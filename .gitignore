@@ -6,6 +6,8 @@ dist/
 # أسرار — لا تُرفع
 .env
 .env.*.local
+# إعدادات SQL المحلية — انسخ من config/settings.example.json
+config/settings.json
 
 # Python
 __pycache__/
