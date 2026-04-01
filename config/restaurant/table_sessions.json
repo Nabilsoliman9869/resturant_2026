@@ -1,0 +1,88 @@
+[
+  {
+    "id": "1912a556-91c3-408b-ab15-608b7db3c8bc",
+    "tableId": "35E63392-878F-4857-98DF-60B10A85BAC1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception"
+    },
+    "startTime": "2026-03-27T20:19:13.391021",
+    "status": "active"
+  },
+  {
+    "id": "a4bfe891-355c-4c85-8042-e811c404bdf5",
+    "tableId": "35E63392-878F-4857-98DF-60B10A85BAC1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception"
+    },
+    "startTime": "2026-03-27T20:19:13.492737",
+    "status": "active"
+  },
+  {
+    "id": "49956de1-83d2-453d-94af-1318fbd1ced9",
+    "tableId": "35E63392-878F-4857-98DF-60B10A85BAC1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": false,
+      "specialRequests": ""
+    },
+    "startTime": "2026-03-27T21:56:18.579765",
+    "status": "active"
+  },
+  {
+    "id": "59248d25-50b0-4978-aeb5-38a6c45c6376",
+    "tableId": "35E63392-878F-4857-98DF-60B10A85BAC1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 3,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": false,
+      "specialRequests": ""
+    },
+    "startTime": "2026-03-27T22:27:02.842376",
+    "status": "active"
+  },
+  {
+    "id": "afb2cda5-582f-4669-85e5-9c5fd28922b0",
+    "tableId": "t1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": true,
+      "specialRequests": "شي من مشتقات الزنك"
+    },
+    "startTime": "2026-03-29T04:34:18.495755",
+    "status": "active"
+  },
+  {
+    "id": "57d34da4-f85f-4941-8fac-269cc8b0882a",
+    "tableId": "t2",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 1,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": true,
+      "specialRequests": "1222222"
+    },
+    "startTime": "2026-04-01T11:59:18.684610",
+    "status": "active"
+  }
+]

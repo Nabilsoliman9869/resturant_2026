@@ -1,0 +1,25 @@
+# تبعيات وبناء
+node_modules/
+dist/
+*.tsbuildinfo
+
+# أسرار — لا تُرفع
+.env
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# سجلات وأدوات
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE (اختياري — احذف السطر إن أردت تتبع إعدادات الفريق)
+.idea/
+*.swp
+*.swo

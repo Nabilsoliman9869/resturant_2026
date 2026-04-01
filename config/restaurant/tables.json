@@ -1,0 +1,97 @@
+[
+  {
+    "id": "t1",
+    "number": 1,
+    "name": "طاولة 1",
+    "seats": 4,
+    "status": "occupied",
+    "position": {
+      "x": 0,
+      "y": 0
+    },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": false,
+      "zone": "القاعة"
+    }
+  },
+  {
+    "id": "t2",
+    "number": 2,
+    "name": "طاولة 2",
+    "seats": 2,
+    "status": "occupied",
+    "position": {
+      "x": 0,
+      "y": 0
+    },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": false,
+      "zone": "القاعة"
+    }
+  },
+  {
+    "id": "t3",
+    "number": 3,
+    "name": "طاولة 3",
+    "seats": 6,
+    "status": "available",
+    "position": {
+      "x": 0,
+      "y": 0
+    },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": false,
+      "zone": "القاعة"
+    }
+  },
+  {
+    "id": "t4",
+    "number": 4,
+    "name": "طاولة 4",
+    "seats": 4,
+    "status": "available",
+    "position": {
+      "x": 0,
+      "y": 0
+    },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": false,
+      "zone": "القاعة"
+    }
+  },
+  {
+    "id": "t5",
+    "number": 5,
+    "name": "طاولة 5",
+    "seats": 8,
+    "status": "available",
+    "position": {
+      "x": 0,
+      "y": 0
+    },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": false,
+      "zone": "القاعة"
+    }
+  }
+]

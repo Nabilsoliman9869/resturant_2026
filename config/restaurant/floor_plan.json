@@ -1,0 +1,78 @@
+{
+  "id": "main-floor",
+  "name": "Main Hall",
+  "width": 1000,
+  "height": 700,
+  "shell": {
+    "type": "polygon",
+    "points": [
+      [
+        40,
+        40
+      ],
+      [
+        960,
+        40
+      ],
+      [
+        960,
+        180
+      ],
+      [
+        720,
+        180
+      ],
+      [
+        720,
+        620
+      ],
+      [
+        280,
+        620
+      ],
+      [
+        280,
+        180
+      ],
+      [
+        40,
+        180
+      ]
+    ]
+  },
+  "tables": [
+    {
+      "id": "T1",
+      "label": "T1",
+      "shape": "circle",
+      "x": 180,
+      "y": 280,
+      "w": 90,
+      "h": 90,
+      "rotation": 0,
+      "seats": 4
+    },
+    {
+      "id": "T2",
+      "label": "T2",
+      "shape": "rect",
+      "x": 420,
+      "y": 300,
+      "w": 120,
+      "h": 70,
+      "rotation": 15,
+      "seats": 4
+    },
+    {
+      "id": "T3",
+      "label": "T3",
+      "shape": "circle",
+      "x": 760,
+      "y": 300,
+      "w": 90,
+      "h": 90,
+      "rotation": 0,
+      "seats": 2
+    }
+  ]
+}

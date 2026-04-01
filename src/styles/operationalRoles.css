@@ -1,0 +1,721 @@
+/* واجهات الأدوار التشغيلية — نمط موحّد (فاتح، أخضر، بطاقات) */
+.role-op,
+.waiter-pos {
+  /* خط يدعم العربية — لا تعتمد على Syne/system فقط */
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
+  --wp-green: #1fa764;
+  --wp-green-dim: #e8f7ef;
+  --wp-border: #e2e6ea;
+  --wp-text: #1a1d21;
+  --wp-muted: #6b7280;
+  --wp-card: #ffffff;
+  --wp-bg: #eef8f3;
+  --wp-danger: #ef4444;
+  --wp-warn: #3b82f6;
+  direction: rtl;
+  text-align: right;
+  margin: -1.5rem;
+  min-height: calc(100vh - 0px);
+  background: var(--wp-bg);
+  color: var(--wp-text);
+  font-family: system-ui, "Segoe UI", Tahoma, sans-serif;
+}
+
+.role-op *,
+.waiter-pos * {
+  box-sizing: border-box;
+}
+
+.waiter-pos__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--wp-card);
+  border-bottom: 1px solid var(--wp-border);
+  flex-wrap: wrap;
+}
+
+.waiter-pos__header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.waiter-pos__back {
+  border: none;
+  background: transparent;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  color: var(--wp-text);
+}
+
+.waiter-pos__back:hover {
+  background: var(--wp-bg);
+}
+
+.waiter-pos__title {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.waiter-pos__user {
+  font-size: 0.85rem;
+  color: var(--wp-muted);
+}
+
+.waiter-pos__header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.waiter-pos__table-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  background: var(--wp-green-dim);
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+
+.waiter-pos__close {
+  border: none;
+  background: var(--wp-bg);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.waiter-pos__body {
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) 1fr;
+  gap: 0;
+  min-height: calc(100vh - 56px);
+}
+
+@media (max-width: 960px) {
+  .waiter-pos__body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.waiter-pos__sidebar {
+  background: var(--wp-card);
+  border-left: 1px solid var(--wp-border);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.waiter-pos__sidebar h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.waiter-pos__toggle-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.waiter-pos__toggle {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--wp-border);
+  background: #f4f6f8;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.waiter-pos__toggle--on {
+  background: var(--wp-green);
+  color: #fff;
+  border-color: var(--wp-green);
+}
+
+.waiter-pos__seats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.5rem;
+}
+
+.waiter-pos__seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.65rem;
+  border-radius: 12px;
+  border: 2px solid var(--wp-border);
+  background: #f4f6f8;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.waiter-pos__seat--sel {
+  border-color: var(--wp-green);
+  background: var(--wp-green-dim);
+}
+
+.waiter-pos__order-box {
+  flex: 1;
+  border: 1px dashed var(--wp-border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  min-height: 180px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.waiter-pos__order-line {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--wp-border);
+  font-size: 0.88rem;
+}
+
+.waiter-pos__order-line input[type="number"] {
+  width: 48px;
+  padding: 0.2rem;
+  border-radius: 6px;
+  border: 1px solid var(--wp-border);
+}
+
+.waiter-pos__main {
+  padding: 1rem 1.25rem;
+  overflow: auto;
+}
+
+.waiter-pos__cats {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  scrollbar-width: thin;
+}
+
+.waiter-pos__cat {
+  flex-shrink: 0;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--wp-border);
+  background: var(--wp-card);
+  cursor: pointer;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.waiter-pos__cat--active {
+  background: var(--wp-green);
+  color: #fff;
+  border-color: var(--wp-green);
+}
+
+.waiter-pos__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.waiter-pos__card {
+  position: relative;
+  background: var(--wp-card);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--wp-border);
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+
+.waiter-pos__card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.waiter-pos__card-img {
+  aspect-ratio: 4/3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.waiter-pos__ribbon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--wp-green);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0 0 10px 0;
+}
+
+.waiter-pos__card-body {
+  padding: 0.65rem 0.75rem 0.75rem;
+}
+
+.waiter-pos__card-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  min-height: 2.5rem;
+}
+
+.waiter-pos__card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--wp-muted);
+}
+
+.waiter-pos__footer-totals {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--wp-card);
+  border-radius: 12px;
+  border: 1px solid var(--wp-border);
+  font-size: 0.9rem;
+}
+
+.waiter-pos__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.waiter-pos__btn {
+  padding: 0.55rem 1.1rem;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.waiter-pos__btn--primary {
+  background: var(--wp-green);
+  color: #fff;
+}
+
+.waiter-pos__btn--ghost {
+  background: #f4f6f8;
+  border: 1px solid var(--wp-border);
+}
+
+.waiter-pos__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.waiter-pos__select {
+  padding: 0.4rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--wp-border);
+  font-size: 0.85rem;
+  max-width: 200px;
+}
+
+.waiter-pos__coupon {
+  padding: 0.4rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--wp-border);
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.waiter-pos__msg {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #b45309;
+}
+
+/* محتوى رئيسي تحت الرأس */
+.role-op__main {
+  padding: 1.25rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.role-op__section-title {
+  margin: 0 0 1rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.role-op__map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.role-op__map-card {
+  background: var(--wp-card);
+  border-radius: 16px;
+  padding: 1rem;
+  border: 2px solid var(--wp-border);
+  cursor: pointer;
+  text-align: right;
+  transition: box-shadow 0.15s;
+}
+
+.role-op__map-card:hover:not(:disabled) {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.07);
+}
+
+.role-op__map-card:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.role-op__map-card--available {
+  border-color: #22c55e;
+}
+
+.role-op__map-card--occupied {
+  border-color: var(--wp-danger);
+}
+
+.role-op__map-card--reserved {
+  border-color: var(--wp-warn);
+}
+
+.role-op__map-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.role-op__map-num {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.role-op__map-icon-ok {
+  color: #22c55e;
+  font-size: 1.25rem;
+}
+
+.role-op__map-icon-no {
+  color: var(--wp-danger);
+  font-size: 1.25rem;
+}
+
+.role-op__map-seats {
+  font-size: 0.88rem;
+  color: var(--wp-muted);
+  margin-bottom: 0.65rem;
+}
+
+.role-op__map-features {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.role-op__feat {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.role-op__map-status-btn {
+  width: 100%;
+  padding: 0.55rem;
+  border-radius: 10px;
+  border: none;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.role-op__map-status-btn--avail {
+  background: var(--wp-green-dim);
+  color: #15803d;
+}
+
+.role-op__map-status-btn--occ {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.role-op__map-status-btn--res {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* طاولات اختيار الجارسون — بطاقة كبيرة */
+.role-op__pick-card {
+  background: var(--wp-card);
+  border: 2px solid var(--wp-green-dim);
+  border-radius: 20px;
+  padding: 2rem 1.5rem;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+
+.role-op__pick-card:hover {
+  box-shadow: 0 12px 32px rgba(31, 167, 100, 0.15);
+  transform: translateY(-2px);
+}
+
+.role-op__pick-num {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--wp-text);
+}
+
+.role-op__pick-sub {
+  margin-top: 0.75rem;
+  color: var(--wp-muted);
+  font-size: 0.95rem;
+}
+
+/* مطبخ / مناولة — بطاقات الطلبات */
+.role-op__order-card {
+  background: var(--wp-card);
+  border: 1px solid var(--wp-border);
+  border-radius: 16px;
+  padding: 1rem 1.15rem;
+  margin-bottom: 0.75rem;
+  border-right: 4px solid var(--wp-green);
+}
+
+.role-op__order-card--ready {
+  border-right-color: #f59e0b;
+}
+
+.role-op__order-meta {
+  font-size: 0.88rem;
+  color: var(--wp-muted);
+  margin-top: 0.35rem;
+}
+
+.role-op__order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* نافذة إسكان */
+.role-op__modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.role-op__modal {
+  background: var(--wp-card);
+  border-radius: 16px;
+  max-width: 420px;
+  width: 100%;
+  padding: 1.25rem;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.15);
+}
+
+.role-op__modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.role-op__modal-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.role-op__modal-close {
+  border: none;
+  background: #f4f6f8;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.role-op__field {
+  margin-bottom: 0.85rem;
+}
+
+.role-op__field label {
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.role-op__field input[type="number"],
+.role-op__field textarea {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--wp-border);
+  font-size: 0.95rem;
+}
+
+.role-op__field textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.role-op__modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.role-op__check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* —— KDS: كروت مطبخ + شريط طاولات —— */
+.kds-layout {
+  display: grid;
+  grid-template-columns: 1fr min(300px, 32vw);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .kds-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kds-sidebar {
+  position: sticky;
+  top: 0.75rem;
+  background: var(--wp-card);
+  border: 1px solid var(--wp-border);
+  border-radius: 16px;
+  padding: 0.85rem 1rem;
+  max-height: min(78vh, 640px);
+  overflow: auto;
+}
+
+.kds-sidebar__title {
+  font-weight: 800;
+  font-size: 0.95rem;
+  margin: 0 0 0.65rem;
+}
+
+.kds-sidebar__row {
+  width: 100%;
+  text-align: right;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: #f8faf9;
+  margin-bottom: 0.45rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.kds-sidebar__row:hover {
+  border-color: var(--wp-green);
+}
+
+.kds-sidebar__row--active {
+  border-color: var(--wp-green);
+  background: var(--wp-green-dim);
+}
+
+.kds-sidebar__pct {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-green);
+}
+
+.kds-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.85rem;
+}
+
+.kds-card {
+  background: var(--wp-card);
+  border: 1px solid var(--wp-border);
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.kds-card--urgent {
+  animation: kdsUrgent 0.85s ease-in-out infinite;
+  border-color: rgba(239, 68, 68, 0.75);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35);
+}
+
+@keyframes kdsUrgent {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(0.995);
+  }
+}
+
+.kds-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+  margin: 0.5rem 0;
+}
+
+.kds-timer--warn {
+  color: var(--wp-danger);
+}
+
+.kds-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}

@@ -1,0 +1,7 @@
+{
+  "server": "your-server,port",
+  "database": "YourDatabase",
+  "uid": "user",
+  "password": "password",
+  "use_windows_auth": false
+}

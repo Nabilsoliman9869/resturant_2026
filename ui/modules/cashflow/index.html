@@ -1,0 +1,2539 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Smart CashFlow UI — صرف / قبض / قيد</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#101a33; --card2:#0f1730;
+      --txt:#e8eeff; --muted:#a9b4d6; --muted2:#8390c2;
+      --pri:#7c5cff; --pri2:#4fd1c5; --warn:#ffcf5c; --bad:#ff5c7a; --ok:#4cff9d;
+      --line:rgba(255,255,255,.08); --shadow: 0 18px 45px rgba(0,0,0,.45);
+      --r:18px;
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans Arabic", "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:var(--font);
+      background:
+        radial-gradient(1000px 600px at 10% 10%, rgba(124,92,255,.25), transparent 60%),
+        radial-gradient(900px 500px at 90% 20%, rgba(79,209,197,.18), transparent 55%),
+        radial-gradient(800px 520px at 60% 90%, rgba(255,92,122,.10), transparent 55%),
+        var(--bg);
+      color:var(--txt);
+    }
+    a{color:inherit}
+    .app{min-height:100%; display:flex; flex-direction:column}
+    header{
+      padding:18px 18px 10px;
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      position:sticky; top:0; z-index:10;
+      background: linear-gradient(to bottom, rgba(11,16,32,.92), rgba(11,16,32,.72), transparent);
+      backdrop-filter: blur(10px);
+    }
+    .brand{display:flex; align-items:center; gap:12px}
+    .logo{
+      width:42px; height:42px; border-radius:14px;
+      background: conic-gradient(from 220deg, var(--pri), var(--pri2), var(--warn), var(--pri));
+      box-shadow: 0 12px 30px rgba(124,92,255,.22);
+      position:relative;
+    }
+    .logo:after{
+      content:""; position:absolute; inset:8px; border-radius:10px;
+      background: rgba(11,16,32,.55);
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .brand h1{margin:0; font-size:16px; letter-spacing:.2px}
+    .brand .sub{margin:2px 0 0; font-size:12px; color:var(--muted)}
+    .topActions{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+    .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color:var(--txt);
+      padding:10px 12px; border-radius:999px;
+      cursor:pointer; user-select:none;
+      transition: transform .12s ease, background .12s ease, border-color .12s ease;
+    }
+    .pill:hover{transform: translateY(-1px); background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.14)}
+    .pill:active{transform: translateY(0px) scale(.99)}
+    .pill .dot{width:8px; height:8px; border-radius:99px; background:var(--pri2); box-shadow:0 0 0 6px rgba(79,209,197,.12)}
+    .pill.bad .dot{background:var(--bad); box-shadow:0 0 0 6px rgba(255,92,122,.12)}
+    .pill.warn .dot{background:var(--warn); box-shadow:0 0 0 6px rgba(255,207,92,.12)}
+    .pill.ok .dot{background:var(--ok); box-shadow:0 0 0 6px rgba(76,255,157,.12)}
+    .pill.small{padding:8px 10px; font-size:12px}
+    .kbd{
+      font-size:11px; color:var(--muted2);
+      padding:3px 7px; border:1px solid var(--line); border-radius:9px;
+      background: rgba(255,255,255,.02);
+    }
+
+    main{flex:1; padding:14px 18px 22px; max-width:1200px; width:100%; margin:0 auto}
+    .grid{display:grid; gap:14px; grid-template-columns: 1.2fr .8fr}
+    @media (max-width: 980px){
+      .grid{grid-template-columns: 1fr}
+      header{position:static}
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border:1px solid var(--line);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .card .hd{
+      padding:14px 14px 12px;
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      border-bottom:1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.04), transparent);
+    }
+    .card .hd .title{font-weight:700; font-size:13px}
+    .card .hd .hint{font-size:12px; color:var(--muted)}
+    .card .bd{padding:14px}
+    .row{display:flex; gap:12px; flex-wrap:wrap}
+    .row > *{flex:1}
+    .field{display:flex; flex-direction:column; gap:7px; min-width:180px}
+    .label{
+      font-size:12px; color:var(--muted);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    .input, select, textarea{
+      width:100%;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(11,16,32,.45);
+      color: var(--txt);
+      padding:11px 12px;
+      outline:none;
+      transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
+      font-size:14px;
+    }
+    textarea{min-height:92px; resize:vertical}
+    .input:focus, select:focus, textarea:focus{
+      border-color: rgba(124,92,255,.55);
+      box-shadow: 0 0 0 6px rgba(124,92,255,.14);
+      background: rgba(11,16,32,.60);
+    }
+
+    .btnRow{display:flex; gap:10px; flex-wrap:wrap}
+    .btn{
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+      color:var(--txt);
+      padding:11px 12px;
+      border-radius: 14px;
+      cursor:pointer;
+      display:inline-flex; align-items:center; justify-content:center; gap:9px;
+      transition: transform .12s ease, background .12s ease, border-color .12s ease;
+      user-select:none;
+      font-weight:650;
+    }
+    .btn:hover{transform: translateY(-1px); background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.16)}
+    .btn:active{transform: translateY(0px) scale(.99)}
+    .btn.pri{background: rgba(124,92,255,.18); border-color: rgba(124,92,255,.40)}
+    .btn.pri:hover{background: rgba(124,92,255,.24)}
+    .btn.good{background: rgba(76,255,157,.12); border-color: rgba(76,255,157,.30)}
+    .btn.bad{background: rgba(255,92,122,.12); border-color: rgba(255,92,122,.30)}
+    .btn.ghost{background: transparent}
+    .btn.small{padding:9px 10px; font-size:12px; border-radius: 12px}
+    .btn.block{width:100%}
+
+    .tiles{display:grid; grid-template-columns: repeat(3, 1fr); gap:10px}
+    @media (max-width: 560px){ .tiles{grid-template-columns: 1fr} }
+    .tile{
+      padding:14px;
+      border-radius: 16px;
+      border:1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      cursor:pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+      user-select:none;
+      position:relative;
+      overflow:hidden;
+    }
+    .tile:hover{transform: translateY(-1px); border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.06)}
+    .tile:active{transform: translateY(0px) scale(.99)}
+    .tile .t{font-weight:800; font-size:14px}
+    .tile .s{margin-top:4px; color:var(--muted); font-size:12px}
+    .tile .tag{
+      position:absolute; top:10px; left:10px;
+      font-size:11px; color:var(--muted2);
+      border:1px solid var(--line); border-radius:999px;
+      padding:4px 8px; background: rgba(11,16,32,.35);
+    }
+    .tile.active{
+      border-color: rgba(79,209,197,.55);
+      box-shadow: 0 0 0 6px rgba(79,209,197,.12);
+    }
+    .tile.active .tag{border-color: rgba(79,209,197,.45); color: rgba(79,209,197,.95)}
+    .stepper{display:flex; gap:8px; flex-wrap:wrap}
+    .step{
+      display:flex; align-items:center; gap:8px;
+      font-size:12px; color:var(--muted);
+      padding:8px 10px;
+      border:1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.02);
+    }
+    .step .n{
+      width:18px; height:18px; border-radius:999px;
+      display:inline-flex; align-items:center; justify-content:center;
+      font-size:11px;
+      background: rgba(124,92,255,.18);
+      border:1px solid rgba(124,92,255,.35);
+      color: var(--txt);
+    }
+    .step.active{
+      color: var(--txt);
+      border-color: rgba(124,92,255,.45);
+      background: rgba(124,92,255,.10);
+    }
+
+    .hr{height:1px; background:var(--line); margin:12px 0}
+    .hintBox{
+      border:1px dashed rgba(255,255,255,.16);
+      background: rgba(255,255,255,.02);
+      padding:12px; border-radius:16px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.6;
+    }
+    .toast{
+      position:fixed; bottom:18px; right:18px;
+      background: rgba(15,23,48,.92);
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow: var(--shadow);
+      border-radius: 16px;
+      padding:12px 12px;
+      min-width:260px; max-width: 92vw;
+      transform: translateY(20px);
+      opacity:0; pointer-events:none;
+      transition: opacity .16s ease, transform .16s ease;
+      z-index:2000;
+    }
+    .toast.show{opacity:1; transform: translateY(0); pointer-events:auto}
+    .toast .m{font-size:13px}
+    .toast .s{font-size:12px; color:var(--muted); margin-top:4px}
+
+    /* Right panel JSON */
+    pre{
+      margin:0;
+      background: rgba(11,16,32,.55);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius: 16px;
+      padding:12px;
+      overflow:auto;
+      max-height: 420px;
+      color:#d9e2ff;
+      font-size:12px;
+      line-height:1.55;
+    }
+    .mini{font-size:12px; color:var(--muted)}
+    .chip{
+      display:inline-flex; align-items:center; gap:7px;
+      padding:7px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      font-size:12px; color:var(--muted);
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip.active{color:var(--txt); border-color: rgba(79,209,197,.45); background: rgba(79,209,197,.08)}
+    .table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0 8px;
+    }
+    .table th{
+      text-align:right;
+      font-size:12px; color:var(--muted);
+      font-weight:650;
+      padding:0 8px;
+    }
+    .table td{
+      padding:10px 8px;
+      background: rgba(11,16,32,.45);
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .table tr td:first-child{border-radius: 14px 0 0 14px}
+    .table tr td:last-child{border-radius: 0 14px 14px 0}
+    .table input,.table select{
+      padding:9px 10px;
+      border-radius:12px;
+    }
+    .rightActions{display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-start}
+    .muted{color:var(--muted)}
+    .kpiRow{display:grid; grid-template-columns: repeat(3, 1fr); gap:10px}
+    @media (max-width: 980px){ .kpiRow{grid-template-columns: 1fr} }
+    .kpi{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      border-radius: 16px;
+      padding:12px;
+    }
+    .kpi .v{font-size:18px; font-weight:850}
+    .kpi .l{font-size:12px; color:var(--muted); margin-top:2px}
+
+    /* Settings drawer — من اليمين في RTL */
+    .drawer{
+      position:fixed; top:0; height:100%; width:min(520px, 92vw);
+      background: rgba(15,23,48,.98);
+      border-right:1px solid rgba(255,255,255,.12);
+      box-shadow: 25px 0 60px rgba(0,0,0,.55);
+      transition: transform .18s ease;
+      z-index:2500;
+      display:flex; flex-direction:column;
+      right:0;
+      transform: translateX(100%);
+    }
+    .drawer.show{transform: translateX(0)}
+    .drawer header{
+      position:static;
+      background: transparent;
+      padding:16px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .drawer .body{padding:14px 16px; overflow:auto}
+    .drawer .footer{padding:14px 16px; border-top:1px solid rgba(255,255,255,.10)}
+    .backdrop{
+      position:fixed; inset:0; background: rgba(0,0,0,.55);
+      opacity:0; pointer-events:none;
+      transition: opacity .18s ease;
+      z-index:2400;
+    }
+    .backdrop.show{opacity:1; pointer-events:auto}
+
+    /* إعدادات الربط — صفوف قابلة للتعديل */
+    .mapping-list{margin:6px 0}
+    .mapping-row{display:flex; align-items:center; gap:8px; margin:6px 0; flex-wrap:wrap}
+    .mapping-row .input{flex:1; min-width:100px}
+    .mapping-row .gl-input{width:100px; flex-shrink:0}
+    .mapping-row .btn-del{padding:4px 8px; font-size:12px; background:rgba(255,99,99,.25); color:#ff6b6b; border:none; border-radius:6px; cursor:pointer}
+    .mapping-row .btn-del:hover{background:rgba(255,99,99,.4)}
+    .mapping-row .btn-pick{padding:4px 8px; font-size:11px; background:rgba(108,92,231,.2); color:#a5b4fc; border:none; border-radius:6px; cursor:pointer}
+    .mapping-row .btn-pick:hover{background:rgba(108,92,231,.35)}
+
+    /* RTL/LTR switch support */
+    [dir="ltr"] .table th{text-align:left}
+    [dir="ltr"] .table tr td:first-child{border-radius: 0 14px 14px 0}
+    [dir="ltr"] .table tr td:last-child{border-radius: 14px 0 0 14px}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true"></div>
+      <div>
+        <h1 id="appTitle">شاشة الإدخال السريع — Smart CashFlow</h1>
+        <div class="sub" id="appSub">صرف / قبض / قيد — أوامر صوتية أو ضغط — جاهز للربط عبر API</div>
+      </div>
+    </div>
+
+    <div class="topActions">
+      <div class="pill small" id="langBtn" title="تبديل اللغة">
+        <span class="dot"></span>
+        <span id="langLabel">AR</span>
+        <span class="kbd">L</span>
+      </div>
+      <div class="pill small" id="voiceBtn" title="تشغيل/إيقاف التعرف على الصوت">
+        <span class="dot" id="voiceDot"></span>
+        <span id="voiceLabel">صوت: إيقاف</span>
+        <span class="kbd">V</span>
+      </div>
+      <div class="pill small" id="settingsBtn" title="الإعدادات (الربط مع الدليل)" role="button" tabindex="0" style="cursor:pointer"
+           onclick="if(typeof openDrawer==='function'){openDrawer();} else { var d=document.getElementById('drawer'),b=document.getElementById('backdrop'); if(d)d.classList.add('show'); if(b)b.classList.add('show'); }">
+        <span class="dot"></span>
+        <span id="settingsLabel">إعدادات الربط</span>
+        <span class="kbd">S</span>
+      </div>
+      <a href="/app-settings" class="pill small" target="_blank" rel="noopener noreferrer" title="يفتح في تبويب جديد — لا يغلق شاشة التدفق النقدي داخل الإطار">
+        <span class="dot"></span>
+        <span>إعدادات الاتصال</span>
+      </a>
+      <div class="pill small ok" id="apiPingBtn" title="فحص API (تجريبي)">
+        <span class="dot"></span>
+        <span id="apiLabel">API: جاهز</span>
+      </div>
+    </div>
+  </header>
+
+  <div id="diagBox" class="card" style="display:none; margin: 0 auto 10px; max-width:1200px; width:calc(100% - 36px); padding:12px 14px; border-color: rgba(255,92,122,.25)"></div>
+
+  <main>
+    <div class="grid">
+      <!-- LEFT: Wizard -->
+      <section class="card">
+        <div class="hd">
+          <div>
+            <div class="title" id="wizTitle">المعالج الذكي</div>
+            <div class="hint" id="wizHint">اختيارات ديناميكية + أوامر صوتية + إدخال سريع</div>
+          </div>
+          <div class="stepper" aria-label="Stepper">
+            <div class="step active" id="st1"><span class="n">1</span><span id="st1t">النوع</span></div>
+            <div class="step" id="st2"><span class="n">2</span><span id="st2t">القناة</span></div>
+            <div class="step" id="st3"><span class="n">3</span><span id="st3t">الرأس</span></div>
+            <div class="step" id="st4"><span class="n">4</span><span id="st4t">التفاصيل</span></div>
+            <div class="step" id="st5"><span class="n">5</span><span id="st5t">تسجيل</span></div>
+          </div>
+        </div>
+
+        <div class="bd">
+          <!-- STEP 1 -->
+          <div id="step1">
+            <div class="hintBox" id="step1Help">
+              أوامر صوتية مقترحة: <b>صرف</b> / <b>قبض</b> / <b>قيد</b> — أو بالإنجليزية: <b>payment</b> / <b>receipt</b> / <b>journal</b>.
+            </div>
+            <div class="hr"></div>
+            <div class="tiles" role="list">
+              <div class="tile" role="listitem" data-act="type" data-val="DISB">
+                <div class="tag">صرف</div>
+                <div class="t" id="tDisb">صرف</div>
+                <div class="s" id="tDisbS">Payment / Disbursement</div>
+              </div>
+              <div class="tile" role="listitem" data-act="type" data-val="RECP">
+                <div class="tag">قبض</div>
+                <div class="t" id="tRecp">قبض</div>
+                <div class="s" id="tRecpS">Receipt / Collection</div>
+              </div>
+              <div class="tile" role="listitem" data-act="type" data-val="JRNL">
+                <div class="tag">قيد</div>
+                <div class="t" id="tJrnl">قيد</div>
+                <div class="s" id="tJrnlS">Journal Entry</div>
+              </div>
+            </div>
+            <div class="hr"></div>
+            <div class="btnRow">
+              <button class="btn pri" id="btnNext1">التالي</button>
+              <button class="btn ghost" id="btnReset">إعادة تعيين</button>
+            </div>
+          </div>
+
+          <!-- STEP 2 -->
+          <div id="step2" style="display:none">
+            <div class="hintBox" id="step2Help">
+              بعد اختيار القناة: <b>نقدي</b> / <b>بنكي</b> / <b>عهدة</b>. للبنكي ستظهر أنواع إضافية: شيك/تحويل/راتب/رسوم/داخلي.
+            </div>
+            <div class="hr"></div>
+
+            <div class="row">
+              <div class="field" style="flex:2">
+                <div class="label" id="chLabel">اختر القناة</div>
+                <div class="tiles" style="grid-template-columns: repeat(3, 1fr)" id="channelTiles">
+                  <div class="tile" data-act="channel" data-val="CASH">
+                    <div class="tag">نقدي</div>
+                    <div class="t" id="cCash">نقدي</div>
+                    <div class="s" id="cCashS">Cash</div>
+                  </div>
+                  <div class="tile" data-act="channel" data-val="BANK">
+                    <div class="tag">بنكي</div>
+                    <div class="t" id="cBank">بنكي</div>
+                    <div class="s" id="cBankS">Bank</div>
+                  </div>
+                  <div class="tile" data-act="channel" data-val="ADV">
+                    <div class="tag">عهدة</div>
+                    <div class="t" id="cAdv">من عهدة</div>
+                    <div class="s" id="cAdvS">Advance</div>
+                  </div>
+                </div>
+              </div>
+              <div class="field" style="flex:1">
+                <div class="label" id="acctLabel">الحساب/العنصر الظاهر للمستخدم</div>
+                <select id="accountPick"></select>
+                <div class="mini" id="acctHint">القائمة تأتي من إعدادات الربط (صناديق/بنوك/عهد)</div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+
+            <!-- Bank subtypes -->
+            <div id="bankSubtypes" style="display:none">
+              <div class="label" id="bankTypeLabel">نوع العملية البنكية</div>
+              <div class="tiles" style="grid-template-columns: repeat(3, 1fr)">
+                <div class="tile" data-act="banksub" data-val="CHQ">
+                  <div class="tag">شيك</div>
+                  <div class="t" id="bChq">شيك صادر</div>
+                  <div class="s" id="bChqS">Cheque Issue</div>
+                </div>
+                <div class="tile" data-act="banksub" data-val="TRF">
+                  <div class="tag">تحويل</div>
+                  <div class="t" id="bTrf">تحويل بنكي</div>
+                  <div class="s" id="bTrfS">Online Transfer</div>
+                </div>
+                <div class="tile" data-act="banksub" data-val="SAL">
+                  <div class="tag">رواتب</div>
+                  <div class="t" id="bSal">تحويل راتب</div>
+                  <div class="s" id="bSalS">Payroll Batch</div>
+                </div>
+                <div class="tile" data-act="banksub" data-val="FEE">
+                  <div class="tag">رسوم</div>
+                  <div class="t" id="bFee">مصروفات بنكية</div>
+                  <div class="s" id="bFeeS">Fees / Charges</div>
+                </div>
+                <div class="tile" data-act="banksub" data-val="INT">
+                  <div class="tag">داخلي</div>
+                  <div class="t" id="bInt">تحويل داخلي</div>
+                  <div class="s" id="bIntS">Between Your Accounts</div>
+                </div>
+                <div class="tile" data-act="banksub" data-val="BILL">
+                  <div class="tag">سداد</div>
+                  <div class="t" id="bBill">سداد فاتورة/دفعة</div>
+                  <div class="s" id="bBillS">Pay Bill / Installment</div>
+                </div>
+              </div>
+
+              <div class="hr"></div>
+
+              <!-- Cheque box -->
+              <div id="chequeBox" style="display:none">
+                <div class="row">
+                  <div class="field">
+                    <div class="label" id="chqNoLabel">رقم الشيك</div>
+                    <input class="input" id="chqNo" placeholder="مثال: 104533" />
+                    <div class="mini" id="chqNoHint">تقدر تقول رقم الشيك صوتيًا — أو تختار من المقترحات</div>
+                  </div>
+                  <div class="field">
+                    <div class="label" id="chqPickLabel">المقترح التالي + آخر 9</div>
+                    <div class="row" style="gap:8px; flex-wrap:wrap" id="chqSuggest"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Transfer box -->
+              <div id="transferBox" style="display:none">
+                <div class="row">
+                  <div class="field">
+                    <div class="label" id="fromLabel">من (حسابك البنكي)</div>
+                    <select id="bankFrom"></select>
+                  </div>
+                  <div class="field">
+                    <div class="label" id="toLabel">إلى (مستفيد)</div>
+                    <input class="input" id="beneficiarySearch" placeholder="ابحث: مورد/عميل/موظف (tbl016) أو حساب (GL)..." />
+                    <div class="row" id="beneficiaryResults" style="gap:8px; margin-top:8px; flex-wrap:wrap"></div>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="field">
+                    <div class="label" id="purposeLabel">الغرض</div>
+                    <select id="purposePick"></select>
+                  </div>
+                  <div class="field">
+                    <div class="label" id="refLabel">مرجع/رقم (فاتورة/دفعة/أمر)</div>
+                    <input class="input" id="refNo" placeholder="اختياري" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Internal transfer -->
+              <div id="internalBox" style="display:none">
+                <div class="row">
+                  <div class="field">
+                    <div class="label" id="intFromLabel">من بنك</div>
+                    <select id="intFrom"></select>
+                  </div>
+                  <div class="field">
+                    <div class="label" id="intToLabel">إلى بنك</div>
+                    <select id="intTo"></select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Payroll -->
+              <div id="payrollBox" style="display:none">
+                <div class="row">
+                  <div class="field">
+                    <div class="label" id="payMonthLabel">شهر الرواتب</div>
+                    <input class="input" id="payMonth" placeholder="مثال: 2/2026 أو فبراير 2026" />
+                  </div>
+                  <div class="field">
+                    <div class="label" id="payGroupLabel">مجموعة/قسم (اختياري)</div>
+                    <input class="input" id="payGroup" placeholder="قسم/فرع/مشروع..." />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+            <div class="btnRow">
+              <button class="btn" id="btnBack2">رجوع</button>
+              <button class="btn pri" id="btnNext2">التالي</button>
+            </div>
+          </div>
+
+          <!-- STEP 3 -->
+          <div id="step3" style="display:none">
+            <div class="hintBox" id="step3Help">
+              التاريخ ذكي: "15" = 15 من الشهر الحالي، "15 يناير" = 15 يناير، "اليوم / Today" = اليوم.
+              تقدر تكتب أو تنطق الشرح. زر <b>تخطي</b> يتجاوز الاختياري.
+            </div>
+            <div class="hr"></div>
+
+            <div class="row">
+              <div class="field">
+                <div class="label" id="dateLabel">التاريخ</div>
+                <input class="input" id="smartDate" placeholder="مثال: 15 أو 15 يناير أو today" />
+              </div>
+              <div class="field">
+                <div class="label" id="datePickLabel">أو اختر من التقويم</div>
+                <input class="input" id="datePicker" type="date" />
+              </div>
+              <div class="field">
+                <div class="label" id="branchLabel">الفرع (اختياري)</div>
+                <select id="branchPick"></select>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field" style="flex:2">
+                <div class="label" id="memoLabel">شرح رأس السند (Memo)</div>
+                <textarea id="memo" placeholder="اكتب أو انطق شرح بسيط..."></textarea>
+              </div>
+              <div class="field" style="flex:1">
+                <div class="label" id="instLabel">تعليمات/ملاحظات (اختياري)</div>
+                <textarea id="instructions" placeholder="مثال: بتعليمات المدير المالي..."></textarea>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <div class="label" id="ccLabel">مركز تكلفة (اختياري)</div>
+                <select id="ccPick"></select>
+              </div>
+              <div class="field">
+                <div class="label" id="projLabel">مشروع (اختياري)</div>
+                <select id="projPick"></select>
+              </div>
+              <div class="field">
+                <div class="label" id="skipLabel">تخطي الاختياري</div>
+                <button class="btn small" id="btnSkipHeader">تخطي</button>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+            <div class="btnRow">
+              <button class="btn" id="btnBack3">رجوع</button>
+              <button class="btn pri" id="btnNext3">التالي</button>
+            </div>
+          </div>
+
+          <!-- STEP 4 -->
+          <div id="step4" style="display:none">
+            <div class="hintBox" id="step4Help">
+              اختر فئة سريعة ثم بند، أو اكتب مباشرة. الأهم: <b>القيمة</b> إجباري.
+              أوامر صوتية: "عمومية" / "تشغيل" / "سطر جديد" / "تخطي" / "تسجيل".
+            </div>
+
+            <div class="hr"></div>
+
+            <div class="row">
+              <div class="field" style="flex:2">
+                <div class="label" id="quickCatsLabel">اختيارات سريعة</div>
+                <div class="row" style="gap:8px; flex-wrap:wrap" id="quickCats"></div>
+              </div>
+              <div class="field" style="flex:1">
+                <div class="label" id="lineSearchLabel">بحث البنود</div>
+                <input class="input" id="lineSearch" placeholder="ابحث: كهرباء المكتب، إيجار، سلف..." />
+                <div class="row" id="lineResults" style="gap:8px; margin-top:8px; flex-wrap:wrap"></div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+
+            <table class="table" aria-label="تفاصيل السند">
+              <thead>
+                <tr>
+                  <th style="width:28%">البند</th>
+                  <th style="width:16%">القيمة</th>
+                  <th style="width:18%">شرح</th>
+                  <th style="width:14%">ضريبة</th>
+                  <th style="width:14%">م.تكلفة/مشروع/فرع</th>
+                  <th style="width:10%">إجراء</th>
+                </tr>
+              </thead>
+              <tbody id="linesTbody"></tbody>
+            </table>
+
+            <div class="row" style="align-items:center">
+              <div class="field" style="flex:1">
+                <button class="btn small" id="btnAddLine">سطر جديد</button>
+              </div>
+              <div class="field" style="flex:2">
+                <div class="kpiRow">
+                  <div class="kpi">
+                    <div class="v" id="kpiLines">0</div>
+                    <div class="l" id="kpiLinesL">عدد السطور</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="v" id="kpiTotal">0.00</div>
+                    <div class="l" id="kpiTotalL">الإجمالي</div>
+                  </div>
+                  <div class="kpi">
+                    <div class="v" id="kpiTax">0.00</div>
+                    <div class="l" id="kpiTaxL">إجمالي الضريبة</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+            <div class="btnRow">
+              <button class="btn" id="btnBack4">رجوع</button>
+              <button class="btn pri" id="btnNext4">التالي</button>
+            </div>
+          </div>
+
+          <!-- STEP 5 -->
+          <div id="step5" style="display:none">
+            <div class="hintBox" id="step5Help">
+              قبل التسجيل: تأكد من القناة، الطرف (إن وجد)، البنود والقيم. زر <b>تسجيل</b> يجهز Payload لربطه بـ API.
+            </div>
+            <div class="hr"></div>
+
+            <div class="row">
+              <div class="field">
+                <div class="label" id="finalSummaryLabel">ملخص سريع</div>
+                <div class="hintBox" id="finalSummary"></div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+            <div class="btnRow">
+              <button class="btn" id="btnBack5">رجوع</button>
+              <button class="btn good" id="btnSubmit">تسجيل</button>
+              <button class="btn bad" id="btnCancel">إلغاء</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- RIGHT: Preview / API payload -->
+      <aside class="card">
+        <div class="hd">
+          <div>
+            <div class="title" id="rightTitle">Preview & API Payload</div>
+            <div class="hint" id="rightHint">هذا هو الـ JSON الذي سترسله لـ API</div>
+          </div>
+          <div class="rightActions">
+            <button class="btn small" id="btnCopy">نسخ JSON</button>
+            <button class="btn small" id="btnMockSend">إرسال تجريبي</button>
+          </div>
+        </div>
+        <div class="bd">
+          <div class="row">
+            <div class="field">
+              <div class="label" id="modeLabel">وضع التنفيذ</div>
+              <div class="row" style="gap:8px; flex-wrap:wrap">
+                <div class="chip active" data-mode="FAST" id="modeFast">سريع</div>
+                <div class="chip" data-mode="SAFE" id="modeSafe">تحقق إضافي</div>
+                <div class="chip" data-mode="DEBUG" id="modeDebug">تفصيلي</div>
+              </div>
+              <div class="mini" id="modeHint">السريع لا يعطل — الإضافي يزيد تحقق — التفصيلي يوسع الـ logs</div>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+
+          <pre id="payloadPre">{}</pre>
+
+          <div class="hr"></div>
+          <div class="hintBox" id="apiNotes">
+            <b>نقطة مهمة:</b> UI لا تُظهر دليل الحسابات، بل تظهر عناصر (صندوق/بنك/عهدة/بنود).
+            الربط الفعلي يتم من الإعدادات، ثم الـ API يولد القيود ويرحل حسب القواعد.
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<!-- Settings Drawer -->
+<div class="backdrop" id="backdrop"></div>
+<div class="drawer" id="drawer">
+  <header>
+    <div class="brand" style="gap:10px">
+      <div class="logo" style="width:34px;height:34px;border-radius:12px"></div>
+      <div>
+        <h1 style="margin:0;font-size:14px" id="drawerTitle">إعدادات الربط (UI ↔ الدليل)</h1>
+        <div class="sub" style="font-size:12px" id="drawerSub">حدد ما يظهر للمستخدم وربطه بحسابات الدليل/الفرع</div>
+      </div>
+    </div>
+    <div class="topActions">
+      <button class="btn small" id="drawerClose">إغلاق</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <div class="hintBox" id="drawerHelp">
+      <b>الحسابات الفرعية فقط</b> (TBL004 حيث CardGuide &ne; MainAccount) هي التي يُسجّل عليها. اختر منها: رؤوس (بنوك، صناديق، عهد) وبنود تفاصيل للسندات.
+    </div>
+    <div class="btnRow" style="margin:8px 0">
+      <button type="button" class="btn pri" id="fetchSubAccounts" onclick="fetchSubAccountsClick()">جلب الحسابات الفرعية من TBL004</button>
+    </div>
+    <div id="drawerLog" style="margin:8px 0; padding:8px; background:rgba(0,0,0,.3); border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:120px; overflow:auto;"></div>
+    <div id="tbl004Section" style="display:none; margin:10px 0">
+      <div class="label">علّم كل حساب: صندوق / بنك / عهدة / بند تفصيل (فقط المُعلّم يظهر في التطبيق)</div>
+      <input type="text" id="tbl004Search" class="input" placeholder="بحث بالرقم أو الاسم..." style="width:100%; margin:6px 0">
+      <div id="tbl004List" class="mapping-list" style="max-height:320px; overflow:auto"></div>
+    </div>
+    <div class="hr"></div>
+    <div class="label" style="margin-top:8px">أو عدّل يدوياً (الاسم الظاهر / كود GL):</div>
+    <div class="row">
+      <div class="field">
+        <div class="label">صناديق (Cash)</div>
+        <div id="mapCash" class="mapping-list"></div>
+        <button type="button" class="btn small" data-add="CASH" onclick="addMappingRow('CASH')">+ إضافة صندوق</button>
+      </div>
+      <div class="field">
+        <div class="label">بنوك (Bank)</div>
+        <div id="mapBank" class="mapping-list"></div>
+        <button type="button" class="btn small" data-add="BANK" onclick="addMappingRow('BANK')">+ إضافة بنك</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <div class="label">عهد (Advances)</div>
+        <div id="mapAdv" class="mapping-list"></div>
+        <button type="button" class="btn small" data-add="ADV" onclick="addMappingRow('ADV')">+ إضافة عهدة</button>
+      </div>
+      <div class="field">
+        <div class="label">بنود تفاصيل (Items)</div>
+        <div id="mapItems" class="mapping-list"></div>
+        <button type="button" class="btn small" data-add="ITEM" onclick="addMappingRow('ITEM')">+ إضافة بند</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="btnRow">
+      <button class="btn pri" id="saveSettings" onclick="saveSettingsClick()">حفظ الربط</button>
+      <button class="btn" id="resetSettings" onclick="resetSettingsClick()">إرجاع الافتراضي</button>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة اختيار حساب من الدليل -->
+<div class="backdrop" id="glPickerBackdrop" style="display:none; z-index:1001"></div>
+<div id="glPickerModal" class="drawer" style="display:none; z-index:1002; max-width:400px; left:50%; transform:translate(-50%,-50%); top:50%">
+  <header><h3 style="margin:0">اختر حساباً من الدليل</h3><button type="button" class="btn small" id="glPickerClose">إغلاق</button></header>
+  <div class="body">
+    <input type="text" id="glPickerSearch" placeholder="بحث بالاسم أو الرقم..." class="input" style="width:100%; margin-bottom:8px">
+    <div id="glPickerList" style="max-height:240px; overflow:auto"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <div class="m" id="toastM">…</div>
+  <div class="s" id="toastS">…</div>
+</div>
+
+<script>
+/* شاشة التدفق النقدي: لا تعتمد على voucher_user — تسجيل الدخول القديم يشير لـ /api/auth/login غير الموجود في api_server،
+   ويفسد التحميل داخل iframe من تطبيق مطاعم. الدخول من تطبيق الأدوار إن رغبت. */
+var demo = window.__voucherDemo || { uiAccounts: { CASH: [], BANK: [], ADV: [] }, items: [] };
+window.__voucherDemo = demo;
+// بعض دوال الإعدادات تستخدم window.demo بينما البعض يستخدم المتغير demo مباشرة.
+window.demo = demo;
+
+/* =========================
+   Smart CashFlow UI
+   - Wizard: Type -> Channel -> Header -> Lines -> Submit
+   - Dynamic lists from Settings (local now, API later)
+   - Voice commands (optional): Web Speech API
+   - Smart date parser (Arabic/English months, today)
+   - Payload preview to POST later
+   ========================= */
+
+const $ = (q, el=document)=> el.querySelector(q);
+const $$ = (q, el=document)=> Array.from(el.querySelectorAll(q));
+
+// ---------- Diagnostics: اعرض أخطاء JS بدل "أزرار ميتة"
+let __diagLast = { click: "", error: "" };
+function diagSet(kind, msg){
+  try{
+    if(kind==="click") __diagLast.click = msg;
+    if(kind==="error") __diagLast.error = msg;
+    const box = document.getElementById("diagBox");
+    if(!box) return;
+    box.style.display = (__diagLast.click || __diagLast.error) ? "block" : "none";
+    box.innerHTML =
+      `<div style="font-weight:800; margin-bottom:6px">تشخيص</div>` +
+      (__diagLast.error ? `<div style="color:var(--bad); margin-bottom:6px"><b>JS Error:</b> ${String(__diagLast.error).replace(/</g,'&lt;')}</div>` : "") +
+      (__diagLast.click ? `<div style="color:var(--muted)"><b>Last click:</b> ${String(__diagLast.click).replace(/</g,'&lt;')}</div>` : "");
+  }catch(_){}
+}
+window.addEventListener("error", (e)=>{
+  const m = (e && (e.message || e.error?.message)) ? (e.message || e.error?.message) : "Unknown error";
+  diagSet("error", m);
+});
+window.addEventListener("unhandledrejection", (e)=>{
+  const m = (e && e.reason && (e.reason.message || String(e.reason))) ? (e.reason.message || String(e.reason)) : "Unhandled promise rejection";
+  diagSet("error", m);
+});
+document.addEventListener("click", (ev)=>{
+  const t = ev.target;
+  const id = t && t.id ? `#${t.id}` : "";
+  const txt = (t && t.textContent) ? t.textContent.trim().slice(0, 40) : "";
+  if(id || txt) diagSet("click", `${id} ${txt}`.trim());
+}, true);
+
+// قاعدة API: ?api_base=http://host:port أو نفس أصل الصفحة (طلبات /api/* صحيحة من 2288/modules/cashflow)
+let API_BASE = "";
+(function syncApiBase() {
+  try {
+    var q = new URLSearchParams(window.location.search || "");
+    var fromQs = (q.get("api_base") || "").trim().replace(/\/$/, "");
+    if (fromQs) {
+      API_BASE = fromQs;
+    } else if (window.location && window.location.origin && window.location.origin !== "null") {
+      API_BASE = "";
+    }
+    window.API_BASE = API_BASE || (window.location && window.location.origin) || "";
+  } catch (e) {
+    window.API_BASE = "";
+  }
+})();
+/* إن لم يُمرَّر api_base في الرابط، يبقى المتغير المحلي فارغاً بينما window.API_BASE = الأصل — نوحّدهما لكل fetch */
+if (!API_BASE) API_BASE = window.API_BASE || "";
+
+/** جذر URL لطلبات /api/* (يجب أن يطابق خادم إكسترا الذي يخدم هذه الصفحة) */
+function cashflowApiRoot() {
+  var b = (typeof API_BASE !== "undefined" && API_BASE) ? API_BASE : (window.API_BASE || "");
+  if (!b) {
+    try {
+      b = (window.location && window.location.origin) ? window.location.origin : "";
+    } catch (e) {
+      b = "";
+    }
+  }
+  return String(b).replace(/\/$/, "");
+}
+
+const state = {
+  lang: "ar", // ar | en
+  dir: "rtl",
+  mode: "FAST", // FAST | SAFE | DEBUG
+  step: 1,
+  tx: {
+    type: null,   // DISB | RECP | JRNL
+    channel: null,// CASH | BANK | ADV
+    channelAccountId: null, // UI account id
+    bankSub: null, // CHQ | TRF | SAL | FEE | INT | BILL
+    instrument: {}, // cheque/transfer/internal/payroll
+    header: {
+      date: null,
+      memo: "",
+      instructions: "",
+      branchId: null,
+      costCenterId: null,
+      projectId: null
+    },
+    beneficiary: null, // {kind:'TBL016'|'GL'|'FREE', id?, name}
+    purpose: null, // e.g. "PURCHASE" etc.
+    referenceNo: "",
+    lines: [] // {itemId, itemName, amount, note, taxCode, dims:{cc,proj,branch}}
+  }
+};
+
+// ---------- Demo Settings (replace later with API)
+demo = {
+  branches: [
+    {id:"BR1", nameAr:"المركز الرئيسي", nameEn:"HQ"},
+    {id:"BR2", nameAr:"فرع الجيزة", nameEn:"Giza Branch"},
+  ],
+  costCenters: [
+    {id:"CC0", nameAr:"—", nameEn:"—"},
+    {id:"CC1", nameAr:"إداري", nameEn:"Admin"},
+    {id:"CC2", nameAr:"تشغيل", nameEn:"Operations"},
+  ],
+  projects: [
+    {id:"PJ0", nameAr:"—", nameEn:"—"},
+    {id:"PJ1", nameAr:"مشروع A", nameEn:"Project A"},
+    {id:"PJ2", nameAr:"مشروع B", nameEn:"Project B"},
+  ],
+  uiAccounts: {
+    CASH: [
+      {id:"C1", uiAr:"خزينة رئيسية", uiEn:"Main Cash", gl:"111001"},
+      {id:"C2", uiAr:"صندوق فرع الجيزة", uiEn:"Giza Cash", gl:"111010"},
+    ],
+    BANK: [
+      {id:"B1", uiAr:"بنك الأهلي", uiEn:"NBE", gl:"112001"},
+      {id:"B2", uiAr:"CIB", uiEn:"CIB", gl:"112010"},
+    ],
+    ADV: [
+      {id:"A1", uiAr:"عهدة أحمد", uiEn:"Ahmed Advance", gl:"113005"},
+      {id:"A2", uiAr:"عهدة مريم", uiEn:"Mariam Advance", gl:"113011"},
+    ],
+  },
+  // Items shown to user -> mapped to GL behind (later)
+  items: [
+    {id:"IT1", cat:"GEN", nameAr:"كهرباء المكتب", nameEn:"Office Electricity", gl:"521001", defaultTax:"NONE", requireDims:false},
+    {id:"IT2", cat:"GEN", nameAr:"إيجار المكتب", nameEn:"Office Rent", gl:"522001", defaultTax:"NONE", requireDims:true},
+    {id:"IT3", cat:"OPS", nameAr:"مصاريف تشغيل", nameEn:"Operating Expense", gl:"531000", defaultTax:"NONE", requireDims:false},
+    {id:"IT4", cat:"SUP", nameAr:"سلف/عهد", nameEn:"Advances", gl:"113000", defaultTax:"NONE", requireDims:false},
+    {id:"IT5", cat:"VND", nameAr:"تسديد مورد", nameEn:"Vendor Payment", gl:"211000", defaultTax:"NONE", requireDims:false},
+    {id:"IT6", cat:"PUR", nameAr:"مشتريات سلعية", nameEn:"Goods Purchase", gl:"411000", defaultTax:"VAT14", requireDims:true},
+    {id:"IT7", cat:"BNK", nameAr:"مصروفات بنكية", nameEn:"Bank Charges", gl:"541010", defaultTax:"NONE", requireDims:false},
+  ],
+  quickCats: [
+    {id:"GEN", ar:"مصروفات عمومية", en:"General"},
+    {id:"OPS", ar:"تكاليف تشغيل", en:"Operations"},
+    {id:"SUP", ar:"سلف/عهد", en:"Advances"},
+    {id:"VND", ar:"موردين", en:"Vendors"},
+    {id:"PUR", ar:"مشتريات", en:"Purchases"},
+    {id:"PRE", ar:"مقدمات", en:"Prepayments"},
+  ],
+  taxCodes: [
+    {id:"NONE", ar:"بدون", en:"None"},
+    {id:"VAT14", ar:"VAT 14%", en:"VAT 14%"},
+    {id:"WHT1", ar:"خصم %1", en:"WHT 1%"},
+  ],
+  purposes: [
+    {id:"PURCHASE", ar:"مشتريات", en:"Purchases"},
+    {id:"EXP", ar:"مصروفات", en:"Expenses"},
+    {id:"BILL", ar:"سداد فاتورة", en:"Pay Bill"},
+    {id:"INST", ar:"دفعة/قسط", en:"Installment"},
+    {id:"SAL", ar:"رواتب", en:"Payroll"},
+  ],
+  // Beneficiary demo (tbl016 + GL)
+  beneficiaries: [
+    {kind:"TBL016", id:"016-219781370", nameAr:"محمد محمد عبدالله زروق وشركاه", nameEn:"Zorouk & Co", role:"Customer"},
+    {kind:"TBL016", id:"016-645885657", nameAr:"جمعية المحاسبين والمراجعين المصرية", nameEn:"Egyptian Accountants Assoc.", role:"Vendor"},
+    {kind:"TBL016", id:"016-EMP-1001", nameAr:"أحمد علي", nameEn:"Ahmed Ali", role:"Employee"},
+    {kind:"GL", id:"GL-115000", nameAr:"حساب متنوع", nameEn:"Misc Account", role:"GL"},
+  ],
+  // Cheque pool demo
+  chequePool: {
+    B1: { next: 104533, last9: [104524,104525,104526,104527,104528,104529,104530,104531,104532] },
+    B2: { next: 220118, last9: [220109,220110,220111,220112,220113,220114,220115,220116,220117] },
+  }
+};
+
+// ---------- i18n (minimal but enough)
+const i18n = {
+  ar: {
+    appTitle:"شاشة الإدخال السريع — Smart CashFlow",
+    appSub:"صرف / قبض / قيد — أوامر صوتية أو ضغط — جاهز للربط عبر API",
+    voiceOff:"صوت: إيقاف", voiceOn:"صوت: تشغيل",
+    settings:"إعدادات الربط",
+    wizTitle:"المعالج الذكي", wizHint:"اختيارات ديناميكية + أوامر صوتية + إدخال سريع",
+    st:["النوع","القناة","الرأس","التفاصيل","تسجيل"],
+    next:"التالي", back:"رجوع", reset:"إعادة تعيين", skip:"تخطي",
+    submit:"تسجيل", cancel:"إلغاء",
+    fast:"سريع", safe:"تحقق إضافي", debug:"تفصيلي",
+    jsonCopied:"تم نسخ الـ JSON",
+    mockSent:"تم إرسال تجريبي (Mock)",
+    needType:"اختر نوع العملية أولاً",
+    needChannel:"اختر القناة + الحساب الظاهر للمستخدم",
+    needHeaderDate:"ادخل تاريخ صحيح (أو اختر من التقويم)",
+    needLineAmount:"أدخل قيمة صحيحة لكل سطر",
+    needOneLine:"أضف سطر واحد على الأقل",
+    total:"الإجمالي",
+    to:"إلى", from:"من"
+  },
+  en: {
+    appTitle:"Fast Entry — Smart CashFlow",
+    appSub:"Payment / Receipt / Journal — Voice or Tap — API-ready",
+    voiceOff:"Voice: Off", voiceOn:"Voice: On",
+    settings:"Mapping Settings",
+    wizTitle:"Smart Wizard", wizHint:"Dynamic lists + Voice commands + Fast entry",
+    st:["Type","Channel","Header","Lines","Submit"],
+    next:"Next", back:"Back", reset:"Reset", skip:"Skip",
+    submit:"Submit", cancel:"Cancel",
+    fast:"Fast", safe:"Extra checks", debug:"Verbose",
+    jsonCopied:"JSON copied",
+    mockSent:"Mock sent",
+    needType:"Choose transaction type first",
+    needChannel:"Choose channel + UI account",
+    needHeaderDate:"Enter a valid date (or pick from calendar)",
+    needLineAmount:"Enter a valid amount for each line",
+    needOneLine:"Add at least one line",
+    total:"Total",
+    to:"To", from:"From"
+  }
+};
+
+// ---------- Helpers
+function t(k){ return i18n[state.lang][k] ?? k; }
+function fmtMoney(n){
+  const x = Number(n || 0);
+  return x.toLocaleString(state.lang === "ar" ? "ar-EG" : "en-US", {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function toast(m, s=""){
+  $("#toastM").textContent = m;
+  $("#toastS").textContent = s;
+  $("#toast").classList.add("show");
+  setTimeout(()=> $("#toast").classList.remove("show"), 2200);
+}
+function setStep(n){
+  state.step = n;
+  ["#step1","#step2","#step3","#step4","#step5"].forEach((id, idx)=>{
+    $(id).style.display = (idx+1===n) ? "" : "none";
+  });
+  // stepper ui
+  $$(".step").forEach((el, idx)=>{
+    el.classList.toggle("active", idx+1===n);
+  });
+  refreshPayload();
+}
+function selectTiles(act, val){
+  $$(`.tile[data-act="${act}"]`).forEach(el=>{
+    el.classList.toggle("active", el.dataset.val===val);
+  });
+}
+function fillSelect(sel, items, getLabel){
+  sel.innerHTML = "";
+  items.forEach(it=>{
+    const opt = document.createElement("option");
+    opt.value = it.id;
+    opt.textContent = getLabel(it);
+    sel.appendChild(opt);
+  });
+}
+
+// ---------- Smart Date Parser (Arabic/English)
+const monthMap = {
+  // ar
+  "يناير":1,"فبراير":2,"مارس":3,"ابريل":4,"أبريل":4,"مايو":5,"يونيو":6,"يوليو":7,"اغسطس":8,"أغسطس":8,"سبتمبر":9,"اكتوبر":10,"أكتوبر":10,"نوفمبر":11,"ديسمبر":12,
+  // en
+  "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,"july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
+  "jan":1,"feb":2,"mar":3,"apr":4,"jun":6,"jul":7,"aug":8,"sep":9,"sept":9,"oct":10,"nov":11,"dec":12
+};
+function parseSmartDate(text){
+  if(!text) return null;
+  let s = text.trim().toLowerCase();
+  s = s.replace(/\s+/g," ");
+  const now = new Date();
+  const yNow = now.getFullYear();
+  const mNow = now.getMonth()+1;
+
+  if(["today","توداي","اليوم"].includes(s)) return new Date(yNow, mNow-1, now.getDate());
+
+  // if user typed ISO via input
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
+    const [yy,mm,dd]=s.split("-").map(Number);
+    return new Date(yy, mm-1, dd);
+  }
+
+  // patterns:
+  // "15" -> dd current month
+  if(/^\d{1,2}$/.test(s)){
+    const dd = Number(s);
+    return new Date(yNow, mNow-1, dd);
+  }
+
+  // "15 يناير" or "15 january" optionally with year "25" or "2025"
+  // split tokens
+  const parts = s.split(" ");
+  // if "15/1/2026" style
+  if(/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(s)){
+    const p = s.split("/");
+    const dd = Number(p[0]), mm = Number(p[1]);
+    let yy = yNow;
+    if(p[2]){
+      yy = Number(p[2]);
+      if(yy<100) yy = 2000 + yy;
+    }
+    return new Date(yy, mm-1, dd);
+  }
+
+  // words month
+  const dd = Number(parts[0]);
+  const monthWord = parts[1];
+  const mm = monthMap[monthWord];
+  if(!isNaN(dd) && mm){
+    let yy = yNow;
+    if(parts[2]){
+      yy = Number(parts[2]);
+      if(yy < 100) yy = 2000 + yy;
+    }
+    // if no explicit year and the date is in future too far, allow past? (simple rule)
+    const d = new Date(yy, mm-1, dd);
+    // if user said "15 يناير" in Feb, it's past -> fine
+    return d;
+  }
+  return null;
+}
+
+// ---------- Lines
+function addLine(pref={}){
+  const item = demo.items.find(x=>x.id===pref.itemId) || null;
+  const line = {
+    id: "L" + Math.random().toString(16).slice(2,8),
+    itemId: pref.itemId || (demo.items[0]?.id || null),
+    itemName: item ? (state.lang==="ar"?item.nameAr:item.nameEn) : (pref.itemName||""),
+    amount: pref.amount ?? "",
+    note: pref.note ?? "",
+    taxCode: pref.taxCode || (item?.defaultTax || "NONE"),
+    dims: {
+      cc: pref.cc || state.tx.header.costCenterId || "CC0",
+      proj: pref.proj || state.tx.header.projectId || "PJ0",
+      branch: pref.branch || state.tx.header.branchId || (demo.branches[0]?.id || null)
+    }
+  };
+  state.tx.lines.push(line);
+  renderLines();
+  refreshPayload();
+}
+function removeLine(id){
+  state.tx.lines = state.tx.lines.filter(x=>x.id!==id);
+  renderLines();
+  refreshPayload();
+}
+function renderLines(){
+  const tb = $("#linesTbody");
+  tb.innerHTML = "";
+  state.tx.lines.forEach((ln)=>{
+    const tr = document.createElement("tr");
+
+    const tdItem = document.createElement("td");
+    const sel = document.createElement("select");
+    demo.items.forEach(it=>{
+      const o=document.createElement("option");
+      o.value=it.id;
+      o.textContent = state.lang==="ar" ? it.nameAr : it.nameEn;
+      if(it.id===ln.itemId) o.selected=true;
+      sel.appendChild(o);
+    });
+    sel.onchange = ()=>{
+      ln.itemId = sel.value;
+      const it = demo.items.find(x=>x.id===ln.itemId);
+      ln.itemName = it ? (state.lang==="ar"?it.nameAr:it.nameEn) : "";
+      if(it?.defaultTax) ln.taxCode = it.defaultTax;
+      refreshPayload();
+      renderLines(); // refresh to reflect tax default
+    };
+    tdItem.appendChild(sel);
+
+    const tdAmt = document.createElement("td");
+    const inpA = document.createElement("input");
+    inpA.className="input";
+    inpA.placeholder="0.00";
+    inpA.value = ln.amount;
+    inpA.oninput = ()=>{ ln.amount = inpA.value; refreshPayload(); };
+    tdAmt.appendChild(inpA);
+
+    const tdNote = document.createElement("td");
+    const inpN = document.createElement("input");
+    inpN.className="input";
+    inpN.placeholder = state.lang==="ar" ? "اختياري" : "Optional";
+    inpN.value = ln.note;
+    inpN.oninput = ()=>{ ln.note = inpN.value; refreshPayload(); };
+    tdNote.appendChild(inpN);
+
+    const tdTax = document.createElement("td");
+    const selT = document.createElement("select");
+    demo.taxCodes.forEach(tc=>{
+      const o=document.createElement("option");
+      o.value=tc.id;
+      o.textContent = state.lang==="ar" ? tc.ar : tc.en;
+      if(tc.id===ln.taxCode) o.selected=true;
+      selT.appendChild(o);
+    });
+    selT.onchange = ()=>{ ln.taxCode = selT.value; refreshPayload(); };
+    tdTax.appendChild(selT);
+
+    const tdDims = document.createElement("td");
+    const wrap = document.createElement("div");
+    wrap.style.display="grid";
+    wrap.style.gap="6px";
+    const sCC = document.createElement("select");
+    demo.costCenters.forEach(c=>{
+      const o=document.createElement("option"); o.value=c.id; o.textContent= state.lang==="ar"?c.nameAr:c.nameEn;
+      if(c.id===ln.dims.cc) o.selected=true;
+      sCC.appendChild(o);
+    });
+    sCC.onchange = ()=>{ ln.dims.cc = sCC.value; refreshPayload(); };
+
+    const sPJ = document.createElement("select");
+    demo.projects.forEach(p=>{
+      const o=document.createElement("option"); o.value=p.id; o.textContent= state.lang==="ar"?p.nameAr:p.nameEn;
+      if(p.id===ln.dims.proj) o.selected=true;
+      sPJ.appendChild(o);
+    });
+    sPJ.onchange = ()=>{ ln.dims.proj = sPJ.value; refreshPayload(); };
+
+    const sBR = document.createElement("select");
+    demo.branches.forEach(b=>{
+      const o=document.createElement("option"); o.value=b.id; o.textContent= state.lang==="ar"?b.nameAr:b.nameEn;
+      if(b.id===ln.dims.branch) o.selected=true;
+      sBR.appendChild(o);
+    });
+    sBR.onchange = ()=>{ ln.dims.branch = sBR.value; refreshPayload(); };
+
+    wrap.appendChild(sCC); wrap.appendChild(sPJ); wrap.appendChild(sBR);
+    tdDims.appendChild(wrap);
+
+    const tdAct = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.className="btn small bad block";
+    btn.textContent = state.lang==="ar" ? "حذف" : "Remove";
+    btn.onclick = ()=> removeLine(ln.id);
+    tdAct.appendChild(btn);
+
+    [tdItem, tdAmt, tdNote, tdTax, tdDims, tdAct].forEach(x=>tr.appendChild(x));
+    tb.appendChild(tr);
+  });
+
+  $("#kpiLines").textContent = String(state.tx.lines.length);
+}
+
+// ---------- Totals
+function calcTotals(){
+  let total=0, tax=0;
+  state.tx.lines.forEach(ln=>{
+    const a = Number(String(ln.amount).replace(/,/g,""));
+    if(!isNaN(a)) total += a;
+    // basic demo tax calc
+    if(ln.taxCode==="VAT14") tax += a*0.14;
+    if(ln.taxCode==="WHT1") tax += a*0.01;
+  });
+  $("#kpiTotal").textContent = fmtMoney(total);
+  $("#kpiTax").textContent = fmtMoney(tax);
+  return {total, tax};
+}
+
+// ---------- Payload
+function buildPayload(){
+  const totals = calcTotals();
+  const payload = {
+    meta: {
+      uiVersion: "1.0",
+      lang: state.lang,
+      mode: state.mode,
+      timestamp: new Date().toISOString()
+    },
+    transaction: {
+      type: state.tx.type,
+      channel: state.tx.channel,
+      channelAccountId: state.tx.channelAccountId,
+      channelAccountGl: (typeof getSelectedUIAccount === "function" && getSelectedUIAccount()) ? getSelectedUIAccount().gl : "",
+      bankSub: state.tx.bankSub,
+      instrument: state.tx.instrument,
+      beneficiary: state.tx.beneficiary,
+      purpose: state.tx.purpose,
+      referenceNo: state.tx.referenceNo,
+      header: state.tx.header,
+      lines: state.tx.lines.map(ln=>{
+        const item = (typeof demo !== "undefined" && demo.items) ? demo.items.find(x=>x.id===ln.itemId) : null;
+        return {
+          itemId: ln.itemId,
+          amount: Number(String(ln.amount).replace(/,/g,"")) || 0,
+          note: ln.note || "",
+          accountGl: (item && item.gl) ? item.gl : (ln.accountGl || ""),
+          taxCode: ln.taxCode,
+          dims: ln.dims
+        };
+      }),
+      totals: {
+        linesCount: state.tx.lines.length,
+        total: totals.total,
+        tax: totals.tax
+      }
+    }
+  };
+  return payload;
+}
+function refreshPayload(){
+  try {
+    var pre = document.getElementById("payloadPre");
+    if (pre) pre.textContent = JSON.stringify(buildPayload(), null, 2);
+  } catch (err) {
+    var p2 = document.getElementById("payloadPre");
+    if (p2) p2.textContent = JSON.stringify({ error: "buildPayload", message: String(err && err.message ? err.message : err) }, null, 2);
+  }
+  try {
+    calcTotals();
+    renderFinalSummary();
+  } catch (e2) { console.warn("refreshPayload", e2); }
+}
+
+// ---------- Final summary
+function renderFinalSummary(){
+  const typeMap = {DISB:"صرف",RECP:"قبض",JRNL:"قيد"};
+  const chMap = {CASH:"نقدي",BANK:"بنكي",ADV:"عهدة"};
+  const bankMap = {CHQ:"شيك",TRF:"تحويل",SAL:"رواتب",FEE:"رسوم",INT:"داخلي",BILL:"سداد"};
+  const a = getSelectedUIAccount();
+  const dt = state.tx.header.date ? new Date(state.tx.header.date).toLocaleDateString(state.lang==="ar"?"ar-EG":"en-US") : "—";
+  const totals = calcTotals();
+  const lines = state.tx.lines.length;
+
+  const ar = `
+    <div>• النوع: <b>${typeMap[state.tx.type] || "—"}</b></div>
+    <div>• القناة: <b>${chMap[state.tx.channel] || "—"}</b> ${state.tx.channel==="BANK" ? `— <b>${bankMap[state.tx.bankSub]||"—"}</b>`:""}</div>
+    <div>• الحساب: <b>${a?.uiAr || "—"}</b> <span class="muted">(GL: ${a?.gl || "—"})</span></div>
+    <div>• التاريخ: <b>${dt}</b></div>
+    <div>• البنود: <b>${lines}</b> — الإجمالي: <b>${fmtMoney(totals.total)}</b></div>
+    ${state.tx.beneficiary ? `<div>• المستفيد: <b>${state.tx.beneficiary.name}</b> <span class="muted">(${state.tx.beneficiary.kind})</span></div>`:""}
+  `;
+  const en = `
+    <div>• Type: <b>${state.tx.type || "—"}</b></div>
+    <div>• Channel: <b>${state.tx.channel || "—"}</b> ${state.tx.channel==="BANK" ? `— <b>${state.tx.bankSub||"—"}</b>`:""}</div>
+    <div>• Account: <b>${a?.uiEn || "—"}</b> <span class="muted">(GL: ${a?.gl || "—"})</span></div>
+    <div>• Date: <b>${dt}</b></div>
+    <div>• Lines: <b>${lines}</b> — Total: <b>${fmtMoney(totals.total)}</b></div>
+    ${state.tx.beneficiary ? `<div>• Beneficiary: <b>${state.tx.beneficiary.name}</b> <span class="muted">(${state.tx.beneficiary.kind})</span></div>`:""}
+  `;
+  $("#finalSummary").innerHTML = (state.lang==="ar") ? ar : en;
+}
+
+// ---------- UI account selection
+function getSelectedUIAccount(){
+  const ch = state.tx.channel;
+  if(!ch) return null;
+  const list = demo.uiAccounts[ch] || [];
+  return list.find(x=>x.id===state.tx.channelAccountId) || null;
+}
+function refreshAccountPick(){
+  const ch = state.tx.channel;
+  const sel = $("#accountPick");
+  const list = demo.uiAccounts[ch] || [];
+  // مثل Place_2026_SYS: لا نختار الحساب تلقائياً — المستخدم لازم يختار صراحةً.
+  sel.innerHTML = "";
+  const ph = document.createElement("option");
+  ph.value = "";
+  ph.textContent = state.lang === "ar" ? "-- اختر الحساب --" : "-- Select account --";
+  sel.appendChild(ph);
+  list.forEach((it)=>{
+    const opt = document.createElement("option");
+    opt.value = it.id;
+    opt.textContent = state.lang==="ar" ? it.uiAr : it.uiEn;
+    sel.appendChild(opt);
+  });
+  // keep old if exists, otherwise keep empty
+  if(state.tx.channelAccountId && list.some(x=>x.id===state.tx.channelAccountId)){
+    sel.value = state.tx.channelAccountId;
+  }else{
+    sel.value = "";
+    state.tx.channelAccountId = null;
+  }
+  sel.onchange = ()=>{
+    state.tx.channelAccountId = sel.value || null;
+    // update cheque pool suggestions if bank
+    if(state.tx.channel==="BANK") refreshChequeSuggest();
+    refreshPayload();
+    // مثل Place_2026_SYS: بعد اختيار الحساب (والبنك بشرط اختيار subtype) نتحرك للخطوة التالية
+    if(state.tx.channel && state.tx.channel !== "BANK"){
+      setTimeout(() => setStep(3), 150);
+    }
+    if(state.tx.channel==="BANK" && state.tx.bankSub && state.tx.channelAccountId){
+      setTimeout(() => setStep(3), 150);
+    }
+  };
+
+  // bank lists
+  fillSelect($("#bankFrom"), demo.uiAccounts.BANK, it=> state.lang==="ar"?it.uiAr:it.uiEn);
+  fillSelect($("#intFrom"), demo.uiAccounts.BANK, it=> state.lang==="ar"?it.uiAr:it.uiEn);
+  fillSelect($("#intTo"), demo.uiAccounts.BANK, it=> state.lang==="ar"?it.uiAr:it.uiEn);
+  $("#bankFrom").onchange = ()=>{ state.tx.instrument.bankFrom = $("#bankFrom").value; refreshChequeSuggest(); refreshPayload(); };
+  $("#intFrom").onchange = ()=>{ state.tx.instrument.intFrom = $("#intFrom").value; refreshPayload(); };
+  $("#intTo").onchange = ()=>{ state.tx.instrument.intTo = $("#intTo").value; refreshPayload(); };
+}
+
+// ---------- Bank subtype boxes
+function showBankBox(which){
+  $("#chequeBox").style.display = (which==="CHQ") ? "" : "none";
+  $("#transferBox").style.display = (["TRF","BILL"].includes(which)) ? "" : "none";
+  $("#internalBox").style.display = (which==="INT") ? "" : "none";
+  $("#payrollBox").style.display = (which==="SAL") ? "" : "none";
+  // fees uses normal lines without extra fields
+  if(which==="FEE"){ /* no extra */ }
+}
+
+// ---------- Cheque suggestions
+function refreshChequeSuggest(){
+  const bankId = $("#bankFrom").value || state.tx.channelAccountId || "B1";
+  const pool = demo.chequePool[bankId];
+  const wrap = $("#chqSuggest");
+  wrap.innerHTML = "";
+  if(!pool){ return; }
+  const mk = (n, isNext=false)=>{
+    const c = document.createElement("div");
+    c.className = "chip" + (isNext ? " active": "");
+    c.textContent = String(n);
+    c.onclick = ()=>{
+      $("#chqNo").value = String(n);
+      state.tx.instrument.chequeNo = String(n);
+      refreshPayload();
+    };
+    return c;
+  };
+  wrap.appendChild(mk(pool.next,true));
+  pool.last9.forEach(n=>wrap.appendChild(mk(n,false)));
+
+  // default next if empty
+  if(!$("#chqNo").value){
+    $("#chqNo").value = String(pool.next);
+    state.tx.instrument.chequeNo = String(pool.next);
+  }
+}
+$("#chqNo").addEventListener("input", ()=>{
+  state.tx.instrument.chequeNo = $("#chqNo").value.trim();
+  refreshPayload();
+});
+
+// ---------- Quick categories and item search
+function renderQuickCats(){
+  const wrap = $("#quickCats");
+  wrap.innerHTML = "";
+  demo.quickCats.forEach(cat=>{
+    const c = document.createElement("div");
+    c.className = "chip";
+    c.textContent = state.lang==="ar" ? cat.ar : cat.en;
+    c.onclick = ()=>{
+      $$("#quickCats .chip").forEach(x=>x.classList.remove("active"));
+      c.classList.add("active");
+      const items = demo.items.filter(it=>it.cat===cat.id);
+      renderLineResults(items);
+    };
+    wrap.appendChild(c);
+  });
+}
+function renderLineResults(items){
+  const wrap = $("#lineResults");
+  wrap.innerHTML = "";
+  items.slice(0,10).forEach(it=>{
+    const c = document.createElement("div");
+    c.className = "chip";
+    c.textContent = state.lang==="ar" ? it.nameAr : it.nameEn;
+    c.onclick = ()=>{
+      // add line with this item and focus amount
+      addLine({itemId: it.id});
+      toast("تم إضافة بند", state.lang==="ar" ? it.nameAr : it.nameEn);
+      // focus last amount
+      setTimeout(()=>{
+        const lastRow = $("#linesTbody").lastElementChild;
+        lastRow?.querySelector("td:nth-child(2) input")?.focus();
+      },50);
+    };
+    wrap.appendChild(c);
+  });
+}
+$("#lineSearch").addEventListener("input", ()=>{
+  const q = $("#lineSearch").value.trim().toLowerCase();
+  if(!q){ $("#lineResults").innerHTML=""; return; }
+  const items = demo.items.filter(it=>{
+    const name = (state.lang==="ar"?it.nameAr:it.nameEn).toLowerCase();
+    return name.includes(q);
+  });
+  renderLineResults(items);
+});
+
+// ---------- Beneficiary search (tbl016 + GL)
+let selectedBeneficiary = null;
+function renderBeneficiaryResults(list){
+  const wrap = $("#beneficiaryResults");
+  wrap.innerHTML = "";
+  list.slice(0,10).forEach(b=>{
+    const c = document.createElement("div");
+    c.className = "chip";
+    c.textContent = state.lang==="ar" ? b.nameAr : b.nameEn;
+    c.onclick = ()=>{
+      selectedBeneficiary = {kind:b.kind, id:b.id, name: c.textContent};
+      state.tx.beneficiary = selectedBeneficiary;
+      // show selection
+      $$("#beneficiaryResults .chip").forEach(x=>x.classList.remove("active"));
+      c.classList.add("active");
+      refreshPayload();
+    };
+    wrap.appendChild(c);
+  });
+}
+$("#beneficiarySearch").addEventListener("input", ()=>{
+  const q = $("#beneficiarySearch").value.trim().toLowerCase();
+  if(!q){ $("#beneficiaryResults").innerHTML=""; return; }
+  const list = demo.beneficiaries.filter(b=>{
+    const n = (state.lang==="ar"?b.nameAr:b.nameEn).toLowerCase();
+    return n.includes(q);
+  });
+  renderBeneficiaryResults(list);
+});
+
+// ---------- Purpose pick
+fillSelect($("#purposePick"), demo.purposes, p=> state.lang==="ar"?p.ar:p.en);
+$("#purposePick").onchange = ()=>{ state.tx.purpose = $("#purposePick").value; refreshPayload(); };
+$("#refNo").oninput = ()=>{ state.tx.referenceNo = $("#refNo").value; refreshPayload(); };
+
+// ---------- Header selects
+fillSelect($("#branchPick"), demo.branches, b=> state.lang==="ar"?b.nameAr:b.nameEn);
+fillSelect($("#ccPick"), demo.costCenters, c=> state.lang==="ar"?c.nameAr:c.nameEn);
+fillSelect($("#projPick"), demo.projects, p=> state.lang==="ar"?p.nameAr:p.nameEn);
+
+$("#branchPick").onchange = ()=>{ state.tx.header.branchId = $("#branchPick").value; refreshPayload(); };
+$("#ccPick").onchange = ()=>{ state.tx.header.costCenterId = $("#ccPick").value; refreshPayload(); };
+$("#projPick").onchange = ()=>{ state.tx.header.projectId = $("#projPick").value; refreshPayload(); };
+
+$("#memo").oninput = ()=>{ state.tx.header.memo = $("#memo").value; refreshPayload(); };
+$("#instructions").oninput = ()=>{ state.tx.header.instructions = $("#instructions").value; refreshPayload(); };
+
+$("#datePicker").addEventListener("change", ()=>{
+  const v = $("#datePicker").value;
+  const d = parseSmartDate(v);
+  if(d){
+    state.tx.header.date = d.toISOString().slice(0,10);
+    $("#smartDate").value = v;
+  }
+  refreshPayload();
+});
+$("#smartDate").addEventListener("input", ()=>{
+  const d = parseSmartDate($("#smartDate").value);
+  if(d){
+    state.tx.header.date = d.toISOString().slice(0,10);
+    $("#datePicker").value = state.tx.header.date;
+  }else{
+    state.tx.header.date = null;
+  }
+  refreshPayload();
+});
+
+// ---------- Mode chips
+$$(".chip[data-mode]").forEach(ch=>{
+  ch.onclick = ()=>{
+    $$(".chip[data-mode]").forEach(x=>x.classList.remove("active"));
+    ch.classList.add("active");
+    state.mode = ch.dataset.mode;
+    refreshPayload();
+  };
+});
+
+// ---------- Step 1 actions
+$$('.tile[data-act="type"]').forEach(el=>{
+  el.onclick = ()=>{
+    state.tx.type = el.dataset.val;
+    selectTiles("type", state.tx.type);
+    refreshPayload();
+    // مثل Place_2026_SYS: اختيار النوع يغيّر الخطوة مباشرة
+    setTimeout(() => {
+      setStep(state.tx.type === "JRNL" ? 3 : 2);
+    }, 200);
+  };
+});
+$("#btnNext1").onclick = ()=>{
+  if(!state.tx.type){ toast(t("needType")); return; }
+  setStep(2);
+};
+$("#btnReset").onclick = resetAll;
+
+function resetAll(){
+  state.step = 1;
+  state.tx = {
+    type:null, channel:null, channelAccountId:null, bankSub:null, instrument:{},
+    header:{date:null,memo:"",instructions:"",branchId:null,costCenterId:null,projectId:null},
+    beneficiary:null, purpose:null, referenceNo:"",
+    lines:[]
+  };
+  selectedBeneficiary=null;
+  // reset UI
+  $$(".tile").forEach(x=>x.classList.remove("active"));
+  $("#bankSubtypes").style.display="none";
+  $("#chequeBox").style.display="none";
+  $("#transferBox").style.display="none";
+  $("#internalBox").style.display="none";
+  $("#payrollBox").style.display="none";
+  $("#memo").value=""; $("#instructions").value="";
+  $("#smartDate").value=""; $("#datePicker").value="";
+  $("#beneficiarySearch").value=""; $("#beneficiaryResults").innerHTML="";
+  $("#lineSearch").value=""; $("#lineResults").innerHTML="";
+  $("#linesTbody").innerHTML="";
+  $("#kpiLines").textContent="0";
+  $("#kpiTotal").textContent="0.00";
+  $("#kpiTax").textContent="0.00";
+  setStep(1);
+  refreshPayload();
+  toast("تمت إعادة التعيين","Reset done");
+}
+
+// ---------- Step 2 actions
+$$('.tile[data-act="channel"]').forEach(el=>{
+  el.onclick = ()=>{
+    state.tx.channel = el.dataset.val;
+    selectTiles("channel", state.tx.channel);
+    // show bank subtypes if bank
+    $("#bankSubtypes").style.display = (state.tx.channel==="BANK") ? "" : "none";
+    refreshAccountPick();
+    // default bankFrom/intFrom/intTo
+    if(state.tx.channel==="BANK"){
+      $("#bankFrom").value = state.tx.channelAccountId || demo.uiAccounts.BANK[0]?.id;
+      $("#intFrom").value = demo.uiAccounts.BANK[0]?.id;
+      $("#intTo").value = demo.uiAccounts.BANK[1]?.id || demo.uiAccounts.BANK[0]?.id;
+      state.tx.instrument.bankFrom = $("#bankFrom").value;
+      state.tx.instrument.intFrom = $("#intFrom").value;
+      state.tx.instrument.intTo = $("#intTo").value;
+      refreshChequeSuggest();
+    }
+    refreshPayload();
+  };
+});
+$$('.tile[data-act="banksub"]').forEach(el=>{
+  el.onclick = ()=>{
+    state.tx.bankSub = el.dataset.val;
+    selectTiles("banksub", state.tx.bankSub);
+    showBankBox(state.tx.bankSub);
+    // reset instrument specifics
+    state.tx.instrument = state.tx.instrument || {};
+    if(state.tx.bankSub==="CHQ"){
+      refreshChequeSuggest();
+      state.tx.instrument.kind="CHEQUE";
+      state.tx.instrument.bankFrom = $("#bankFrom").value || state.tx.channelAccountId;
+      state.tx.instrument.chequeNo = $("#chqNo").value || "";
+    }else if(["TRF","BILL"].includes(state.tx.bankSub)){
+      state.tx.instrument.kind="TRANSFER";
+      state.tx.instrument.bankFrom = $("#bankFrom").value || state.tx.channelAccountId;
+    }else if(state.tx.bankSub==="INT"){
+      state.tx.instrument.kind="INTERNAL_TRANSFER";
+      state.tx.instrument.intFrom = $("#intFrom").value;
+      state.tx.instrument.intTo = $("#intTo").value;
+    }else if(state.tx.bankSub==="SAL"){
+      state.tx.instrument.kind="PAYROLL";
+    }else if(state.tx.bankSub==="FEE"){
+      state.tx.instrument.kind="BANK_FEES";
+    }
+    refreshPayload();
+    // إذا المستخدم اختار subtype + حساب، انتقل للخطوة التالية مباشرة
+    if(state.tx.channel==="BANK" && state.tx.channelAccountId && state.tx.bankSub){
+      setTimeout(() => setStep(3), 150);
+    }
+  };
+});
+
+$("#btnBack2").onclick = ()=> setStep(1);
+$("#btnNext2").onclick = ()=>{
+  if(!state.tx.channel || !state.tx.channelAccountId){ toast(t("needChannel")); return; }
+  if(state.tx.channel==="BANK" && !state.tx.bankSub){
+    toast("اختر نوع العملية البنكية","Cheque/Transfer/...");
+    return;
+  }
+  setStep(3);
+};
+
+// ---------- Step 3 actions
+$("#btnSkipHeader").onclick = ()=>{
+  // only keep date; clear optional
+  state.tx.header.memo = state.tx.header.memo || "";
+  state.tx.header.instructions = "";
+  state.tx.header.costCenterId = state.tx.header.costCenterId || "CC0";
+  state.tx.header.projectId = state.tx.header.projectId || "PJ0";
+  refreshPayload();
+  toast(t("skip"), "تم تخطي الاختياري");
+};
+$("#btnBack3").onclick = ()=> setStep(2);
+$("#btnNext3").onclick = ()=>{
+  if(!state.tx.header.date){ toast(t("needHeaderDate")); return; }
+  // auto-init one line if none (except journal maybe)
+  if(state.tx.lines.length===0){
+    addLine({});
+  }
+  setStep(4);
+};
+
+// ---------- Step 4 actions
+$("#btnAddLine").onclick = ()=> addLine({});
+$("#btnBack4").onclick = ()=> setStep(3);
+$("#btnNext4").onclick = ()=>{
+  if(state.tx.lines.length===0){ toast(t("needOneLine")); return; }
+  // validate amounts
+  for(const ln of state.tx.lines){
+    const a = Number(String(ln.amount).replace(/,/g,""));
+    if(!isFinite(a) || a<=0){
+      toast(t("needLineAmount"), state.lang==="ar" ? "راجع قيم السطور" : "Check line amounts");
+      return;
+    }
+  }
+  setStep(5);
+};
+
+// ---------- Step 5 actions
+$("#btnBack5").onclick = ()=> setStep(4);
+$("#btnCancel").onclick = resetAll;
+
+$("#btnSubmit").onclick = async ()=>{
+  const payload = buildPayload();
+  try {
+    const r = await fetch(cashflowApiRoot() + "/api/cashflow/transaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const res = await r.json();
+    if (res.success) {
+      toast("تم التسجيل بنجاح", "رقم السند: " + (res.id || "—") + " — جاهز لأكسترا");
+      resetAll();
+    } else {
+      toast("خطأ", res.message || "فشل التسجيل");
+    }
+  } catch (e) {
+    toast("خطأ في الاتصال", e.message || "تأكد من تشغيل السيرفر وفتح الصفحة من /cashflow");
+  }
+};
+
+// ---------- Copy / Mock send
+$("#btnCopy").onclick = async ()=>{
+  try{
+    await navigator.clipboard.writeText($("#payloadPre").textContent);
+    toast(t("jsonCopied"));
+  }catch(e){
+    toast("تعذر النسخ","انسخ يدويًا من اللوحة");
+  }
+};
+$("#btnMockSend").onclick = async ()=>{
+  const payload = buildPayload();
+  try {
+    const r = await fetch(cashflowApiRoot() + "/api/cashflow/transaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const res = await r.json();
+    if (res.success) {
+      toast("تم إرسال تجريبي بنجاح", "رقم السند: " + (res.id || "—"));
+    } else {
+      toast("إرسال تجريبي فشل", res.message || "");
+    }
+  } catch (e) {
+    toast("خطأ اتصال", e.message || "");
+  }
+};
+
+// ---------- Settings drawer — إعدادات الربط قابلة للتعديل والحفظ
+const MAPPING_STORAGE_KEY = "voucher_mapping";
+
+function loadMappingFromStorage(){
+  try {
+    const raw = localStorage.getItem(MAPPING_STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data.CASH && data.CASH.length) demo.uiAccounts.CASH = data.CASH;
+    if (data.BANK && data.BANK.length) demo.uiAccounts.BANK = data.BANK;
+    if (data.ADV && data.ADV.length) demo.uiAccounts.ADV = data.ADV;
+    if (data.items && data.items.length) demo.items = data.items;
+  } catch (e) {}
+}
+
+function openDrawer(){
+  var d = document.getElementById("drawer");
+  var b = document.getElementById("backdrop");
+  if (d) d.classList.add("show");
+  if (b) b.classList.add("show");
+  try {
+    loadMappingFromStorage();
+    renderMapping();
+  } catch (err) {
+    console.error("renderMapping", err);
+    if (document.getElementById("mapCash")) document.getElementById("mapCash").innerHTML = "<p class='muted'>خطأ في التحميل. تحقق من وحدة التحكم (F12).</p>";
+  }
+  bindDrawerButtons();
+}
+function bindDrawerButtons(){
+  // إعادة ربط الأزرار عند كل فتح للدرج (الـ delegation في الأسفل يغطي النقرات أيضاً)
+}
+// تفويض النقر على درج الإعدادات — يضمن استجابة الأزرار حتى بعد تغيير المحتوى
+(function(){
+  var drawer = document.getElementById("drawer");
+  if (!drawer) return;
+  drawer.addEventListener("click", function(ev){
+    var t = ev.target;
+    if (t.id === "fetchSubAccounts" || (t.closest && t.closest("#fetchSubAccounts"))) { ev.preventDefault(); if (typeof fetchSubAccountsClick === "function") fetchSubAccountsClick(); return; }
+    if (t.id === "saveSettings" || (t.closest && t.closest("#saveSettings"))) { ev.preventDefault(); if (typeof saveSettingsClick === "function") saveSettingsClick(); return; }
+    if (t.id === "resetSettings" || (t.closest && t.closest("#resetSettings"))) { ev.preventDefault(); if (typeof resetSettingsClick === "function") resetSettingsClick(); return; }
+    var addBtn = t.closest && t.closest("[data-add]");
+    if (addBtn && addBtn.getAttribute("data-add") && typeof addMappingRow === "function") { ev.preventDefault(); addMappingRow(addBtn.getAttribute("data-add")); }
+  });
+})();
+function drawerLog(msg) {
+  var el = document.getElementById("drawerLog");
+  if (el) { el.textContent = (el.textContent ? el.textContent + "\n" : "") + msg; el.scrollTop = el.scrollHeight; }
+}
+function fetchSubAccountsClick(){
+  var list = document.getElementById("tbl004List");
+  var section = document.getElementById("tbl004Section");
+  if (!list) { alert("العنصر tbl004List غير موجود"); return; }
+  var base = cashflowApiRoot();
+  var url = base + "/api/accounts/sub";
+
+  console.log("API_BASE:", window.API_BASE);
+  console.log("Origin:", window.location.origin);
+  console.log("Fetching:", url);
+  drawerLog("[طلب] GET " + url);
+  list.innerHTML = "<p>جاري الجلب...</p>";
+  if (section) section.style.display = "block";
+
+  fetch(url, { credentials: "include" })
+    .then(function(r){
+      console.log("HTTP:", r.status, r.statusText, "Redirected:", r.redirected, "URL:", r.url);
+      return r.text().then(function(text){ return { status: r.status, ok: r.ok, text: text }; });
+    })
+    .then(function(res){
+      console.log("RAW RESPONSE (أول 500 حرف):", res.text.slice(0, 500));
+      var data;
+      try { data = JSON.parse(res.text); } catch (e) { throw new Error("الرد ليس JSON (غالبًا صفحة تسجيل دخول أو HTML)."); }
+      if (!res.ok) throw new Error(data.detail || ("خطأ " + res.status));
+      return data;
+    })
+    .then(function(data){
+      var arr = (data && Array.isArray(data.accounts)) ? data.accounts : [];
+      console.log("عدد الحسابات:", arr.length);
+      if (arr.length > 0) console.table(arr);
+      window.tbl004AccountsCache = arr;
+      drawerLog("[نتيجة] 200 – " + arr.length + " حساب");
+      if (arr.length === 0) {
+        list.innerHTML = "<p>لا توجد حسابات. (الخادم ردّ لكن القائمة فارغة)</p>";
+        alert("النتيجة: 0 حساب. تحقق من TBL004 والإعدادات.");
+        return;
+      }
+      var cash = window.demo && window.demo.uiAccounts && window.demo.uiAccounts.CASH || [];
+      var bank = window.demo && window.demo.uiAccounts && window.demo.uiAccounts.BANK || [];
+      var adv = window.demo && window.demo.uiAccounts && window.demo.uiAccounts.ADV || [];
+      var items = window.demo && window.demo.items || [];
+      var cashIds = cash.map(function(x){ return (x.gl || x.AccountID || x.CardGuide || "").toString(); });
+      var bankIds = bank.map(function(x){ return (x.gl || x.AccountID || x.CardGuide || "").toString(); });
+      var advIds = adv.map(function(x){ return (x.gl || x.AccountID || x.CardGuide || "").toString(); });
+      var itemIds = items.map(function(x){ return (x.gl || x.AccountID || "").toString(); });
+      var html = "";
+      for (var i = 0; i < arr.length; i++) {
+        var a = arr[i];
+        if (!a || typeof a !== "object") continue;
+        var id = (a.AccountID || a.CardGuide || "").toString();
+        var disp = (a.DisplayName || a.AccountName || id || "").toString().replace(/</g,"&lt;").replace(/"/g,"&quot;");
+        var chC = cashIds.indexOf(id) >= 0 || cashIds.indexOf((a.CardGuide||"").toString()) >= 0 ? " checked" : "";
+        var chB = bankIds.indexOf(id) >= 0 || bankIds.indexOf((a.CardGuide||"").toString()) >= 0 ? " checked" : "";
+        var chA = advIds.indexOf(id) >= 0 || advIds.indexOf((a.CardGuide||"").toString()) >= 0 ? " checked" : "";
+        var chI = itemIds.indexOf(id) >= 0 ? " checked" : "";
+        html += "<div class=\"mapping-row tbl004-row\" data-card=\"" + (a.CardGuide||"").toString().replace(/"/g,"&quot;") + "\" data-accid=\"" + id.replace(/"/g,"&quot;") + "\" data-name=\"" + (a.AccountName||"").toString().replace(/"/g,"&quot;") + "\"><span style=\"min-width:140px\">" + disp + "</span><label><input type=\"checkbox\" class=\"ch-cash\"" + chC + "> صندوق</label><label><input type=\"checkbox\" class=\"ch-bank\"" + chB + "> بنك</label><label><input type=\"checkbox\" class=\"ch-adv\"" + chA + "> عهدة</label><label><input type=\"checkbox\" class=\"ch-item\"" + chI + "> بند</label></div>";
+      }
+      list.innerHTML = html;
+      alert("النتيجة: تم جلب " + arr.length + " حساب. انظر القائمة فوق.");
+    })
+    .catch(function(e){
+      var msg = e.message || "تحقق من السيرفر والإعدادات.";
+      console.error("خطأ:", msg);
+      drawerLog("[خطأ] " + msg);
+      list.innerHTML = "<p>خطأ: " + msg + "</p>";
+      alert("خطأ: " + msg);
+    });
+}
+function addMappingRow(kind){
+  var d = window.demo || {};
+  if (!d.uiAccounts) d.uiAccounts = { CASH: [], BANK: [], ADV: [] };
+  if (!d.items) d.items = [];
+  if (kind === "CASH") { d.uiAccounts.CASH.push({id:"C"+(d.uiAccounts.CASH.length+1), uiAr:"", uiEn:"", gl:""}); }
+  else if (kind === "BANK") { d.uiAccounts.BANK.push({id:"B"+(d.uiAccounts.BANK.length+1), uiAr:"", uiEn:"", gl:""}); }
+  else if (kind === "ADV") { d.uiAccounts.ADV.push({id:"A"+(d.uiAccounts.ADV.length+1), uiAr:"", uiEn:"", gl:""}); }
+  else if (kind === "ITEM") { d.items.push({id:"IT"+(d.items.length+1), cat:"GEN", nameAr:"", nameEn:"", gl:"", defaultTax:"NONE", requireDims:false}); }
+  window.demo = d;
+  if (typeof renderMapping === "function") renderMapping();
+  if (typeof bindDrawerButtons === "function") bindDrawerButtons();
+  alert("تمت إضافة صف في " + (kind === "CASH" ? "صناديق" : kind === "BANK" ? "بنوك" : kind === "ADV" ? "عهد" : "بنود"));
+}
+function saveSettingsClick(){
+  var d = window.demo || { uiAccounts: { CASH: [], BANK: [], ADV: [] }, items: [] };
+  try {
+    if (document.getElementById("tbl004List") && document.querySelectorAll("#tbl004List .tbl004-row").length > 0 && typeof buildMappingFromTBL004Checkboxes === "function") {
+      buildMappingFromTBL004Checkboxes();
+      d = window.demo || d;
+    } else if (typeof readMappingFromDOM === "function") {
+      readMappingFromDOM();
+      d = window.demo || d;
+    }
+    localStorage.setItem("voucher_mapping", JSON.stringify({ CASH: d.uiAccounts.CASH || [], BANK: d.uiAccounts.BANK || [], ADV: d.uiAccounts.ADV || [], items: d.items || [] }));
+    if (typeof closeDrawer === "function") closeDrawer();
+    if (typeof refreshAccountPick === "function") refreshAccountPick();
+    var n = (d.uiAccounts.CASH.length || 0) + (d.uiAccounts.BANK.length || 0) + (d.uiAccounts.ADV.length || 0) + (d.items.length || 0);
+    alert("تم حفظ الربط.\nصناديق: " + (d.uiAccounts.CASH.length || 0) + "، بنوك: " + (d.uiAccounts.BANK.length || 0) + "، عهد: " + (d.uiAccounts.ADV.length || 0) + "، بنود: " + (d.items.length || 0));
+  } catch (e) {
+    console.error("saveSettingsClick", e);
+    alert("حدث خطأ عند الحفظ: " + (e.message || ""));
+  }
+}
+function resetSettingsClick(){
+  var d = window.demo || { uiAccounts: { CASH: [], BANK: [], ADV: [] }, items: [] };
+  d.uiAccounts.CASH = [{id:"C1",uiAr:"خزينة رئيسية",uiEn:"Main Cash",gl:"111001"},{id:"C2",uiAr:"صندوق فرع الجيزة",uiEn:"Giza Cash",gl:"111010"}];
+  d.uiAccounts.BANK = [{id:"B1",uiAr:"بنك الأهلي",uiEn:"NBE",gl:"112001"},{id:"B2",uiAr:"CIB",uiEn:"CIB",gl:"112010"}];
+  d.uiAccounts.ADV = [{id:"A1",uiAr:"عهدة أحمد",uiEn:"Ahmed Advance",gl:"113005"},{id:"A2",uiAr:"عهدة مريم",uiEn:"Mariam Advance",gl:"113011"}];
+  d.items = [{id:"IT1",cat:"GEN",nameAr:"كهرباء المكتب",nameEn:"Office Electricity",gl:"521001",defaultTax:"NONE",requireDims:false},{id:"IT2",cat:"GEN",nameAr:"إيجار المكتب",nameEn:"Office Rent",gl:"522001",defaultTax:"NONE",requireDims:true},{id:"IT3",cat:"OPS",nameAr:"مصاريف تشغيل",nameEn:"Operating Expense",gl:"531000",defaultTax:"NONE",requireDims:false},{id:"IT4",cat:"SUP",nameAr:"سلف/عهد",nameEn:"Advances",gl:"113000",defaultTax:"NONE",requireDims:false},{id:"IT5",cat:"VND",nameAr:"تسديد مورد",nameEn:"Vendor Payment",gl:"211000",defaultTax:"NONE",requireDims:false},{id:"IT6",cat:"PUR",nameAr:"مشتريات سلعية",nameEn:"Goods Purchase",gl:"411000",defaultTax:"VAT14",requireDims:true},{id:"IT7",cat:"BNK",nameAr:"مصروفات بنكية",nameEn:"Bank Charges",gl:"541010",defaultTax:"NONE",requireDims:false}];
+  window.demo = d;
+  try { localStorage.removeItem("voucher_mapping"); } catch (e) {}
+  if (typeof renderMapping === "function") renderMapping();
+  if (typeof bindDrawerButtons === "function") bindDrawerButtons();
+  alert("تم إرجاع الافتراضي.");
+}
+function closeDrawer(){
+  $("#drawer").classList.remove("show");
+  $("#backdrop").classList.remove("show");
+}
+var settingsBtnEl = document.getElementById("settingsBtn");
+if (settingsBtnEl) settingsBtnEl.addEventListener("click", openDrawer);
+document.getElementById("drawerClose") && document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+document.getElementById("backdrop") && document.getElementById("backdrop").addEventListener("click", closeDrawer);
+
+function makeMappingRow(prefix, idx, labelAr, labelEn, gl, isItem, itemCat){
+  const lab = (state.lang==="ar" ? labelAr : labelEn) || labelAr || labelEn || "";
+  const id = prefix + "_" + idx;
+  const glId = "gl_" + id;
+  return `<div class="mapping-row" data-prefix="${prefix}" data-idx="${idx}">
+    <input type="text" class="input map-label" data-id="${id}" placeholder="الاسم الظاهر" value="${escapeAttr(lab)}" />
+    <input type="text" class="input gl-input map-gl" data-id="${glId}" placeholder="GL" value="${escapeAttr(gl||"")}" />
+    <button type="button" class="btn-pick gl-pick" title="جلب من الدليل">دليل</button>
+    <button type="button" class="btn-del map-del" title="حذف">✕</button>
+  </div>`;
+}
+function escapeAttr(s){ return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+
+function renderMapping(){
+  const L = state.lang;
+  const cash = demo.uiAccounts.CASH || [];
+  const bank = demo.uiAccounts.BANK || [];
+  const adv = demo.uiAccounts.ADV || [];
+  const items = demo.items || [];
+
+  $("#mapCash").innerHTML = cash.map((x,i)=> makeMappingRow("CASH", i, x.uiAr, x.uiEn, x.gl, false)).join("") || makeMappingRow("CASH", 0, "", "", "", false);
+  $("#mapBank").innerHTML = bank.map((x,i)=> makeMappingRow("BANK", i, x.uiAr, x.uiEn, x.gl, false)).join("") || makeMappingRow("BANK", 0, "", "", "", false);
+  $("#mapAdv").innerHTML  = adv.map((x,i)=> makeMappingRow("ADV", i, x.uiAr, x.uiEn, x.gl, false)).join("") || makeMappingRow("ADV", 0, "", "", "", false);
+  $("#mapItems").innerHTML = items.map((it,i)=> makeMappingRow("ITEM", i, it.nameAr, it.nameEn, it.gl, true, it.cat)).join("") || makeMappingRow("ITEM", 0, "", "", "", true);
+
+  $$(".map-del").forEach(btn=>{
+    btn.onclick = ()=>{
+      const row = btn.closest(".mapping-row");
+      const prefix = row.dataset.prefix, idx = parseInt(row.dataset.idx,10);
+      if (prefix === "CASH") { demo.uiAccounts.CASH.splice(idx,1); if (!demo.uiAccounts.CASH.length) demo.uiAccounts.CASH = [{id:"C1",uiAr:"",uiEn:"",gl:""}]; }
+      else if (prefix === "BANK") { demo.uiAccounts.BANK.splice(idx,1); if (!demo.uiAccounts.BANK.length) demo.uiAccounts.BANK = [{id:"B1",uiAr:"",uiEn:"",gl:""}]; }
+      else if (prefix === "ADV") { demo.uiAccounts.ADV.splice(idx,1); if (!demo.uiAccounts.ADV.length) demo.uiAccounts.ADV = [{id:"A1",uiAr:"",uiEn:"",gl:""}]; }
+      else if (prefix === "ITEM") { demo.items.splice(idx,1); if (!demo.items.length) demo.items = [{id:"IT1",cat:"GEN",nameAr:"",nameEn:"",gl:"",defaultTax:"NONE",requireDims:false}]; }
+      renderMapping();
+    };
+  });
+
+  $$(".gl-pick").forEach(btn=>{
+    btn.onclick = ()=>{ const row = btn.closest(".mapping-row"); openGLPicker(row.querySelector(".map-gl")); };
+  });
+
+  $$("[data-add]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const kind = btn.dataset.add;
+      if (kind === "CASH") { demo.uiAccounts.CASH.push({id:"C"+(demo.uiAccounts.CASH.length+1), uiAr:"", uiEn:"", gl:""}); }
+      else if (kind === "BANK") { demo.uiAccounts.BANK.push({id:"B"+(demo.uiAccounts.BANK.length+1), uiAr:"", uiEn:"", gl:""}); }
+      else if (kind === "ADV") { demo.uiAccounts.ADV.push({id:"A"+(demo.uiAccounts.ADV.length+1), uiAr:"", uiEn:"", gl:""}); }
+      else if (kind === "ITEM") { demo.items.push({id:"IT"+(demo.items.length+1), cat:"GEN", nameAr:"", nameEn:"", gl:"", defaultTax:"NONE", requireDims:false}); }
+      renderMapping();
+    };
+  });
+}
+
+function readMappingFromDOM(){
+  const cash = [], bank = [], adv = [], items = [];
+  $("#mapCash").querySelectorAll(".mapping-row").forEach((row,i)=>{
+    const lab = ((row.querySelector(".map-label") || {}).value || "").toString().trim();
+    const gl = ((row.querySelector(".map-gl") || {}).value || "").toString().trim();
+    if (lab || gl) cash.push({ id: "C"+(i+1), uiAr: lab, uiEn: lab, gl: gl || "" });
+  });
+  $("#mapBank").querySelectorAll(".mapping-row").forEach((row,i)=>{
+    const lab = ((row.querySelector(".map-label") || {}).value || "").toString().trim();
+    const gl = ((row.querySelector(".map-gl") || {}).value || "").toString().trim();
+    if (lab || gl) bank.push({ id: "B"+(i+1), uiAr: lab, uiEn: lab, gl: gl || "" });
+  });
+  $("#mapAdv").querySelectorAll(".mapping-row").forEach((row,i)=>{
+    const lab = ((row.querySelector(".map-label") || {}).value || "").toString().trim();
+    const gl = ((row.querySelector(".map-gl") || {}).value || "").toString().trim();
+    if (lab || gl) adv.push({ id: "A"+(i+1), uiAr: lab, uiEn: lab, gl: gl || "" });
+  });
+  $("#mapItems").querySelectorAll(".mapping-row").forEach((row,i)=>{
+    const lab = ((row.querySelector(".map-label") || {}).value || "").toString().trim();
+    const gl = ((row.querySelector(".map-gl") || {}).value || "").toString().trim();
+    if (lab || gl) items.push({ id: "IT"+(i+1), cat: "GEN", nameAr: lab, nameEn: lab, gl: gl || "", defaultTax: "NONE", requireDims: false });
+  });
+  if (cash.length) demo.uiAccounts.CASH = cash;
+  if (bank.length) demo.uiAccounts.BANK = bank;
+  if (adv.length) demo.uiAccounts.ADV = adv;
+  if (items.length) demo.items = items;
+}
+
+// ---------- نافذة جلب الحسابات من الدليل (TBL004)
+let glPickerTargetInput = null;
+function openGLPicker(targetInput){
+  glPickerTargetInput = targetInput;
+  $("#glPickerModal").style.display = "block";
+  $("#glPickerBackdrop").style.display = "block";
+  $("#glPickerList").innerHTML = "<p class='muted'>جاري التحميل...</p>";
+  fetch(cashflowApiRoot() + "/api/accounts/sub")
+    .then(r=>{
+      if (!r.ok) return r.json().then(d=>{ throw new Error(d.detail || r.statusText); });
+      return r.json();
+    })
+    .then(data=>{
+      const list = data.accounts || [];
+      if (!list.length) {
+        $("#glPickerList").innerHTML = "<p class='muted'>لا توجد حسابات فرعية في TBL004 (أو الجدول فارغ). جرّب من نافذة إعدادات الاتصال بعد التأكد من الاتصال.</p>";
+        return;
+      }
+      $("#glPickerList").innerHTML = list.map(a=>`
+        <div class="mapping-row" style="cursor:pointer; padding:6px 8px; border-radius:8px" data-gl="${escapeAttr(a.AccountID||a.DisplayName||"")}" data-name="${escapeAttr(a.DisplayName||a.AccountName||"")}">
+          <span>${escapeAttr(a.DisplayName || a.AccountName || a.AccountID || "")}</span>
+          <span class="muted">${escapeAttr(a.AccountID||"")}</span>
+        </div>
+      `).join("");
+      $$("#glPickerList .mapping-row").forEach(el=>{
+        el.onclick = ()=>{ if (glPickerTargetInput) glPickerTargetInput.value = el.dataset.gl || el.dataset.name || ""; closeGLPicker(); };
+      });
+      $("#glPickerSearch").value = "";
+      $("#glPickerSearch").oninput = ()=>{
+        const q = $("#glPickerSearch").value.trim().toLowerCase();
+        $("#glPickerList").querySelectorAll(".mapping-row").forEach(r=>{
+          const t = (r.dataset.name + " " + (r.dataset.gl||"")).toLowerCase();
+          r.style.display = q && !t.includes(q) ? "none" : "";
+        });
+      };
+    })
+    .catch(e=>{ $("#glPickerList").innerHTML = "<p class='muted'>خطأ: " + (e.message || "تحقق من إعدادات الاتصال والسيرفر.") + "</p>"; });
+}
+function closeGLPicker(){
+  $("#glPickerModal").style.display = "none";
+  $("#glPickerBackdrop").style.display = "none";
+  glPickerTargetInput = null;
+}
+var _glClose = document.getElementById("glPickerClose");
+if (_glClose) _glClose.onclick = closeGLPicker;
+var _glBackdrop = document.getElementById("glPickerBackdrop");
+if (_glBackdrop) _glBackdrop.onclick = closeGLPicker;
+var _fetchFromGL = document.getElementById("fetchFromGL");
+if (_fetchFromGL) _fetchFromGL.onclick = ()=>{ openGLPicker(null); toast("اختر حقل GL ثم اضغط «دليل» بجانبه لملئه من الدليل",""); };
+
+// ---------- جلب الحسابات الفرعية من TBL004 (CardGuide <> MainAccount)
+var tbl004AccountsCache = [];
+
+function buildMappingFromTBL004Checkboxes(){
+  if (!window.demo) window.demo = { uiAccounts: { CASH: [], BANK: [], ADV: [] }, items: [] };
+  if (!window.demo.uiAccounts) window.demo.uiAccounts = { CASH: [], BANK: [], ADV: [] };
+  if (!window.demo.items) window.demo.items = [];
+  var cash = [], bank = [], adv = [], items = [];
+  var list = document.getElementById("tbl004List");
+  if (!list) return;
+  var rows = list.querySelectorAll(".tbl004-row");
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var card = row.getAttribute("data-card") || "";
+    var accId = row.getAttribute("data-accid") || "";
+    var name = row.getAttribute("data-name") || accId;
+    var span = row.querySelector("span");
+    var disp = (span && span.textContent) ? span.textContent.trim() : name;
+    if (row.querySelector(".ch-cash") && row.querySelector(".ch-cash").checked) cash.push({ id: "C"+cash.length, CardGuide: card, uiAr: disp, uiEn: disp, gl: accId, AccountID: accId });
+    if (row.querySelector(".ch-bank") && row.querySelector(".ch-bank").checked) bank.push({ id: "B"+bank.length, CardGuide: card, uiAr: disp, uiEn: disp, gl: accId, AccountID: accId });
+    if (row.querySelector(".ch-adv") && row.querySelector(".ch-adv").checked) adv.push({ id: "A"+adv.length, CardGuide: card, uiAr: disp, uiEn: disp, gl: accId, AccountID: accId });
+    if (row.querySelector(".ch-item") && row.querySelector(".ch-item").checked) items.push({ id: "IT"+items.length, CardGuide: card, cat: "GEN", nameAr: disp, nameEn: disp, gl: accId, AccountID: accId, defaultTax: "NONE", requireDims: false });
+  }
+  window.demo.uiAccounts.CASH = cash;
+  window.demo.uiAccounts.BANK = bank;
+  window.demo.uiAccounts.ADV = adv;
+  window.demo.items = items;
+}
+
+// ---------- Language switch
+function applyLang(){
+  const L = state.lang;
+  document.documentElement.lang = (L==="ar") ? "ar" : "en";
+  document.documentElement.dir = (L==="ar") ? "rtl" : "ltr";
+  state.dir = document.documentElement.dir;
+
+  // top
+  $("#appTitle").textContent = i18n[L].appTitle;
+  $("#appSub").textContent = i18n[L].appSub;
+  $("#langLabel").textContent = (L==="ar") ? "AR" : "EN";
+  $("#settingsLabel").textContent = i18n[L].settings;
+
+  // stepper titles
+  $("#st1t").textContent = i18n[L].st[0];
+  $("#st2t").textContent = i18n[L].st[1];
+  $("#st3t").textContent = i18n[L].st[2];
+  $("#st4t").textContent = i18n[L].st[3];
+  $("#st5t").textContent = i18n[L].st[4];
+
+  // buttons
+  $("#btnNext1").textContent = i18n[L].next;
+  $("#btnNext2").textContent = i18n[L].next;
+  $("#btnNext3").textContent = i18n[L].next;
+  $("#btnNext4").textContent = i18n[L].next;
+  $("#btnBack2").textContent = i18n[L].back;
+  $("#btnBack3").textContent = i18n[L].back;
+  $("#btnBack4").textContent = i18n[L].back;
+  $("#btnBack5").textContent = i18n[L].back;
+  $("#btnReset").textContent = i18n[L].reset;
+  $("#btnSkipHeader").textContent = i18n[L].skip;
+  $("#btnSubmit").textContent = i18n[L].submit;
+  $("#btnCancel").textContent = i18n[L].cancel;
+
+  $("#modeFast").textContent = i18n[L].fast;
+  $("#modeSafe").textContent = i18n[L].safe;
+  $("#modeDebug").textContent = i18n[L].debug;
+
+  // re-render dynamic areas
+  renderQuickCats();
+  renderLines();
+  refreshAccountPick();
+  renderMapping();
+  refreshPayload();
+}
+$("#langBtn").onclick = ()=>{
+  state.lang = (state.lang==="ar") ? "en" : "ar";
+  applyLang();
+};
+
+// ---------- Keyboard shortcuts
+document.addEventListener("keydown", (e)=>{
+  if(e.key.toLowerCase()==="l"){ $("#langBtn").click(); }
+  if(e.key.toLowerCase()==="s"){ $("#settingsBtn").click(); }
+  if(e.key.toLowerCase()==="v"){ $("#voiceBtn").click(); }
+  if(e.key==="Escape"){ closeDrawer(); }
+});
+
+// ---------- Voice (optional)
+let recog = null;
+let listening = false;
+let voiceStopping = false;  /* لتجاهل خطأ aborted عند الإيقاف */
+let voiceResultTimer = null;  /* تأجيل المعالجة حتى لا يتجمّد الواجهة */
+
+function initVoice(){
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SpeechRecognition) return null;
+  const r = new SpeechRecognition();
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+  r.lang = (state.lang==="ar") ? "ar-EG" : "en-US";
+  return r;
+}
+function voiceSetUI(on){
+  $("#voiceLabel").textContent = on ? t("voiceOn") : t("voiceOff");
+  $("#voiceDot").style.background = on ? "var(--ok)" : "var(--pri2)";
+}
+function handleVoiceText(text){
+  const s = text.trim().toLowerCase();
+  if(!s) return;
+
+  // Commands map (Arabic + English)
+  const cmd = {
+    type: [
+      {k:["صرف","payment","disbursement"], v:"DISB"},
+      {k:["قبض","receipt","collection"], v:"RECP"},
+      {k:["قيد","journal"], v:"JRNL"},
+    ],
+    channel: [
+      {k:["نقدي","cash"], v:"CASH"},
+      {k:["بنكي","bank"], v:"BANK"},
+      {k:["عهدة","advance"], v:"ADV"},
+    ],
+    bankSub: [
+      {k:["شيك","cheque","check"], v:"CHQ"},
+      {k:["تحويل","transfer"], v:"TRF"},
+      {k:["رواتب","salary","payroll"], v:"SAL"},
+      {k:["رسوم","عمولات","fees","charges"], v:"FEE"},
+      {k:["داخلي","internal"], v:"INT"},
+      {k:["سداد","فاتورة","bill","installment"], v:"BILL"},
+    ]
+  };
+
+  // Global controls
+  if(["تخطي","skip"].includes(s)){
+    if(state.step===3) $("#btnSkipHeader").click();
+    return;
+  }
+  if(["سطر جديد","line new","new line"].includes(s)){
+    if(state.step===4) $("#btnAddLine").click();
+    return;
+  }
+  if(["تسجيل","submit","save","record"].includes(s)){
+    if(state.step===5) $("#btnSubmit").click();
+    return;
+  }
+  if(["التالي","next"].includes(s)){
+    if(state.step===1) $("#btnNext1").click();
+    else if(state.step===2) $("#btnNext2").click();
+    else if(state.step===3) $("#btnNext3").click();
+    else if(state.step===4) $("#btnNext4").click();
+    return;
+  }
+  if(["رجوع","back"].includes(s)){
+    if(state.step===2) $("#btnBack2").click();
+    else if(state.step===3) $("#btnBack3").click();
+    else if(state.step===4) $("#btnBack4").click();
+    else if(state.step===5) $("#btnBack5").click();
+    return;
+  }
+
+  // Step-sensitive commands
+  if(state.step===1){
+    for(const it of cmd.type){
+      if(it.k.some(w=>s.includes(w))){
+        state.tx.type = it.v;
+        selectTiles("type", it.v);
+        refreshPayload();
+        toast("تم اختيار", s);
+        return;
+      }
+    }
+  }
+  if(state.step===2){
+    for(const it of cmd.channel){
+      if(it.k.some(w=>s.includes(w))){
+        state.tx.channel = it.v;
+        selectTiles("channel", it.v);
+        $("#bankSubtypes").style.display = (it.v==="BANK") ? "" : "none";
+        refreshAccountPick();
+        refreshPayload();
+        toast("تم اختيار القناة", s);
+        return;
+      }
+    }
+    if(state.tx.channel==="BANK"){
+      for(const it of cmd.bankSub){
+        if(it.k.some(w=>s.includes(w))){
+          state.tx.bankSub = it.v;
+          selectTiles("banksub", it.v);
+          showBankBox(it.v);
+          refreshPayload();
+          toast("نوع بنكي", s);
+          return;
+        }
+      }
+      // if says a number -> cheque no
+      if(state.tx.bankSub==="CHQ" && /^\d{4,}$/.test(s)){
+        $("#chqNo").value = s;
+        state.tx.instrument.chequeNo = s;
+        refreshPayload();
+        toast("رقم الشيك", s);
+        return;
+      }
+    }
+  }
+  if(state.step===3){
+    // smart date
+    const d = parseSmartDate(s);
+    if(d){
+      state.tx.header.date = d.toISOString().slice(0,10);
+      $("#smartDate").value = s;
+      $("#datePicker").value = state.tx.header.date;
+      refreshPayload();
+      toast("تم ضبط التاريخ", $("#datePicker").value);
+      return;
+    }
+    // memo: if starts with "شرح" or "memo"
+    if(s.startsWith("شرح") || s.startsWith("memo")){
+      const val = text.replace(/^شرح\s*/,"").replace(/^memo\s*/i,"");
+      $("#memo").value = val;
+      state.tx.header.memo = val;
+      refreshPayload();
+      toast("تم إدخال الشرح");
+      return;
+    }
+  }
+  if(state.step===4){
+    // quick categories by keyword
+    const catHit = demo.quickCats.find(c=>{
+      const k = (state.lang==="ar"?c.ar:c.en).toLowerCase();
+      return k.includes(s) || s.includes(k.split(" ")[0]);
+    });
+    if(catHit){
+      // highlight by rendering items
+      const items = demo.items.filter(it=>it.cat===catHit.id);
+      renderLineResults(items);
+      toast("فئة", state.lang==="ar"?catHit.ar:catHit.en);
+      return;
+    }
+    // "كهربا 3200" quick line
+    const m = s.match(/^(.+)\s+(\d+(\.\d+)?)$/);
+    if(m){
+      const name = m[1].trim();
+      const amt = m[2];
+      const found = demo.items.find(it=> (state.lang==="ar"?it.nameAr:it.nameEn).toLowerCase().includes(name));
+      if(found){
+        addLine({itemId: found.id, amount: amt});
+        toast("تمت إضافة سطر", name+" = "+amt);
+        return;
+      }
+    }
+  }
+}
+
+// Toggle voice
+$("#voiceBtn").onclick = ()=>{
+  if(!recog) recog = initVoice();
+  if(!recog){
+    toast("المتصفح لا يدعم الصوت","استخدم Chrome أو Edge");
+    return;
+  }
+  listening = !listening;
+  if(listening){
+    voiceStopping = false;
+    recog.lang = (state.lang==="ar") ? "ar-EG" : "en-US";
+    recog.onresult = (event)=>{
+      let finalText = "";
+      for(let i=event.resultIndex; i<event.results.length; i++){
+        const res = event.results[i];
+        if(res.isFinal && res[0] && res[0].transcript){
+          finalText += res[0].transcript + " ";
+        }
+      }
+      finalText = finalText.trim();
+      if(!finalText) return;
+      /* تأجيل المعالجة حتى لا يتجمّد الصفحة — التنفيذ خارج callback الصوت */
+      if(voiceResultTimer) clearTimeout(voiceResultTimer);
+      voiceResultTimer = setTimeout(()=>{
+        voiceResultTimer = null;
+        try {
+          finalText.split(/[\n\.،,]+/).map(x=>x.trim()).filter(Boolean).forEach(handleVoiceText);
+        } catch(err) {
+          console.warn("handleVoiceText", err);
+        }
+      }, 80);
+    };
+    recog.onerror = (e)=>{
+      if(voiceStopping) return;
+      const err = e.error || e.message || "";
+      if(err==="aborted") return;
+      if(err==="not-allowed"){
+        toast("لم يُسمح بالميكروفون","السماح للموقع بالوصول إلى الميكروفون");
+        return;
+      }
+      if(err==="no-speech"){
+        toast("لم يُلتقط صوت","جرّب النطق مرة أخرى");
+        return;
+      }
+      if(err==="network"){
+        toast("خطأ شبكة","تحقق من الاتصال ثم أعد تشغيل الصوت");
+        return;
+      }
+      toast("خطأ صوت", String(err) || "خطأ غير معروف");
+    };
+    recog.onend = ()=>{
+      if(listening && !voiceStopping){
+        /* تأخير بسيط قبل إعادة التشغيل حتى لا يسبب تكرار سريع وتجمّد */
+        setTimeout(()=>{
+          if(listening && !voiceStopping && recog) try{ recog.start(); }catch(x){}
+        }, 150);
+      }
+    };
+    try {
+      recog.start();
+      voiceSetUI(true);
+      toast("الصوت يعمل","قل: صرف / قبض / نقدي / اليوم...");
+    } catch(err) {
+      listening = false;
+      voiceSetUI(false);
+      toast("تعذر تشغيل الصوت", err.message || "جرّب فتح الصفحة من https أو localhost");
+    }
+  }else{
+    voiceStopping = true;
+    try{ recog.stop(); }catch(x){}
+    voiceSetUI(false);
+    toast("تم إيقاف الصوت");
+  }
+};
+
+// ---------- Init
+function init(){
+  // mode labels already
+  // حمّل الربط المحفوظ تلقائياً (بدون ما يفتح المستخدم نافذة الإعدادات)
+  loadMappingFromStorage();
+
+  // لو المستخدم ما عمل Settings قبل كده، لا نخلي القوائم فاضية.
+  // هذه قيم Demo فقط لتمكين سير الـ Wizard من البداية.
+  if (!demo.uiAccounts) demo.uiAccounts = { CASH: [], BANK: [], ADV: [] };
+  if (!demo.items) demo.items = [];
+  if (!demo.uiAccounts.CASH.length) {
+    demo.uiAccounts.CASH = [
+      {id:"C1",uiAr:"خزينة رئيسية",uiEn:"Main Cash",gl:"111001"},
+      {id:"C2",uiAr:"صندوق فرع الجيزة",uiEn:"Giza Cash",gl:"111010"},
+    ];
+  }
+  if (!demo.uiAccounts.BANK.length) {
+    demo.uiAccounts.BANK = [
+      {id:"B1",uiAr:"بنك الأهلي",uiEn:"NBE",gl:"112001"},
+      {id:"B2",uiAr:"CIB",uiEn:"CIB",gl:"112010"},
+    ];
+  }
+  if (!demo.uiAccounts.ADV.length) {
+    demo.uiAccounts.ADV = [
+      {id:"A1",uiAr:"عهدة أحمد",uiEn:"Ahmed Advance",gl:"113005"},
+      {id:"A2",uiAr:"عهدة مريم",uiEn:"Mariam Advance",gl:"113011"},
+    ];
+  }
+  if (!demo.items.length) {
+    demo.items = [
+      {id:"IT1",cat:"GEN",nameAr:"كهرباء المكتب",nameEn:"Office Electricity",gl:"521001",defaultTax:"NONE",requireDims:false},
+      {id:"IT2",cat:"GEN",nameAr:"إيجار المكتب",nameEn:"Office Rent",gl:"522001",defaultTax:"NONE",requireDims:true},
+      {id:"IT3",cat:"OPS",nameAr:"مصاريف تشغيل",nameEn:"Operating Expense",gl:"531000",defaultTax:"NONE",requireDims:false},
+      {id:"IT4",cat:"SUP",nameAr:"سلف/عهد",nameEn:"Advances",gl:"113000",defaultTax:"NONE",requireDims:false},
+      {id:"IT5",cat:"VND",nameAr:"تسديد مورد",nameEn:"Vendor Payment",gl:"211000",defaultTax:"NONE",requireDims:false},
+      {id:"IT6",cat:"PUR",nameAr:"مشتريات سلعية",nameEn:"Goods Purchase",gl:"411000",defaultTax:"VAT14",requireDims:true},
+      {id:"IT7",cat:"BNK",nameAr:"مصروفات بنكية",nameEn:"Bank Charges",gl:"541010",defaultTax:"NONE",requireDims:false},
+    ];
+  }
+
+  renderQuickCats();
+  renderMapping();
+  // default branch/cc/proj
+  $("#branchPick").value = demo.branches[0]?.id || "";
+  state.tx.header.branchId = $("#branchPick").value || null;
+  $("#ccPick").value = "CC0"; state.tx.header.costCenterId="CC0";
+  $("#projPick").value = "PJ0"; state.tx.header.projectId="PJ0";
+
+  fillSelect($("#purposePick"), demo.purposes, p=> state.lang==="ar"?p.ar:p.en);
+
+  // default one line?
+  // keep empty until step 4 or after header.
+  refreshPayload();
+  applyLang();
+  voiceSetUI(false);
+}
+try{
+  init();
+}catch(e){
+  diagSet("error", e && (e.message || String(e)) ? (e.message || String(e)) : "Init failed");
+}
+
+// ---------- فحص اتصال الخادم (تحديث شارة API — لم تكن تعمل سابقاً)
+function runCashflowPing() {
+  var root = cashflowApiRoot();
+  var label = document.getElementById("apiLabel");
+  var btn = document.getElementById("apiPingBtn");
+  if (label) label.textContent = "API: …";
+  if (btn) { btn.classList.remove("ok", "bad", "warn"); btn.classList.add("warn"); }
+  var url = root + "/api/ping";
+  fetch(url, { method: "GET", cache: "no-store" })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+    .then(function (x) {
+      if (label) label.textContent = x.ok && x.j && x.j.ok ? "API: متصل" : "API: رد غير متوقع";
+      if (btn) {
+        btn.classList.remove("warn");
+        if (x.ok && x.j && x.j.ok) btn.classList.add("ok");
+        else btn.classList.add("bad");
+      }
+    })
+    .catch(function () {
+      if (label) label.textContent = "API: لا اتصال";
+      if (btn) { btn.classList.remove("ok", "warn"); btn.classList.add("bad"); }
+    });
+}
+var _apiPingEl = document.getElementById("apiPingBtn");
+if (_apiPingEl) _apiPingEl.onclick = function () { runCashflowPing(); };
+runCashflowPing();
+
+// ---------- API ربط أكسترا
+async function apiGET(url){
+  const r = await fetch(cashflowApiRoot() + url);
+  const data = r.ok ? await r.json() : null;
+  return { ok: r.ok, data };
+}
+async function apiPOST(url, body){
+  const r = await fetch(cashflowApiRoot() + url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = r.ok ? await r.json() : null;
+  return { ok: r.ok, id: data?.id, data };
+}
+</script>
+</body>
+</html>
