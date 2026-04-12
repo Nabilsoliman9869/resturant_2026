@@ -9,7 +9,7 @@ echo  - يفتح نافذتين جديدتين: API ثم الواجهة
 echo ========================================
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($port in @(2288, 9999)) { Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = [int]$_.OwningProcess; if ($p -gt 0) { Write-Host ('  إيقاف PID ' + $p + ' (منفذ ' + $port + ')'); Stop-Process -Id $p -Force -ErrorAction SilentlyContinue } } }"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\mat3am_kill_ports.ps1"
 
 timeout /t 2 /nobreak >nul
 
@@ -26,7 +26,7 @@ if not exist "node_modules" (
   echo تثبيت npm...
   call npm install
 )
-start "MAT3AM-UI" cmd /k "cd /d \"%HERE%\" && echo واجهة: http://127.0.0.1:9999 && npm run dev"
+start "MAT3AM-UI" cmd /k "cd /d \"%HERE%\" && if exist node_modules\.vite rmdir /s /q node_modules\.vite && echo واجهة: http://127.0.0.1:9999 && npm run dev -- --force"
 
 echo.
 echo ========================================
@@ -34,6 +34,6 @@ echo  بعد ثوانٍ:
 echo   - API:   http://127.0.0.1:2288/api/ping
 echo   - واجهة: http://127.0.0.1:9999/login
 echo  في المتصفح: Ctrl+Shift+R (تحديث قوي) أو امسح كاش الموقع لـ localhost
-echo  دخول تهيئة: dev / dev@123 (أو زر التعبئة في صفحة الدخول)
+echo  دخول مطوّر دائم: dev / dev@123
 echo ========================================
 pause

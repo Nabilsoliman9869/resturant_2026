@@ -27,6 +27,9 @@ import SettingsLayout from "./pages/settings/SettingsLayout";
 import VenueFloorSettingsPage from "./pages/settings/VenueFloorSettingsPage";
 import MenusDailySettingsPage from "./pages/settings/MenusDailySettingsPage";
 import FloorPlanEditorPage from "./pages/settings/FloorPlanEditorPage";
+import ProductImagesSettingsPage from "./pages/settings/ProductImagesSettingsPage";
+import CashierTableSessionsPage from "./pages/CashierTableSessionsPage";
+import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
   const { user } = useAuth();
@@ -54,6 +57,8 @@ export default function App() {
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
+        <Route path="table-sessions" element={<CashierTableSessionsPage />} />
+        <Route path="invoices-local" element={<CashierInvoicesLocalPage />} />
       </Route>
 
       <Route
@@ -95,6 +100,7 @@ export default function App() {
           <Route path="tables" element={<TablesLayoutPage />} />
           <Route path="costing" element={<CostingPage />} />
           <Route path="menus" element={<MenusDailySettingsPage />} />
+          <Route path="product-images" element={<ProductImagesSettingsPage />} />
           <Route path="pos" element={<PosAdminPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
@@ -132,6 +138,7 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="tables" replace />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
@@ -158,6 +165,7 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="runner" replace />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="runner" element={<RunnerPage />} />
         <Route path="tables" element={<ServerTablesPage />} />
       </Route>
@@ -184,6 +192,7 @@ export default function App() {
           <Route path="tables" element={<TablesLayoutPage />} />
           <Route path="costing" element={<CostingPage />} />
           <Route path="menus" element={<MenusDailySettingsPage />} />
+          <Route path="product-images" element={<ProductImagesSettingsPage />} />
           <Route path="pos" element={<PosAdminPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />

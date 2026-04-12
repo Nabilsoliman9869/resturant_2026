@@ -1,0 +1,273 @@
+[
+  {
+    "id": "a09e1dd7-c2d5-4eea-a1dd-a44a7616cd79",
+    "sessionId": "afb2cda5-582f-4669-85e5-9c5fd28922b0",
+    "tableId": "t1",
+    "invoiceId": "54D481BE-B4CE-41BB-9F8D-E980BAA23386",
+    "items": [
+      {
+        "name": "Alex Liver Sandwich (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+      },
+      {
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+      }
+    ],
+    "status": "ready",
+    "generalOrder": false,
+    "createdAt": "2026-04-04T03:47:24.439122",
+    "prepStartTime": "2026-04-04T03:52:16.957171",
+    "prepEndTime": "2026-04-04T03:53:01.785671"
+  },
+  {
+    "id": "4db66e88-effe-4bf5-9f4d-1325cc4f370d",
+    "sessionId": "57d34da4-f85f-4941-8fac-269cc8b0882a",
+    "tableId": "t2",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "name": "Alex Liver Sandwich (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+      },
+      {
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+      },
+      {
+        "name": "anise (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5B8BDE42-1C27-4B4A-B1A3-9126FCCB5191"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-09T21:47:12.929109",
+    "ticketNo": 1
+  },
+  {
+    "id": "c3d3d10a-e5af-47ee-924c-9718fe53b392",
+    "sessionId": "57d34da4-f85f-4941-8fac-269cc8b0882a",
+    "tableId": "t2",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+      },
+      {
+        "name": "Alex Liver Sandwich (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-09T23:21:07.117832",
+    "ticketNo": 2
+  },
+  {
+    "id": "d04ff2e8-4a0a-4675-88de-585f8f96e8f4",
+    "sessionId": "9d9e0f96-9f62-4e5b-acee-0da663b01803",
+    "tableId": "T5",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "name": "12% Service (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E6F6CE09-AB15-4BC3-9548-D9E7AED24858"
+      },
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+      },
+      {
+        "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-10T03:38:20.038009",
+    "ticketNo": 3
+  },
+  {
+    "id": "583561ef-61a5-43ad-bc7e-dfbea306053a",
+    "sessionId": "9d9e0f96-9f62-4e5b-acee-0da663b01803",
+    "tableId": "T5",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 4)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+      },
+      {
+        "name": "Alex Liver Sandwich (كرسي 4)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+      },
+      {
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+      },
+      {
+        "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70"
+      },
+      {
+        "name": "Alexandarian Liver (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-10T03:42:08.385489",
+    "ticketNo": 4
+  },
+  {
+    "id": "d4f83740-da45-484b-968f-7e6042ff8fc8",
+    "sessionId": "9d9e0f96-9f62-4e5b-acee-0da663b01803",
+    "tableId": "T5",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+      },
+      {
+        "name": "Alex Liver Sandwich (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+      },
+      {
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+      },
+      {
+        "name": "Apple Breeza (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "3894CA6A-65EA-491A-84F6-A2816C815E38"
+      },
+      {
+        "name": "apple juice (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "3EAAAEE9-17A4-42BD-86FE-D988315A4510"
+      },
+      {
+        "name": "Asfor With Chicken Tagine (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1B4DAB30-125B-4355-B9A9-914BC567632D"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-10T04:20:38.945864",
+    "ticketNo": 5
+  },
+  {
+    "id": "dcafd04d-1353-4120-bb51-879d08cbdc04",
+    "sessionId": "c6550969-a507-4c99-8dbf-ffe89e617126",
+    "tableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+      },
+      {
+        "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70"
+      },
+      {
+        "name": "Alexandarian Liver (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-10T04:35:00.454833",
+    "ticketNo": 6
+  }
+]

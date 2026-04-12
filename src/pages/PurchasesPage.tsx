@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
+import { tryParseJson } from "../lib/tryParseJson";
 
 /** مطابق لـ backend/constants.py — مجموعة الموردين في TBL015 / MainGroupGuide في TBL016 */
 const SUPPLIER_GROUP_GUID = "26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500";
@@ -93,9 +94,10 @@ export default function PurchasesPage() {
         const u = new URL(`${base}/api/invoices/next-number`);
         u.searchParams.set("invoice_type", typeGuid);
         const r = await fetch(u.toString());
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json();
-        setBillNumber(typeof j.next_number === "number" ? j.next_number : null);
+        const bodyText = await r.text();
+        if (!r.ok) throw new Error(bodyText || `HTTP ${r.status}`);
+        const j = tryParseJson<{ next_number?: number }>(bodyText);
+        setBillNumber(typeof j?.next_number === "number" ? j.next_number : null);
       } catch {
         setBillNumber(null);
       }
@@ -122,11 +124,12 @@ export default function PurchasesPage() {
       if (!aRes.ok) throw new Error(`الموردين: ${aRes.status}`);
       if (!pRes.ok) throw new Error(`الأصناف: ${pRes.status}`);
 
-      const tJson = await tRes.json();
-      const aJson = await aRes.json();
-      const pJson = await pRes.json();
+      const tJson = tryParseJson<{ invoice_types?: { InvoiceName: string; CardGuide: string }[] }>(await tRes.text()) ?? {};
+      const aJson = tryParseJson<{ agents?: { CardGuide: string; AgentName: string }[] }>(await aRes.text()) ?? {};
+      const pJson =
+        tryParseJson<{ products?: { CardGuide: string; ProductName: string; Price?: number }[] }>(await pRes.text()) ?? {};
 
-      const types: InvoiceTypeRow[] = (tJson.invoice_types || []).map((x: { InvoiceName: string; CardGuide: string }) => ({
+      const types: InvoiceTypeRow[] = (tJson.invoice_types ?? []).map((x) => ({
         InvoiceName: x.InvoiceName,
         CardGuide: String(x.CardGuide).toUpperCase(),
       }));
@@ -138,9 +141,9 @@ export default function PurchasesPage() {
         void refreshNextNumber(chosen.CardGuide);
       }
 
-      setSuppliers((aJson.agents || []).map((x: { CardGuide: string; AgentName: string }) => ({ CardGuide: x.CardGuide, AgentName: x.AgentName })));
+      setSuppliers((aJson.agents ?? []).map((x) => ({ CardGuide: x.CardGuide, AgentName: x.AgentName })));
       setProducts(
-        (pJson.products || []).map((x: { CardGuide: string; ProductName: string; Price?: number }) => ({
+        (pJson.products ?? []).map((x) => ({
           CardGuide: x.CardGuide,
           ProductName: x.ProductName,
           Price: typeof x.Price === "number" ? x.Price : 0,
@@ -282,16 +285,12 @@ export default function PurchasesPage() {
       const text = await r.text();
       if (!r.ok) {
         let detail = text;
-        try {
-          const j = JSON.parse(text) as { detail?: string };
-          if (j.detail) detail = j.detail;
-        } catch {
-          /* keep text */
-        }
+        const ej = tryParseJson<{ detail?: string }>(text);
+        if (ej?.detail) detail = String(ej.detail);
         throw new Error(detail || `HTTP ${r.status}`);
       }
-      const j = JSON.parse(text) as { MainGuide?: string; message?: string };
-      setSaveMsg(j.message || "تم حفظ فاتورة المشتريات في TBL022 / TBL023.");
+      const j = tryParseJson<{ MainGuide?: string; message?: string }>(text);
+      setSaveMsg(j?.message || "تم حفظ فاتورة المشتريات في TBL022 / TBL023.");
       setLines([]);
       try {
         localStorage.removeItem(LS_DRAFT);

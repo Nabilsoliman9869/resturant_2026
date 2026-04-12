@@ -19,8 +19,8 @@ export type PosLineInput = {
 
 export type PosTotalsParams = {
   lines: PosLineInput[];
-  /** طاولة = داخلي (تُحتسب الخدمة عند الإتمام)، سفري/دليفري = بدون خدمة في هذا النموذج */
-  orderType: "table" | "takeaway" | "delivery";
+  /** طاولة = داخلي (تُحتسب الخدمة عند الإتمام)، غيرها = بدون بند خدمة الطاولة في هذا النموذج */
+  orderType: "table" | "takeaway" | "delivery" | "bar_quick" | "catering";
   /** بعد الضغط على «اكتمل الطلب» يُفعَّل احتساب الخدمة للطلبات على الطاولة */
   orderFinalized: boolean;
   servicePercent: number;

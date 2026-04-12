@@ -1,4 +1,5 @@
 import { getApiBase } from "./apiBase";
+import { tryParseJson } from "./tryParseJson";
 
 /**
  * بعد نجاح تسجيل الدخول: التحقق أن نفس خادم الـ API يجيب.
@@ -16,7 +17,7 @@ export async function checkApiReadyAfterLogin(timeoutMs = 8000): Promise<boolean
     });
     window.clearTimeout(timer);
     if (!r.ok) return false;
-    const j = (await r.json()) as { ok?: boolean };
+    const j = tryParseJson<{ ok?: boolean }>(await r.text());
     return j?.ok === true;
   } catch {
     window.clearTimeout(timer);

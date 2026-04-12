@@ -2,12 +2,12 @@
 Backend API Server for POS System
 FastAPI Backend - متصل بقاعدة البيانات SQL Server
 """
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
-from pydantic import BaseModel
-from typing import List, Optional
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from pydantic import BaseModel, model_validator
+from typing import List, Optional, Tuple
 import pyodbc
 from datetime import datetime
 import uuid
@@ -25,7 +25,7 @@ try:
 except ValueError:
     XTRA_API_PORT = 2288
 
-# دخول تهيئة أولية: لا يقرأ MAT3AM_APP_USERS. يُعطّل تلقائياً عندما يوجد صف واحد على الأقل في ذلك الجدول.
+# دخول تهيئة / مطوّر: لا يعتمد على MAT3AM_APP_USERS ولا يُعطّل أبداً بعد التهيئة (dev / dev@123 أو MAT3AM_INITIAL_DEV_*).
 MAT3AM_INITIAL_DEV_LOGIN = (os.environ.get("MAT3AM_INITIAL_DEV_LOGIN") or "dev").strip().strip("\ufeff")
 MAT3AM_INITIAL_DEV_PIN = (os.environ.get("MAT3AM_INITIAL_DEV_PIN") or "dev@123").strip().strip("\ufeff")
 MAT3AM_INITIAL_DEV_USER_ID = "00000000-0000-4000-8000-000000000001"
@@ -94,10 +94,25 @@ def _looks_like_initial_setup_username(login_name: str) -> bool:
 app = FastAPI(title="إكسترا ويب — نظام موازي", version="2.0.0")
 
 
+@app.get("/__whoami", include_in_schema=False)
+def whoami_typo_redirect():
+    """كثيراً ما يُنسى الشرطتان الأخيرتان — نفس محتوى التحقق عبر إعادة توجيه."""
+    return RedirectResponse(url="/__whoami__", status_code=307)
+
+
 @app.get("/__whoami__", include_in_schema=False)
 def whoami():
-    """اختبار: هل الخادم الذي يعمل هو هذا الملف؟"""
-    return PlainTextResponse("api_server.py: WHOAMI OK")
+    """اختبار: هل الخادم الذي يعمل هو هذا الملف؟ (سطر MAT3AM يظهر فقط في نسخة مطاعم الحالية)"""
+    try:
+        _mt = int(os.path.getmtime(__file__))
+    except Exception:
+        _mt = 0
+    body = (
+        "api_server.py: WHOAMI OK\n"
+        "MAT3AM_API=1 DEV_LOGIN_ALWAYS=1\n"
+        f"API_FILE_MTIME_UNIX={_mt}\n"
+    )
+    return PlainTextResponse(body)
 
 
 # مسارات مطلقة مبنية على __file__ (تفادي 404 بسبب التشغيل من backend/)
@@ -107,6 +122,19 @@ REST_DIR = BASE_DIR / "ui" / "restaurant"
 
 # إعدادات الاتصال من ملف (إن وُجد) — يُحمّل من config/settings.json
 _settings_path = os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "settings.json"))
+
+
+def _load_mat3am_settings() -> dict:
+    """قسم اختياري mat3am داخل config/settings.json (عملة افتراضية، مطابقة أسماء، إلخ)."""
+    if not os.path.exists(_settings_path):
+        return {}
+    try:
+        with open(_settings_path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        m = d.get("mat3am")
+        return m if isinstance(m, dict) else {}
+    except Exception:
+        return {}
 
 
 def _normalize_sql_port(port) -> Optional[int]:
@@ -199,6 +227,262 @@ for i, r in enumerate(app.routes):
     n = getattr(r, "name", None)
     print(" ", type(r).__name__, p, n)
 
+# —— Product images local storage under config/restaurant/product_images ——
+_product_images_dir_path = str(BASE_DIR / "config" / "restaurant" / "product_images")
+_product_images_manifest_path = str(BASE_DIR / "config" / "restaurant" / "product_images.json")
+_group_images_dir_path = str(BASE_DIR / "config" / "restaurant" / "group_images")
+_group_images_manifest_path = str(BASE_DIR / "config" / "restaurant" / "group_images.json")
+def _product_images_dir() -> str:
+    os.makedirs(_product_images_dir_path, exist_ok=True)
+    return _product_images_dir_path
+
+
+def _product_images_manifest_load() -> dict:
+    try:
+        if os.path.isfile(_product_images_manifest_path):
+            with open(_product_images_manifest_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                imgs = d.get("images")
+                if isinstance(imgs, dict):
+                    return {"images": imgs}
+    except Exception:
+        pass
+    return {"images": {}}
+
+
+def _product_images_manifest_save(d: dict) -> None:
+    os.makedirs(os.path.dirname(_product_images_manifest_path), exist_ok=True)
+    with open(_product_images_manifest_path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+
+
+def _product_images_manifest_set(card_guide: str, image_url: str) -> None:
+    m = _product_images_manifest_load()
+    imgs = m.get("images")
+    if not isinstance(imgs, dict):
+        imgs = {}
+        m["images"] = imgs
+    gid = str(card_guide).upper()
+    imgs[gid] = {
+        "image": image_url,
+        "updatedAt": datetime.now().isoformat(),
+    }
+    _product_images_manifest_save(m)
+
+
+def _product_images_manifest_get(card_guide: str) -> Optional[str]:
+    m = _product_images_manifest_load()
+    imgs = m.get("images")
+    if not isinstance(imgs, dict):
+        return None
+    rec = imgs.get(str(card_guide).upper())
+    if isinstance(rec, dict):
+        v = rec.get("image")
+        if v:
+            return str(v)
+    return None
+
+
+def _group_images_dir() -> str:
+    os.makedirs(_group_images_dir_path, exist_ok=True)
+    return _group_images_dir_path
+
+
+def _group_images_manifest_load() -> dict:
+    try:
+        if os.path.isfile(_group_images_manifest_path):
+            with open(_group_images_manifest_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                imgs = d.get("images")
+                if isinstance(imgs, dict):
+                    return {"images": imgs}
+    except Exception:
+        pass
+    return {"images": {}}
+
+
+def _group_images_manifest_save(d: dict) -> None:
+    os.makedirs(os.path.dirname(_group_images_manifest_path), exist_ok=True)
+    with open(_group_images_manifest_path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+
+
+def _group_images_manifest_set(card_guide: str, image_url: str) -> None:
+    m = _group_images_manifest_load()
+    imgs = m.get("images")
+    if not isinstance(imgs, dict):
+        imgs = {}
+        m["images"] = imgs
+    gid = str(card_guide).upper()
+    imgs[gid] = {
+        "image": image_url,
+        "updatedAt": datetime.now().isoformat(),
+    }
+    _group_images_manifest_save(m)
+
+
+def _group_images_manifest_get(card_guide: str) -> Optional[str]:
+    m = _group_images_manifest_load()
+    imgs = m.get("images")
+    if not isinstance(imgs, dict):
+        return None
+    rec = imgs.get(str(card_guide).upper())
+    if isinstance(rec, dict):
+        v = rec.get("image")
+        if v:
+            return str(v)
+    return None
+
+
+def _ensure_menu_tables(cursor) -> None:
+    cursor.execute(
+        """
+        IF OBJECT_ID('dbo.TBL006','U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.TBL006(
+                CardGuide uniqueidentifier NOT NULL PRIMARY KEY,
+                GroupName nvarchar(255) NULL,
+                LatinName nvarchar(255) NULL,
+                CardImage varbinary(max) NULL,
+                GroupImageUrl nvarchar(500) NULL
+            );
+        END
+        """
+    )
+    cursor.execute(
+        """
+        IF OBJECT_ID('dbo.TBL007','U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.TBL007(
+                CardGuide uniqueidentifier NOT NULL PRIMARY KEY,
+                ProductName nvarchar(255) NULL,
+                LatinName nvarchar(255) NULL,
+                GroupGuid uniqueidentifier NULL,
+                AgentPrice decimal(18,2) NULL,
+                NotActive bit NOT NULL DEFAULT(0),
+                CardImage varbinary(max) NULL,
+                ProductImageUrl nvarchar(500) NULL
+            );
+        END
+        """
+    )
+    cursor.execute(
+        """
+        IF COL_LENGTH('dbo.TBL006','CardImage') IS NULL
+            ALTER TABLE dbo.TBL006 ADD CardImage varbinary(max) NULL;
+        IF COL_LENGTH('dbo.TBL006','GroupImageUrl') IS NULL
+            ALTER TABLE dbo.TBL006 ADD GroupImageUrl nvarchar(500) NULL;
+        IF COL_LENGTH('dbo.TBL007','CardImage') IS NULL
+            ALTER TABLE dbo.TBL007 ADD CardImage varbinary(max) NULL;
+        IF COL_LENGTH('dbo.TBL007','ProductImageUrl') IS NULL
+            ALTER TABLE dbo.TBL007 ADD ProductImageUrl nvarchar(500) NULL;
+        """
+    )
+
+
+def _enrich_invoice_lines_from_menu(cursor, lines: list) -> list:
+    cache = {}
+    out = []
+    for ln in lines:
+        if not isinstance(ln, dict):
+            continue
+        pg = str(ln.get("ProductGuide") or "").strip()
+        rec = None
+        if pg:
+            rec = cache.get(pg)
+            if rec is None:
+                try:
+                    cursor.execute(
+                        "SELECT TOP 1 ProductName, AgentPrice FROM TBL007 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                        (pg,),
+                    )
+                    r = cursor.fetchone()
+                    rec = {
+                        "name": str(r[0]) if r and r[0] else "",
+                        "price": float(r[1]) if r and r[1] is not None else None,
+                    }
+                except Exception:
+                    rec = {"name": "", "price": None}
+                cache[pg] = rec
+        x = dict(ln)
+        menu_name = (rec or {}).get("name") or ""
+        menu_price = (rec or {}).get("price")
+        if not str(x.get("ProductName") or "").strip() and menu_name:
+            x["ProductName"] = menu_name
+        if (float(x.get("UnitPrice") or 0) <= 0) and (menu_price is not None):
+            qty = float(x.get("Quantity") or 0)
+            x["UnitPrice"] = float(menu_price)
+            x["TotalValue"] = float(menu_price) * qty
+        out.append(x)
+    return out
+
+def _guess_image_ext(data: bytes) -> tuple[str, str]:
+    if data.startswith(b"\xFF\xD8\xFF"):
+        return ("jpg", "image/jpeg")
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ("png", "image/png")
+    if data.startswith(b"GIF8"):
+        return ("gif", "image/gif")
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("webp", "image/webp")
+    return ("bin", "application/octet-stream")
+
+def _find_product_image_file(card_guide: str) -> tuple[str | None, str | None]:
+    d = _product_images_dir()
+    gid = str(card_guide).upper()
+    for ext, ctype in (("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("png", "image/png"), ("gif", "image/gif"), ("webp", "image/webp")):
+        p = os.path.join(d, f"{gid}.{ext}")
+        if os.path.isfile(p):
+            return (p, ctype)
+    return (None, None)
+
+
+def _find_group_image_file(card_guide: str) -> tuple[str | None, str | None]:
+    d = _group_images_dir()
+    gid = str(card_guide).upper()
+    for ext, ctype in (("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("png", "image/png"), ("gif", "image/gif"), ("webp", "image/webp")):
+        p = os.path.join(d, f"{gid}.{ext}")
+        if os.path.isfile(p):
+            return (p, ctype)
+    return (None, None)
+
+
+def _auto_group_svg(group_name: str) -> bytes:
+    nm = str(group_name or "Group").strip()[:42] or "Group"
+    en = "Group"
+    low = nm.lower()
+    if "soup" in low or "شور" in low:
+        en = "Soup"
+    elif "pizza" in low or "بيتزا" in low:
+        en = "Pizza"
+    elif "pasta" in low or "باستا" in low:
+        en = "Pasta"
+    elif "chicken" in low or "دجاج" in low:
+        en = "Chicken"
+    elif "dessert" in low or "حلو" in low or "حلويات" in low:
+        en = "Dessert"
+    elif "drink" in low or "مشروبات" in low or "قهوة" in low:
+        en = "Drinks"
+    elif "grill" in low or "مشويات" in low:
+        en = "Grills"
+    elif "sand" in low or "ساند" in low:
+        en = "Sandwiches"
+    elif "appet" in low or "مقبل" in low:
+        en = "Appetizers"
+    elif "salad" in low or "سلط" in low:
+        en = "Salads"
+    svg = f"""<svg xmlns='http://www.w3.org/2000/svg' width='520' height='220' viewBox='0 0 520 220'>
+<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%' stop-color='#d9f99d'/><stop offset='100%' stop-color='#86efac'/></linearGradient></defs>
+<rect x='3' y='3' rx='26' ry='26' width='514' height='214' fill='url(#g)' stroke='#16a34a' stroke-width='6'/>
+<rect x='20' y='34' rx='18' ry='18' width='150' height='150' fill='#fff' stroke='#22c55e' stroke-width='4'/>
+<text x='95' y='124' text-anchor='middle' font-family='Segoe UI, Tahoma' font-size='62' font-weight='800' fill='#166534'>{en[:1]}</text>
+<text x='188' y='90' text-anchor='start' font-family='Segoe UI, Tahoma' font-size='42' font-weight='900' fill='#052e16'>{nm}</text>
+<text x='188' y='138' text-anchor='start' font-family='Segoe UI, Tahoma' font-size='34' font-weight='700' fill='#14532d'>{en}</text>
+</svg>"""
+    return svg.encode("utf-8")
+
 # Routes للملفات HTML
 @app.get("/")
 def read_root():
@@ -288,18 +572,26 @@ def api_settings_connection_get():
 
 @app.put("/api/settings/connection")
 def api_settings_connection_put(body: dict):
-    """حفظ إعدادات الاتصال في config/settings.json"""
+    """حفظ إعدادات الاتصال في config/settings.json (يُحفَظ قسم mat3am وغيره إن وُجد دون مسحه)."""
     try:
         os.makedirs(os.path.dirname(_settings_path), exist_ok=True)
         port_val = _normalize_sql_port(body.get("port"))
+        merged: dict = {}
+        if os.path.exists(_settings_path):
+            try:
+                with open(_settings_path, "r", encoding="utf-8") as f:
+                    merged = json.load(f)
+                if not isinstance(merged, dict):
+                    merged = {}
+            except Exception:
+                merged = {}
+        merged["server"] = body.get("server", "")
+        merged["port"] = port_val
+        merged["database"] = body.get("database", "")
+        merged["uid"] = body.get("uid", "")
+        merged["password"] = body.get("password", "")
         with open(_settings_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "server": body.get("server", ""),
-                "port": port_val,
-                "database": body.get("database", ""),
-                "uid": body.get("uid", ""),
-                "password": body.get("password", ""),
-            }, f, indent=2, ensure_ascii=False)
+            json.dump(merged, f, indent=2, ensure_ascii=False)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -425,30 +717,11 @@ async def api_auth_login(request: Request):
         )
 
     if _initial_setup_credentials_match(login_name, pin):
-        conn_dev = get_connection()
-        if conn_dev:
-            try:
-                cur = conn_dev.cursor()
-                try:
-                    cur.execute("SELECT COUNT(*) FROM dbo.MAT3AM_APP_USERS")
-                    dev_cnt = int((cur.fetchone() or [0])[0] or 0)
-                except Exception:
-                    dev_cnt = 0
-                if dev_cnt > 0:
-                    raise HTTPException(
-                        status_code=401,
-                        detail="تمت تهيئة مستخدمي التطبيق — سجّل الدخول بحساب من القاعدة (مثل cashier / 1001) وليس dev.",
-                    )
-            finally:
-                try:
-                    conn_dev.close()
-                except Exception:
-                    pass
         return {
             "ok": True,
             "user": {
                 "id": MAT3AM_INITIAL_DEV_USER_ID,
-                "name": "تهيئة أولية",
+                "name": "مطوّر / تهيئة",
                 "login": MAT3AM_INITIAL_DEV_LOGIN,
                 "role": "developer",
             },
@@ -782,6 +1055,84 @@ class CostCenter(BaseModel):
     CardGuide: str
     CostCenter: str
 
+
+def _mat3am_tbl023_unit_as_tinyint(unit_raw: object) -> int:
+    """TBL023.Unit = tinyint في SQL Server؛ أي نص (مثل «وحدة» أو وسم عرض) يُحوَّل إلى رقم آمن."""
+    if unit_raw is None:
+        return 1
+    s0 = str(unit_raw).strip()
+    if not s0:
+        return 1
+    s = unicodedata.normalize("NFKC", s0)
+    for zw in ("\ufeff", "\u200c", "\u200d", "\u2060", "\xa0"):
+        s = s.replace(zw, "")
+    s = s.strip()
+    if not s:
+        return 1
+    try:
+        v = int(float(s.replace(",", ".")))
+        if 0 <= v <= 255:
+            return v
+    except (TypeError, ValueError, ArithmeticError):
+        pass
+    sl = s.casefold()
+    # كلمات شائعة للوحدة (عربي/إنجليزي) — لا تُمرَّر كنص إلى SQL
+    unit_aliases = (
+        "وحدة",
+        "وحدات",
+        "قطعة",
+        "قطع",
+        "صنف",
+        "عدد",
+        "كيلو",
+        "كجم",
+        "متر",
+        "لتر",
+        "ea",
+        "pcs",
+        "pc",
+        "pk",
+        "each",
+        "unit",
+        "kg",
+    )
+    if sl in ("u", "m", "l"):
+        return 1
+    for a in unit_aliases:
+        if a in sl or a in s:
+            return 1
+    if re.search(r"[\u0600-\u06FF]", s):
+        return 1
+    if re.fullmatch(r"[A-Za-z]{1,8}", s):
+        return 1
+    return 1
+
+
+def _normalize_pos_invoice_line(it: object) -> Optional[dict]:
+    """يحوّل بند السلة من الواجهة (camelCase) إلى مفاتيح InvoiceItem (PascalCase)."""
+    if not isinstance(it, dict):
+        return None
+    qty = float(it.get("Quantity", it.get("quantity", 0)) or 0)
+    unit_price = float(it.get("UnitPrice", it.get("unitPrice", 0)) or 0)
+    tv_raw = it.get("TotalValue", it.get("totalValue", it.get("lineNet")))
+    if tv_raw is None:
+        total_value = qty * unit_price
+    else:
+        total_value = float(tv_raw)
+    pg = it.get("ProductGuide") or it.get("productGuide") or it.get("menuItemId") or ""
+    pname = it.get("ProductName") or it.get("productName") or it.get("name") or ""
+    unit_raw = it.get("Unit") if it.get("Unit") is not None else it.get("unit")
+    unit_ti = _mat3am_tbl023_unit_as_tinyint(unit_raw if unit_raw is not None else "1")
+    return {
+        "ProductGuide": str(pg),
+        "ProductName": str(pname),
+        "Quantity": qty,
+        "Unit": str(unit_ti),
+        "UnitPrice": unit_price,
+        "TotalValue": total_value,
+    }
+
+
 class InvoiceItem(BaseModel):
     ProductGuide: str
     ProductName: str
@@ -789,6 +1140,22 @@ class InvoiceItem(BaseModel):
     Unit: str
     UnitPrice: float
     TotalValue: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_pos_line(cls, data: object):
+        """قبول بنود الواجهة (productGuide، quantity، …) عند بناء الفاتورة."""
+        if isinstance(data, dict):
+            line = _normalize_pos_invoice_line(data)
+            if line is not None:
+                return line
+        return data
+
+    @model_validator(mode="after")
+    def _unit_row_tinyint_only(self) -> "InvoiceItem":
+        u = _mat3am_tbl023_unit_as_tinyint(self.Unit)
+        return self.model_copy(update={"Unit": str(u)})
+
 
 class InvoiceHeader(BaseModel):
     BillNumber: Optional[int] = None
@@ -805,30 +1172,9 @@ class InvoiceHeader(BaseModel):
     LocalAdministrativeTax: float = 0.0
     PaymentMethod: str = "بطاقات مصرفيه"
     Items: List[InvoiceItem]
-
-
-def _normalize_pos_invoice_line(it: object) -> Optional[dict]:
-    """يحوّل بند السلة من الواجهة (camelCase) إلى مفاتيح InvoiceItem (PascalCase)."""
-    if not isinstance(it, dict):
-        return None
-    qty = float(it.get("Quantity", it.get("quantity", 0)) or 0)
-    unit_price = float(it.get("UnitPrice", it.get("unitPrice", 0)) or 0)
-    tv_raw = it.get("TotalValue", it.get("totalValue", it.get("lineNet")))
-    if tv_raw is None:
-        total_value = qty * unit_price
-    else:
-        total_value = float(tv_raw)
-    pg = it.get("ProductGuide") or it.get("productGuide") or it.get("menuItemId") or ""
-    pname = it.get("ProductName") or it.get("productName") or it.get("name") or ""
-    unit = it.get("Unit") or it.get("unit") or "وحدة"
-    return {
-        "ProductGuide": str(pg),
-        "ProductName": str(pname),
-        "Quantity": qty,
-        "Unit": str(unit),
-        "UnitPrice": unit_price,
-        "TotalValue": total_value,
-    }
+    # اختياري: تجاوز المخزن/العملة (وإلا يُحسب من نمط الفاتورة وإعدادات mat3am في settings.json)
+    StoreGuide: Optional[str] = None
+    CurrencyGuide: Optional[str] = None
 
 
 class InvoiceSearch(BaseModel):
@@ -981,6 +1327,669 @@ def _is_purchase_invoice(invoice_name: str) -> bool:
     return any(k in n for k in ["مشتري", "وارد", "شراء", "توريد"])
 
 
+# احتياطي إن لم تُشغَّل تهيئة أنواع المطعم بعد
+FALLBACK_INVOICE_TYPE_GUID = "3478A885-6D69-4058-892E-8A57496DB9BC"
+
+# ستة أنماط مطعم — الاسم العربي في TBL020.InvoiceName (مفتاح التمييز بعد التهيئة).
+# TBL020.CardGuide يُولَّد جديداً لكل نوع (NEWID / uuid4) حتى يقبل SQL Server دون GUID ثابت.
+# TBL022.MainGuide = CardGuide من TBL020 لذلك النوع (يُسترجع عبر MAT3AM أو WHERE InvoiceName = الاسم المعروف).
+# معرف الفاتورة نفسه في TBL022.CardGuide يُولَّد جديداً لكل عملية بيع (save_invoice).
+MAT3AM_RESTAURANT_ORDER_KINDS: Tuple[str, ...] = (
+    "table",
+    "takeaway",
+    "delivery",
+    "purchase",
+    "bar_quick",
+    "catering",
+)
+MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR: dict[str, str] = {
+    "table": "مطاعم — طاولات داخلية",
+    "takeaway": "مطاعم — سفري",
+    "delivery": "مطاعم — دليفري",
+    "purchase": "مطاعم — مشتريات",
+    "bar_quick": "مطاعم — بار / طلب سريع",
+    "catering": "مطاعم — مناسبات وكاترينج",
+}
+# نفس LatinName المستخدم في تهيئة TBL020 — يُستخدم لـ TBL008.LatinName (توحيد مع النمط).
+MAT3AM_ORDERKIND_INVOICE_DISPLAY_LATIN: dict[str, str] = {
+    "table": "MAT3AM Table",
+    "takeaway": "MAT3AM Takeaway",
+    "delivery": "MAT3AM Delivery",
+    "purchase": "MAT3AM Purchase",
+    "bar_quick": "MAT3AM Bar",
+    "catering": "MAT3AM Catering",
+}
+MAT3AM_RESTAURANT_ORDER_KINDS_SET = frozenset(MAT3AM_RESTAURANT_ORDER_KINDS)
+
+# يُكتب في TextValue01 عند إنشاء الصف في TBL020 (تمييز/تدقيق)
+MAT3AM_ORDERKIND_TEXTVALUE01: dict[str, str] = {
+    "table": "MAT3AM_ORDER_TABLE",
+    "takeaway": "MAT3AM_ORDER_TAKEAWAY",
+    "delivery": "MAT3AM_ORDER_DELIVERY",
+    "purchase": "MAT3AM_ORDER_PURCHASE",
+    "bar_quick": "MAT3AM_ORDER_BAR",
+    "catering": "MAT3AM_ORDER_CATERING",
+}
+
+
+def _mat3am_restaurant_kind_seed_specs() -> list[tuple[str, str, str, str]]:
+    """مصدر واحد لتهيئة TBL020 وTBL008: (OrderKind, InvoiceName/WarehouseName عربي, LatinName, TextValue01)."""
+    return [
+        (
+            kind,
+            MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR[kind],
+            MAT3AM_ORDERKIND_INVOICE_DISPLAY_LATIN[kind],
+            MAT3AM_ORDERKIND_TEXTVALUE01[kind],
+        )
+        for kind in MAT3AM_RESTAURANT_ORDER_KINDS
+    ]
+
+
+def _mat3am_tbl020_column_names(cursor) -> set[str]:
+    cursor.execute(
+        """
+        SELECT c.name FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.TBL020') AND c.is_identity = 0
+        """
+    )
+    return {str(r[0]) for r in cursor.fetchall() if r and r[0]}
+
+
+# شكل إكسترا الكامل لـ TBL020 (إلزامي لبعض قواعد إكسترا — أعمدة POS/الفاتورة)
+_MAT3AM_T020_XTRA_POS_COLUMNS: frozenset[str] = frozenset(
+    {
+        "CardGuide",
+        "CardNumber",
+        "InvoiceName",
+        "LatinName",
+        "QtyCalculation",
+        "BillType",
+        "BillKind",
+        "PriceType",
+        "PriceType2",
+        "POSType",
+        "DefaultPayType",
+        "WithoutItemTax",
+        "InvoiceMovementSide",
+        "AgentAccountSide",
+        "Fields",
+    }
+)
+
+
+def _mat3am_try_insert_tbl020_xtra_pos_row(cursor, inv_ar: str, inv_lat: str) -> bool:
+    """
+    INSERT يطابق تعريف المستخدم لـ TBL020: NEWID() + قيم افتراضية للأعمدة الإدارية/السعر.
+    CardNumber = MAX+1 وليس رقماً ثابتاً.
+    """
+    cols = _mat3am_tbl020_column_names(cursor)
+    if not _MAT3AM_T020_XTRA_POS_COLUMNS.issubset(cols):
+        return False
+    sql = """
+    INSERT INTO dbo.TBL020 (
+        CardGuide,
+        CardNumber,
+        InvoiceName,
+        LatinName,
+        QtyCalculation,
+        BillType,
+        BillKind,
+        PriceType,
+        PriceType2,
+        POSType,
+        DefaultPayType,
+        WithoutItemTax,
+        InvoiceMovementSide,
+        AgentAccountSide,
+        Fields
+    )
+    VALUES (
+        NEWID(),
+        (SELECT ISNULL(MAX(x.CardNumber), 0) + 1 FROM dbo.TBL020 AS x),
+        ?,
+        ?,
+        0,
+        2,
+        0,
+        1,
+        0,
+        1,
+        2,
+        0,
+        -1,
+        1,
+        N'ProductGuide,Quantity,Unit,Description'
+    )
+    """
+    try:
+        cursor.execute(sql, (inv_ar, inv_lat))
+        return _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar) is not None
+    except Exception:
+        return False
+
+
+def _mat3am_try_insert_tbl020_newid_only(
+    cursor, inv_ar: str, inv_lat: str, text_value01: Optional[str]
+) -> bool:
+    """
+    إدراج صف بنفس InvoiceName باستخدام NEWID() داخل T-SQL فقط (لا CAST(? AS uniqueidentifier) من بايثون).
+    يحل فشل التحويل 8169 مع بعض برامج التشغيل/الربط.
+    """
+    if _mat3am_try_insert_tbl020_xtra_pos_row(cursor, inv_ar, inv_lat):
+        return True
+    cols = _mat3am_tbl020_column_names(cursor)
+    has_cn = "CardNumber" in cols
+    has_tv = "TextValue01" in cols
+    has_fields = "Fields" in cols
+    trials: list[tuple[str, tuple]] = []
+
+    if has_cn:
+        trials.append(
+            (
+                """INSERT INTO dbo.TBL020 (CardGuide, CardNumber, InvoiceName, LatinName)
+                   VALUES (NEWID(), (SELECT ISNULL(MAX(x.CardNumber), 0) + 1 FROM dbo.TBL020 AS x), ?, ?)""",
+                (inv_ar, inv_lat),
+            )
+        )
+        if has_tv and text_value01:
+            trials.append(
+                (
+                    """INSERT INTO dbo.TBL020 (CardGuide, CardNumber, InvoiceName, LatinName, TextValue01)
+                       VALUES (NEWID(), (SELECT ISNULL(MAX(x.CardNumber), 0) + 1 FROM dbo.TBL020 AS x), ?, ?, ?)""",
+                    (inv_ar, inv_lat, (text_value01 or "")[:255]),
+                )
+            )
+    if has_fields:
+        trials.append(
+            (
+                "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName, Fields) VALUES (NEWID(), ?, ?, NULL)",
+                (inv_ar, inv_lat),
+            )
+        )
+        if has_tv and text_value01:
+            trials.append(
+                (
+                    "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName, Fields, TextValue01) VALUES (NEWID(), ?, ?, NULL, ?)",
+                    (inv_ar, inv_lat, (text_value01 or "")[:255]),
+                )
+            )
+    trials.append(
+        (
+            "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName) VALUES (NEWID(), ?, ?)",
+            (inv_ar, inv_lat),
+        )
+    )
+    if has_tv and text_value01:
+        trials.append(
+            (
+                "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName, TextValue01) VALUES (NEWID(), ?, ?, ?)",
+                (inv_ar, inv_lat, (text_value01 or "")[:255]),
+            )
+        )
+
+    for sql, params in trials:
+        try:
+            cursor.execute(sql, params)
+            if _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _mat3am_insert_tbl020_one_row_minimal(
+    cursor, card_guid: str, inv_ar: str, inv_lat: str, text_value01: Optional[str]
+) -> bool:
+    """إدراج صف واحد بأبسط أعمدة ممكنة؛ يناسب قاعدة جديدة. يعيد False إن فشلت كل المحاولات."""
+    if _mat3am_try_insert_tbl020_newid_only(cursor, inv_ar, inv_lat, text_value01):
+        return True
+    cols = _mat3am_tbl020_column_names(cursor)
+    has_cn = "CardNumber" in cols
+    has_tv = "TextValue01" in cols
+    has_fields = "Fields" in cols
+    g = str(card_guid).strip().upper()
+    trials: list[tuple[str, tuple]] = []
+
+    if has_cn:
+        trials.append(
+            (
+                """INSERT INTO dbo.TBL020 (CardGuide, CardNumber, InvoiceName, LatinName)
+                   VALUES (CAST(? AS uniqueidentifier),
+                    (SELECT ISNULL(MAX(x.CardNumber), 0) + 1 FROM dbo.TBL020 AS x), ?, ?)""",
+                (g, inv_ar, inv_lat),
+            )
+        )
+        if has_tv and text_value01:
+            trials.append(
+                (
+                    """INSERT INTO dbo.TBL020 (CardGuide, CardNumber, InvoiceName, LatinName, TextValue01)
+                       VALUES (CAST(? AS uniqueidentifier),
+                        (SELECT ISNULL(MAX(x.CardNumber), 0) + 1 FROM dbo.TBL020 AS x), ?, ?, ?)""",
+                    (g, inv_ar, inv_lat, (text_value01 or "")[:255]),
+                )
+            )
+    if has_fields:
+        trials.append(
+            (
+                "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName, Fields) VALUES (CAST(? AS uniqueidentifier), ?, ?, NULL)",
+                (g, inv_ar, inv_lat),
+            )
+        )
+        if has_tv and text_value01:
+            trials.append(
+                (
+                    "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName, Fields, TextValue01) VALUES (CAST(? AS uniqueidentifier), ?, ?, NULL, ?)",
+                    (g, inv_ar, inv_lat, (text_value01 or "")[:255]),
+                )
+            )
+    trials.append(
+        (
+            "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName) VALUES (CAST(? AS uniqueidentifier), ?, ?)",
+            (g, inv_ar, inv_lat),
+        )
+    )
+    if has_tv and text_value01:
+        trials.append(
+            (
+                "INSERT INTO dbo.TBL020 (CardGuide, InvoiceName, LatinName, TextValue01) VALUES (CAST(? AS uniqueidentifier), ?, ?, ?)",
+                (g, inv_ar, inv_lat, (text_value01 or "")[:255]),
+            )
+        )
+
+    for sql, params in trials:
+        try:
+            cursor.execute(sql, params)
+            if _mat3am_tbl020_row_exists(cursor, g):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _mat3am_insert_tbl020_minimal_template_row(cursor) -> str:
+    """قالب مؤقت لنسخ باقي الأعمدة من إكسترا — فقط عندما يفشل الإدراج المباشر للستة صفوف."""
+    template_guid = str(uuid.uuid4()).upper()
+    if not _mat3am_insert_tbl020_one_row_minimal(
+        cursor, template_guid, "مطاعم — قالب تهيئة", "MAT3AM Seed Template", None
+    ):
+        raise RuntimeError(
+            "تعذر إدراج أي صف في TBL020 الفارغ — أعمدة إلزامية في إكسترا غير مغطاة. عرّف أول نوع فاتورة من البرنامج الأصلي ثم أعد التهيئة."
+        )
+    return template_guid
+
+
+def _mat3am_norm_guid_key(g: object) -> str:
+    s = str(g or "").strip().upper().replace("{", "").replace("}", "")
+    return s
+
+
+def _mat3am_guid_sql_param(g: object) -> str:
+    """نص موحّد لربط uniqueidentifier في T-SQL (بدون أقواس)."""
+    return _mat3am_norm_guid_key(g)
+
+
+def _mat3am_tbl020_row_exists(cursor, card_guid: object) -> bool:
+    g = _mat3am_guid_sql_param(card_guid)
+    if not g:
+        return False
+    cursor.execute(
+        "SELECT 1 FROM dbo.TBL020 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+        (g,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _mat3am_tbl020_cardguide_by_invoice_name(cursor, invoice_name_ar: str) -> Optional[str]:
+    """CardGuide من TBL020 حسب InvoiceName (مرحلة ربط TBL022.MainGuide)."""
+    name = (invoice_name_ar or "").strip()
+    if not name:
+        return None
+    try:
+        cursor.execute(
+            "SELECT TOP (1) CardGuide FROM dbo.TBL020 WHERE InvoiceName = ? ORDER BY CardGuide",
+            (name,),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return str(row[0]).strip()
+    except Exception:
+        pass
+    return None
+
+
+def _mat3am_map_seeded_cardguides(cursor) -> set[str]:
+    """معرّفات TBL020 المسجّلة في خريطة المطعم (لا نستخدمها كقالب نسخ من إكسترا)."""
+    out: set[str] = set()
+    try:
+        cursor.execute("SELECT Tbl020CardGuide FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES")
+        for r in cursor.fetchall() or []:
+            if r and r[0] is not None:
+                out.add(_mat3am_norm_guid_key(r[0]))
+    except Exception:
+        pass
+    return out
+
+
+def _mat3am_pick_tbl020_template_guid(cursor) -> Optional[str]:
+    """صف قالب للنسخ: يُفضَّل صف إكسترا أصلي وليس صفاً مسجّلاً في MAT3AM_RESTAURANT_INVOICE_TYPES."""
+    fixed = _mat3am_map_seeded_cardguides(cursor)
+    try:
+        cursor.execute("SELECT CardGuide FROM dbo.TBL020 ORDER BY CardGuide")
+        rows = cursor.fetchall() or []
+    except Exception:
+        return None
+    for row in rows:
+        if not row or row[0] is None:
+            continue
+        raw = row[0]
+        if _mat3am_norm_guid_key(raw) in fixed:
+            continue
+        return str(raw)
+    for row in rows:
+        if row and row[0] is not None:
+            return str(row[0])
+    return None
+
+
+def _mat3am_clone_tbl020_row(
+    cursor,
+    template_card_guid: str,
+    new_card_guid: str,
+    invoice_name: str,
+    latin_name: str,
+    text_value01_tag: str,
+) -> None:
+    """INSERT صف في TBL020 بنسخ أعمدة من صف قالب (أول نوع موجود في إكسترا) مع CardGuide وأسماء جديدة."""
+    cursor.execute(
+        """
+        SELECT c.name, CAST(c.is_identity AS int)
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.TBL020') AND c.is_computed = 0
+        ORDER BY c.column_id
+        """
+    )
+    col_rows = cursor.fetchall()
+    if not col_rows:
+        raise RuntimeError("تعذر قراءة أعمدة TBL020")
+    insert_cols: list[str] = []
+    for name, is_identity in col_rows:
+        if int(is_identity or 0):
+            continue
+        insert_cols.append(str(name))
+
+    tpl = _mat3am_guid_sql_param(template_card_guid)
+    newg = _mat3am_guid_sql_param(new_card_guid)
+    if not tpl or not newg:
+        raise RuntimeError("GUID قالب أو هدف غير صالح لنسخ TBL020")
+
+    select_parts: list[str] = []
+    params: list = []
+    for c in insert_cols:
+        if c == "CardGuide":
+            select_parts.append("CAST(? AS uniqueidentifier)")
+            params.append(newg)
+        elif c == "InvoiceName":
+            select_parts.append("?")
+            params.append((invoice_name or "")[:255])
+        elif c == "LatinName":
+            select_parts.append("?")
+            params.append((latin_name or "")[:255])
+        elif c == "TextValue01":
+            select_parts.append("?")
+            params.append((text_value01_tag or "")[:255] or None)
+        elif c == "CardNumber":
+            select_parts.append("(SELECT ISNULL(MAX(CardNumber), 0) + 1 FROM dbo.TBL020)")
+        else:
+            select_parts.append(f"[src].[{c}]")
+
+    colnames_sql = ", ".join(f"[{c}]" for c in insert_cols)
+    select_sql = ", ".join(select_parts)
+    sql = f"""
+    INSERT INTO dbo.TBL020 ({colnames_sql})
+    SELECT {select_sql}
+    FROM dbo.TBL020 AS [src]
+    WHERE [src].[CardGuide] = CAST(? AS uniqueidentifier)
+    """
+    cursor.execute(
+        "SELECT 1 FROM dbo.TBL020 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+        (tpl,),
+    )
+    if cursor.fetchone() is None:
+        raise RuntimeError(
+            f"قالب TBL020 غير موجود (CardGuide={tpl}) — تعذر النسخ."
+        )
+    params.append(tpl)
+    cursor.execute(sql, tuple(params))
+    if not _mat3am_tbl020_row_exists(cursor, newg):
+        raise RuntimeError(
+            f"INSERT…SELECT لم يُدرج صفاً في TBL020 للـ CardGuide={newg} "
+            f"(قالب={tpl}). غالباً القالب لا يطابق الاستعلام أو قيود الجدول."
+        )
+
+
+def _get_restaurant_invoice_type_guid(cursor, order_kind: str, explicit_guid: Optional[str] = None) -> str:
+    """
+    TBL022.MainGuide = نوع الفاتورة من TBL020:
+    أولاً من MAT3AM_RESTAURANT_INVOICE_TYPES، وإلا SELECT CardGuide FROM TBL020 WHERE InvoiceName = الاسم المعروف.
+    """
+    if explicit_guid and str(explicit_guid).strip():
+        return str(explicit_guid).strip().upper()
+    k = (order_kind or "table").strip().lower()
+    if k not in MAT3AM_RESTAURANT_ORDER_KINDS_SET:
+        k = "table"
+    try:
+        cursor.execute(
+            "SELECT Tbl020CardGuide FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES WHERE OrderKind = ?",
+            (k,),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    inv_ar = MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR.get(k)
+    if inv_ar:
+        cg = _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar)
+        if cg:
+            return _mat3am_guid_sql_param(cg)
+    return str(FALLBACK_INVOICE_TYPE_GUID).upper()
+
+
+def _get_purchase_invoice_type_guid(cursor) -> Optional[str]:
+    try:
+        cursor.execute(
+            "SELECT Tbl020CardGuide FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES WHERE OrderKind = N'purchase'",
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    cg = _mat3am_tbl020_cardguide_by_invoice_name(
+        cursor, MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR.get("purchase", "")
+    )
+    return _mat3am_guid_sql_param(cg) if cg else None
+
+
+def _seed_mat3am_restaurant_invoice_types(cursor) -> dict:
+    """
+    تهيئة: 6 صفوف في TBL020 بـ CardGuide جديد (uuid4) لكل نوع، مع InvoiceName عربي مميّز.
+    TBL022.MainGuide يُستمد لاحقاً من Tbl020CardGuide (MAT3AM) أو من SELECT CardGuide FROM TBL020 WHERE InvoiceName = ...
+    قاعدة فارغة: إدراج مباشر؛ إن تعذّر يُنسَخ من قالب مؤقت أو من صف موجود.
+    """
+    out: dict = {
+        "ok": True,
+        "created": [],
+        "skipped": [],
+        "errors": [],
+        "note": None,
+        "tbl020SeededGuids": {},
+        "tbl020SeededDirect": False,
+        "tbl020TemplateInserted": False,
+    }
+    specs = _mat3am_restaurant_kind_seed_specs()
+    remove_template: Optional[str] = None
+    used_direct_six = False
+    template_guid: Optional[str] = None
+    try:
+        try:
+            cursor.execute("SELECT COUNT(*) FROM dbo.TBL020")
+            n020 = int((cursor.fetchone() or [0])[0] or 0)
+        except Exception as e:
+            out["ok"] = False
+            out["note"] = str(e)
+            return out
+
+        if n020 == 0:
+            inserted_guids: list[str] = []
+            direct_ok = True
+            for kind, inv_ar, inv_lat, tag in specs:
+                if _mat3am_try_insert_tbl020_newid_only(cursor, inv_ar, inv_lat, tag):
+                    cg0 = _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar)
+                    if cg0:
+                        inserted_guids.append(_mat3am_guid_sql_param(cg0))
+                    else:
+                        direct_ok = False
+                        break
+                    continue
+                card_guid = str(uuid.uuid4()).upper()
+                if _mat3am_insert_tbl020_one_row_minimal(cursor, card_guid, inv_ar, inv_lat, tag):
+                    inserted_guids.append(str(card_guid).strip().upper())
+                else:
+                    direct_ok = False
+                    break
+            if direct_ok:
+                used_direct_six = True
+                out["tbl020SeededDirect"] = True
+            else:
+                for gid in inserted_guids:
+                    try:
+                        cursor.execute(
+                            "DELETE FROM dbo.TBL020 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                            (gid,),
+                        )
+                    except Exception:
+                        pass
+                try:
+                    remove_template = _mat3am_insert_tbl020_minimal_template_row(cursor)
+                    out["tbl020TemplateInserted"] = True
+                except Exception as e:
+                    out["ok"] = False
+                    out["note"] = str(e)
+                    return out
+
+        if not used_direct_six:
+            template_guid = _mat3am_pick_tbl020_template_guid(cursor)
+            if not template_guid:
+                out["ok"] = False
+                out["note"] = "TBL020 بلا صفوف مناسب للنسخ — راجع هيكل الجدول."
+                return out
+            out["debugTemplateGuid"] = _mat3am_guid_sql_param(template_guid)
+
+        # خريطة دون صف TBL020 بنفس InvoiceName المعروف — حذف الخريطة لإعادة الإدراج
+        for kind, inv_ar, inv_lat, tag in specs:
+            try:
+                if not _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar):
+                    cursor.execute(
+                        "DELETE FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES WHERE OrderKind = ?",
+                        (kind,),
+                    )
+            except Exception:
+                pass
+
+        for kind, inv_ar, inv_lat, tag in specs:
+            try:
+                existing = _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar)
+                tbl_exists = existing is not None
+                card_guid = _mat3am_guid_sql_param(existing) if existing else ""
+
+                cursor.execute("SELECT 1 FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES WHERE OrderKind = ?", (kind,))
+                map_exists = cursor.fetchone() is not None
+
+                if tbl_exists and map_exists:
+                    out["skipped"].append(kind)
+                    continue
+
+                did_tbl = False
+                did_map = False
+                if not tbl_exists:
+                    if _mat3am_try_insert_tbl020_newid_only(cursor, inv_ar, inv_lat, tag):
+                        cg_ins = _mat3am_tbl020_cardguide_by_invoice_name(cursor, inv_ar)
+                        card_guid = _mat3am_guid_sql_param(cg_ins) if cg_ins else ""
+                        did_tbl = True
+                    else:
+                        card_guid = str(uuid.uuid4()).upper()
+                        tpl = template_guid
+                        if tpl is None:
+                            tpl = _mat3am_pick_tbl020_template_guid(cursor)
+                        if tpl is None:
+                            out["errors"].append(
+                                {
+                                    "orderKind": kind,
+                                    "detail": "تعذر إنشاء نوع الفاتورة في TBL020 (إدراج NEWID() فشل ولا قالب للنسخ).",
+                                }
+                            )
+                            out["ok"] = False
+                            continue
+                        try:
+                            _mat3am_clone_tbl020_row(cursor, tpl, card_guid, inv_ar, inv_lat, tag)
+                            did_tbl = True
+                        except Exception as ex_clone:
+                            out["errors"].append(
+                                {
+                                    "orderKind": kind,
+                                    "detail": f"فشل إدراج TBL020: {ex_clone}",
+                                }
+                            )
+                            out["ok"] = False
+                            continue
+
+                if not map_exists:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.MAT3AM_RESTAURANT_INVOICE_TYPES (OrderKind, Tbl020CardGuide, InvoiceDisplayName)
+                        VALUES (?, ?, ?)
+                        """,
+                        (kind, _mat3am_guid_sql_param(card_guid), inv_ar),
+                    )
+                    did_map = True
+
+                if did_tbl or did_map:
+                    out["created"].append(
+                        {
+                            "orderKind": kind,
+                            "tbl020CardGuide": _mat3am_guid_sql_param(card_guid),
+                            "invoiceName": inv_ar,
+                            "textValue01": tag,
+                        }
+                    )
+            except Exception as ex:
+                out["errors"].append({"orderKind": kind, "detail": str(ex)})
+                out["ok"] = False
+
+        try:
+            for kind in MAT3AM_RESTAURANT_ORDER_KINDS:
+                cursor.execute(
+                    "SELECT Tbl020CardGuide FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES WHERE OrderKind = ?",
+                    (kind,),
+                )
+                r = cursor.fetchone()
+                if r and r[0] is not None:
+                    out["tbl020SeededGuids"][kind] = _mat3am_guid_sql_param(r[0])
+        except Exception:
+            pass
+    finally:
+        if remove_template:
+            try:
+                cursor.execute(
+                    "DELETE FROM dbo.TBL020 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    (remove_template,),
+                )
+            except Exception:
+                pass
+    return out
+
+
 def _insert_stock_movement(
     cursor,
     movement_type: str,
@@ -1127,6 +2136,7 @@ def get_agent_groups():
     
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         query = """
         SELECT CardGuide, GroupName
         FROM TBL015
@@ -1161,6 +2171,7 @@ def create_agent_group(body: dict):
         raise HTTPException(status_code=400, detail="اسم المجموعة مطلوب")
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         g = str(uuid.uuid4()).upper()
         cursor.execute("INSERT INTO TBL015 (CardGuide, GroupName) VALUES (?, ?)", (g, name))
         conn.commit()
@@ -1510,6 +2521,7 @@ def get_service_groups():
     
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         query = """
         SELECT CardGuide, GroupName, LatinName
         FROM TBL006
@@ -1546,9 +2558,10 @@ def get_products(group_guide: Optional[str] = None):
     
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         if group_guide:
             query = """
-            SELECT TOP 100 CardGuide, ProductName, LatinName, AgentPrice, GroupGuid
+            SELECT TOP 500 CardGuide, ProductName, LatinName, AgentPrice, GroupGuid, ProductImageUrl
             FROM TBL007
             WHERE ProductName IS NOT NULL AND NotActive = 0 AND GroupGuid = CAST(? AS uniqueidentifier)
             ORDER BY ProductName
@@ -1556,7 +2569,7 @@ def get_products(group_guide: Optional[str] = None):
             cursor.execute(query, group_guide)
         else:
             query = """
-            SELECT TOP 100 CardGuide, ProductName, LatinName, AgentPrice, GroupGuid
+            SELECT TOP 500 CardGuide, ProductName, LatinName, AgentPrice, GroupGuid, ProductImageUrl
             FROM TBL007
             WHERE ProductName IS NOT NULL AND NotActive = 0
             ORDER BY ProductName
@@ -1565,11 +2578,16 @@ def get_products(group_guide: Optional[str] = None):
         
         products = []
         for row in cursor.fetchall():
+            guid = str(row[0])
+            img_manifest = _product_images_manifest_get(guid)
+            img_db = str(row[5]) if len(row) > 5 and row[5] else None
             products.append({
-                "CardGuide": str(row[0]),
+                "CardGuide": guid,
                 "ProductName": row[1],
                 "Price": float(row[3]) if row[3] else 0.0,
-                "GroupGuid": str(row[4]) if row[4] else None
+                "GroupGuid": str(row[4]) if row[4] else None,
+                "image": f"/api/products/{guid}/image",
+                "imageUrl": img_manifest or img_db or f"/api/products/{guid}/image",
             })
         return {"products": products}
     except Exception as e:
@@ -1592,16 +2610,20 @@ def create_product(body: dict):
         raise HTTPException(status_code=400, detail="اسم الصنف مطلوب")
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         g = str(uuid.uuid4()).upper()
         group_guid = body.get("GroupGuid") or body.get("group") or None
         price = float(body.get("AgentPrice") or body.get("Price") or body.get("price") or 0)
         latin = (body.get("LatinName") or "").strip() or None
+        image_url = str(body.get("imageUrl") or body.get("ProductImageUrl") or "").strip() or None
         cursor.execute(
-            "INSERT INTO TBL007 (CardGuide, ProductName, LatinName, GroupGuid, AgentPrice, NotActive) VALUES (?, ?, ?, ?, ?, 0)",
-            (g, name, latin, group_guid, price)
+            "INSERT INTO TBL007 (CardGuide, ProductName, LatinName, GroupGuid, AgentPrice, NotActive, ProductImageUrl) VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (g, name, latin, group_guid, price, image_url)
         )
         conn.commit()
-        return {"success": True, "CardGuide": g, "ProductName": name}
+        if image_url:
+            _product_images_manifest_set(g, image_url)
+        return {"success": True, "CardGuide": g, "ProductName": name, "imageUrl": image_url}
     except Exception as e:
         if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1619,9 +2641,10 @@ def search_products(search_text: str):
     
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         search_pattern = f"%{search_text}%"
         query = """
-        SELECT TOP 50 CardGuide, ProductName, AgentPrice
+        SELECT TOP 100 CardGuide, ProductName, AgentPrice, ProductImageUrl
         FROM TBL007
         WHERE ProductName LIKE ? AND NotActive = 0
         ORDER BY ProductName
@@ -1630,10 +2653,16 @@ def search_products(search_text: str):
         
         products = []
         for row in cursor.fetchall():
+            guid = str(row[0])
+            img_manifest = _product_images_manifest_get(guid)
+            img_db = str(row[3]) if len(row) > 3 and row[3] else None
             products.append({
-                "CardGuide": str(row[0]),
+                "CardGuide": guid,
                 "ProductName": row[1],
-                "Price": float(row[2]) if row[2] else 0.0
+                "Price": float(row[2]) if row[2] else 0.0,
+                "AgentPrice": float(row[2]) if row[2] else 0.0,
+                "image": f"/api/products/{guid}/image",
+                "imageUrl": img_manifest or img_db or f"/api/products/{guid}/image",
             })
         return {"products": products}
     except Exception as e:
@@ -1642,6 +2671,209 @@ def search_products(search_text: str):
         try:
             if conn:
                 conn.close()
+        except Exception:
+            pass
+
+
+@app.get("/api/products/{card_guide}/image")
+def get_product_image(card_guide: str, request: Request):
+    """إرجاع صورة الصنف من ملف محلي إن وُجد، وإلا من TBL007.CardImage.
+    يدعم ETag وCache-Control.
+    """
+    try:
+        fp, ctype_hint = _find_product_image_file(card_guide)
+        if fp:
+            with open(fp, "rb") as f:
+                data = f.read()
+            import hashlib
+            etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+            inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+            if inm and inm == etag:
+                return Response(status_code=304)
+            headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+            return Response(content=data, media_type=ctype_hint or "application/octet-stream", headers=headers)
+
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+        cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
+        cursor.execute("SELECT TOP 1 CardImage FROM TBL007 WHERE CardGuide = CAST(? AS uniqueidentifier)", card_guide)
+        row = cursor.fetchone()
+        if not row or row[0] is None:
+            raise HTTPException(status_code=404, detail="لا توجد صورة لهذا الصنف")
+        blob = row[0]
+        try:
+            data = bytes(blob)
+        except Exception:
+            data = blob
+
+        # ETag
+        import hashlib
+        etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+        inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+        if inm and inm == etag:
+            return Response(status_code=304)
+
+        # Sniff content type
+        ctype = "application/octet-stream"
+        if data.startswith(b"\xFF\xD8\xFF"):
+            ctype = "image/jpeg"
+        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+            ctype = "image/png"
+        elif data.startswith(b"GIF8"):
+            ctype = "image/gif"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            ctype = "image/webp"
+
+        headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+        return Response(content=data, media_type=ctype, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn  # may be undefined if file path existed
+        except NameError:
+            return
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+@app.post("/api/products/{card_guide}/image")
+async def upload_product_image(card_guide: str, file: UploadFile = File(...)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="ملف فارغ")
+    ext, _ctype = _guess_image_ext(data)
+    d = _product_images_dir()
+    gid = str(card_guide).upper()
+    for ext_old in ("jpg", "jpeg", "png", "gif", "webp", "bin"):
+        p_old = os.path.join(d, f"{gid}.{ext_old}")
+        if os.path.exists(p_old):
+            try:
+                os.remove(p_old)
+            except Exception:
+                pass
+    p = os.path.join(d, f"{gid}.{ext}")
+    with open(p, "wb") as f:
+        f.write(data)
+    image_url = f"/api/products/{gid}/image"
+    _product_images_manifest_set(gid, image_url)
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            _ensure_menu_tables(cur)
+            cur.execute("UPDATE TBL007 SET ProductImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, gid))
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return {"ok": True, "image": image_url, "imageUrl": image_url}
+
+
+@app.get("/api/products/image-manifest")
+def product_image_manifest_get():
+    return _product_images_manifest_load()
+
+
+@app.post("/api/products/{card_guide}/image-link")
+def product_image_link_set(card_guide: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    image_url = str(body.get("imageUrl") or body.get("image") or "").strip()
+    if not image_url:
+        raise HTTPException(status_code=400, detail="imageUrl مطلوب")
+    gid = str(card_guide).upper()
+    _product_images_manifest_set(gid, image_url)
+    conn = get_connection()
+    if not conn:
+        return {"ok": True, "imageUrl": image_url, "dbUpdated": False}
+    try:
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        cur.execute("UPDATE TBL007 SET ProductImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, gid))
+        conn.commit()
+        return {"ok": True, "imageUrl": image_url, "dbUpdated": True}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/products/image-manifest/sync-to-db")
+def product_image_manifest_sync_to_db():
+    m = _product_images_manifest_load()
+    imgs = m.get("images")
+    if not isinstance(imgs, dict):
+        return {"ok": True, "updated": 0}
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    updated = 0
+    try:
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        for gid, rec in imgs.items():
+            if not isinstance(rec, dict):
+                continue
+            image_url = str(rec.get("image") or "").strip()
+            if not image_url:
+                continue
+            cur.execute("UPDATE TBL007 SET ProductImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, str(gid).upper()))
+            updated += 1
+        conn.commit()
+        return {"ok": True, "updated": updated}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/menu/bootstrap")
+def menu_bootstrap():
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        conn.commit()
+        return {"ok": True, "message": "تم التأكد من جداول المنيو TBL006/TBL007 وحقول الصور."}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
         except Exception:
             pass
 
@@ -1655,19 +2887,40 @@ def get_product_groups():
     
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         query = """
-        SELECT CardGuide, GroupName
-        FROM TBL006
-        WHERE GroupName IS NOT NULL
-        ORDER BY GroupName
+        SELECT
+            g.CardGuide,
+            g.GroupName,
+            g.GroupImageUrl,
+            s.ProductGuide,
+            s.ProductImageUrl
+        FROM TBL006 g
+        OUTER APPLY (
+            SELECT TOP 1
+                p.CardGuide AS ProductGuide,
+                p.ProductImageUrl
+            FROM TBL007 p
+            WHERE p.GroupGuid = g.CardGuide AND p.NotActive = 0
+            ORDER BY
+                CASE WHEN p.ProductImageUrl IS NULL OR LTRIM(RTRIM(p.ProductImageUrl)) = '' THEN 1 ELSE 0 END,
+                p.ProductName
+        ) s
+        WHERE g.GroupName IS NOT NULL
+        ORDER BY g.GroupName
         """
         cursor.execute(query)
         
         groups = []
         for row in cursor.fetchall():
+            gid = str(row[0])
+            img_manifest = _group_images_manifest_get(gid)
+            img_db = str(row[2]) if len(row) > 2 and row[2] else None
             groups.append({
-                "CardGuide": str(row[0]),
-                "GroupName": row[1]
+                "CardGuide": gid,
+                "GroupName": row[1],
+                "image": f"/api/product-groups/{gid}/image",
+                "imageUrl": img_manifest or img_db or f"/api/product-groups/{gid}/image-auto",
             })
         return {"groups": groups}
     except Exception as e:
@@ -1690,10 +2943,14 @@ def create_product_group(body: dict):
         raise HTTPException(status_code=400, detail="اسم المجموعة مطلوب")
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         g = str(uuid.uuid4()).upper()
-        cursor.execute("INSERT INTO TBL006 (CardGuide, GroupName) VALUES (?, ?)", (g, name))
+        image_url = str(body.get("imageUrl") or body.get("GroupImageUrl") or "").strip() or None
+        cursor.execute("INSERT INTO TBL006 (CardGuide, GroupName, GroupImageUrl) VALUES (?, ?, ?)", (g, name, image_url))
         conn.commit()
-        return {"success": True, "CardGuide": g, "GroupName": name}
+        if image_url:
+            _group_images_manifest_set(g, image_url)
+        return {"success": True, "CardGuide": g, "GroupName": name, "imageUrl": image_url}
     except Exception as e:
         if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1701,6 +2958,205 @@ def create_product_group(body: dict):
         try:
             if conn: conn.close()
         except Exception: pass
+
+
+@app.get("/api/product-groups/{group_guide}/image")
+def get_product_group_image(group_guide: str, request: Request):
+    try:
+        fp, ctype_hint = _find_group_image_file(group_guide)
+        if fp:
+            with open(fp, "rb") as f:
+                data = f.read()
+            import hashlib
+            etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+            inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+            if inm and inm == etag:
+                return Response(status_code=304)
+            headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+            return Response(content=data, media_type=ctype_hint or "application/octet-stream", headers=headers)
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        cur.execute("SELECT TOP 1 CardImage FROM TBL006 WHERE CardGuide = CAST(? AS uniqueidentifier)", group_guide)
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            raise HTTPException(status_code=404, detail="لا توجد صورة لهذه المجموعة")
+        blob = row[0]
+        try:
+            data = bytes(blob)
+        except Exception:
+            data = blob
+        import hashlib
+        etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+        inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+        if inm and inm == etag:
+            return Response(status_code=304)
+        ctype = "application/octet-stream"
+        if data.startswith(b"\xFF\xD8\xFF"):
+            ctype = "image/jpeg"
+        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+            ctype = "image/png"
+        elif data.startswith(b"GIF8"):
+            ctype = "image/gif"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            ctype = "image/webp"
+        headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+        return Response(content=data, media_type=ctype, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn
+        except NameError:
+            return
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+@app.get("/api/product-groups/{group_guide}/image-auto")
+def get_product_group_image_auto(group_guide: str, request: Request):
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        cur.execute("SELECT TOP 1 GroupName FROM TBL006 WHERE CardGuide = CAST(? AS uniqueidentifier)", group_guide)
+        row = cur.fetchone()
+        nm = str(row[0]) if row and row[0] else "Group"
+        data = _auto_group_svg(nm)
+        import hashlib
+        etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+        inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+        if inm and inm == etag:
+            return Response(status_code=304)
+        return Response(content=data, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=3600", "ETag": etag})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/product-groups/{group_guide}/image")
+async def upload_product_group_image(group_guide: str, file: UploadFile = File(...)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="ملف فارغ")
+    ext, _ctype = _guess_image_ext(data)
+    d = _group_images_dir()
+    gid = str(group_guide).upper()
+    for ext_old in ("jpg", "jpeg", "png", "gif", "webp", "bin"):
+        p_old = os.path.join(d, f"{gid}.{ext_old}")
+        if os.path.exists(p_old):
+            try:
+                os.remove(p_old)
+            except Exception:
+                pass
+    p = os.path.join(d, f"{gid}.{ext}")
+    with open(p, "wb") as f:
+        f.write(data)
+    image_url = f"/api/product-groups/{gid}/image"
+    _group_images_manifest_set(gid, image_url)
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            _ensure_menu_tables(cur)
+            cur.execute("UPDATE TBL006 SET GroupImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, gid))
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return {"ok": True, "image": image_url, "imageUrl": image_url}
+
+
+@app.get("/api/product-groups/image-manifest")
+def product_group_image_manifest_get():
+    return _group_images_manifest_load()
+
+
+@app.post("/api/product-groups/{group_guide}/image-link")
+def product_group_image_link_set(group_guide: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    image_url = str(body.get("imageUrl") or body.get("image") or "").strip()
+    if not image_url:
+        raise HTTPException(status_code=400, detail="imageUrl مطلوب")
+    gid = str(group_guide).upper()
+    _group_images_manifest_set(gid, image_url)
+    conn = get_connection()
+    if not conn:
+        return {"ok": True, "imageUrl": image_url, "dbUpdated": False}
+    try:
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        cur.execute("UPDATE TBL006 SET GroupImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, gid))
+        conn.commit()
+        return {"ok": True, "imageUrl": image_url, "dbUpdated": True}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/product-groups/image-manifest/sync-to-db")
+def product_group_image_manifest_sync_to_db():
+    m = _group_images_manifest_load()
+    imgs = m.get("images")
+    if not isinstance(imgs, dict):
+        return {"ok": True, "updated": 0}
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    updated = 0
+    try:
+        cur = conn.cursor()
+        _ensure_menu_tables(cur)
+        for gid, rec in imgs.items():
+            if not isinstance(rec, dict):
+                continue
+            image_url = str(rec.get("image") or "").strip()
+            if not image_url:
+                continue
+            cur.execute("UPDATE TBL006 SET GroupImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, str(gid).upper()))
+            updated += 1
+        conn.commit()
+        return {"ok": True, "updated": updated}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 # ========== Projects ==========
 @app.get("/api/projects")
@@ -1820,6 +3276,111 @@ def create_cost_center(body: dict):
         try:
             if conn: conn.close()
         except Exception: pass
+
+def _resolve_existing_usguide(cur, preferred: Optional[str]) -> Optional[str]:
+    try:
+        if preferred:
+            cur.execute("SELECT TOP 1 UsGuide FROM TBL013 WHERE UsGuide = ?", preferred)
+            r = cur.fetchone()
+            if r and r[0]:
+                return str(r[0])
+    except Exception:
+        pass
+    try:
+        cur.execute("SELECT TOP 1 UsGuide FROM TBL013 ORDER BY UsGuide")
+        r = cur.fetchone()
+        if r and r[0]:
+            return str(r[0])
+    except Exception:
+        pass
+    return None
+
+
+def _upsert_cost_center_by_name(name: str, main_cost_center: Optional[str] = None, card_code: Optional[str] = None) -> Optional[str]:
+    """Upsert to TBL005 with sensible defaults for a restaurant table cost center.
+    Returns CardGuide (existing or newly created)."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        # Exists by CostCenter
+        cur.execute("SELECT CardGuide FROM TBL005 WHERE CostCenter = ?", name)
+        row = cur.fetchone()
+        if row and row[0]:
+            gid_existing = str(row[0])
+            if main_cost_center:
+                try:
+                    cur.execute("UPDATE TBL005 SET MainCostCenter = ? WHERE CardGuide = ?", (main_cost_center, gid_existing))
+                    conn.commit()
+                except Exception:
+                    pass
+            return gid_existing
+
+        # Prepare defaults
+        card_guide = str(uuid.uuid4()).upper()
+        not_active = 0
+        # Derive a compact card code from name (e.g., "#101" -> "101")
+        if card_code:
+            code = str(card_code)
+        else:
+            try:
+                code = re.sub(r"[^A-Za-z0-9]+", "", name)
+            except Exception:
+                code = name
+        security = 0
+        latin_name = None
+        card_type = 0
+        def_account = None
+        def_account2 = None
+        def_account3 = None
+        parent_cost_center = main_cost_center
+        default_value = 0.0
+        int_value = 0
+        notes = "Auto from floor_plan"
+        card_image = None
+        notes2 = notes3 = notes4 = notes5 = notes6 = notes7 = notes8 = notes9 = None
+        used_in_hr = 0
+        by_user = _resolve_existing_usguide(cur, MAT3AM_INITIAL_DEV_USER_ID) or MAT3AM_INITIAL_DEV_USER_ID
+        by_group = None
+
+        # Full insert with explicit columns (others left NULL)
+        cur.execute(
+            """
+            INSERT INTO TBL005 (
+                CardGuide, NotActive, CardCode, Security, CostCenter, LatinName, CardType,
+                DefaultAccount, DefaultAccount2, DefaultAccount3, MainCostCenter,
+                DefaultValue, IntValue, Notes, CardImage,
+                CostCenterNotes2, CostCenterNotes3, CostCenterNotes4, CostCenterNotes5,
+                CostCenterNotes6, CostCenterNotes7, CostCenterNotes8, CostCenterNotes9,
+                UsedInHR, ByUser, ByGroup
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                card_guide, not_active, code, security, name, latin_name, card_type,
+                def_account, def_account2, def_account3, parent_cost_center,
+                default_value, int_value, notes, card_image,
+                notes2, notes3, notes4, notes5,
+                notes6, notes7, notes8, notes9,
+                used_in_hr, by_user, by_group,
+            ),
+        )
+        conn.commit()
+        return card_guide
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 # ========== محطة الخرسانة — عربيات الخلط (مراكز كلفة TBL005) ==========
 # البادئة TRUCK|لوحة|سعة|سائق|هاتف — لتمييز عربيات الخلط عن مراكز كلفة أخرى
@@ -2555,66 +4116,858 @@ def get_invoice(main_guide: str):
         except Exception:
             pass
 
-# ========== Save Invoice ==========
+def _tbl022_column_names_map(cursor) -> dict[str, str]:
+    """اسم العمود الفعلي في TBL022: مفتاح lower() → الاسم كما في sys.columns (مطابقة StoreGuide دون حساسية لحالة الأحرف)."""
+    m: dict[str, str] = {}
+    try:
+        cursor.execute(
+            """
+            SELECT c.name
+            FROM sys.columns c
+            INNER JOIN sys.tables t ON c.object_id = t.object_id
+            INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE LOWER(t.name) = N'tbl022' AND LOWER(s.name) = N'dbo'
+            """
+        )
+        for r in cursor.fetchall():
+            if r and r[0]:
+                n = str(r[0])
+                m[n.lower()] = n
+    except Exception:
+        try:
+            cursor.execute(
+                "SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(N'dbo.TBL022')"
+            )
+            for r in cursor.fetchall():
+                if r and r[0]:
+                    n = str(r[0])
+                    m[n.lower()] = n
+        except Exception:
+            pass
+    if not m:
+        try:
+            cursor.execute(
+                """
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = N'dbo' AND TABLE_NAME = N'TBL022'
+                """
+            )
+            for r in cursor.fetchall():
+                if r and r[0]:
+                    n = str(r[0])
+                    m[n.lower()] = n
+        except Exception:
+            pass
+    return m
+
+
+def _tbl022_column_names(cursor) -> set[str]:
+    return set(_tbl022_column_names_map(cursor).values())
+
+
+# TBL019 = طرق الدفع (PayTerm). FK_TBL022_TBL019 → TBL019.ID
+# القيم الشائعة في إكسترا: -1 None | 1 Cash | 2 By Credit | 3 Bank Card | 4 Cheque
+MAT3AM_TBL019_VALID_IDS = frozenset((-1, 1, 2, 3, 4))
+# افتراض طلب التشغيل عند عدم المطابقة أو قيمة قديمة خاطئة (0، 5، …): By Credit
+MAT3AM_INVOICE_TBL019_PAYTERM_ID = 2
+
+
+def _mat3am_tbl022_parent_columns_fk_to_tbl019(cursor) -> list[str]:
+    """أعمدة dbo.TBL022 التي يفرض FK (مثل FK_TBL022_TBL019) وجودها في dbo.TBL019.ID."""
+    out: list[str] = []
+    try:
+        cursor.execute(
+            """
+            SELECT c.name
+            FROM sys.foreign_keys AS f
+            INNER JOIN sys.foreign_key_columns AS fc ON f.object_id = fc.constraint_object_id
+            INNER JOIN sys.columns AS c
+                ON fc.parent_object_id = c.object_id AND fc.parent_column_id = c.column_id
+            INNER JOIN sys.tables AS tp ON f.parent_object_id = tp.object_id
+            INNER JOIN sys.schemas AS sp ON tp.schema_id = sp.schema_id
+            INNER JOIN sys.tables AS tr ON f.referenced_object_id = tr.object_id
+            INNER JOIN sys.schemas AS sr ON tr.schema_id = sr.schema_id
+            INNER JOIN sys.columns AS cr
+                ON fc.referenced_object_id = cr.object_id AND fc.referenced_column_id = cr.column_id
+            WHERE LOWER(tp.name) = N'tbl022' AND LOWER(sp.name) = N'dbo'
+              AND LOWER(tr.name) = N'tbl019' AND LOWER(sr.name) = N'dbo'
+              AND LOWER(cr.name) = N'id'
+            """
+        )
+        for r in cursor.fetchall():
+            if r and r[0]:
+                out.append(str(r[0]))
+    except Exception:
+        pass
+    return out
+
+
+def _mat3am_coerce_int_id(v: object) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        return int(float(v))
+    except Exception:
+        return None
+
+
+def _mat3am_apply_tbl022_fk_tbl019_columns(
+    cursor, cols: list[str], vals: list, tbl022_m: dict[str, str]
+) -> None:
+    """
+    أعمدة TBL022 المربوطة بـ TBL019.ID: إن كانت القيمة غير موجودة في TBL019 (مثل 0 من خريطة قديمة)
+    نستبدلها بـ MAT3AM_INVOICE_TBL019_PAYTERM_ID؛ وإن كان العمود غير مُدرَج نُضيفه.
+    """
+    fk_parents = _mat3am_tbl022_parent_columns_fk_to_tbl019(cursor)
+    if not fk_parents:
+        return
+    for raw in fk_parents:
+        low = raw.lower()
+        actual = tbl022_m.get(low, raw)
+        idx = next((i for i, c in enumerate(cols) if c.lower() == low), -1)
+        if idx >= 0:
+            cv = _mat3am_coerce_int_id(vals[idx])
+            if cv is None or cv not in MAT3AM_TBL019_VALID_IDS:
+                vals[idx] = MAT3AM_INVOICE_TBL019_PAYTERM_ID
+            continue
+        if low not in tbl022_m:
+            continue
+        cols.append(actual)
+        vals.append(MAT3AM_INVOICE_TBL019_PAYTERM_ID)
+
+
+def _tbl008_column_names_map(cursor) -> dict[str, str]:
+    """مثل TBL022: dbo.TBL008 — يصلح حالات فشل OBJECT_ID(N'dbo.TBL008')."""
+    m: dict[str, str] = {}
+    try:
+        cursor.execute(
+            """
+            SELECT c.name
+            FROM sys.columns c
+            INNER JOIN sys.tables t ON c.object_id = t.object_id
+            INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE LOWER(t.name) = N'tbl008' AND LOWER(s.name) = N'dbo'
+            """
+        )
+        for r in cursor.fetchall():
+            if r and r[0]:
+                n = str(r[0])
+                m[n.lower()] = n
+    except Exception:
+        pass
+    if not m:
+        try:
+            cursor.execute(
+                "SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(N'dbo.TBL008')"
+            )
+            for r in cursor.fetchall():
+                if r and r[0]:
+                    n = str(r[0])
+                    m[n.lower()] = n
+        except Exception:
+            pass
+    if not m:
+        try:
+            cursor.execute(
+                """
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = N'dbo' AND TABLE_NAME = N'TBL008'
+                """
+            )
+            for r in cursor.fetchall():
+                if r and r[0]:
+                    n = str(r[0])
+                    m[n.lower()] = n
+        except Exception:
+            pass
+    return m
+
+
+def _tbl008_column_names(cursor) -> set[str]:
+    return set(_tbl008_column_names_map(cursor).values())
+
+
+def _mat3am_get_or_create_default_store_guid(cursor) -> str:
+    """مستودع افتراضي لـ TBL022.StoreGuide: أول صف في TBL008 أو إدراج بنفس آلية إكسترا."""
+    try:
+        cursor.execute(
+            "SELECT TOP (1) CardGuide FROM dbo.TBL008 ORDER BY CardGuide"
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    c8 = _tbl008_column_names(cursor)
+    full = {"CardGuide", "CardCode", "Security", "WarehouseName", "LatinName", "NotActive"}
+    if full.issubset(c8):
+        try:
+            cursor.execute(
+                """
+                INSERT INTO dbo.TBL008 (CardGuide, CardCode, Security, WarehouseName, LatinName, NotActive)
+                VALUES (
+                    NEWID(),
+                    (SELECT ISNULL(MAX(x.CardCode), 0) + 1 FROM dbo.TBL008 AS x),
+                    1,
+                    N'مطاعم — مستودع افتراضي',
+                    N'MAT3AM Default Warehouse',
+                    0
+                )
+                """
+            )
+            cursor.execute(
+                "SELECT TOP (1) CardGuide FROM dbo.TBL008 ORDER BY CardGuide DESC"
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return _mat3am_guid_sql_param(row[0])
+        except Exception:
+            pass
+    if {"CardGuide", "WarehouseName"}.issubset(c8):
+        g = str(uuid.uuid4()).upper()
+        try:
+            ln = "LatinName" in c8
+            if ln:
+                cursor.execute(
+                    "INSERT INTO dbo.TBL008 (CardGuide, WarehouseName, LatinName) VALUES (?, ?, ?)",
+                    (g, "مطاعم — مستودع افتراضي", "MAT3AM Default Warehouse"),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO dbo.TBL008 (CardGuide, WarehouseName) VALUES (?, ?)",
+                    (g, "مطاعم — مستودع افتراضي"),
+                )
+            return _mat3am_guid_sql_param(g)
+        except Exception:
+            pass
+    raise RuntimeError(
+        "تعذر إنشاء أو جلب مستودع (TBL008) — عمود StoreGuide في TBL022 إلزامي."
+    )
+
+
+def _mat3am_tbl008_cardguide_by_warehouse_name(cursor, warehouse_name: str) -> Optional[str]:
+    try:
+        cursor.execute(
+            "SELECT TOP (1) CardGuide FROM dbo.TBL008 WHERE WarehouseName = ?",
+            (warehouse_name,),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    return None
+
+
+def _mat3am_insert_tbl008_row_for_name(cursor, warehouse_name_ar: str, latin_name: str) -> str:
+    """إدراج صف في TBL008 بعدة استراتيجيات SQL (OUTPUT INSERTED) مع أخطاء مجمّعة إن فشل الكل."""
+    cmap = _tbl008_column_names_map(cursor)
+    c8 = set(cmap.values())
+    if not c8:
+        raise RuntimeError("TBL008: لا تُقرأ أعمدة الجدول — تحقق من dbo.TBL008 في القاعدة المتصلة.")
+
+    errs: list[str] = []
+
+    def _col(*candidates: str) -> Optional[str]:
+        for c in candidates:
+            if c in c8:
+                return c
+            low = c.lower()
+            if low in cmap:
+                return cmap[low]
+        return None
+
+    cg = _col("CardGuide")
+    wn = _col("WarehouseName")
+    ln = _col("LatinName")
+    cc = _col("CardCode")
+    sec = _col("Security")
+    na = _col("NotActive")
+
+    def _try_output(label: str, sql: str, params: tuple) -> Optional[str]:
+        try:
+            cursor.execute(sql, params)
+            row = cursor.fetchone()
+            if row and row[0]:
+                return _mat3am_guid_sql_param(row[0])
+        except Exception as e:
+            errs.append(f"{label}: {e}")
+        return None
+
+    if all((cg, cc, sec, wn, ln, na)):
+        sql_tc = f"""
+        INSERT INTO dbo.TBL008 ([{cg}], [{cc}], [{sec}], [{wn}], [{ln}], [{na}])
+        OUTPUT INSERTED.[{cg}]
+        VALUES (
+            NEWID(),
+            (SELECT COALESCE(MAX(TRY_CAST(x.[{cc}] AS INT)), 0) + 1 FROM dbo.TBL008 AS x),
+            1, ?, ?, 0
+        )
+        """
+        got = _try_output("tbl008_try_cast", sql_tc, (warehouse_name_ar, latin_name))
+        if got:
+            return got
+        sql_mx = f"""
+        INSERT INTO dbo.TBL008 ([{cg}], [{cc}], [{sec}], [{wn}], [{ln}], [{na}])
+        OUTPUT INSERTED.[{cg}]
+        VALUES (
+            NEWID(),
+            (SELECT ISNULL(MAX(x.[{cc}]), 0) + 1 FROM dbo.TBL008 AS x),
+            1, ?, ?, 0
+        )
+        """
+        got = _try_output("tbl008_max_cardcode", sql_mx, (warehouse_name_ar, latin_name))
+        if got:
+            return got
+
+    if cg and wn and ln:
+        sql3 = f"""
+        INSERT INTO dbo.TBL008 ([{cg}], [{wn}], [{ln}])
+        OUTPUT INSERTED.[{cg}]
+        VALUES (NEWID(), ?, ?)
+        """
+        got = _try_output("tbl008_min3", sql3, (warehouse_name_ar, latin_name))
+        if got:
+            return got
+    if cg and wn:
+        sql2 = f"""
+        INSERT INTO dbo.TBL008 ([{cg}], [{wn}])
+        OUTPUT INSERTED.[{cg}]
+        VALUES (NEWID(), ?)
+        """
+        got = _try_output("tbl008_min2", sql2, (warehouse_name_ar,))
+        if got:
+            return got
+
+    g = str(uuid.uuid4()).upper()
+    cols: list[str] = []
+    vals: list = []
+    if cg:
+        cols.append(cg)
+        vals.append(g)
+    if wn:
+        cols.append(wn)
+        vals.append(warehouse_name_ar)
+    if ln:
+        cols.append(ln)
+        vals.append(latin_name)
+    if sec:
+        cols.append(sec)
+        vals.append(1)
+    if na:
+        cols.append(na)
+        vals.append(0)
+    if cc and cc not in cols:
+        try:
+            cursor.execute(f"SELECT ISNULL(MAX(CAST([{cc}] AS FLOAT)), 0) FROM dbo.TBL008")
+            mx = cursor.fetchone()
+            nxt = int(float(mx[0] or 0)) + 1 if mx else 1
+        except Exception:
+            nxt = 1
+        cols.append(cc)
+        vals.append(nxt)
+    if len(cols) < 2:
+        raise RuntimeError("TBL008 لا يحتوي أعمدة كافية لإدراج مستودع. " + " | ".join(errs[-3:]))
+    ph = ", ".join(["?"] * len(vals))
+    try:
+        cursor.execute(f"INSERT INTO dbo.TBL008 ({', '.join('[' + c + ']' for c in cols)}) VALUES ({ph})", tuple(vals))
+        return _mat3am_guid_sql_param(g)
+    except Exception as e:
+        errs.append(f"dynamic_bind: {e}")
+    raise RuntimeError("فشل إدراج TBL008 بعد كل المحاولات: " + " | ".join(errs[-6:]))
+
+
+def _mat3am_ensure_warehouse_row(cursor, warehouse_name_ar: str, latin_name: str) -> str:
+    """يضمن وجود صف TBL008 بالاسم المعرّف (كما في التهيئة) ويعيد CardGuide."""
+    found = _mat3am_tbl008_cardguide_by_warehouse_name(cursor, warehouse_name_ar)
+    if found:
+        return found
+    return _mat3am_insert_tbl008_row_for_name(cursor, warehouse_name_ar, latin_name)
+
+
+def _mat3am_order_kind_for_invoice_type_guid(cursor, tbl020_card_guide: str) -> Optional[str]:
+    try:
+        cursor.execute(
+            """
+            SELECT OrderKind FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES
+            WHERE Tbl020CardGuide = CAST(? AS uniqueidentifier)
+            """,
+            (_mat3am_guid_sql_param(tbl020_card_guide),),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip()
+    except Exception:
+        pass
+    return None
+
+
+def _mat3am_store_guid_for_invoice_main_guide(cursor, invoice_type_guid: str) -> str:
+    """
+    TBL022.StoreGuide: نفس منطق التوحيد مع نمط الفاتورة —
+    SELECT CardGuide FROM dbo.TBL008 WHERE WarehouseName = اسم النمط (MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR).
+    ثم خريطة MAT3AM_RESTAURANT_STORES، ثم إنشاء الصف إن لم يوجد، ثم احتياطي افتراضي.
+    """
+    kind = _mat3am_order_kind_for_invoice_type_guid(cursor, invoice_type_guid)
+    if not kind:
+        kind = "table"
+    wn = MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR.get(kind)
+    lat = MAT3AM_ORDERKIND_INVOICE_DISPLAY_LATIN.get(kind, "MAT3AM Store")
+    if wn:
+        try:
+            cursor.execute(
+                "SELECT TOP (1) CardGuide FROM dbo.TBL008 WHERE WarehouseName = ?",
+                (wn,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return _mat3am_guid_sql_param(row[0])
+        except Exception:
+            pass
+    try:
+        cursor.execute(
+            "SELECT Tbl008CardGuide FROM dbo.MAT3AM_RESTAURANT_STORES WHERE OrderKind = ?",
+            (kind,),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    if wn:
+        return _mat3am_ensure_warehouse_row(cursor, wn, lat)
+    return _mat3am_get_or_create_default_store_guid(cursor)
+
+
+def _seed_mat3am_restaurant_stores(cursor) -> dict:
+    """تهيئة: صفوف TBL008 بنفس أسماء أنماط TBL020 (WarehouseName = InvoiceName) + MAT3AM_RESTAURANT_STORES."""
+    out: dict = {"ok": True, "created": [], "skipped": [], "errors": [], "note": None}
+    for kind, wn, lat, _tag in _mat3am_restaurant_kind_seed_specs():
+        if not wn:
+            continue
+        try:
+            guid = _mat3am_ensure_warehouse_row(cursor, wn, lat)
+            try:
+                cursor.execute(
+                    "SELECT 1 FROM dbo.MAT3AM_RESTAURANT_STORES WHERE OrderKind = ?",
+                    (kind,),
+                )
+                existed = cursor.fetchone() is not None
+                if existed:
+                    cursor.execute(
+                        """
+                        UPDATE dbo.MAT3AM_RESTAURANT_STORES
+                        SET Tbl008CardGuide = CAST(? AS uniqueidentifier), WarehouseDisplayName = ?
+                        WHERE OrderKind = ?
+                        """,
+                        (guid, wn, kind),
+                    )
+                    out["skipped"].append(kind)
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.MAT3AM_RESTAURANT_STORES (OrderKind, Tbl008CardGuide, WarehouseDisplayName)
+                        VALUES (?, CAST(? AS uniqueidentifier), ?)
+                        """,
+                        (kind, guid, wn),
+                    )
+                    out["created"].append({"orderKind": kind, "tbl008CardGuide": guid, "warehouseName": wn})
+            except Exception as ex:
+                out["errors"].append({"orderKind": kind, "detail": str(ex)})
+                out["ok"] = False
+            try:
+                cursor.connection.commit()
+            except Exception:
+                pass
+        except Exception as ex:
+            out["errors"].append({"orderKind": kind, "detail": str(ex)})
+            out["ok"] = False
+            out["note"] = str(ex)
+            try:
+                cursor.connection.commit()
+            except Exception:
+                pass
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) FROM dbo.TBL008 WHERE WarehouseName LIKE N'مطاعم —%'"
+        )
+        out["tbl008Mat3amNameRows"] = int((cursor.fetchone() or [0])[0] or 0)
+    except Exception:
+        out["tbl008Mat3amNameRows"] = None
+    return out
+
+
+def _parse_invoice_header_datetime(s: Optional[str]) -> datetime:
+    """قبول تاريخ/وقت بصيغ متعددة؛ إن وُجد التاريخ فقط يُدمَج وقت اليوم الحالي (تفادي منتصف الليل الخاطئ)."""
+    raw = (s or "").strip()
+    if not raw:
+        return datetime.now()
+    fmts_dt = (
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+    )
+    fmts_date_only = ("%d-%m-%Y", "%Y-%m-%d")
+    for fmt in fmts_dt:
+        try:
+            return datetime.strptime(raw[:29], fmt)
+        except ValueError:
+            continue
+    for fmt in fmts_date_only:
+        try:
+            d0 = datetime.strptime(raw[:10], fmt)
+            n = datetime.now()
+            return d0.replace(hour=n.hour, minute=n.minute, second=n.second, microsecond=n.microsecond)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        pass
+    return datetime.now()
+
+
+def _mat3am_currency_guid_from_settings(cursor, ms: dict) -> Optional[str]:
+    """Guid صريح من الإعدادات إن وُجد وصالح في TBL001."""
+    g = (ms.get("defaultCurrencyGuid") or ms.get("currencyGuide") or "").strip()
+    if not g:
+        return None
+    try:
+        cursor.execute(
+            "SELECT 1 FROM dbo.TBL001 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            (_mat3am_guid_sql_param(g),),
+        )
+        if cursor.fetchone():
+            return _mat3am_guid_sql_param(g)
+    except Exception:
+        pass
+    return None
+
+
+def _mat3am_default_egp_currency_guid(cursor) -> Optional[str]:
+    """TBL022.CurrencyGuide: جنيه مصري + LatinName يوافق Egypt Pound أو EGP (كما في إكسترا)."""
+    try:
+        cursor.execute(
+            """
+            SELECT TOP (1) CardGuide FROM dbo.TBL001
+            WHERE CurrencyName IN (N'جنيه مصري', N'جنية مصرى')
+              AND (
+                    UPPER(LTRIM(RTRIM(ISNULL(LatinName, N'')))) = N'EGYPT POUND'
+                 OR UPPER(LTRIM(RTRIM(ISNULL(LatinName, N'')))) LIKE N'%EGP%'
+                  )
+            ORDER BY CurrencyName
+            """
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    try:
+        cursor.execute(
+            """
+            SELECT TOP (1) CardGuide FROM dbo.TBL001
+            WHERE CurrencyName IN (N'جنيه مصري', N'جنية مصرى')
+            ORDER BY CurrencyName
+            """
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    return None
+
+
+def _mat3am_default_currency_guid_for_invoice(cursor) -> str:
+    """عملة افتراضية لـ TBL022.CurrencyGuide: إعدادات mat3am ثم جنيه مصري/EGP ثم تفضيل أسماء ثم مطابقة جزئية ثم TOP 1 من TBL001 ثم فاتورة سابقة."""
+    ms = _load_mat3am_settings()
+    cg = _mat3am_currency_guid_from_settings(cursor, ms)
+    if cg:
+        return cg
+    cg = _mat3am_default_egp_currency_guid(cursor)
+    if cg:
+        return cg
+    preferred = ms.get("currencyPreferredNames")
+    if not isinstance(preferred, list):
+        preferred = ["جنيه مصري", "جنية مصرى"]
+    for name in preferred:
+        n = (name or "").strip()
+        if not n:
+            continue
+        try:
+            cursor.execute(
+                "SELECT TOP (1) CardGuide FROM dbo.TBL001 WHERE CurrencyName = ?",
+                (n,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return _mat3am_guid_sql_param(row[0])
+        except Exception:
+            pass
+    contains = ms.get("currencyNameContains")
+    if not isinstance(contains, list):
+        contains = ["جنيه", "egp", "egp ", "ج.م"]
+    for sub in contains:
+        s = (sub or "").strip()
+        if not s:
+            continue
+        pat = f"%{s}%"
+        try:
+            cursor.execute(
+                """
+                SELECT TOP (1) CardGuide FROM dbo.TBL001
+                WHERE (CurrencyName LIKE ? OR LatinName LIKE ? OR CurrencyPartName LIKE ?)
+                ORDER BY CurrencyName
+                """,
+                (pat, pat, pat),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return _mat3am_guid_sql_param(row[0])
+        except Exception:
+            try:
+                cursor.execute(
+                    """
+                    SELECT TOP (1) CardGuide FROM dbo.TBL001
+                    WHERE (CurrencyName LIKE ? OR LatinName LIKE ?)
+                    ORDER BY CurrencyName
+                    """,
+                    (pat, pat),
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return _mat3am_guid_sql_param(row[0])
+            except Exception:
+                pass
+    try:
+        cursor.execute(
+            "SELECT TOP (1) CardGuide FROM dbo.TBL001 WHERE CurrencyName IS NOT NULL ORDER BY CurrencyName"
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    try:
+        cursor.execute(
+            "SELECT TOP (1) CurrencyGuide FROM dbo.TBL022 WHERE CurrencyGuide IS NOT NULL"
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return _mat3am_guid_sql_param(row[0])
+    except Exception:
+        pass
+    raise RuntimeError(
+        "تعذر تحديد عملة افتراضية — أضف عملة في TBL001 أو عرّف mat3am.defaultCurrencyGuid في config/settings.json."
+    )
+
+
+def _mat3am_insert_tbl023_invoice_lines_xtra_style(
+    cursor,
+    main_guide: str,
+    invoice: InvoiceHeader,
+    source_bill_guid: Optional[str],
+) -> None:
+    """
+    نفس بنية INSERT بنود الفاتورة في المصدر الأصلي:
+    ``XTRA_WEB/backend/api_server.py`` → ``save_invoice`` (حوالي 1799–1831).
+
+    الفرق الوحيد المطلوب لقواعد إكسترا الحديثة (مثل oya_Mohandessin): عمود ``Unit``
+    في ``TBL023`` قد يكون ``tinyint``؛ المرجع الأصلي يمرّر ``item.Unit`` كنص، بينما
+    عمود ``Unit`` يُمرَّر كـ ``tinyint`` عبر ``CAST`` بعد ``_mat3am_tbl023_unit_as_tinyint``.
+    """
+    for item in invoice.Items:
+        unit_val = int(_mat3am_tbl023_unit_as_tinyint(item.Unit))
+        if source_bill_guid:
+            cursor.execute(
+                """
+                INSERT INTO TBL023
+                (MainGuide, ProductGuide, Quantity, Unit, TotalValue, InsertedIn, RelatedAgent, SourceBill)
+                VALUES (?, ?, ?, CAST(? AS tinyint), ?, ?, ?, ?)
+                """,
+                (
+                    main_guide,
+                    item.ProductGuide,
+                    item.Quantity,
+                    unit_val,
+                    item.TotalValue,
+                    datetime.now(),
+                    invoice.AgentGuide,
+                    source_bill_guid,
+                ),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO TBL023
+                (MainGuide, ProductGuide, Quantity, Unit, TotalValue, InsertedIn, RelatedAgent)
+                VALUES (?, ?, ?, CAST(? AS tinyint), ?, ?, ?)
+                """,
+                (
+                    main_guide,
+                    item.ProductGuide,
+                    item.Quantity,
+                    unit_val,
+                    item.TotalValue,
+                    datetime.now(),
+                    invoice.AgentGuide,
+                ),
+            )
+
+
+# =============================================================================
+# حفظ الفاتورة — مرجع التصميم الأساسي:
+#   ``E:/XTRA_WEB/backend/api_server.py``  الدالة ``save_invoice`` (~1697–1848)
+#
+# توسيعات مطاعم (بعد مطابقة قاعدة العميل، وليست في الملف الأصلي):
+#   - رأس TBL022 ديناميكي: StoreGuide, CurrencyGuide, DateValue01 عند وجود الأعمدة
+#   - PayMethod يطابق TBL019.ID (جدول طرق الدفع) بسبب FK_TBL022_TBL019
+#   - ``_mat3am_apply_tbl022_fk_tbl019_columns`` لأي عمود FK إضافي لـ TBL019
+#   - بعد الـ commit: حركة مخزون MAT3AM_STOCK_MOVEMENT + ``_ensure_costing_and_stock_schema``
+# =============================================================================
 @app.post("/api/invoices")
 def save_invoice(invoice: InvoiceHeader):
-    """حفظ فاتورة جديدة في TBL022 و TBL023"""
+    """حفظ فاتورة جديدة في TBL022 و TBL023 (مرجع إكسترا + توسيعات مطاعم لقاعدة SQL الفعلية)"""
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     
     try:
         cursor = conn.cursor()
-        _ensure_costing_and_stock_schema(cursor)
-        
+        try:
+            _ensure_costing_and_stock_schema(cursor)
+        except Exception as _sch_e:
+            print("[mat3am] save_invoice: تهيئة جداول المخزون (غير حرجة):", _sch_e)
+
         # إنشاء MainGuide جديد
         main_guide = str(uuid.uuid4()).upper()
         # CardGuide من نوع الفاتورة/الإيصال
         # إذا لم يتم تحديد InvoiceType، استخدم فاتورة الكترونية كافتراضي
-        invoice_type = invoice.InvoiceType or "3478A885-6D69-4058-892E-8A57496DB9BC"
+        invoice_type = invoice.InvoiceType or FALLBACK_INVOICE_TYPE_GUID
         
         # حساب الإجمالي
         total_value = sum(item.TotalValue for item in invoice.Items)
         
-        # تحويل التواريخ
-        try:
-            bill_date = datetime.strptime(invoice.BillDate, "%d-%m-%Y")
-        except:
-            bill_date = datetime.now()
+        bill_date = _parse_invoice_header_datetime(invoice.BillDate)
+        done_in = _parse_invoice_header_datetime(invoice.DoneIn)
         
-        try:
-            done_in = datetime.strptime(invoice.DoneIn, "%d-%m-%Y")
-        except:
-            done_in = datetime.now()
-        
-        # طريقة الدفع
+        # المرجع الأصلي (XTRA_WEB/backend): خريطة 0..6 على PayMethod — لا تصلح مع FK → TBL019.ID
+        # TBL019 عند العميل: 1 Cash, 2 By Credit, 3 Bank Card, 4 Cheque, -1 None
         payment_method_map = {
-            'نقدي': 0,
-            'بطاقات مصرفيه': 1,
-            'شيك': 2,
-            'آجل': 3,
-            'بنك مصر': 4,
-            'دفع نقدي': 5,
-            'سوبر كاش': 6
+            "نقدي": 1,
+            "دفع نقدي": 1,
+            "بطاقات مصرفيه": 3,
+            "بنك مصر": 3,
+            "شيك": 4,
+            "آجل": 2,
+            "سوبر كاش": 1,
+            "cash": 1,
+            "card": 3,
+            "digital": 3,
         }
-        pay_method = payment_method_map.get(invoice.PaymentMethod, 0)
+        pm_key = (invoice.PaymentMethod or "").strip()
+        pay_method = payment_method_map.get(
+            pm_key,
+            payment_method_map.get(pm_key.casefold(), MAT3AM_INVOICE_TBL019_PAYTERM_ID),
+        )
         
         # الفاتورة المصدر (حافظة المرتبطة) للربط في TBL022 و TBL023
         source_bill_guid = invoice.SourceBill.strip() if invoice.SourceBill else None
         
         # حفظ رأس الفاتورة
-        # ملاحظة: CardGuide في TBL022 = MainGuide (المعرف الفريد)
-        # MainGuide في TBL022 = CardGuide من TBL020 (نوع الفاتورة)
-        # SourceBill = جيد الحافظة التي تم التحصيل عنها
-        if source_bill_guid:
-            header_query = """
-            INSERT INTO TBL022 
-            (CardGuide, MainGuide, BillNumber, BillDate, DoneIn, AgentGuide, Project, CostCenter, Notes, 
-             Discount, TaxValue, LocalAdministrativeTax, LockRelations, InsertedIn, Paid, PayMethod, SourceBill)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            cursor.execute(header_query, (
-                main_guide,
+        # TBL022.CardGuide = main_guide؛ TBL022.MainGuide = نوع الفاتورة من TBL020
+        # StoreGuide / CurrencyGuide: إلزامي في بعض قواعد إكسترا — يُملآن تلقائياً
+        tbl022_m = _tbl022_column_names_map(cursor)
+        store_col = tbl022_m.get("storeguide")
+        currency_col = tbl022_m.get("currencyguide")
+        date_value_col = tbl022_m.get("datevalue01")
+
+        store_gv: Optional[str] = None
+        if store_col:
+            sg_override = (invoice.StoreGuide or "").strip()
+            if sg_override:
+                try:
+                    cursor.execute(
+                        "SELECT 1 FROM dbo.TBL008 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                        (_mat3am_guid_sql_param(sg_override),),
+                    )
+                    if cursor.fetchone():
+                        store_gv = _mat3am_guid_sql_param(sg_override)
+                except Exception:
+                    store_gv = None
+            if not store_gv:
+                try:
+                    store_gv = _mat3am_store_guid_for_invoice_main_guide(cursor, invoice_type)
+                except Exception:
+                    store_gv = None
+            if not store_gv:
+                store_gv = _mat3am_get_or_create_default_store_guid(cursor)
+
+        cur_gv: Optional[str] = None
+        if currency_col:
+            cg_override = (invoice.CurrencyGuide or "").strip()
+            if cg_override:
+                try:
+                    cursor.execute(
+                        "SELECT 1 FROM dbo.TBL001 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                        (_mat3am_guid_sql_param(cg_override),),
+                    )
+                    if cursor.fetchone():
+                        cur_gv = _mat3am_guid_sql_param(cg_override)
+                except Exception:
+                    cur_gv = None
+            if not cur_gv:
+                try:
+                    cur_gv = _mat3am_default_currency_guid_for_invoice(cursor)
+                except Exception:
+                    try:
+                        cursor.execute(
+                            "SELECT TOP (1) CardGuide FROM dbo.TBL001 WHERE CardGuide IS NOT NULL"
+                        )
+                        rr = cursor.fetchone()
+                        if rr and rr[0]:
+                            cur_gv = _mat3am_guid_sql_param(rr[0])
+                    except Exception:
+                        pass
+
+        cols = ["CardGuide"]
+        vals: list = [main_guide]
+        if store_col and store_gv:
+            cols.append(store_col)
+            vals.append(store_gv)
+        elif store_col and not store_gv:
+            raise HTTPException(
+                status_code=500,
+                detail="عمود StoreGuide إلزامي ولم يُحلّ معرف المخزن — نفّذ POST /api/dev/bootstrap ثم تحقق من TBL008 وMAT3AM_RESTAURANT_STORES.",
+            )
+        if currency_col and cur_gv:
+            cols.append(currency_col)
+            vals.append(cur_gv)
+        cols.extend(
+            [
+                "MainGuide",
+                "BillNumber",
+                "BillDate",
+                "DoneIn",
+                "AgentGuide",
+                "Project",
+                "CostCenter",
+                "Notes",
+                "Discount",
+                "TaxValue",
+                "LocalAdministrativeTax",
+                "LockRelations",
+                "InsertedIn",
+                "Paid",
+                "PayMethod",
+            ]
+        )
+        vals.extend(
+            [
                 invoice_type,
                 invoice.BillNumber,
                 bill_date,
@@ -2630,180 +4983,165 @@ def save_invoice(invoice: InvoiceHeader):
                 datetime.now(),
                 0.0,
                 pay_method,
-                source_bill_guid
-            ))
-        else:
-            header_query = """
-            INSERT INTO TBL022 
-            (CardGuide, MainGuide, BillNumber, BillDate, DoneIn, AgentGuide, Project, CostCenter, Notes, 
-             Discount, TaxValue, LocalAdministrativeTax, LockRelations, InsertedIn, Paid, PayMethod)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            cursor.execute(header_query, (
-                main_guide,
-                invoice_type,
-                invoice.BillNumber,
-                bill_date,
-                done_in,
-                invoice.AgentGuide,
-                invoice.Project or None,
-                invoice.CostCenter or None,
-                invoice.Notes or None,
-                invoice.Discount,
-                invoice.TaxValue,
-                invoice.LocalAdministrativeTax,
-                False,
-                datetime.now(),
-                0.0,
-                pay_method
-            ))
-        
-        # حفظ الأصناف (مع SourceBill = جيد الحافظة إن وُجد)
-        for item in invoice.Items:
-            if source_bill_guid:
-                item_query = """
-                INSERT INTO TBL023 
-                (MainGuide, ProductGuide, Quantity, Unit, TotalValue, InsertedIn, RelatedAgent, SourceBill)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                cursor.execute(item_query, (
-                    main_guide,
-                    item.ProductGuide,
-                    item.Quantity,
-                    item.Unit,
-                    item.TotalValue,
-                    datetime.now(),
-                    invoice.AgentGuide,
-                    source_bill_guid
-                ))
-            else:
-                item_query = """
-                INSERT INTO TBL023 
-                (MainGuide, ProductGuide, Quantity, Unit, TotalValue, InsertedIn, RelatedAgent)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """
-                cursor.execute(item_query, (
-                    main_guide,
-                    item.ProductGuide,
-                    item.Quantity,
-                    item.Unit,
-                    item.TotalValue,
-                    datetime.now(),
-                    invoice.AgentGuide
-                ))
+            ]
+        )
+        if source_bill_guid:
+            cols.append("SourceBill")
+            vals.append(source_bill_guid)
 
-        # ربط الفواتير بحركة المخزون:
-        # - المشتريات: حركة داخلة للصنف المباع في الفاتورة
-        # - المبيعات: حركة خارجة للمشتقات حسب Recipe/BOM للمنتج النهائي
-        invoice_type_name = _get_invoice_type_name(cursor, invoice_type)
-        is_purchase = _is_purchase_invoice(invoice_type_name)
-        ref = str(main_guide)
-        for item in invoice.Items:
-            item_product_guide = (item.ProductGuide or "").strip() or None
-            item_name = (item.ProductName or "").strip() or "صنف"
-            qty = float(item.Quantity or 0)
-            unit_code = item.Unit if hasattr(item, "Unit") else None
-            unit_price = float(item.UnitPrice or 0)
-            total_value_line = float(item.TotalValue or (qty * unit_price))
-            if qty <= 0:
-                continue
-            if is_purchase:
-                _insert_stock_movement(
-                    cursor=cursor,
-                    movement_type="PURCHASE_IN",
-                    reference_id=ref,
-                    invoice_guid=main_guide,
-                    invoice_type_guid=invoice_type,
-                    product_guide=item_product_guide,
-                    item_name=item_name,
-                    qty_in=qty,
-                    qty_out=0,
-                    unit_code=unit_code,
-                    unit_cost=unit_price,
-                    total_cost=total_value_line,
-                    notes=f"مشتريات - {invoice_type_name or 'وارد'}",
-                )
-                continue
+        if date_value_col:
+            cols.append(date_value_col)
+            vals.append(bill_date)
 
-            # مبيعات: خصم مكونات الوصفة تلقائياً
-            recipe_guid = None
-            if item_product_guide:
-                try:
-                    cursor.execute(
-                        """
-                        SELECT TOP 1 RecipeGuid
-                        FROM dbo.MAT3AM_RECIPE_HDR
-                        WHERE ProductGuide = CAST(? AS uniqueidentifier) AND IsActive = 1
-                        ORDER BY UpdatedAt DESC
-                        """,
-                        (item_product_guide,),
-                    )
-                    rr = cursor.fetchone()
-                    recipe_guid = str(rr[0]) if rr and rr[0] else None
-                except Exception:
-                    recipe_guid = None
+        # FK إلى TBL019.ID — تصحيح 0/5/6 القديمة أو عمود إضافي غير مُدرَج
+        _mat3am_apply_tbl022_fk_tbl019_columns(cursor, cols, vals, tbl022_m)
 
-            if recipe_guid:
-                cursor.execute(
-                    """
-                    SELECT ComponentName, Quantity, UnitCode, UnitCost, ComponentProductGuide
-                    FROM dbo.MAT3AM_RECIPE_LINE
-                    WHERE RecipeGuid = CAST(? AS uniqueidentifier)
-                    """,
-                    (recipe_guid,),
-                )
-                recipe_lines = cursor.fetchall()
-                for ln in recipe_lines:
-                    comp_name = (ln[0] or "").strip() or "مكون"
-                    comp_qty = float(ln[1] or 0) * qty
-                    comp_unit = (ln[2] or "EA")
-                    comp_unit_cost = float(ln[3] or 0)
-                    comp_pg = ln[4] if len(ln) > 4 else None
-                    comp_product_guide = str(comp_pg).strip() if comp_pg else None
-                    comp_total = comp_qty * comp_unit_cost
-                    if comp_qty <= 0:
-                        continue
+        colnames_sql = ", ".join(cols)
+        placeholders = ", ".join(["?"] * len(vals))
+        header_query = f"INSERT INTO TBL022 ({colnames_sql}) VALUES ({placeholders})"
+        cursor.execute(header_query, tuple(vals))
+
+        # بنود TBL023: مطابقة نص SQL للمرجع الأصلي (انظر ``_mat3am_insert_tbl023_invoice_lines_xtra_style``)
+        _mat3am_insert_tbl023_invoice_lines_xtra_style(
+            cursor, main_guide, invoice, source_bill_guid
+        )
+
+        # إتمام الفاتورة أولاً — حركة MAT3AM_STOCK_MOVEMENT لاحقاً ولا تُلغي الحفظ
+        conn.commit()
+
+        stock_movement_ok = True
+        stock_movement_detail: Optional[str] = None
+        try:
+            sc = conn.cursor()
+            try:
+                _ensure_costing_and_stock_schema(sc)
+            except Exception as _e2:
+                print("[mat3am] stock schema before movement:", _e2)
+            invoice_type_name = _get_invoice_type_name(sc, invoice_type)
+            is_purchase = _is_purchase_invoice(invoice_type_name)
+            ref = str(main_guide)
+            for item in invoice.Items:
+                item_product_guide = (item.ProductGuide or "").strip() or None
+                item_name = (item.ProductName or "").strip() or "صنف"
+                qty = float(item.Quantity or 0)
+                unit_code = item.Unit if hasattr(item, "Unit") else None
+                unit_price = float(item.UnitPrice or 0)
+                total_value_line = float(item.TotalValue or (qty * unit_price))
+                if qty <= 0:
+                    continue
+                if is_purchase:
                     _insert_stock_movement(
-                        cursor=cursor,
-                        movement_type="SALE_RECIPE_OUT",
+                        cursor=sc,
+                        movement_type="PURCHASE_IN",
                         reference_id=ref,
                         invoice_guid=main_guide,
                         invoice_type_guid=invoice_type,
-                        product_guide=comp_product_guide,
-                        item_name=comp_name,
-                        qty_in=0,
-                        qty_out=comp_qty,
-                        unit_code=comp_unit,
-                        unit_cost=comp_unit_cost,
-                        total_cost=comp_total,
-                        notes=f"خصم مشتقات بيع الصنف {item_name}",
+                        product_guide=item_product_guide,
+                        item_name=item_name,
+                        qty_in=qty,
+                        qty_out=0,
+                        unit_code=unit_code,
+                        unit_cost=unit_price,
+                        total_cost=total_value_line,
+                        notes=f"مشتريات - {invoice_type_name or 'وارد'}",
                     )
-            else:
-                # fallback: خصم المنتج النهائي نفسه إذا لم توجد وصفة
-                _insert_stock_movement(
-                    cursor=cursor,
-                    movement_type="SALE_PRODUCT_OUT",
-                    reference_id=ref,
-                    invoice_guid=main_guide,
-                    invoice_type_guid=invoice_type,
-                    product_guide=item_product_guide,
-                    item_name=item_name,
-                    qty_in=0,
-                    qty_out=qty,
-                    unit_code=unit_code,
-                    unit_cost=unit_price,
-                    total_cost=total_value_line,
-                    notes="خصم مباشر لعدم وجود Recipe",
-                )
-        
-        conn.commit()
-        
+                    continue
+
+                recipe_guid = None
+                if item_product_guide:
+                    try:
+                        sc.execute(
+                            """
+                            SELECT TOP 1 RecipeGuid
+                            FROM dbo.MAT3AM_RECIPE_HDR
+                            WHERE ProductGuide = CAST(? AS uniqueidentifier) AND IsActive = 1
+                            ORDER BY UpdatedAt DESC
+                            """,
+                            (item_product_guide,),
+                        )
+                        rr = sc.fetchone()
+                        recipe_guid = str(rr[0]) if rr and rr[0] else None
+                    except Exception:
+                        recipe_guid = None
+
+                if recipe_guid:
+                    sc.execute(
+                        """
+                        SELECT ComponentName, Quantity, UnitCode, UnitCost, ComponentProductGuide
+                        FROM dbo.MAT3AM_RECIPE_LINE
+                        WHERE RecipeGuid = CAST(? AS uniqueidentifier)
+                        """,
+                        (recipe_guid,),
+                    )
+                    recipe_lines = sc.fetchall()
+                    for ln in recipe_lines:
+                        comp_name = (ln[0] or "").strip() or "مكون"
+                        comp_qty = float(ln[1] or 0) * qty
+                        comp_unit = (ln[2] or "EA")
+                        comp_unit_cost = float(ln[3] or 0)
+                        comp_pg = ln[4] if len(ln) > 4 else None
+                        comp_product_guide = str(comp_pg).strip() if comp_pg else None
+                        comp_total = comp_qty * comp_unit_cost
+                        if comp_qty <= 0:
+                            continue
+                        _insert_stock_movement(
+                            cursor=sc,
+                            movement_type="SALE_RECIPE_OUT",
+                            reference_id=ref,
+                            invoice_guid=main_guide,
+                            invoice_type_guid=invoice_type,
+                            product_guide=comp_product_guide,
+                            item_name=comp_name,
+                            qty_in=0,
+                            qty_out=comp_qty,
+                            unit_code=comp_unit,
+                            unit_cost=comp_unit_cost,
+                            total_cost=comp_total,
+                            notes=f"خصم مشتقات بيع الصنف {item_name}",
+                        )
+                else:
+                    _insert_stock_movement(
+                        cursor=sc,
+                        movement_type="SALE_PRODUCT_OUT",
+                        reference_id=ref,
+                        invoice_guid=main_guide,
+                        invoice_type_guid=invoice_type,
+                        product_guide=item_product_guide,
+                        item_name=item_name,
+                        qty_in=0,
+                        qty_out=qty,
+                        unit_code=unit_code,
+                        unit_cost=unit_price,
+                        total_cost=total_value_line,
+                        notes="خصم مباشر لعدم وجود Recipe",
+                    )
+            conn.commit()
+        except Exception as e_stock:
+            stock_movement_ok = False
+            stock_movement_detail = str(e_stock)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print("[mat3am] الفاتورة حُفظت في TBL022/TBL023؛ فشل تسجيل حركة المخزون:", e_stock)
+
         return {
             "success": True,
+            # main_guide هنا = TBL022.CardGuide (معرّف الفاتورة نفسها)؛ TBL023.MainGuide يطابقه
             "MainGuide": main_guide,
+            "CardGuide": main_guide,
+            "InvoiceTypeGuid": invoice_type,
             "BillNumber": invoice.BillNumber,
-            "message": "تم حفظ الفاتورة بنجاح"
+            "message": "تم حفظ الفاتورة بنجاح",
+            "stockMovementOk": stock_movement_ok,
+            **({"stockMovementWarning": stock_movement_detail} if stock_movement_detail else {}),
         }
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"خطأ في الحفظ: {str(e)}")
@@ -4945,6 +7283,31 @@ def _restaurant_path(name: str) -> str:
     return os.path.join(_restaurant_dir, name + ".json")
 
 
+def _restaurant_next_kds_ticket_no(existing: list) -> int:
+    """رقم عرض للمطبخ للطلبات غير المرتبطة برقم فاتورة — تسلسلي دون التصادم مع billNumber."""
+    m = 0
+    for o in existing:
+        if not isinstance(o, dict):
+            continue
+        for key in ("billNumber", "ticketNo"):
+            v = o.get(key)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, int):
+                m = max(m, v)
+            elif isinstance(v, float):
+                try:
+                    m = max(m, int(v))
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            elif isinstance(v, str) and v.strip().isdigit():
+                try:
+                    m = max(m, int(v.strip()))
+                except ValueError:
+                    pass
+    return m + 1
+
+
 def _bootstrap_mat3am_runtime() -> None:
     """تهيئة مجلدات وملفات التشغيل عند إقلاع الخادم — دون الاعتماد على فحص يدوي من المشغّل."""
     try:
@@ -5080,6 +7443,57 @@ def _floor_plan_single_floor_valid(flo: dict) -> bool:
     return True
 
 
+def _floor_plan_sync_cost_centers_in_document(plan: dict) -> dict:
+    if not isinstance(plan, dict):
+        return {"changed": False, "synced": 0, "failed_labels": []}
+    if isinstance(plan.get("floors"), list):
+        floors = plan.get("floors") or []
+    else:
+        floors = [plan]
+    changed = False
+    synced = 0
+    failed_labels = []
+    for fi, flo in enumerate(floors):
+        if not isinstance(flo, dict):
+            continue
+        nm = str(flo.get("name") or flo.get("id") or fi + 1).lower()
+        floor_name = str(flo.get("name") or f"طابق {fi + 1}")
+        floor_code_suffix = re.sub(r"[^A-Za-z0-9]+", "_", str(flo.get("id") or fi + 1)).strip("_").upper() or str(fi + 1)
+        floor_code = f"FLOOR_{floor_code_suffix}"
+        floor_gid = _upsert_cost_center_by_name(floor_name, None, floor_code)
+        if not floor_gid:
+            failed_labels.append(floor_name)
+            continue
+        if flo.get("floorCostCenterId") != floor_gid:
+            flo["floorCostCenterId"] = floor_gid
+            changed = True
+        if any(k in nm for k in ("roof", "رووف", "روف")):
+            prefix = "R"
+        elif any(k in nm for k in ("خارجي", "حديقة", "خارجيه", "outdoor", "garden")):
+            prefix = "E"
+        else:
+            prefix = str(fi + 1)
+        tbls = flo.get("tables") if isinstance(flo.get("tables"), list) else []
+        for ti, t in enumerate(tbls):
+            if not isinstance(t, dict):
+                continue
+            suffix = str(ti + 1).zfill(2)
+            code = f"{prefix}1{suffix}" if prefix in ("R", "E") else f"{prefix}{suffix}"
+            label = f"#{int(code)}" if code.isdigit() else code
+            gid = _upsert_cost_center_by_name(label, floor_gid, code)
+            if not gid:
+                failed_labels.append(label)
+                continue
+            synced += 1
+            if gid and t.get("linkedTableId") != gid:
+                t["linkedTableId"] = gid
+                changed = True
+            if t.get("label") != label:
+                t["label"] = label
+                changed = True
+    return {"changed": changed, "synced": synced, "failed_labels": failed_labels}
+
+
 @app.put("/api/restaurant/floor-plan")
 def restaurant_floor_plan_put(body: dict):
     """استبدال كامل لـ floor_plan.json — الجسم إما المخطط مباشرة أو { \"plan\": { ... } }.
@@ -5097,17 +7511,52 @@ def restaurant_floor_plan_put(body: dict):
         for i, fl in enumerate(fls):
             if not isinstance(fl, dict) or not _floor_plan_single_floor_valid(fl):
                 raise HTTPException(status_code=400, detail=f"طابق غير صالح في index={i}")
+        sync_res = _floor_plan_sync_cost_centers_in_document(plan)
+        if sync_res["failed_labels"]:
+            raise HTTPException(status_code=500, detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]))
         p = _restaurant_path("floor_plan")
         with open(p, "w", encoding="utf-8") as f:
             json.dump(plan, f, ensure_ascii=False, indent=2)
-        return {"ok": True}
+        return {"ok": True, "syncedCostCenters": True, "updatedPlanLinks": sync_res["changed"], "syncedTables": sync_res["synced"]}
 
     if not _floor_plan_single_floor_valid(plan):
         raise HTTPException(status_code=400, detail="مخطط غير صالح: يلزم shell (مضلع ≥3 نقاط) و tables و id و name و width و height")
+    sync_res = _floor_plan_sync_cost_centers_in_document(plan)
+    if sync_res["failed_labels"]:
+        raise HTTPException(status_code=500, detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]))
     p = _restaurant_path("floor_plan")
     with open(p, "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=2)
-    return {"ok": True}
+    return {"ok": True, "syncedCostCenters": True, "updatedPlanLinks": sync_res["changed"], "syncedTables": sync_res["synced"]}
+
+
+@app.post("/api/restaurant/floor-plan/sync-cost-centers")
+def restaurant_floor_plan_sync_cost_centers():
+    """مزامنة طاولات المخطط مع مراكز الكلفة (TBL005) وتعبئة linkedTableId وأسماء العرض.
+    - يشتق كودًا لكل طاولة: 1xx للطابق الأول، 2xx للثاني، E1xx للخارجي، R1xx للرووف.
+    - يُنشئ أو يُعيد استخدام TBL005 بالاسم، ويكتب CardGuide في linkedTableId.
+    """
+    p = _restaurant_path("floor_plan")
+    if not os.path.exists(p):
+        raise HTTPException(status_code=400, detail="لا يوجد ملف مخطط")
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            plan = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not isinstance(plan, dict):
+        raise HTTPException(status_code=400, detail="مخطط غير صالح")
+    sync_res = _floor_plan_sync_cost_centers_in_document(plan)
+    if sync_res["failed_labels"]:
+        raise HTTPException(status_code=500, detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]))
+    if sync_res["changed"]:
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(plan, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "changed": sync_res["changed"], "syncedTables": sync_res["synced"]}
 
 
 def _restaurant_kds_settings_default():
@@ -5155,6 +7604,121 @@ def restaurant_kds_settings_put(body: dict):
     return _restaurant_write_kds_settings(body if isinstance(body, dict) else {})
 
 
+def _floor_plan_table_id_to_label() -> dict:
+    """خريطة id الطاولة في المخطط → تسمية للعرض (label أو name)."""
+    out: dict = {}
+    p = _restaurant_path("floor_plan")
+    if not os.path.isfile(p):
+        return out
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            plan = json.load(f)
+        if not isinstance(plan, dict):
+            return out
+
+        def ingest_tables(tbl_list):
+            if not isinstance(tbl_list, list):
+                return
+            for t in tbl_list:
+                if not isinstance(t, dict):
+                    continue
+                tid = str(t.get("id") or "").strip()
+                if not tid:
+                    continue
+                lab = (t.get("label") or t.get("name") or t.get("title") or "").strip()
+                out[tid] = lab if lab else tid
+                out[tid.upper()] = out[tid]
+
+        if plan.get("schemaVersion") == 2:
+            for fl in plan.get("floors") or []:
+                if isinstance(fl, dict):
+                    ingest_tables(fl.get("tables"))
+        else:
+            ingest_tables(plan.get("tables"))
+    except Exception:
+        pass
+    return out
+
+
+def _restaurant_file_tables_id_to_name() -> dict:
+    out: dict = {}
+    for t in _restaurant_load("tables", []):
+        if not isinstance(t, dict) or not t.get("id"):
+            continue
+        tid = str(t.get("id")).strip()
+        nm = (t.get("name") or "").strip()
+        num = t.get("number")
+        out[tid] = nm if nm else (f"طاولة {num}" if num is not None else tid)
+    return out
+
+
+def _restaurant_table_display_names_for_ids(table_ids: set) -> dict:
+    """حلّ أسماء عرض للطاولة: ملف tables.json، مخطط الأرضية، ثم TBL005."""
+    result: dict = {}
+    if not table_ids:
+        return result
+    fp = _floor_plan_table_id_to_label()
+    fm = _restaurant_file_tables_id_to_name()
+    pending: list = []
+    for tid in table_ids:
+        if not tid:
+            result[tid] = "—"
+            continue
+        ts = str(tid).strip()
+        if ts in fm:
+            result[tid] = fm[ts]
+            continue
+        if ts in fp:
+            result[tid] = fp[ts]
+            continue
+        t_up = ts.upper()
+        hit = None
+        for k, v in fp.items():
+            if str(k).upper() == t_up:
+                hit = v
+                break
+        if hit:
+            result[tid] = hit
+            continue
+        pending.append(tid)
+
+    if pending:
+        conn = get_connection()
+        if conn:
+            try:
+                dbmap: dict = {}
+                cur = conn.cursor()
+                cur.execute("SELECT CardGuide, CostCenter FROM TBL005 WHERE CostCenter IS NOT NULL")
+                for row in cur.fetchall():
+                    if row and row[0]:
+                        g = str(row[0]).strip()
+                        name = (str(row[1]).strip() if row[1] is not None else "") or ""
+                        dbmap[g.upper()] = name or g
+                for tid in pending:
+                    if tid in result:
+                        continue
+                    ts = str(tid).strip()
+                    nm = dbmap.get(ts.upper())
+                    if nm:
+                        result[tid] = nm if len(nm) < 80 else (nm[:77] + "…")
+                    else:
+                        compact = ts.replace("-", "")
+                        short = compact[-6:].upper() if len(compact) >= 6 else ts[:8]
+                        result[tid] = f"طاولة (مرجع {short})"
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        for tid in pending:
+            if tid not in result:
+                ts = str(tid).strip()
+                compact = ts.replace("-", "")
+                short = compact[-6:].upper() if len(compact) >= 6 else ts[:8]
+                result[tid] = f"طاولة (مرجع {short})"
+    return result
+
+
 def _restaurant_default_tables():
     """طاولات افتراضية حتى تظهر القائمة حتى بدون قاعدة أو ملف"""
     return [
@@ -5167,10 +7731,8 @@ def _restaurant_default_tables():
 
 @app.get("/api/restaurant/tables")
 def restaurant_get_tables():
-    """جلب الطاولات — من ملف أو مراكز التكلفة أو افتراضي"""
-    data = _restaurant_load("tables", [])
-    if data:
-        return {"tables": data}
+    """جلب الطاولات — من مراكز التكلفة (TBL005) أولاً، ثم من ملف، ثم افتراضي"""
+    # 1) قاعدة البيانات (TBL005)
     conn = get_connection()
     if conn:
         try:
@@ -5188,11 +7750,22 @@ def restaurant_get_tables():
                     "position": {"x": 50 + (i % 5) * 120, "y": 50 + (i // 5) * 100},
                     "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False},
                 })
-            conn.close()
             if tables:
                 return {"tables": tables}
         except Exception:
             pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # 2) ملف محلي (لبيئات بدون قاعدة)
+    data = _restaurant_load("tables", [])
+    if data:
+        return {"tables": data}
+
+    # 3) افتراضي
     return {"tables": _restaurant_default_tables()}
 
 @app.post("/api/restaurant/tables")
@@ -5215,6 +7788,12 @@ def restaurant_save_table(body: dict):
     else:
         data.append(rec)
     _restaurant_save("tables", data)
+    # upsert into TBL005 as a cost center
+    try:
+        cc_label = str(rec.get("name") or "").strip()
+        _upsert_cost_center_by_name(cc_label)
+    except Exception:
+        pass
     return rec
 
 @app.delete("/api/restaurant/tables/{table_id}")
@@ -5250,27 +7829,108 @@ def restaurant_update_table_status(table_id: str, body: dict):
             pass
     return {"id": table_id, "status": status}
 
+
+def _restaurant_session_order_counts() -> dict:
+    """عدد الطلبات (أي سجل) لكل sessionId."""
+    counts: dict = {}
+    for o in _restaurant_load("orders", []):
+        if not isinstance(o, dict):
+            continue
+        sid = str(o.get("sessionId") or "").strip()
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+    return counts
+
+
+def _session_table_display_fallback(tid: str) -> str:
+    ts = str(tid or "").strip()
+    if not ts:
+        return "بدون طاولة"
+    compact = ts.replace("-", "")
+    short = compact[-6:].upper() if len(compact) >= 6 else ts[:8]
+    return f"طاولة ·{short}"
+
+
 @app.get("/api/restaurant/table-sessions")
 def restaurant_get_sessions(status: Optional[str] = None):
-    """جلسات الطاولات"""
+    """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير."""
     data = _restaurant_load("table_sessions", [])
     if status:
         data = [s for s in data if s.get("status") == status]
-    return {"sessions": data}
+    counts = _restaurant_session_order_counts()
+    tids = set()
+    for s in data:
+        if isinstance(s, dict) and s.get("tableId"):
+            tids.add(str(s.get("tableId")).strip())
+    tids.discard("")
+    name_map = _restaurant_table_display_names_for_ids(tids)
+    fm = _restaurant_file_tables_id_to_name()
+    out = []
+    for s in data:
+        if not isinstance(s, dict):
+            continue
+        row = dict(s)
+        tid = str(s.get("tableId") or "").strip()
+        disp = (name_map.get(tid) or "").strip() if tid else ""
+        if not disp or disp == "—":
+            disp = (fm.get(tid) or "").strip() if tid else ""
+        if not disp or disp == "—":
+            disp = _session_table_display_fallback(tid) if tid else "بدون طاولة"
+        row["tableDisplayName"] = disp
+        row["linkedOrderCount"] = int(counts.get(str(s.get("id")), 0))
+        out.append(row)
+    out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
+    return {"sessions": out}
+
 
 @app.post("/api/restaurant/table-sessions")
 def restaurant_create_session(body: dict):
-    """إنشاء جلسة طاولة (إسكان)"""
+    """إنشاء جلسة طاولة (إسكان). جلسة نشطة واحدة منطقياً لكل tableId: إن وُجدت تُعاد كما هي ما لم يُمرَّر forceNewSession."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    table_id = str(body.get("tableId") or "").strip()
+    if not table_id:
+        raise HTTPException(status_code=400, detail="tableId مطلوب")
+    force_new = body.get("forceNewSession") in (True, "1", "true", "yes", 1)
     data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    if not force_new:
+        for s in data:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("status") or "").lower() != "active":
+                continue
+            if str(s.get("tableId") or "").strip() != table_id:
+                continue
+            gc = body.get("guestCount")
+            if gc is not None:
+                try:
+                    s["guestCount"] = max(1, int(gc))
+                except (TypeError, ValueError):
+                    pass
+            cc = body.get("childrenCount")
+            if cc is not None:
+                try:
+                    s["childrenCount"] = max(0, int(cc))
+                except (TypeError, ValueError):
+                    pass
+            pref = body.get("preferences")
+            if isinstance(pref, dict) and pref:
+                base = s.get("preferences") if isinstance(s.get("preferences"), dict) else {}
+                merged = {**base, **pref}
+                s["preferences"] = merged
+            _restaurant_save("table_sessions", data)
+            return s
     sid = str(uuid.uuid4())
     rec = {
         "id": sid,
-        "tableId": body.get("tableId"),
+        "tableId": table_id,
         "projectId": body.get("projectId"),
         "hostId": body.get("hostId"),
         "guestCount": body.get("guestCount", 1),
         "childrenCount": body.get("childrenCount", 0),
-        "preferences": body.get("preferences", {}),
+        "preferences": body.get("preferences", {}) if isinstance(body.get("preferences"), dict) else {},
         "startTime": datetime.now().isoformat(),
         "status": "active",
     }
@@ -5278,8 +7938,73 @@ def restaurant_create_session(body: dict):
     _restaurant_save("table_sessions", data)
     return rec
 
+
+@app.post("/api/restaurant/table-sessions/cleanup-duplicate-empties")
+def restaurant_cleanup_duplicate_empty_sessions():
+    """إنهاء جلسات مكررة لنفس الطاولة إن كانت فارغة (0 طلبات) ولم يُطلب لها حساب. تُبقى جلسة واحدة مفضّلة (بطلبات / طلب حساب / الأحدث)."""
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    counts = _restaurant_session_order_counts()
+    by_table: dict = {}
+    for s in data:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("status") or "").lower() != "active":
+            continue
+        tid = str(s.get("tableId") or "").strip()
+        if not tid:
+            continue
+        by_table.setdefault(tid, []).append(s)
+    now_iso = datetime.now().isoformat()
+    completed: list = []
+    for _tid, lst in by_table.items():
+        if len(lst) <= 1:
+            continue
+
+        def rank(s):
+            sid = str(s.get("id") or "")
+            oc = int(counts.get(sid, 0))
+            br = 1 if s.get("billingRequestedAt") else 0
+            st = str(s.get("startTime") or "")
+            return (oc > 0, br, st)
+
+        lst_sorted = sorted(lst, key=rank, reverse=True)
+        keep_id = str(lst_sorted[0].get("id") or "")
+        for s in lst_sorted[1:]:
+            sid = str(s.get("id") or "")
+            if sid == keep_id:
+                continue
+            if int(counts.get(sid, 0)) > 0:
+                continue
+            if s.get("billingRequestedAt"):
+                continue
+            s["status"] = "completed"
+            s["endTime"] = now_iso
+            completed.append(sid)
+    _restaurant_save("table_sessions", data)
+    return {"ok": True, "completedSessionIds": completed, "count": len(completed)}
+
 @app.patch("/api/restaurant/table-sessions/{session_id}/complete")
-def restaurant_complete_session(session_id: str):
+def restaurant_complete_session(session_id: str, force: bool = Query(False, description="تجاوز فحص فاتورة بانتظار التسديد (غير مستحسن)")):
+    """إغلاق سجل الجلسة في الملف المحلي فقط — لا يُسدّد فاتورة ولا يحذف الطلبات.
+    إن وُجدت فاتورة محلية بانتظار الكاشير لنفس الجلسة يُرفض الإغلاق ما لم يُمرَّر force=true."""
+    if not force:
+        invs = _restaurant_load("invoices", [])
+        if isinstance(invs, list):
+            for inv in invs:
+                if not isinstance(inv, dict):
+                    continue
+                if str(inv.get("sessionId") or "").strip() != str(session_id).strip():
+                    continue
+                if not inv.get("awaitingPayment"):
+                    continue
+                if str(inv.get("paidAt") or "").strip():
+                    continue
+                raise HTTPException(
+                    status_code=409,
+                    detail="توجد فاتورة بانتظار التسديد لهذه الجلسة. افتح «فواتير المطعم (كاشير)» واضغط تسديد (مع «إغلاق الجلسة» إن رغبت)، ثم أعد المحاولة. أو أضف ?force=true للتجاوز.",
+                )
     data = _restaurant_load("table_sessions", [])
     for s in data:
         if s.get("id") == session_id:
@@ -5289,12 +8014,526 @@ def restaurant_complete_session(session_id: str):
             return s
     raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
 
+
+def _cashier_alert_parse_ts(iso_s: str) -> float:
+    try:
+        s = str(iso_s or "").strip()
+        if s.endswith("Z"):
+            s = s[:-1]
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _cashier_load_alerts() -> list:
+    raw = _restaurant_load("cashier_alerts", [])
+    return raw if isinstance(raw, list) else []
+
+
+def _cashier_save_alerts(data: list) -> None:
+    _restaurant_save("cashier_alerts", data)
+
+
+@app.get("/api/restaurant/cashier/table-overview")
+def restaurant_cashier_table_overview():
+    """جلسات نشطة + ملخص بنود وطلب حساب/انتظار تسديد — استدعاء واحد للكاشير (شرائح الطاولات)."""
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    orders_all = _restaurant_load("orders", [])
+    if not isinstance(orders_all, list):
+        orders_all = []
+    invs = _restaurant_load("invoices", [])
+    if not isinstance(invs, list):
+        invs = []
+
+    active = [s for s in sessions if isinstance(s, dict) and str(s.get("status") or "").lower() == "active"]
+    tids = set()
+    for s in active:
+        tid = str(s.get("tableId") or "").strip()
+        if tid:
+            tids.add(tid)
+    name_map = _restaurant_table_display_names_for_ids(tids)
+    fm = _restaurant_file_tables_id_to_name()
+
+    await_inv: dict = {}
+    for inv in invs:
+        if not isinstance(inv, dict):
+            continue
+        if not inv.get("awaitingPayment"):
+            continue
+        if str(inv.get("paidAt") or "").strip():
+            continue
+        sid = str(inv.get("sessionId") or "").strip()
+        if sid:
+            await_inv[sid] = str(inv.get("invoiceId") or "")
+
+    items_out: list = []
+    for s in active:
+        sid = str(s.get("id") or "")
+        tid = str(s.get("tableId") or "").strip()
+        disp = (name_map.get(tid) or "").strip() if tid else ""
+        if not disp or disp == "—":
+            disp = (fm.get(tid) or "").strip() if tid else ""
+        if not disp or disp == "—":
+            disp = _session_table_display_fallback(tid) if tid else "بدون طاولة"
+
+        sess_orders = [
+            o
+            for o in orders_all
+            if isinstance(o, dict)
+            and str(o.get("sessionId") or "") == sid
+            and str(o.get("status") or "").lower() != "cancelled"
+        ]
+        subtotal = 0.0
+        preview_parts: list = []
+        kitchen_pending = 0
+        for o in sess_orders:
+            st = str(o.get("status") or "").lower()
+            if st in ("pending", "preparing"):
+                kitchen_pending += 1
+            for it in o.get("items") or []:
+                if not isinstance(it, dict):
+                    continue
+                try:
+                    q = float(it.get("quantity") or 0)
+                except (TypeError, ValueError):
+                    q = 0.0
+                try:
+                    p = float(it.get("unitPrice") or 0)
+                except (TypeError, ValueError):
+                    p = 0.0
+                subtotal += q * p
+                nm = str(it.get("name") or "").strip() or "صنف"
+                if q and int(q) == q:
+                    preview_parts.append(f"{nm}×{int(q)}")
+                else:
+                    preview_parts.append(f"{nm}×{round(q, 2)}")
+        prev = "، ".join(preview_parts[:10])
+        if len(prev) > 140:
+            prev = prev[:137] + "…"
+
+        bill_req = str(s.get("billingRequestedAt") or "").strip() or None
+        inv_id = await_inv.get(sid, "")
+        items_out.append(
+            {
+                "sessionId": sid,
+                "tableId": tid,
+                "tableDisplayName": disp,
+                "guestCount": s.get("guestCount"),
+                "billingRequestedAt": bill_req,
+                "awaitingPayment": bool(inv_id),
+                "awaitingInvoiceId": inv_id or None,
+                "orderCount": len(sess_orders),
+                "kitchenInProgressCount": kitchen_pending,
+                "linesPreview": prev or "—",
+                "itemsSubtotal": round(subtotal, 2),
+            }
+        )
+
+    def _sort_key(x: dict):
+        ap = 0 if x.get("awaitingPayment") else 1
+        br = 0 if x.get("billingRequestedAt") else 1
+        return (ap, br, str(x.get("tableDisplayName") or ""))
+
+    items_out.sort(key=_sort_key)
+    return {"generatedAt": datetime.now().isoformat(), "count": len(items_out), "sessions": items_out}
+
+
+@app.get("/api/restaurant/cashier/alerts")
+def restaurant_cashier_alerts_list():
+    raw = _cashier_load_alerts()
+    out = [a for a in raw if isinstance(a, dict) and not str(a.get("dismissedAt") or "").strip()]
+    out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
+    return {"alerts": out[:40], "count": len(out)}
+
+
+@app.post("/api/restaurant/cashier/alerts")
+def restaurant_cashier_alerts_create(body: dict):
+    """تنبيه للكاشير — منع تكرار لنفس sourceKey خلال 180 ثانية."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    typ = str(body.get("type") or "").strip().lower()
+    if typ not in ("kitchen_urgent", "waiter_summon"):
+        raise HTTPException(status_code=400, detail="type يجب kitchen_urgent أو waiter_summon")
+    source_key = str(body.get("sourceKey") or "").strip()
+    title = str(body.get("title") or body.get("message") or "").strip()[:200]
+    if not title:
+        title = "استعجال مطبخ" if typ == "kitchen_urgent" else "استدعاء من الصالة"
+    body_text = str(body.get("body") or body.get("detail") or "").strip()[:500]
+    now_iso = datetime.now().isoformat()
+    now_ts = datetime.now().timestamp()
+    raw = _cashier_load_alerts()
+
+    if source_key:
+        for a in reversed(raw):
+            if not isinstance(a, dict):
+                continue
+            if str(a.get("dismissedAt") or "").strip():
+                continue
+            if str(a.get("sourceKey") or "") != source_key:
+                continue
+            if now_ts - _cashier_alert_parse_ts(str(a.get("createdAt") or "")) <= 180:
+                return {"ok": True, "deduped": True, "id": a.get("id"), "alert": a}
+
+    rec = {
+        "id": str(uuid.uuid4()),
+        "type": typ,
+        "title": title,
+        "body": body_text or None,
+        "tableId": str(body.get("tableId") or "").strip() or None,
+        "sessionId": str(body.get("sessionId") or "").strip() or None,
+        "orderId": str(body.get("orderId") or "").strip() or None,
+        "sourceKey": source_key or None,
+        "createdAt": now_iso,
+        "dismissedAt": None,
+    }
+    raw.append(rec)
+    if len(raw) > 500:
+        raw = raw[-500:]
+    _cashier_save_alerts(raw)
+    return {"ok": True, "deduped": False, "id": rec["id"], "alert": rec}
+
+
+@app.patch("/api/restaurant/cashier/alerts/{alert_id}/dismiss")
+def restaurant_cashier_alerts_dismiss(alert_id: str):
+    raw = _cashier_load_alerts()
+    now_iso = datetime.now().isoformat()
+    for a in raw:
+        if isinstance(a, dict) and str(a.get("id") or "") == str(alert_id):
+            a["dismissedAt"] = now_iso
+            _cashier_save_alerts(raw)
+            return {"ok": True, "id": alert_id}
+    raise HTTPException(status_code=404, detail="التنبيه غير موجود")
+
+
+def _append_session_audit_entry(entry: dict) -> None:
+    p = _restaurant_path("session_audit")
+    arr: list = []
+    if os.path.isfile(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, list):
+                arr = raw
+        except Exception:
+            pass
+    arr.append(entry)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(arr, f, ensure_ascii=False, indent=2)
+
+
+@app.patch("/api/restaurant/table-sessions/{session_id}")
+def restaurant_patch_session(session_id: str, body: dict):
+    """نقل جلسة نشطة إلى طاولة أخرى (نفس sessionId) + تحديث tableId في الطلبات المرتبطة."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    new_table = str(body.get("tableId") or "").strip()
+    if not new_table:
+        raise HTTPException(status_code=400, detail="tableId مطلوب")
+    data = _restaurant_load("table_sessions", [])
+    found = None
+    for s in data:
+        if str(s.get("id")) == str(session_id):
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(found.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="لا يمكن نقل جلسة غير نشطة")
+    old_table = found.get("tableId")
+    found["tableId"] = new_table
+    _restaurant_save("table_sessions", data)
+    odata = _restaurant_load("orders", [])
+    for o in odata:
+        if str(o.get("sessionId") or "") == str(session_id):
+            o["tableId"] = new_table
+    _restaurant_save("orders", odata)
+    _append_session_audit_entry(
+        {
+            "at": datetime.now().isoformat(),
+            "action": "transfer_table",
+            "sessionId": str(session_id),
+            "fromTableId": old_table,
+            "toTableId": new_table,
+            "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
+        }
+    )
+    return {"ok": True, "session": found}
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/merge")
+def restaurant_merge_session(session_id: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    target_table_id = str(body.get("targetTableId") or "").strip()
+    if not target_table_id:
+        raise HTTPException(status_code=400, detail="targetTableId مطلوب")
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    src = None
+    dst = None
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("id") or "") == str(session_id):
+            src = s
+        if str(s.get("tableId") or "") == target_table_id and str(s.get("status") or "").lower() == "active":
+            dst = s
+    if not src:
+        raise HTTPException(status_code=404, detail="الجلسة المصدر غير موجودة")
+    if str(src.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="الجلسة المصدر غير نشطة")
+    if not dst:
+        raise HTTPException(status_code=404, detail="لا توجد جلسة نشطة للطاولة الهدف")
+    if str(dst.get("id") or "") == str(session_id):
+        raise HTTPException(status_code=400, detail="لا يمكن دمج الجلسة مع نفسها")
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+    for o in orders:
+        if not isinstance(o, dict):
+            continue
+        if str(o.get("sessionId") or "") == str(session_id):
+            o["sessionId"] = str(dst.get("id"))
+            o["tableId"] = str(dst.get("tableId"))
+    _restaurant_save("orders", orders)
+    try:
+        src_gc = int(src.get("guestCount") or 0)
+        dst_gc = int(dst.get("guestCount") or 0)
+        if src_gc > 0:
+            dst["guestCount"] = dst_gc + src_gc
+    except Exception:
+        pass
+    src["status"] = "merged"
+    src["mergedIntoSessionId"] = str(dst.get("id"))
+    src["closedAt"] = datetime.now().isoformat()
+    _restaurant_save("table_sessions", sessions)
+    _append_session_audit_entry(
+        {
+            "at": datetime.now().isoformat(),
+            "action": "merge_table",
+            "sessionId": str(session_id),
+            "fromTableId": src.get("tableId"),
+            "toTableId": dst.get("tableId"),
+            "targetSessionId": str(dst.get("id")),
+            "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
+        }
+    )
+    return {"ok": True, "sourceSessionId": str(session_id), "targetSession": dst}
+
+
+@app.get("/api/restaurant/daily-menu")
+def restaurant_daily_menu_get():
+    """قائمة اليوم للفلترة في الجرسون/POS — ملف daily_menu.json"""
+    p = _restaurant_path("daily_menu")
+    if not os.path.isfile(p):
+        return {"menu": {"forDate": "", "allowedTokens": [], "notes": ""}}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            toks = d.get("allowedTokens")
+            if not isinstance(toks, list):
+                toks = []
+            return {
+                "menu": {
+                    "forDate": str(d.get("forDate") or ""),
+                    "allowedTokens": [str(x) for x in toks if x is not None],
+                    "notes": str(d.get("notes") or ""),
+                }
+            }
+    except Exception:
+        pass
+    return {"menu": {"forDate": "", "allowedTokens": [], "notes": ""}}
+
+
+@app.put("/api/restaurant/daily-menu")
+def restaurant_daily_menu_put(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    m = body.get("menu") if isinstance(body.get("menu"), dict) else body
+    if not isinstance(m, dict):
+        raise HTTPException(status_code=400, detail="menu غير صالح")
+    toks = m.get("allowedTokens")
+    if not isinstance(toks, list):
+        toks = []
+    out = {
+        "forDate": str(m.get("forDate") or "")[:32],
+        "allowedTokens": [str(x).strip() for x in toks if str(x).strip()][:500],
+        "notes": str(m.get("notes") or "")[:4000],
+    }
+    p = _restaurant_path("daily_menu")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "menu": out}
+
+
+# --- Daily menu schedule: date ranges mapped to explicit TBL007 products ---
+@app.get("/api/restaurant/daily-menu-schedule")
+def restaurant_daily_menu_schedule_get():
+    """جدولة القائمة اليومية حسب الأصناف: entries[{dateFrom,dateTo,items[{ProductGuide,ProductName}]}]"""
+    p = _restaurant_path("daily_menu_schedule")
+    if not os.path.isfile(p):
+        return {"entries": []}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict) and isinstance(d.get("entries"), list):
+            out_entries = []
+            for e in d["entries"]:
+                if not isinstance(e, dict):
+                    continue
+                date_from = str(e.get("dateFrom") or "")[:32]
+                date_to = str(e.get("dateTo") or "")[:32]
+                items = e.get("items") if isinstance(e.get("items"), list) else []
+                norm_items = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    pg = str(it.get("ProductGuide") or it.get("CardGuide") or "")
+                    pn = str(it.get("ProductName") or it.get("name") or "")
+                    if pg:
+                        norm_items.append({"ProductGuide": pg, "ProductName": pn})
+                out_entries.append({"dateFrom": date_from, "dateTo": date_to or date_from, "items": norm_items[:300]})
+            return {"entries": out_entries}
+    except Exception:
+        pass
+    return {"entries": []}
+
+
+@app.put("/api/restaurant/daily-menu-schedule")
+def restaurant_daily_menu_schedule_put(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    entries = body.get("entries") if isinstance(body.get("entries"), list) else []
+    out_entries = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        df = str(e.get("dateFrom") or "")[:32]
+        dt = str(e.get("dateTo") or df)[:32]
+        items = e.get("items") if isinstance(e.get("items"), list) else []
+        norm_items = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            pg = str(it.get("ProductGuide") or it.get("CardGuide") or "")
+            pn = str(it.get("ProductName") or it.get("name") or "")
+            if pg:
+                norm_items.append({"ProductGuide": pg, "ProductName": pn})
+        out_entries.append({"dateFrom": df, "dateTo": dt, "items": norm_items[:300]})
+    p = _restaurant_path("daily_menu_schedule")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump({"entries": out_entries}, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "entries": out_entries}
+
+
+@app.get("/api/restaurant/invoices-local")
+def restaurant_invoices_local(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    payment_status: Optional[str] = None,
+):
+    """فواتير محلية — بعد «طلب الحساب» تظهر بـ awaitingPayment حتى يُسدّد الكاشير.
+    payment_status: awaiting | paid | all (افتراضي all للتوافق)."""
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    ps = (payment_status or "all").strip().lower()
+    rows = []
+    for inv in raw:
+        if not isinstance(inv, dict):
+            continue
+        awaiting = bool(inv.get("awaitingPayment"))
+        paid_at = str(inv.get("paidAt") or "").strip()
+        if ps == "awaiting" and not awaiting:
+            continue
+        if ps == "paid" and not paid_at:
+            continue
+        ref = paid_at if paid_at else str(inv.get("requestedAt") or inv.get("paidAt") or "")
+        day = ref[:10] if len(ref) >= 10 else ""
+        if date_from and day and day < date_from[:10]:
+            continue
+        if date_to and day and day > date_to[:10]:
+            continue
+        rows.append(inv)
+    rows.sort(key=lambda x: str(x.get("requestedAt") or x.get("paidAt") or ""), reverse=True)
+    return {"invoices": rows, "count": len(rows)}
+
+
+@app.post("/api/restaurant/invoices-local/mark-paid")
+def restaurant_invoices_local_mark_paid(body: dict):
+    """تسديد فاتورة انتظار الكاشير — يحدّث الملف المحلي ويحاول تحديث TBL022.Paid."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    invoice_id = str(body.get("invoiceId") or "").strip()
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    found = None
+    for inv in raw:
+        if isinstance(inv, dict) and str(inv.get("invoiceId") or "") == invoice_id:
+            found = inv
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+    if str(found.get("paidAt") or "").strip():
+        raise HTTPException(status_code=409, detail="الفاتورة مُسدَّدة مسبقاً")
+    amt = found.get("total")
+    try:
+        paid_amt = float(amt) if amt is not None else 0.0
+    except (TypeError, ValueError):
+        paid_amt = 0.0
+    now_iso = datetime.now().isoformat()
+    found["awaitingPayment"] = False
+    found["paidAt"] = now_iso
+    found["paymentMethod"] = str(body.get("paymentMethod") or "cash")[:40]
+    _restaurant_save("invoices", raw)
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE TBL022 SET Paid = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                (paid_amt, invoice_id),
+            )
+            conn.commit()
+        except Exception as ex:
+            print("[mat3am] mark-paid TBL022:", ex)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if bool(body.get("closeSession")):
+        sid = str(found.get("sessionId") or "").strip()
+        if sid:
+            sess = _restaurant_load("table_sessions", [])
+            if isinstance(sess, list):
+                for s in sess:
+                    if isinstance(s, dict) and str(s.get("id") or "") == sid:
+                        s["endTime"] = now_iso
+                        s["status"] = "completed"
+                        break
+                _restaurant_save("table_sessions", sess)
+    return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso}
+
+
 @app.get("/api/restaurant/orders")
-def restaurant_get_orders(session_id: Optional[str] = None, status: Optional[str] = None):
-    """الطلبات — session_id أو status (pending, preparing, ready, served, paid)"""
+def restaurant_get_orders(
+    session_id: Optional[str] = None,
+    sessionId: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    """الطلبات — session_id أو sessionId (نفس المعنى) أو status."""
     data = _restaurant_load("orders", [])
-    if session_id:
-        data = [o for o in data if o.get("sessionId") == session_id]
+    sid = session_id or sessionId
+    if sid:
+        data = [o for o in data if str(o.get("sessionId") or "") == str(sid)]
     if status:
         data = [o for o in data if o.get("status") == status]
     return {"orders": data}
@@ -5320,6 +8559,7 @@ def restaurant_create_order(body: dict):
         "status": "pending",
         "createdAt": datetime.now().isoformat(),
         "prepTargetMinutes": ptm_f,
+        "ticketNo": _restaurant_next_kds_ticket_no(data),
     }
     data.append(rec)
     _restaurant_save("orders", data)
@@ -5327,15 +8567,26 @@ def restaurant_create_order(body: dict):
 
 @app.patch("/api/restaurant/orders/{order_id}/status")
 def restaurant_update_order_status(order_id: str, body: dict):
-    status = (body.get("status") or "").strip()
+    status = (body.get("status") or "").strip().lower()
+    allowed = {"pending", "preparing", "ready", "served", "paid", "cancelled"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"حالة غير مدعومة: {status}")
     data = _restaurant_load("orders", [])
     for o in data:
         if o.get("id") == order_id:
+            prev = str(o.get("status") or "").lower()
+            if status == "cancelled" and prev not in ("pending",):
+                raise HTTPException(
+                    status_code=409,
+                    detail="لا يمكن الإلغاء بعد بدء التحضير في المطبخ.",
+                )
             o["status"] = status
             if status == "preparing":
                 o["prepStartTime"] = datetime.now().isoformat()
             elif status == "ready":
                 o["prepEndTime"] = datetime.now().isoformat()
+            elif status == "cancelled":
+                o["cancelledAt"] = datetime.now().isoformat()
             _restaurant_save("orders", data)
             return o
     raise HTTPException(status_code=404, detail="الطلب غير موجود")
@@ -5376,6 +8627,51 @@ def restaurant_update_kitchen_notification(notification_id: str, body: dict):
             return n
     raise HTTPException(status_code=404, detail="الإشعار غير موجود")
 
+@app.get("/api/restaurant/invoice-type-mappings")
+def restaurant_invoice_type_mappings():
+    """عرض ربط نوع الطلب (table/takeaway/delivery/purchase) بـ CardGuide في TBL020 بعد التهيئة."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT m.OrderKind, m.Tbl020CardGuide, m.InvoiceDisplayName, t.InvoiceName, t.TextValue01
+                FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES m
+                LEFT JOIN dbo.TBL020 t ON t.CardGuide = m.Tbl020CardGuide
+                ORDER BY m.OrderKind
+                """
+            )
+            rows = cursor.fetchall()
+        except Exception:
+            rows = []
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "orderKind": r[0],
+                    "tbl020CardGuide": str(r[1]) if r[1] else None,
+                    "invoiceDisplayName": r[2],
+                    "tbl020InvoiceName": r[3],
+                    "textValue01": r[4],
+                }
+            )
+        return {
+            "mappings": out,
+            "orderKindsExpected": list(MAT3AM_RESTAURANT_ORDER_KINDS),
+            "hint": None
+            if out
+            else "لا توجد خرائط — تأكد من وجود أنواع في TBL020 ثم POST /api/dev/bootstrap لإنشاء MAT3AM_RESTAURANT_INVOICE_TYPES.",
+        }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.post("/api/restaurant/invoices")
 def restaurant_create_invoice(body: dict):
     """إنشاء فاتورة المطعم — تحويل لـ POST /api/invoices (XTRA)"""
@@ -5387,7 +8683,9 @@ def restaurant_create_invoice(body: dict):
     discount_value = float(body.get("discountValue", 0))
     total = float(body.get("total", 0))
     payment_method = body.get("paymentMethod") or "cash"
-    order_type = (body.get("orderType") or "table").strip().lower()  # table|takeaway|delivery
+    order_type = (body.get("orderType") or "table").strip().lower()
+    if order_type not in MAT3AM_RESTAURANT_ORDER_KINDS_SET:
+        order_type = "table"
     delivery = body.get("delivery") or {}
     agent_guide = body.get("agentGuide")
     conn = get_connection()
@@ -5395,6 +8693,7 @@ def restaurant_create_invoice(body: dict):
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     try:
         cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
         if not agent_guide and order_type == "delivery":
             d_phone = str(delivery.get("phone") or "").strip()
             d_mobile = str(delivery.get("mobile") or "").strip()
@@ -5439,9 +8738,15 @@ def restaurant_create_invoice(body: dict):
             agent_guide = str(r[0]) if r and r[0] else None
         if not agent_guide:
             raise HTTPException(status_code=400, detail="لا يوجد عميل افتراضي. أضف عميلاً في النظام أو أرسل agentGuide.")
-        cursor.execute("SELECT ISNULL(MAX(BillNumber), 0) + 1 FROM TBL022 WHERE MainGuide = (SELECT TOP 1 CardGuide FROM TBL020)")
+        # نوع الفاتورة من TBL020 ثم رقم تسلسلي لنفس النوع (MainGuide في TBL022 = CardGuide نوع الفاتورة)
+        explicit_inv = body.get("invoiceType") or body.get("invoiceTypeGuide")
+        invoice_type_guid = _get_restaurant_invoice_type_guid(cursor, order_type, explicit_inv)
+        cursor.execute(
+            "SELECT ISNULL(MAX(BillNumber), 0) + 1 FROM TBL022 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+            (invoice_type_guid,),
+        )
         r = cursor.fetchone()
-        bill_num = int(r[0]) if r else 1
+        bill_num = int(r[0]) if r and r[0] is not None else 1
         today = datetime.now()
         bill_date = today.strftime("%d-%m-%Y")
         pay_ar = {"cash": "نقدي", "card": "بطاقات مصرفيه", "digital": "نقدي"}
@@ -5462,7 +8767,7 @@ def restaurant_create_invoice(body: dict):
                         "ProductGuide": it.get("menuItemId") or it.get("productGuide") or "",
                         "ProductName": it.get("name", ""),
                         "Quantity": qty,
-                        "Unit": "وحدة",
+                        "Unit": "1",
                         "UnitPrice": price,
                         "TotalValue": qty * price,
                     })
@@ -5471,17 +8776,76 @@ def restaurant_create_invoice(body: dict):
             line = _normalize_pos_invoice_line(raw)
             if line:
                 normalized_items.append(line)
-        items_body = normalized_items
+        items_body = _enrich_invoice_lines_from_menu(cursor, normalized_items)
         if not items_body:
             raise HTTPException(status_code=400, detail="لا توجد بنود للفاتورة")
+
+        # طاولة + جرسون: تسجيل للمطبخ فقط (Open Check) — بدون TBL022/TBL023 حتى «طلب الحساب»
+        post_sql = body.get("postToSqlInvoice")
+        if post_sql is None:
+            post_sql = True
+        if order_type == "table" and post_sql is False:
+            table_id_kds = str(body.get("tableId") or "").strip() or str(session_id or "")
+            kds_items = []
+            for x in items_body:
+                kds_items.append(
+                    {
+                        "name": str(x.get("ProductName") or ""),
+                        "quantity": float(x.get("Quantity") or 0),
+                        "unitPrice": float(x.get("UnitPrice") or 0),
+                        "productGuide": str(x.get("ProductGuide") or ""),
+                    }
+                )
+            ord_data = _restaurant_load("orders", [])
+            ord_data.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "sessionId": str(session_id),
+                    "tableId": table_id_kds,
+                    "invoiceId": None,
+                    "finalInvoiceId": None,
+                    "items": kds_items,
+                    "kitchenTotals": {
+                        "subtotal": subtotal,
+                        "tax": tax,
+                        "serviceCharge": service_charge,
+                        "total": total,
+                    },
+                    "status": "pending",
+                    "generalOrder": bool(body.get("generalOrder")),
+                    "createdAt": datetime.now().isoformat(),
+                    "ticketNo": _restaurant_next_kds_ticket_no(ord_data),
+                }
+            )
+            _restaurant_save("orders", ord_data)
+            return {
+                "kitchenOnly": True,
+                "orderId": ord_data[-1]["id"],
+                "sessionId": session_id,
+                "tableId": table_id_kds,
+                "message": "سُجّل للمطبخ — الفاتورة تُنشأ عند «طلب الحساب» فقط.",
+            }
+
         delivery_note = ""
         if order_type == "delivery":
+            student_line = delivery.get("studentPhone") or delivery.get("studentId") or delivery.get("studentNumber")
+            courier_bits = [
+                delivery.get("courierName"),
+                delivery.get("driverName"),
+                delivery.get("shippingCompany"),
+                delivery.get("shipperName"),
+            ]
+            courier_line = " / ".join(str(x).strip() for x in courier_bits if x and str(x).strip())
             delivery_note = (
                 f" | دليفري: هاتف={delivery.get('phone') or delivery.get('mobile') or ''}"
                 f" | عنوان={delivery.get('address') or ''}"
                 f" | وقت التسليم={delivery.get('deliveryTime') or ''}"
                 f" | دفع={delivery.get('payment') or payment_method}"
             )
+            if student_line:
+                delivery_note += f" | طالب/هاتف عميل={student_line}"
+            if courier_line:
+                delivery_note += f" | شحن/شاحن={courier_line}"
         elif order_type == "takeaway":
             delivery_note = " | سفري"
 
@@ -5490,6 +8854,7 @@ def restaurant_create_invoice(body: dict):
             "BillDate": bill_date,
             "DoneIn": bill_date,
             "AgentGuide": agent_guide,
+            "InvoiceType": invoice_type_guid,
             "Notes": ("مطعم - جلسة " + (session_id or "")) + delivery_note,
             "PaymentMethod": pay_ar.get(payment_method, "نقدي"),
             "Discount": discount_value,
@@ -5502,6 +8867,37 @@ def restaurant_create_invoice(body: dict):
         inv_list = _restaurant_load("invoices", [])
         inv_list.append({"sessionId": session_id, "invoiceId": result.get("MainGuide"), "total": total, "paidAt": datetime.now().isoformat()})
         _restaurant_save("invoices", inv_list)
+        # طلب مطبخ (KDS) — مرتبط بجلسة الطاولة؛ يظهر في شاشة المطبخ ويُلغى من الجرسون إن بقي pending
+        if order_type == "table" and session_id and items_body:
+            try:
+                table_id_kds = str(body.get("tableId") or "").strip() or str(session_id)
+                kds_items = []
+                for x in items_body:
+                    kds_items.append(
+                        {
+                            "name": str(x.get("ProductName") or ""),
+                            "quantity": float(x.get("Quantity") or 0),
+                            "unitPrice": float(x.get("UnitPrice") or 0),
+                            "productGuide": str(x.get("ProductGuide") or ""),
+                        }
+                    )
+                ord_data = _restaurant_load("orders", [])
+                ord_data.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "sessionId": str(session_id),
+                        "tableId": table_id_kds,
+                        "invoiceId": str(result.get("MainGuide") or ""),
+                        "billNumber": int(bill_num),
+                        "items": kds_items,
+                        "status": "pending",
+                        "generalOrder": bool(body.get("generalOrder")),
+                        "createdAt": datetime.now().isoformat(),
+                    }
+                )
+                _restaurant_save("orders", ord_data)
+            except Exception:
+                pass
         return {"id": result.get("MainGuide"), "sessionId": session_id, "subtotal": subtotal, "tax": tax, "total": total, "paidAt": datetime.now().isoformat()}
     except HTTPException:
         raise
@@ -5513,6 +8909,237 @@ def restaurant_create_invoice(body: dict):
                 conn.close()
         except Exception:
             pass
+
+
+@app.post("/api/restaurant/sessions/request-bill")
+def restaurant_sessions_request_bill(body: dict):
+    """طلب الحساب: تجميع طلبات الجلسة غير المفوترة → فاتورة SQL واحدة + انتظار تسديد الكاشير."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    session_id = str(body.get("sessionId") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="sessionId مطلوب")
+
+    all_o = _restaurant_load("orders", [])
+    if not isinstance(all_o, list):
+        all_o = []
+    pending = []
+    for o in all_o:
+        if not isinstance(o, dict):
+            continue
+        if str(o.get("sessionId") or "") != session_id:
+            continue
+        if str(o.get("status") or "").lower() == "cancelled":
+            continue
+        if o.get("finalInvoiceId"):
+            continue
+        if o.get("invoiceId"):
+            continue
+        pending.append(o)
+    if not pending:
+        raise HTTPException(
+            status_code=400,
+            detail="لا توجد طلبات مفتوحة لهذه الجلسة (أو سبق فوترتها).",
+        )
+
+    split_enabled = bool(body.get("splitBySeat"))
+    raw_groups = body.get("seatGroups") if isinstance(body.get("seatGroups"), list) else []
+    tip_amount = max(0.0, float(body.get("tipAmount") or 0.0))
+
+    def _extract_seat_num(item_name: str) -> Optional[int]:
+        m = re.search(r"كرسي\s*(\d+)", str(item_name or ""))
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    split_groups: list[dict] = []
+    if split_enabled:
+        for idx, g in enumerate(raw_groups):
+            if not isinstance(g, dict):
+                continue
+            seats_raw = g.get("seats") if isinstance(g.get("seats"), list) else []
+            seats = sorted({int(x) for x in seats_raw if str(x).isdigit() and int(x) > 0})
+            if not seats:
+                continue
+            split_groups.append(
+                {
+                    "id": str(g.get("id") or f"check-{idx+1}"),
+                    "name": str(g.get("name") or f"شيك {idx+1}"),
+                    "seats": seats,
+                }
+            )
+        if len(split_groups) < 2:
+            split_enabled = False
+
+    items_body = []
+    for o in pending:
+        for it in o.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            pg = str(it.get("productGuide") or it.get("menuItemId") or "")
+            name = str(it.get("name") or "")
+            seat_num = _extract_seat_num(name)
+            qty = float(it.get("quantity") or 0)
+            price = float(it.get("unitPrice") or 0)
+            if qty <= 0:
+                continue
+            items_body.append(
+                {
+                    "ProductGuide": pg,
+                    "ProductName": name,
+                    "Quantity": qty,
+                    "Unit": "1",
+                    "UnitPrice": price,
+                    "TotalValue": qty * price,
+                    "_seatNum": seat_num,
+                }
+            )
+    normalized_items = []
+    for raw in items_body:
+        line = _normalize_pos_invoice_line(raw)
+        if line:
+            normalized_items.append(line)
+    items_body = normalized_items
+    if not items_body:
+        raise HTTPException(status_code=400, detail="لا توجد بنود صالحة للفاتورة")
+
+    agg_sub = 0.0
+    agg_tax = 0.0
+    agg_svc = 0.0
+    for o in pending:
+        kt = o.get("kitchenTotals")
+        if isinstance(kt, dict):
+            agg_sub += float(kt.get("subtotal") or 0)
+            agg_tax += float(kt.get("tax") or 0)
+            agg_svc += float(kt.get("serviceCharge") or 0)
+    if agg_sub <= 0 and agg_tax <= 0 and agg_svc <= 0:
+        agg_sub = sum(float(x.get("TotalValue") or 0) for x in items_body)
+    agg_total = agg_sub + agg_tax + agg_svc + tip_amount
+
+    invoice_batches: list[dict] = []
+    if split_enabled:
+        for g in split_groups:
+            seats = set(g["seats"])
+            g_items = [dict(x) for x in items_body if x.get("_seatNum") in seats]
+            if not g_items:
+                continue
+            for x in g_items:
+                x.pop("_seatNum", None)
+            g_sub = sum(float(x.get("TotalValue") or 0) for x in g_items)
+            invoice_batches.append({"name": g["name"], "items": g_items, "subtotal": g_sub})
+        if len(invoice_batches) < 2:
+            split_enabled = False
+
+    if not split_enabled:
+        items_one = [dict(x) for x in items_body]
+        for x in items_one:
+            x.pop("_seatNum", None)
+        invoice_batches = [{"name": "فاتورة الجلسة", "items": items_one, "subtotal": sum(float(x.get("TotalValue") or 0) for x in items_one)}]
+
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
+        cursor.execute("SELECT TOP 1 CardGuide FROM TBL016")
+        r = cursor.fetchone()
+        agent_guide = str(r[0]) if r and r[0] else None
+        if not agent_guide:
+            raise HTTPException(status_code=400, detail="لا يوجد عميل افتراضي في TBL016")
+        invoice_type_guid = _get_restaurant_invoice_type_guid(cursor, "table", None)
+        cursor.execute(
+            "SELECT ISNULL(MAX(BillNumber), 0) + 1 FROM TBL022 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+            (invoice_type_guid,),
+        )
+        r = cursor.fetchone()
+        bill_num = int(r[0]) if r and r[0] is not None else 1
+        today = datetime.now()
+        bill_date = today.strftime("%d-%m-%Y")
+        created_invoices: list[dict] = []
+        parts_count = max(1, len(invoice_batches))
+        share_tax = agg_tax / parts_count
+        share_svc = agg_svc / parts_count
+        share_tip = tip_amount / parts_count
+        for idx, part in enumerate(invoice_batches):
+            part_items = part["items"]
+            if not part_items:
+                continue
+            part_items = _enrich_invoice_lines_from_menu(cursor, part_items)
+            inv = {
+                "BillNumber": bill_num + idx,
+                "BillDate": bill_date,
+                "DoneIn": bill_date,
+                "AgentGuide": agent_guide,
+                "InvoiceType": invoice_type_guid,
+                "Notes": f"مطعم — طلب حساب جلسة {session_id} — {part['name']}",
+                "PaymentMethod": "نقدي",
+                "Discount": 0.0,
+                "TaxValue": share_tax if split_enabled else agg_tax,
+                "LocalAdministrativeTax": share_svc if split_enabled else agg_svc,
+                "Items": part_items,
+            }
+            invoice_header = InvoiceHeader(**inv)
+            result = save_invoice(invoice_header)
+            main_g = str(result.get("MainGuide") or "")
+            subtotal_p = float(part.get("subtotal") or 0)
+            total_p = subtotal_p + (share_tax if split_enabled else agg_tax) + (share_svc if split_enabled else agg_svc) + (share_tip if split_enabled else tip_amount)
+            created_invoices.append({"invoiceId": main_g, "name": part["name"], "total": total_p, "tipAmount": (share_tip if split_enabled else tip_amount)})
+
+        if not created_invoices:
+            raise HTTPException(status_code=500, detail="تعذر إنشاء فواتير للجلسة")
+        now_iso = datetime.now().isoformat()
+        pending_ids = {str(o.get("id")) for o in pending if o.get("id")}
+        for o in all_o:
+            if not isinstance(o, dict):
+                continue
+            if str(o.get("id") or "") in pending_ids:
+                o["finalInvoiceId"] = ",".join([x["invoiceId"] for x in created_invoices])
+                o["billedAt"] = now_iso
+        _restaurant_save("orders", all_o)
+        inv_list = _restaurant_load("invoices", [])
+        for part in created_invoices:
+            inv_list.append(
+                {
+                    "sessionId": session_id,
+                    "invoiceId": part["invoiceId"],
+                    "total": part["total"],
+                    "requestedAt": now_iso,
+                    "awaitingPayment": True,
+                    "paidAt": None,
+                    "splitName": part["name"] if split_enabled else None,
+                    "tipAmount": part.get("tipAmount") or 0.0,
+                }
+            )
+        _restaurant_save("invoices", inv_list)
+        sess = _restaurant_load("table_sessions", [])
+        for s in sess:
+            if isinstance(s, dict) and str(s.get("id")) == session_id:
+                s["billingRequestedAt"] = now_iso
+        _restaurant_save("table_sessions", sess)
+        return {
+            "invoiceId": created_invoices[0]["invoiceId"],
+            "billNumber": bill_num,
+            "total": sum(float(x["total"]) for x in created_invoices),
+            "awaitingPayment": True,
+            "sessionId": session_id,
+            "splitApplied": split_enabled,
+            "tipAmount": tip_amount,
+            "invoices": created_invoices,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 # ========== سندات الصرف/القبض — POST /api/cashflow/transaction ==========
 class CashflowLine(BaseModel):
@@ -5715,11 +9342,10 @@ def _seed_mat3am_default_users_if_empty(cursor) -> int:
     return inserted
 
 
-def _ensure_mat3am_dev_schema(cursor) -> int:
-    """إنشاء جداول التطبيق المساندة إن لم تكن موجودة. يعيد عدد مستخدمي التطبيق المُدرَجين (إن وُجدت تعبئة).
+def _ensure_mat3am_dev_schema(cursor) -> tuple:
+    """إنشاء جداول التطبيق المساندة إن لم تكن موجودة.
 
-    ملاحظة: جدول MAT3AM_APP_USERS يُنفَّذ ويُثبَّت بـ COMMIT منفصل أولاً حتى لا يُفقَد بفشل لاحق
-    في جداول التكلفة/المخزون ضمن نفس المعاملة.
+    يعيد (عدد مستخدمي التطبيق المُدرَجين, نتيجة تهيئة أنواع فواتير المطعم في TBL020, نتيجة تهيئة مخازن TBL008 وربطها).
     """
     ddl_users_only = """
         IF OBJECT_ID(N'dbo.MAT3AM_APP_USERS', N'U') IS NULL
@@ -5777,6 +9403,28 @@ def _ensure_mat3am_dev_schema(cursor) -> int:
         END
         """,
         """
+        IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_INVOICE_TYPES', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_RESTAURANT_INVOICE_TYPES (
+                OrderKind NVARCHAR(32) NOT NULL PRIMARY KEY,
+                Tbl020CardGuide UNIQUEIDENTIFIER NOT NULL,
+                InvoiceDisplayName NVARCHAR(255) NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        END
+        """,
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_STORES', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_RESTAURANT_STORES (
+                OrderKind NVARCHAR(32) NOT NULL PRIMARY KEY,
+                Tbl008CardGuide UNIQUEIDENTIFIER NOT NULL,
+                WarehouseDisplayName NVARCHAR(255) NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        END
+        """,
+        """
         IF OBJECT_ID(N'dbo.MAT3AM_RECIPE_HDR', N'U') IS NULL
         BEGIN
             CREATE TABLE dbo.MAT3AM_RECIPE_HDR (
@@ -5824,12 +9472,34 @@ def _ensure_mat3am_dev_schema(cursor) -> int:
             pass
         print(f"[MAT3AM] تحذير: تعذر إكمال جداول التكلفة/المخزون (يتم الاستمرار لجدول المستخدمين): {e}")
 
+    restaurant_invoice_seed: dict = {"ok": False, "note": "لم يُنفَّذ"}
+    try:
+        restaurant_invoice_seed = _seed_mat3am_restaurant_invoice_types(cursor)
+        cursor.connection.commit()
+    except Exception as e:
+        restaurant_invoice_seed = {"ok": False, "note": str(e), "errors": [{"detail": str(e)}]}
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+
+    restaurant_store_seed: dict = {"ok": False, "note": "لم يُنفَّذ"}
+    try:
+        restaurant_store_seed = _seed_mat3am_restaurant_stores(cursor)
+        cursor.connection.commit()
+    except Exception as e:
+        restaurant_store_seed = {"ok": False, "note": str(e), "errors": [{"detail": str(e)}]}
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+
     users_inserted = _seed_mat3am_default_users_if_empty(cursor)
     try:
         cursor.connection.commit()
     except Exception:
         pass
-    return users_inserted
+    return users_inserted, restaurant_invoice_seed, restaurant_store_seed
 
 
 @app.post("/api/dev/bootstrap")
@@ -5840,19 +9510,30 @@ def developer_bootstrap():
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     try:
         cursor = conn.cursor()
-        default_users_inserted = _ensure_mat3am_dev_schema(cursor)
+        default_users_inserted, restaurant_invoice_seed, restaurant_store_seed = _ensure_mat3am_dev_schema(cursor)
         conn.commit()
         default_users_spec = [
             {"login": a, "pin": b, "role": c, "displayName": d}
             for a, b, c, d in MAT3AM_BOOTSTRAP_DEFAULT_USERS
         ]
+        inv_seed = restaurant_invoice_seed or {}
+        inv_ok = bool(inv_seed.get("ok", True))
+        st_seed = restaurant_store_seed or {}
+        st_ok = bool(st_seed.get("ok", True))
         return {
             "ok": True,
-            "message": "تمت تهيئة جداول الدعم بنجاح",
+            "bootstrapSchemaRevision": 3,
+            "restaurantInvoiceTypesOk": inv_ok,
+            "restaurantStoresOk": st_ok,
+            "message": "تمت تهيئة جداول الدعم بنجاح"
+            + ("" if inv_ok else " — مع فشل أو نقص في أنماط فواتير المطعم (TBL020)؛ راجع restaurantInvoiceTypesSeed.")
+            + ("" if st_ok else " — مع فشل أو نقص في مخازن المطعم (TBL008)؛ راجع restaurantStoresSeed."),
             "tables": [
                 "MAT3AM_APP_USERS",
                 "MAT3AM_ERROR_LOG",
                 "MAT3AM_AUDIT_LOG",
+                "MAT3AM_RESTAURANT_INVOICE_TYPES",
+                "MAT3AM_RESTAURANT_STORES",
                 "MAT3AM_RECIPE_HDR",
                 "MAT3AM_RECIPE_LINE",
                 "MAT3AM_STOCK_MOVEMENT",
@@ -5862,6 +9543,10 @@ def developer_bootstrap():
             "defaultAppUsersInserted": default_users_inserted,
             "defaultAppUsersSpec": default_users_spec,
             "defaultAppUsersNote": "يُدرَج هؤلاء فقط عندما يكون جدول MAT3AM_APP_USERS فارغاً تماماً.",
+            "restaurantInvoiceTypesSeed": restaurant_invoice_seed,
+            "restaurantInvoiceTypesNote": "زر التهيئة: 6 صفوف في TBL020 بـ CardGuide جديد لكل نوع وInvoiceName عربي؛ TBL022.MainGuide من MAT3AM أو من SELECT CardGuide FROM TBL020 WHERE InvoiceName = الاسم. قاعدة فارغة = إدراج مباشر؛ إن تعذّر قالب مؤقت أو نسخ من صف موجود.",
+            "restaurantStoresSeed": restaurant_store_seed,
+            "restaurantStoresNote": "تهيئة: 6 صفوف في TBL008 بنفس WarehouseName مثل InvoiceName في TBL020 (توحيد) + MAT3AM_RESTAURANT_STORES؛ الحفظ: StoreGuide = CardGuide من TBL008 WHERE WarehouseName = اسم النمط.",
         }
     except Exception as e:
         try:
@@ -5975,5 +9660,12 @@ def list_dev_error_logs(limit: int = 200):
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"تشغيل خادم إكسترا ويب على http://127.0.0.1:{XTRA_API_PORT} (غيّر المنفذ: set XTRA_API_PORT=...)")
+
+    _this = Path(__file__).resolve()
+    print("=" * 56)
+    print("MAT3AM_API — مطاعم/backend (دخول dev دائم في هذا الملف)")
+    print(f"ملف الخادم: {_this}")
+    print(f"المنفذ: {XTRA_API_PORT} — تحقق: http://127.0.0.1:{XTRA_API_PORT}/__whoami__")
+    print("يجب أن يظهر سطر: MAT3AM_API=1 DEV_LOGIN_ALWAYS=1")
+    print("=" * 56)
     uvicorn.run(app, host="0.0.0.0", port=XTRA_API_PORT)

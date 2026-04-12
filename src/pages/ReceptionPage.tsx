@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
+import { mapTablesToFloorPlanLabels } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 
 type TableStatus = "available" | "occupied" | "reserved";
@@ -45,11 +46,16 @@ export default function ReceptionPage() {
   const load = useCallback(async () => {
     setMsg("");
     try {
-      const r = await fetch(`${base}/api/restaurant/tables`);
-      const j = await r.json();
+      const [tablesRes, floorPlanRes] = await Promise.all([
+        fetch(`${base}/api/restaurant/tables`),
+        fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
+      ]);
+      const j = await tablesRes.json();
+      const floorPlanJson = await floorPlanRes.json().catch(() => ({}));
       const rows = Array.isArray(j.tables) ? j.tables : [];
+      const labeledRows = mapTablesToFloorPlanLabels(floorPlanJson?.plan, rows);
       setTables(
-        rows.map(
+        labeledRows.map(
           (t: {
             id?: string;
             name?: string;

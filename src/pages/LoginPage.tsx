@@ -145,12 +145,11 @@ export default function LoginPage() {
             color: "var(--text)",
           }}
         >
-          <strong>أول تشغيل (قبل التهيئة):</strong> لا يوجد بعد مستخدمون في القاعدة — اضغط الزر أدناه «دخول تهيئة أولى» أو
-          اكتب <code>dev</code> / <code>dev@123</code> ثم «دخول» (دور مطوّر مؤقت، لا يعتمد على جدول المستخدمين).
+          <strong>حساب المطوّر (دائم):</strong> <code>dev</code> / <code>dev@123</code> — دور مطوّر لا يعتمد على جدول
+          المستخدمين؛ يعمل قبل وبعد التهيئة في أي وقت (زر سريع أدناه أو إدخال يدوي ثم «دخول»).
           <br />
-          <strong>بعد</strong> ضبط الاتصال وتنفيذ <strong>تهيئة القاعدة</strong> من لوحة المطوّر: استخدم الحسابات الافتراضية من
-          القاعدة فقط — مثل <code>cashier</code> / <code>1001</code>. حساب <code>dev</code> يتوقف تلقائياً عندما يوجد أي
-          مستخدم في <code>MAT3AM_APP_USERS</code>.
+          للعمل اليومي بعد التهيئة استخدم حسابات القاعدة — مثل <code>cashier</code> / <code>1001</code> أو{" "}
+          <code>manager</code>. من «اتصال القاعدة والتهيئة» يمكن إعادة تنفيذ التهيئة متى لزم.
         </div>
         <p style={{ color: "var(--muted)", marginTop: 0, fontSize: "0.9rem" }}>
           يمكن تغيير اسم/رمز الدخول المبدئي من متغيرات البيئة <code>MAT3AM_INITIAL_DEV_LOGIN</code> و{" "}
@@ -158,12 +157,13 @@ export default function LoginPage() {
         </p>
         <p style={{ color: "var(--muted)", marginTop: 0, fontSize: "0.82rem", lineHeight: 1.5 }}>
           طلب الدخول يُرسل إلى: <code style={{ wordBreak: "break-all" }}>{getApiBase()}</code>
-          {" — "}الخادم الصحيح من <code>مطاعم/backend</code> (2288). إن ظهرت «مستخدم غير موجود» مع{" "}
-          <code>dev</code> فغالباً الطلب يذهب لخادم قديم؛ افتح{" "}
+          {" — "}افتح{" "}
           <a href={`${getApiBase()}/__whoami__`} target="_blank" rel="noreferrer">
             __whoami__
           </a>{" "}
-          ويجب أن يظهر <code>api_server.py: WHOAMI OK</code> ثم شغّل <code>restart_from_zero.bat</code>.
+          — يجب أن يظهر سطر <code>MAT3AM_API=1 DEV_LOGIN_ALWAYS=1</code>. إن لم يظهر فالمنفذ 2288 يشغّل{" "}
+          <strong>خادماً قديماً</strong> (ليس من مجلد <code>مطاعم/backend</code>): أوقف كل Python على 2288 ثم شغّل{" "}
+          <code>restart_from_zero.bat</code> من جذر مجلد مطاعم.
         </p>
         <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
@@ -196,6 +196,22 @@ export default function LoginPage() {
           {err && (
             <div style={{ color: "var(--danger)", fontSize: "0.9rem", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
               {err}
+              {err.includes("تمت تهيئة مستخدمي التطبيق") && err.includes("وليس dev") ? (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "0.65rem 0.75rem",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "rgba(249, 115, 22, 0.12)",
+                    color: "var(--text)",
+                  }}
+                >
+                  هذه الرسالة <strong>لا تصدر</strong> من نسخة <code>مطاعم/backend</code> الحالية — الخادم على 2288 قديم.
+                  أوقف العملية القديمة وشغّل <code>run_api.bat</code> أو <code>restart_from_zero.bat</code> من مجلد مطاعم،
+                  ثم تحقق من <code>__whoami__</code> أن يظهر <code>MAT3AM_API=1</code>.
+                </div>
+              ) : null}
             </div>
           )}
           {pendingSession && verifyFailed && (
@@ -249,7 +265,7 @@ export default function LoginPage() {
               void attemptLogin("dev", "dev@123");
             }}
           >
-            دخول تهيئة أولى — dev / dev@123
+            دخول مطوّر — dev / dev@123 (دائماً)
           </button>
         </form>
 

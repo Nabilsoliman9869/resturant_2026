@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getApiBase } from "../lib/apiBase";
+import { tryParseJson } from "../lib/tryParseJson";
 import { normalizeVenueType, readCachedVenueType, VENUE_STORAGE_KEY, type VenueType } from "../lib/venueType";
 
 type VenueContextValue = {
@@ -18,8 +19,8 @@ export function VenueProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const base = getApiBase();
     const r = await fetch(`${base}/api/restaurant/venue`);
-    const j = (await r.json()) as { venueType?: string };
-    const vt = normalizeVenueType(j.venueType);
+    const j = tryParseJson<{ venueType?: string }>(await r.text());
+    const vt = normalizeVenueType(j?.venueType);
     setVenueType(vt);
     try {
       sessionStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify({ venueType: vt }));

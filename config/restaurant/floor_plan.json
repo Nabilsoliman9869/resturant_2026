@@ -1,78 +1,242 @@
 {
-  "id": "main-floor",
-  "name": "Main Hall",
-  "width": 1000,
-  "height": 700,
-  "shell": {
-    "type": "polygon",
-    "points": [
-      [
-        40,
-        40
-      ],
-      [
-        960,
-        40
-      ],
-      [
-        960,
-        180
-      ],
-      [
-        720,
-        180
-      ],
-      [
-        720,
-        620
-      ],
-      [
-        280,
-        620
-      ],
-      [
-        280,
-        180
-      ],
-      [
-        40,
-        180
-      ]
-    ]
-  },
-  "tables": [
+  "schemaVersion": 2,
+  "activeFloorId": "main-floor",
+  "floors": [
     {
-      "id": "T1",
-      "label": "T1",
-      "shape": "circle",
-      "x": 180,
-      "y": 280,
-      "w": 90,
-      "h": 90,
-      "rotation": 0,
-      "seats": 4
-    },
-    {
-      "id": "T2",
-      "label": "T2",
-      "shape": "rect",
-      "x": 420,
-      "y": 300,
-      "w": 120,
-      "h": 70,
-      "rotation": 15,
-      "seats": 4
-    },
-    {
-      "id": "T3",
-      "label": "T3",
-      "shape": "circle",
-      "x": 760,
-      "y": 300,
-      "w": 90,
-      "h": 90,
-      "rotation": 0,
-      "seats": 2
+      "id": "main-floor",
+      "name": "الطابق الرئيسي",
+      "width": 1400,
+      "height": 920,
+      "shell": {
+        "type": "polygon",
+        "points": [
+          [30, 30],
+          [1370, 30],
+          [1370, 890],
+          [30, 890]
+        ]
+      },
+      "tables": [
+        {
+          "id": "T1",
+          "label": "#101",
+          "shape": "circle",
+          "x": 90,
+          "y": 150,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "54030BB5-1727-47BE-8AFC-D37B52F89547"
+        },
+        {
+          "id": "T2",
+          "label": "#102",
+          "shape": "circle",
+          "x": 90,
+          "y": 260,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "7944373E-C778-4FA7-8942-BA8E10D28274"
+        },
+        {
+          "id": "T3",
+          "label": "#103",
+          "shape": "circle",
+          "x": 90,
+          "y": 370,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "AF9C626A-C3D2-49C4-9BBA-2468C2C6CB0C"
+        },
+        {
+          "id": "T4",
+          "label": "#104",
+          "shape": "circle",
+          "x": 90,
+          "y": 480,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "AD72A344-025C-4D89-8F01-73A361CD57CE"
+        },
+        {
+          "id": "T5",
+          "label": "#105",
+          "shape": "circle",
+          "x": 90,
+          "y": 590,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "615F3E40-7C65-413D-998F-C26B7BA6FC9F"
+        },
+        {
+          "id": "T6",
+          "label": "#106",
+          "shape": "circle",
+          "x": 90,
+          "y": 700,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "11C45258-B201-4EFE-8D08-DABAF6A6CFD7"
+        },
+        {
+          "id": "T7",
+          "label": "#107",
+          "shape": "circle",
+          "x": 260,
+          "y": 200,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "F8CD1131-5042-404A-9957-5D98DB19DB4E"
+        },
+        {
+          "id": "T8",
+          "label": "#108",
+          "shape": "circle",
+          "x": 390,
+          "y": 200,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "1626F663-B857-46D8-BF7E-2FC7206166F0"
+        },
+        {
+          "id": "R1",
+          "label": "R101",
+          "shape": "circle",
+          "x": 360,
+          "y": 95,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "E8817D63-C763-4916-B0C6-2EE80935D662"
+        },
+        {
+          "id": "R2",
+          "label": "R102",
+          "shape": "circle",
+          "x": 500,
+          "y": 95,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "33E8DD88-25A3-48B5-8476-8BE27FD09D80"
+        },
+        {
+          "id": "R3",
+          "label": "R103",
+          "shape": "circle",
+          "x": 640,
+          "y": 95,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "08474722-B8FB-446F-B9DF-7CF9FA532D3E"
+        },
+        {
+          "id": "R4",
+          "label": "R104",
+          "shape": "circle",
+          "x": 780,
+          "y": 95,
+          "w": 76,
+          "h": 76,
+          "seats": 4,
+          "linkedTableId": "B7439340-45EE-402D-BCC4-E336873948A4"
+        },
+        {
+          "id": "R5",
+          "label": "R105",
+          "shape": "circle",
+          "x": 630,
+          "y": 650,
+          "w": 84,
+          "h": 84,
+          "seats": 5,
+          "linkedTableId": "89E0DA7F-0A95-427D-B351-FEDA26C4A293"
+        },
+        {
+          "id": "R6",
+          "label": "R106",
+          "shape": "circle",
+          "x": 820,
+          "y": 650,
+          "w": 84,
+          "h": 84,
+          "seats": 5,
+          "linkedTableId": "D4AA8525-CD8C-43F0-A9BB-56A60AAFC636"
+        }
+      ],
+      "obstacles": [
+        {
+          "id": "obs-st4-boundary",
+          "type": "wall_segment",
+          "shape": "rect",
+          "x": 380,
+          "y": 450,
+          "w": 760,
+          "h": 280,
+          "label": "ST4"
+        }
+      ],
+      "zones": [
+        {
+          "id": "st1",
+          "name": "ST1",
+          "boundary": [
+            [40, 110],
+            [230, 110],
+            [230, 820],
+            [40, 820]
+          ]
+        },
+        {
+          "id": "st2",
+          "name": "ST2",
+          "boundary": [
+            [230, 150],
+            [560, 150],
+            [560, 320],
+            [230, 320]
+          ]
+        },
+        {
+          "id": "st3",
+          "name": "ST3",
+          "boundary": [
+            [320, 70],
+            [1290, 70],
+            [1290, 220],
+            [320, 220]
+          ]
+        },
+        {
+          "id": "st5",
+          "name": "ST5",
+          "boundary": [
+            [450, 320],
+            [1220, 320],
+            [1220, 470],
+            [450, 470]
+          ]
+        },
+        {
+          "id": "st4",
+          "name": "ST4",
+          "boundary": [
+            [380, 450],
+            [1140, 450],
+            [1140, 760],
+            [380, 760]
+          ]
+        }
+      ],
+      "floorCostCenterId": "11111111-1111-4111-8111-111111111111"
     }
   ]
 }

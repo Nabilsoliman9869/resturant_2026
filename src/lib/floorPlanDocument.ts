@@ -109,6 +109,9 @@ export function createEmptyFloor(id: string, name: string): FloorPlan {
       ],
     },
     tables: [],
+    obstacles: [],
+    aisles: [],
+    zones: [],
   };
 }
 

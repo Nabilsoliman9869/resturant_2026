@@ -38,7 +38,8 @@
       "specialRequests": ""
     },
     "startTime": "2026-03-27T21:56:18.579765",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-04T06:29:25.970064"
   },
   {
     "id": "59248d25-50b0-4978-aeb5-38a6c45c6376",
@@ -53,7 +54,8 @@
       "specialRequests": ""
     },
     "startTime": "2026-03-27T22:27:02.842376",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-04T06:28:35.034197"
   },
   {
     "id": "afb2cda5-582f-4669-85e5-9c5fd28922b0",
@@ -68,7 +70,8 @@
       "specialRequests": "شي من مشتقات الزنك"
     },
     "startTime": "2026-03-29T04:34:18.495755",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-04T06:28:25.678813"
   },
   {
     "id": "57d34da4-f85f-4941-8fac-269cc8b0882a",
@@ -83,6 +86,131 @@
       "specialRequests": "1222222"
     },
     "startTime": "2026-04-01T11:59:18.684610",
+    "status": "active"
+  },
+  {
+    "id": "43b02998-a6bf-40ee-9d00-d9364b40c9f7",
+    "tableId": "t1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-04T06:51:37.804942",
+    "status": "active"
+  },
+  {
+    "id": "faee78bb-6f0f-421a-b232-c9f0acc01bcd",
+    "tableId": "t3",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": false,
+      "specialRequests": ""
+    },
+    "startTime": "2026-04-09T03:20:18.702727",
+    "status": "active"
+  },
+  {
+    "id": "9bf0746a-bd24-4c8d-8963-a960b17a4f03",
+    "tableId": "t4",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-09T20:35:26.089694",
+    "status": "active"
+  },
+  {
+    "id": "07e82491-c705-4b8e-86c3-4d3554721d3a",
+    "tableId": "t5",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-10T03:05:49.883712",
+    "status": "active"
+  },
+  {
+    "id": "6514197e-4f5b-4131-a1ef-148c91ddbc46",
+    "tableId": "T1",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-10T03:13:55.214130",
+    "status": "active"
+  },
+  {
+    "id": "b30e2cfc-bb5a-4078-9b35-3c0d1d23d6bf",
+    "tableId": "G5",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-10T03:15:26.444080",
+    "status": "active"
+  },
+  {
+    "id": "9d9e0f96-9f62-4e5b-acee-0da663b01803",
+    "tableId": "T5",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-10T03:38:06.082085",
+    "status": "active"
+  },
+  {
+    "id": "c6550969-a507-4c99-8dbf-ffe89e617126",
+    "tableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-10T04:30:54.168531",
+    "status": "active"
+  },
+  {
+    "id": "fff4a450-b525-44b0-9f7f-c1785ba3988d",
+    "tableId": "615F3E40-7C65-413D-998F-C26B7BA6FC9F",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-10T04:34:30.734862",
+    "status": "active"
+  },
+  {
+    "id": "07ffb5a4-e476-47ef-946b-adce55389382",
+    "tableId": "AD72A344-025C-4D89-8F01-73A361CD57CE",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-11T04:19:16.172146",
+    "status": "active"
+  },
+  {
+    "id": "d59b8319-78fe-4b70-9ae1-95147b9897c4",
+    "tableId": "1626F663-B857-46D8-BF7E-2FC7206166F0",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-11T04:32:48.475270",
     "status": "active"
   }
 ]

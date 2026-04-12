@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
+import { tryParseJson } from "../lib/tryParseJson";
 import { playKitchenWarnBeep } from "../lib/kdsBeep";
 import "../styles/operationalRoles.css";
 
@@ -8,10 +9,15 @@ type OrderItem = { name?: string; quantity?: number };
 type OrderRow = {
   id: string;
   tableId: string;
+  sessionId?: string;
   status: string;
   items: OrderItem[];
   prepStartTime?: string;
   prepTargetMinutes?: number;
+  generalOrder?: boolean;
+  /** يُملأ من فاتورة المطعم — رقم يظهر للمطبخ بدل مقطع UUID */
+  billNumber?: number;
+  ticketNo?: number;
 };
 
 type KdsSettings = { prepTargetMinutes: number; warnBeforeEndMinutes: number };
@@ -27,6 +33,18 @@ function statusWeight(s: string) {
   if (x === "preparing") return 0.55;
   if (x === "pending") return 0.2;
   return 0;
+}
+
+function kdsOrderDisplayTitle(o: OrderRow): string {
+  if (typeof o.billNumber === "number" && Number.isFinite(o.billNumber)) {
+    return `فاتورة #${o.billNumber}`;
+  }
+  if (typeof o.ticketNo === "number" && Number.isFinite(o.ticketNo)) {
+    return `تذكرة #${o.ticketNo}`;
+  }
+  const hex = (o.id || "").replace(/-/g, "");
+  if (hex.length >= 6) return `طلب ${hex.slice(-6).toUpperCase()}`;
+  return `طلب ${(o.id || "").slice(0, 8)}`;
 }
 
 function tableCompletion(orders: OrderRow[]) {
@@ -77,16 +95,43 @@ function KdsOrderCard({
   settings,
   onStart,
   onFinish,
+  base,
 }: {
   order: OrderRow;
   settings: KdsSettings;
   onStart: (id: string) => void;
   onFinish: (id: string) => void;
+  base: string;
 }) {
   const target = Number(order.prepTargetMinutes) > 0 ? Number(order.prepTargetMinutes) : settings.prepTargetMinutes;
   const warn = settings.warnBeforeEndMinutes;
   const preparing = (order.status || "").toLowerCase() === "preparing";
   const { urgent, overdue, label } = usePrepCountdown(preparing ? order.prepStartTime : undefined, target, warn);
+  const cashierNotifiedRef = useRef(false);
+
+  useEffect(() => {
+    if (!preparing) {
+      cashierNotifiedRef.current = false;
+      return;
+    }
+    if (!urgent && !overdue) return;
+    if (cashierNotifiedRef.current) return;
+    cashierNotifiedRef.current = true;
+    const labelT = kdsOrderDisplayTitle(order);
+    void fetch(`${base}/api/restaurant/cashier/alerts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "kitchen_urgent",
+        sourceKey: `kitchen_urgent:${order.id}`,
+        title: `استعجال مطبخ · ${labelT}`,
+        body: orderLabel(order).slice(0, 400),
+        tableId: order.tableId,
+        sessionId: order.sessionId || undefined,
+        orderId: order.id,
+      }),
+    });
+  }, [preparing, urgent, overdue, base, order.id, order.tableId, order.sessionId, order.generalOrder, order.billNumber, order.ticketNo]);
 
   useEffect(() => {
     if (!urgent && !overdue) return;
@@ -101,7 +146,20 @@ function KdsOrderCard({
     <div className={`kds-card ${urgent || overdue ? "kds-card--urgent" : ""}`}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: "1.02rem" }}>طلب {order.id.slice(0, 8)}</div>
+          <div style={{ fontWeight: 800, fontSize: "1.02rem" }} title={`معرّف النظام: ${order.id}`}>
+            {kdsOrderDisplayTitle(order)}
+            {order.generalOrder ? (
+              <span style={{ marginRight: 8, fontSize: "0.75rem", color: "var(--wp-accent, #38bdf8)" }}>· طلب عام</span>
+            ) : null}
+          </div>
+          {!(
+            (typeof order.billNumber === "number" && Number.isFinite(order.billNumber)) ||
+            (typeof order.ticketNo === "number" && Number.isFinite(order.ticketNo))
+          ) ? (
+            <div style={{ color: "var(--wp-muted)", fontSize: "0.72rem", marginTop: 2 }} title={order.id}>
+              مرجع قديم: {order.id.slice(0, 8)}…
+            </div>
+          ) : null}
           <div style={{ color: "var(--wp-muted)", fontSize: "0.88rem", marginTop: 4 }}>
             طاولة: <strong>{order.tableId || "—"}</strong> · الحالة: {order.status}
           </div>
@@ -146,8 +204,8 @@ export default function KitchenPage() {
         fetch(`${base}/api/restaurant/orders`),
         fetch(`${base}/api/restaurant/kds-settings`),
       ]);
-      const oj = await or.json();
-      const kj = await ks.json();
+      const oj = tryParseJson<{ orders?: OrderRow[] }>(await or.text()) ?? {};
+      const kj = tryParseJson<{ prepTargetMinutes?: number; warnBeforeEndMinutes?: number }>(await ks.text()) ?? {};
       setOrders(Array.isArray(oj.orders) ? oj.orders : []);
       setSettings({
         prepTargetMinutes: Number(kj.prepTargetMinutes) || 20,
@@ -179,7 +237,10 @@ export default function KitchenPage() {
   }
 
   const pending = useMemo(
-    () => orders.filter((o) => !["ready", "served", "paid"].includes((o.status || "").toLowerCase())),
+    () =>
+      orders.filter(
+        (o) => !["ready", "served", "paid", "cancelled"].includes((o.status || "").toLowerCase()),
+      ),
     [orders],
   );
 
@@ -232,6 +293,7 @@ export default function KitchenPage() {
                     key={o.id}
                     order={o}
                     settings={settings}
+                    base={base}
                     onStart={(id) => void setStatus(id, "preparing")}
                     onFinish={(id) => void setStatus(id, "ready")}
                   />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { NavLink } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { normalizeFloorPlanDocument } from "../lib/floorPlanDocument";
 import { type FloorPlan, type FloorTable, type TableLiveMap, type TableLiveStatus } from "../lib/floorPlanModel";
@@ -14,7 +15,8 @@ type TableRec = {
 };
 
 type SessionRec = { id: string; tableId?: string; status?: string };
-type OrderRec = { id: string; tableId?: string; status?: string };
+type OrderRec = { id: string; tableId?: string; status?: string; items?: Array<{ name?: string; quantity?: number }> };
+type PlanStatus = "api" | "missing" | "invalid" | "unavailable";
 
 function tableLabel(t: TableRec) {
   return (t.name || "").trim() || `طاولة ${t.number ?? t.id.slice(0, 6)}`;
@@ -67,12 +69,18 @@ function buildTableLiveMap(
     }
 
     let progress: number | undefined;
+    let orderPreview: string | undefined;
     if (openOrders.length) {
       const sum = openOrders.reduce((a, o) => a + orderStatusWeight(o.status || ""), 0);
       progress = Math.min(100, Math.round((sum / openOrders.length) * 100));
+      const flat = openOrders
+        .flatMap((o) => (Array.isArray(o.items) ? o.items : []))
+        .map((it) => `${it?.name || "صنف"}${it?.quantity ? `×${it.quantity}` : ""}`)
+        .filter(Boolean);
+      orderPreview = flat.slice(0, 2).join(" · ");
     }
 
-    live[`${keyPre}${ft.id}`] = { status, progress };
+    live[`${keyPre}${ft.id}`] = { status, progress, orderCount: openOrders.length, orderPreview };
   }
   return live;
 }
@@ -169,36 +177,64 @@ export default function FloorPlanLive() {
   const [tables, setTables] = useState<TableRec[]>([]);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [live, setLive] = useState<TableLiveMap>({});
+  const [planStatus, setPlanStatus] = useState<PlanStatus>("missing");
   const [msg, setMsg] = useState("");
 
   const load = useCallback(async () => {
     setMsg("");
     try {
+      const safeJson = async (res: Response) => {
+        try {
+          const txt = await res.text();
+          if (!txt) return {} as any;
+          return JSON.parse(txt);
+        } catch {
+          return {} as any;
+        }
+      };
+      const fetchSafe = async (url: string) => {
+        try {
+          const response = await fetch(url);
+          const body = await safeJson(response);
+          return { ok: response.ok, status: response.status, body };
+        } catch (error) {
+          return { ok: false, status: 0, body: null as any, error: String(error) };
+        }
+      };
       const [fpRes, tRes, sRes, oRes] = await Promise.all([
-        fetch(`${base}/api/restaurant/floor-plan`),
-        fetch(`${base}/api/restaurant/tables`),
-        fetch(`${base}/api/restaurant/table-sessions`),
-        fetch(`${base}/api/restaurant/orders`),
+        fetchSafe(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
+        fetchSafe(`${base}/api/restaurant/tables`),
+        fetchSafe(`${base}/api/restaurant/table-sessions`),
+        fetchSafe(`${base}/api/restaurant/orders`),
       ]);
-      const fpj = await fpRes.json();
-      const tj = await tRes.json();
-      const sj = await sRes.json();
-      const oj = await oRes.json();
 
-      const rawPlan = fpj.plan;
+      const rawPlan = fpRes.ok ? fpRes.body?.plan : null;
       const norm = rawPlan != null ? normalizeFloorPlanDocument(rawPlan) : null;
       const flist = norm?.floors ?? [];
-      setFloors(flist);
-      setActiveFloorId((cur) => {
-        if (!flist.length) return null;
-        if (cur && flist.some((f) => f.id === cur)) return cur;
-        return norm?.activeFloorId ?? flist[0].id;
-      });
+      if (fpRes.ok) {
+        setFloors(flist);
+        setActiveFloorId((cur) => {
+          if (!flist.length) return null;
+          if (cur && flist.some((f) => f.id === cur)) return cur;
+          return norm?.activeFloorId ?? flist[0].id;
+        });
+        if (rawPlan == null) {
+          setPlanStatus("missing");
+        } else if (!norm) {
+          setPlanStatus("invalid");
+          setMsg("تم العثور على floor_plan.json لكن بنيته غير صالحة للعرض.");
+        } else {
+          setPlanStatus("api");
+        }
+      } else {
+        setPlanStatus("unavailable");
+        setMsg(fpRes.error || `تعذر الوصول إلى API الخاص بالمخطط (HTTP ${fpRes.status || 0}). تأكد من تشغيل الخادم الخلفي على 127.0.0.1:2288.`);
+      }
 
-      const tl = Array.isArray(tj.tables) ? tj.tables : [];
+      const tl = Array.isArray(tRes.body?.tables) ? tRes.body.tables : [];
       setTables(tl);
-      const sessions: SessionRec[] = Array.isArray(sj.sessions) ? sj.sessions : [];
-      const orders: OrderRec[] = Array.isArray(oj.orders) ? oj.orders : [];
+      const sessions: SessionRec[] = Array.isArray(sRes.body?.sessions) ? sRes.body.sessions : [];
+      const orders: OrderRec[] = Array.isArray(oRes.body?.orders) ? oRes.body.orders : [];
 
       const busy = new Set<string>();
       for (const s of sessions) {
@@ -258,17 +294,28 @@ export default function FloorPlanLive() {
             <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: "#3b82f6", marginLeft: 6 }} />
             محجوزة
           </span>
+          <NavLink to="/app/developer/settings/floor-editor" className="btn btn-ghost" style={{ fontSize: "0.82rem" }}>
+            فتح محرّر المخطط
+          </NavLink>
           <button type="button" className="btn btn-ghost" style={{ fontSize: "0.82rem" }} onClick={() => void load()}>
             تحديث
           </button>
         </div>
       </div>
       <p style={{ color: "var(--muted)", fontSize: "0.88rem", marginTop: "0.35rem", marginBottom: "0.75rem" }}>
-        {plan ? (
+        {planStatus === "api" && plan ? (
           <>
             مصدر الشكل: <code>floor_plan.json</code> عبر <code>GET /api/restaurant/floor-plan</code> — مضلع الصالة + طاولات بـ SVG.
-            الاستيراد/التصدير: <code>PUT /api/restaurant/floor-plan</code> (نفس بنية الملف). اربط الطاولة بـ <code>linkedTableId</code> ليطابق
-            معرّف <code>tables.json</code> إن اختلف <code>id</code> عن المعرف في الطلبات.
+            الاستيراد/التصدير: <code>PUT /api/restaurant/floor-plan</code> (نفس بنية الملف) مع مزامنة تلقائية لطاولات المخطط إلى
+            <code> TBL005</code> وتعبئة <code>linkedTableId</code> عند الحاجة.
+          </>
+        ) : planStatus === "unavailable" ? (
+          <>
+            تعذر تحميل <code>floor_plan.json</code> من <code>GET /api/restaurant/floor-plan</code> لأن الخادم الخلفي غير متاح أو لا يستجيب.
+          </>
+        ) : planStatus === "invalid" ? (
+          <>
+            تم العثور على <code>config/restaurant/floor_plan.json</code> لكن محتواه غير صالح للعرض حالياً — يتم استخدام التخطيط القديم مؤقتاً.
           </>
         ) : (
           <>

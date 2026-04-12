@@ -21,6 +21,7 @@ export default function DeveloperConnection() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<DevLog[]>([]);
+  const [whoamiText, setWhoamiText] = useState<string>("");
 
   function apiUnreachableHint() {
     const base = getApiBase();
@@ -55,6 +56,10 @@ export default function DeveloperConnection() {
   }
 
   useEffect(() => {
+    fetch(`${getApiBase()}/__whoami__`)
+      .then((r) => (r.ok ? r.text() : Promise.resolve("")))
+      .then((t) => setWhoamiText((t || "").trim()))
+      .catch(() => setWhoamiText(""));
     loadSettings()
       .then(() => loadLogs())
       .catch(() => setMsg(apiUnreachableHint()));
@@ -140,7 +145,67 @@ export default function DeveloperConnection() {
           : n === 0
             ? " — جدول المستخدمين كان غير فارغ؛ لم يُدرَج مستخدمون افتراضيون."
             : "";
-      setMsg(`تهيئة ناجحة: ${tbl}${usersLine}`);
+      const seed = j.restaurantInvoiceTypesSeed as
+        | {
+            ok?: boolean;
+            note?: string;
+            created?: unknown[];
+            skipped?: string[];
+            errors?: { orderKind?: string; detail?: string }[];
+            tbl020SeededDirect?: boolean;
+            tbl020TemplateInserted?: boolean;
+          }
+        | undefined;
+      const invOk = seed?.ok !== false && j.restaurantInvoiceTypesOk !== false;
+      let invLine = "";
+      if (seed) {
+        const cr = Array.isArray(seed.created) ? seed.created.length : 0;
+        const sk = Array.isArray(seed.skipped) ? seed.skipped.length : 0;
+        const er = Array.isArray(seed.errors) ? seed.errors : [];
+        invLine = `\n\nأنواع فواتير المطعم (TBL020 / MAT3AM): ${invOk ? "حسب التوقع" : "⚠ فشل أو نقص"}\n— أُنشئ/حدّث: ${cr} — تخطّي (موجود مسبقاً): ${sk}`;
+        if (seed.note) invLine += `\n— ملاحظة: ${seed.note}`;
+        if (er.length) {
+          invLine += `\n— أخطاء:\n${er.map((e) => `  • ${e.orderKind ?? "?"}: ${e.detail ?? ""}`).join("\n")}`;
+        }
+        invLine += `\n— تحقق في SSMS: SELECT CardGuide, InvoiceName FROM TBL020 WHERE InvoiceName LIKE N'مطاعم —%';`;
+      }
+      if (!invOk) {
+        invLine += "\n\n⚠ نفّذ SELECT على TBL020؛ إن لم تظهر الصفوف الستة فالنسخ من القالب فشل (راجع رسالة SQL أعلاه أو هيكل TBL020).";
+      }
+      const rev = typeof j.bootstrapSchemaRevision === "number" ? j.bootstrapSchemaRevision : 0;
+      const stSeed = j.restaurantStoresSeed as
+        | {
+            ok?: boolean;
+            note?: string;
+            created?: unknown[];
+            skipped?: string[];
+            errors?: { orderKind?: string; detail?: string }[];
+            tbl008Mat3amNameRows?: number | null;
+          }
+        | undefined;
+      const stOk = stSeed?.ok !== false && j.restaurantStoresOk !== false;
+      let storeLine = "";
+      if (!("restaurantStoresSeed" in j) || rev < 3) {
+        storeLine = `\n\n⚠ المخازن (TBL008): رد الخادم قديم أو لا يشمل تهيئة المخازن (bootstrapSchemaRevision=${rev || "غير مرسل"}). أوقف الخادم ثم شغّل من مجلد المشروع: python backend/api_server.py (أو run_api.bat) وتأكد أن الملف المحدّث يُحمَّل.`;
+      } else if (stSeed) {
+        const cr = Array.isArray(stSeed.created) ? stSeed.created.length : 0;
+        const sk = Array.isArray(stSeed.skipped) ? stSeed.skipped.length : 0;
+        const er = Array.isArray(stSeed.errors) ? stSeed.errors : [];
+        const cnt = stSeed.tbl008Mat3amNameRows;
+        storeLine = `\n\nمخازن المطعم (TBL008 / MAT3AM_RESTAURANT_STORES): ${stOk ? "حسب التوقع" : "⚠ فشل أو نقص"}\n— أُنشئ/حدّث خريطة: ${cr} — تخطّي (موجود مسبقاً): ${sk}`;
+        if (typeof cnt === "number") storeLine += `\n— صفوف TBL008 باسم «مطاعم —»: ${cnt} (بعد التهيئة)`;
+        if (stSeed.note) storeLine += `\n— ملاحظة: ${stSeed.note}`;
+        if (er.length) {
+          storeLine += `\n— أخطاء:\n${er.map((e) => `  • ${e.orderKind ?? "?"}: ${e.detail ?? ""}`).join("\n")}`;
+        }
+        storeLine += `\n— تحقق في SSMS: SELECT CardGuide, WarehouseName FROM dbo.TBL008 WHERE WarehouseName LIKE N'مطاعم —%';`;
+        storeLine += `\n— SELECT OrderKind, Tbl008CardGuide FROM dbo.MAT3AM_RESTAURANT_STORES;`;
+      }
+      if (rev >= 3 && !stOk && stSeed) {
+        storeLine += "\n\n⚠ فشل تهيئة المخازن — لن يُحفَظ StoreGuide في TBL022 حتى تُصلَح؛ راجع التفاصيل أعلاه.";
+      }
+      setMsg(`تهيئة: ${tbl}${usersLine}.${invLine}${storeLine}`);
+      await loadSettings();
       await loadLogs();
     } catch (e) {
       const s = String(e);
@@ -150,9 +215,53 @@ export default function DeveloperConnection() {
     }
   }
 
+  const viteBoot = __MAT3AM_VITE_BOOT_STAMP__;
+
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>لوحة المطور — الاتصال والتهيئة</h2>
+      <div
+        className="card"
+        style={{
+          marginBottom: 16,
+          padding: "12px 14px",
+          background: "var(--surface-2, rgba(0,0,0,0.06))",
+          border: "1px solid var(--border, #ccc)",
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>بصمة التشغيل الحالية (للتأكد أنك لست على نسخة قديمة)</div>
+        <div style={{ fontSize: "0.88rem", lineHeight: 1.5 }}>
+          <div>
+            واجهة Vite — وقت إقلاع السيرفر: <code>{viteBoot || "—"}</code>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            عنوانك في المتصفح: <code>{typeof window !== "undefined" ? window.location.href : "—"}</code>
+          </div>
+          {whoamiText ? (
+            <pre
+              style={{
+                margin: "8px 0 0",
+                padding: 8,
+                fontSize: "0.8rem",
+                overflow: "auto",
+                background: "var(--bg, #fff)",
+                borderRadius: 4,
+              }}
+            >
+              {whoamiText}
+            </pre>
+          ) : (
+            <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
+              لم يُحمَّل <code>/__whoami__</code> — شغّل API من مجلد مطاعم (<code>run_api.bat</code> أو{" "}
+              <code>restart_from_zero.bat</code>) ثم حدّث الصفحة.
+            </p>
+          )}
+        </div>
+        <p style={{ margin: "10px 0 0", fontSize: "0.82rem", color: "var(--muted)" }}>
+          إن بقي وقت Vite أو <code>API_FILE_MTIME_UNIX</code> كما كان بعد إعادة تشغيل واضحة، فأنت إما لم تُغلِق العملية
+          القديمة على المنفذ أو المتصفح يخبّئ كاشاً — استخدم <code>restart_from_zero.bat</code> ثم Ctrl+Shift+R.
+        </p>
+      </div>
       <p style={{ color: "var(--muted)" }}>
         عنوان الطلبات من المتصفح: <code>{getApiBase()}</code>
         {typeof window !== "undefined" &&

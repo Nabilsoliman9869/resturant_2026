@@ -1,10 +1,23 @@
+import { Link, useLocation } from "react-router-dom";
+
 export default function DeveloperInitDb() {
+  const loc = useLocation();
+  const settingsBase = loc.pathname.match(/^(\/app\/[^/]+\/settings)/)?.[1] ?? "/app/developer/settings";
+
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>تهيئة الجداول والبروسيجرات</h2>
       <p style={{ color: "var(--muted)" }}>
-        تم نقل التنفيذ المباشر إلى نافذة <strong>اتصال القاعدة</strong> بزر <strong>تنفيذ التهيئة</strong>.
-        هذه الصفحة مرجعية فقط لملفات SQL الإضافية.
+        زر <strong>تنفيذ التهيئة</strong> موجود في صفحة{" "}
+        <Link to={`${settingsBase}/connection`} style={{ color: "var(--accent2, #22d3ee)", fontWeight: 600 }}>
+          اتصال القاعدة والتهيئة
+        </Link>{" "}
+        (من الشريط الجانبي أو إعدادات النظام ← اتصال القاعدة). هذه الصفحة مرجعية لملفات SQL الإضافية.
+      </p>
+      <p style={{ marginTop: "0.75rem" }}>
+        <Link to={`${settingsBase}/connection`} className="btn btn-primary">
+          الانتقال إلى اتصال القاعدة وتنفيذ التهيئة
+        </Link>
       </p>
       <ul style={{ color: "var(--muted)" }}>
         <li>

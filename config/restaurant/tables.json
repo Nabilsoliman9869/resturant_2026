@@ -42,7 +42,7 @@
     "number": 3,
     "name": "طاولة 3",
     "seats": 6,
-    "status": "available",
+    "status": "occupied",
     "position": {
       "x": 0,
       "y": 0

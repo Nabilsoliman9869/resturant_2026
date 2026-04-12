@@ -33,7 +33,8 @@ export default function FloorPlanEditorPage() {
       <h1 style={{ marginTop: 0, fontFamily: "var(--display)", fontSize: "1.65rem" }}>محرّر مخطط الصالة</h1>
       <p style={{ color: "var(--muted)", lineHeight: 1.6, marginTop: 0 }}>
         طوابق متعددة، رسم حدود بالنقر، تعديل النقاط، إضافة طاولات، سحب داخل الحدود، وربط{" "}
-        <code>linkedTableId</code> بقائمة الطاولات من الـ API. الحفظ يستبدل <code>floor_plan.json</code> بالكامل.
+        <code>linkedTableId</code> بقائمة الطاولات من الـ API. الحفظ يستبدل <code>floor_plan.json</code> بالكامل ويزامن الطاولات
+        تلقائياً مع <code>TBL005</code>.
       </p>
       <FloorPlanEditor apiTables={apiTables} onSaved={loadTables} />
     </div>

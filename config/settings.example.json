@@ -3,5 +3,10 @@
   "database": "YourDatabase",
   "uid": "user",
   "password": "password",
-  "use_windows_auth": false
+  "use_windows_auth": false,
+  "mat3am": {
+    "defaultCurrencyGuid": null,
+    "currencyPreferredNames": ["جنيه مصري", "جنية مصرى"],
+    "currencyNameContains": ["جنيه", "egp", "ج.م"]
+  }
 }

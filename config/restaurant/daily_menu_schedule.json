@@ -1,0 +1,38 @@
+{
+  "entries": [
+    {
+      "dateFrom": "2026-04-01",
+      "dateTo": "2026-12-31",
+      "items": [
+        {
+          "ProductGuide": "01BB884E-2E6C-402C-973A-61E5C639EAC0",
+          "ProductName": "الشوربة Soup"
+        },
+        {
+          "ProductGuide": "24FE8871-B1B0-403F-B5A0-F8626FEDCF2C",
+          "ProductName": "بيكاتا مشوية Grilled Picatta"
+        },
+        {
+          "ProductGuide": "C224D292-9917-419E-A403-A2FA24A20DEE",
+          "ProductName": "دجاج مشوى بالمشروم Grild Chicken Mushroom Sandwich"
+        },
+        {
+          "ProductGuide": "2840B2C7-0B94-49B1-BDCD-5F67D558E34D",
+          "ProductName": "ستيك مشوى Grild Steak"
+        },
+        {
+          "ProductGuide": "CBEA8C1D-9F62-4E73-A559-B302F8BD5E50",
+          "ProductName": "ستيك مشوى Grild Steak Sandwich"
+        },
+        {
+          "ProductGuide": "60305EFC-F013-4050-B6CB-2D92034E5AD8",
+          "ProductName": "سمان مشوى Grild Quail"
+        },
+        {
+          "ProductGuide": "46759B09-1D2F-41CB-958E-1960117C52D5",
+          "ProductName": "شوربة البروكلى بالكريمة Broccoli With Creamy Soup"
+        }
+      ]
+    }
+  ]
+}

@@ -12,7 +12,7 @@ export type FloorShell = {
   points: Point[];
 };
 
-export type TableShape = "circle" | "rect";
+export type TableShape = "circle" | "rect" | "ellipse";
 
 export type FloorTable = {
   id: string;
@@ -35,6 +35,9 @@ export type FloorPlan = {
   height: number;
   shell: FloorShell;
   tables: FloorTable[];
+  obstacles?: Obstacle[];
+  aisles?: AislePath[];
+  zones?: FloorZone[];
 };
 
 export type TableLiveStatus = "free" | "occupied" | "reserved" | "billing" | "dirty";
@@ -44,6 +47,8 @@ export type TableLiveMap = Record<
   {
     status: TableLiveStatus;
     progress?: number;
+    orderCount?: number;
+    orderPreview?: string;
   }
 >;
 
@@ -76,7 +81,7 @@ export function parseFloorPlan(data: unknown): FloorPlan | null {
     const r = t as Record<string, unknown>;
     const tid = typeof r.id === "string" ? r.id : "";
     const label = typeof r.label === "string" ? r.label : tid;
-    const shape = r.shape === "circle" || r.shape === "rect" ? r.shape : null;
+    const shape = r.shape === "circle" || r.shape === "rect" || r.shape === "ellipse" ? r.shape : null;
     const x = Number(r.x);
     const y = Number(r.y);
     const w = Number(r.w);
@@ -101,7 +106,7 @@ export function parseFloorPlan(data: unknown): FloorPlan | null {
     });
   }
 
-  return {
+  const out: FloorPlan = {
     id,
     name,
     width,
@@ -109,6 +114,15 @@ export function parseFloorPlan(data: unknown): FloorPlan | null {
     shell: { type: "polygon", points: sh.points as Point[] },
     tables,
   };
+
+  const maybeArr = (v: unknown) => (Array.isArray(v) ? v : undefined);
+  const obs = maybeArr(o.obstacles);
+  const ais = maybeArr(o.aisles);
+  const zns = maybeArr(o.zones);
+  if (obs) (out as any).obstacles = obs as Obstacle[];
+  if (ais) (out as any).aisles = ais as AislePath[];
+  if (zns) (out as any).zones = zns as FloorZone[];
+  return out;
 }
 
 /** ——— امتدادات مستقبلية (عقبات، ممرات…) ——— */

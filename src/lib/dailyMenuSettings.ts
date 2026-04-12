@@ -1,4 +1,5 @@
-/** تخزين مؤقت — يُستبدل لاحقاً بمزامنة الخادم */
+import { getApiBase } from "./apiBase";
+import { tryParseJson } from "./tryParseJson";
 
 export const DAILY_MENU_STORAGE_KEY = "mat3am_daily_menu_v1";
 
@@ -6,6 +7,21 @@ export type DailyMenuState = {
   forDate: string;
   allowedTokens: string[];
   notes: string;
+};
+
+export type DailyMenuScheduleItem = {
+  ProductGuide: string;
+  ProductName: string;
+};
+
+export type DailyMenuScheduleEntry = {
+  dateFrom: string;
+  dateTo: string;
+  items: DailyMenuScheduleItem[];
+};
+
+export type DailyMenuScheduleResponse = {
+  entries: DailyMenuScheduleEntry[];
 };
 
 export function todayYmd(): string {
@@ -49,4 +65,77 @@ export function isItemAllowedByDailyMenu(
   const q = itemIdOrName.trim().toLowerCase();
   if (!q) return false;
   return tokens.some((t) => q.includes(t.toLowerCase()) || t.toLowerCase().includes(q));
+}
+
+/** فلترة صنف POS/جرسون: يطابق دليل المنتج أو الاسم ضد الرموز اليومية */
+export function isProductOnDailyMenu(
+  productGuide: string,
+  productName: string,
+  state: DailyMenuState | null
+): boolean {
+  if (!state) return true;
+  if (isItemAllowedByDailyMenu(productGuide, state)) return true;
+  if (productName && isItemAllowedByDailyMenu(productName, state)) return true;
+  return false;
+}
+
+export async function fetchDailyMenuFromApi(): Promise<DailyMenuState | null> {
+  try {
+    const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu`);
+    if (!r.ok) return null;
+    const j = tryParseJson<{ menu?: Partial<DailyMenuState> }>(await r.text()) ?? {};
+    const m = j.menu;
+    if (!m || typeof m !== "object") return null;
+    return {
+      forDate: typeof m.forDate === "string" ? m.forDate : todayYmd(),
+      allowedTokens: Array.isArray(m.allowedTokens)
+        ? m.allowedTokens.map(String).filter(Boolean)
+        : [],
+      notes: typeof m.notes === "string" ? m.notes : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function pushDailyMenuToApi(state: DailyMenuState): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ menu: state }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, detail: typeof j.detail === "string" ? j.detail : "فشل الحفظ" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: String(e) };
+  }
+}
+
+export async function fetchDailyMenuSchedule(): Promise<DailyMenuScheduleEntry[]> {
+  try {
+    const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu-schedule`);
+    if (!r.ok) return [];
+    const j = (await r.json()) as DailyMenuScheduleResponse;
+    if (!j || !Array.isArray(j.entries)) return [];
+    return j.entries;
+  } catch {
+    return [];
+  }
+}
+
+export async function pushDailyMenuSchedule(entries: DailyMenuScheduleEntry[]): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu-schedule`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, detail: typeof j.detail === "string" ? j.detail : "فشل الحفظ" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: String(e) };
+  }
 }

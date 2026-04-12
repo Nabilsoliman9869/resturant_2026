@@ -14,7 +14,7 @@ alwaysApply: true
 
 | الخدمة | القيمة |
 |--------|--------|
-| واجهة التطوير (Vite) | **http://localhost:5290** — `vite.config.ts` → `server.port` |
+| واجهة التطوير (Vite) | **http://localhost:9999** — `vite.config.ts` → `server.port` |
 | API إكسترا (من `مطاعم/backend`) | **http://127.0.0.1:2288** — `XTRA_API_PORT` الافتراضي |
 | متغير الواجهة | **`VITE_XTRA_API=http://127.0.0.1:2288`** في `.env` (انسخ من `.env.example`) |
 
