@@ -60,6 +60,8 @@ export function isItemAllowedByDailyMenu(
   itemIdOrName: string,
   state: DailyMenuState = loadDailyMenuState()
 ): boolean {
+  // لا نطبّق فلترة اليوميات على يوم مختلف حتى لا تختفي أصناف بالخطأ.
+  if ((state?.forDate || "").trim() && state.forDate !== todayYmd()) return true;
   const tokens = state.allowedTokens.map((t) => t.trim()).filter(Boolean);
   if (tokens.length === 0) return true;
   const q = itemIdOrName.trim().toLowerCase();

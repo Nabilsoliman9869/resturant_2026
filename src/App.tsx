@@ -28,8 +28,17 @@ import VenueFloorSettingsPage from "./pages/settings/VenueFloorSettingsPage";
 import MenusDailySettingsPage from "./pages/settings/MenusDailySettingsPage";
 import FloorPlanEditorPage from "./pages/settings/FloorPlanEditorPage";
 import ProductImagesSettingsPage from "./pages/settings/ProductImagesSettingsPage";
+import PriceListSettingsPage from "./pages/settings/PriceListSettingsPage";
+import DailyCostEnginePage from "./pages/settings/DailyCostEnginePage";
+import CostingModeSettingsPage from "./pages/settings/CostingModeSettingsPage";
+import DailyOpeningCustodyPage from "./pages/settings/DailyOpeningCustodyPage";
+import DailyReturnPage from "./pages/settings/DailyReturnPage";
+import DailyOverheadPage from "./pages/settings/DailyOverheadPage";
+import DailyResultPage from "./pages/settings/DailyResultPage";
+import KitchenItemStopPage from "./pages/settings/KitchenItemStopPage";
 import CashierTableSessionsPage from "./pages/CashierTableSessionsPage";
 import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
+import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
   const { user } = useAuth();
@@ -42,7 +51,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/" element={<Navigate to="/app/developer/settings/connection" replace />} />
 
       <Route
         path="/app/cashier/*"
@@ -99,9 +108,18 @@ export default function App() {
           <Route path="floor-editor" element={<FloorPlanEditorPage />} />
           <Route path="tables" element={<TablesLayoutPage />} />
           <Route path="costing" element={<CostingPage />} />
+          <Route path="price-lists" element={<PriceListSettingsPage />} />
+          <Route path="daily-cost-engine" element={<DailyCostEnginePage />} />
+          <Route path="costing-mode" element={<CostingModeSettingsPage />} />
+          <Route path="daily-opening-custody" element={<DailyOpeningCustodyPage />} />
+          <Route path="daily-return" element={<DailyReturnPage />} />
+          <Route path="daily-overhead" element={<DailyOverheadPage />} />
+          <Route path="daily-result" element={<DailyResultPage />} />
+          <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
           <Route path="menus" element={<MenusDailySettingsPage />} />
           <Route path="product-images" element={<ProductImagesSettingsPage />} />
           <Route path="pos" element={<PosAdminPage />} />
+          <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />
@@ -154,6 +172,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="kitchen" replace />} />
         <Route path="kitchen" element={<KitchenPage />} />
+        <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
       </Route>
 
       <Route
@@ -191,9 +210,18 @@ export default function App() {
           <Route path="floor-editor" element={<FloorPlanEditorPage />} />
           <Route path="tables" element={<TablesLayoutPage />} />
           <Route path="costing" element={<CostingPage />} />
+          <Route path="price-lists" element={<PriceListSettingsPage />} />
+          <Route path="daily-cost-engine" element={<DailyCostEnginePage />} />
+          <Route path="costing-mode" element={<CostingModeSettingsPage />} />
+          <Route path="daily-opening-custody" element={<DailyOpeningCustodyPage />} />
+          <Route path="daily-return" element={<DailyReturnPage />} />
+          <Route path="daily-overhead" element={<DailyOverheadPage />} />
+          <Route path="daily-result" element={<DailyResultPage />} />
+          <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
           <Route path="menus" element={<MenusDailySettingsPage />} />
           <Route path="product-images" element={<ProductImagesSettingsPage />} />
           <Route path="pos" element={<PosAdminPage />} />
+          <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />

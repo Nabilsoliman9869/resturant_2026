@@ -215,6 +215,67 @@ export default function DeveloperConnection() {
     }
   }
 
+  async function seedDefaultData() {
+    setMsg("");
+    setBusy(true);
+    try {
+      const r = await fetch(`${getApiBase()}/api/dev/seed-default-data`, { method: "POST" });
+      const t = await r.text();
+      let j: any = {};
+      try {
+        j = t ? JSON.parse(t) : {};
+      } catch {
+        throw new Error(t || `HTTP ${r.status}`);
+      }
+      if (!r.ok || !j.ok) throw new Error(j.detail || j.message || `HTTP ${r.status}`);
+      const out = j.tables || {};
+      const lines = Object.keys(out).map((k) => {
+        const s = out[k] || {};
+        const errs = Array.isArray(s.errors) ? s.errors.length : 0;
+        return `${k}: +${s.inserted || 0} / ~${s.updated || 0} / =${s.skipped || 0}${errs ? ` / !${errs}` : ""}`;
+      });
+      setMsg(`تمت تعبئة بيانات افتراضية كبداية (Seed ${j.seedVersion || ""}).\n${lines.join("\n")}`);
+      await loadLogs();
+    } catch (e) {
+      const s = String(e);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifySeedDefaultData() {
+    setMsg("");
+    setBusy(true);
+    try {
+      const r = await fetch(`${getApiBase()}/api/dev/seed-default-data/verify`);
+      const t = await r.text();
+      let j: any = {};
+      try {
+        j = t ? JSON.parse(t) : {};
+      } catch {
+        throw new Error(t || `HTTP ${r.status}`);
+      }
+      if (!r.ok || !j.ok) throw new Error(j.detail || j.message || `HTTP ${r.status}`);
+      const s = j.summary || {};
+      const rows = Array.isArray(j.tables) ? j.tables : [];
+      const extras = Array.isArray(j.extraChecks) ? j.extraChecks : [];
+      const lines = [
+        `الحالة العامة: ${j.status || "UNKNOWN"}`,
+        `OK=${s.ok || 0} | WARN=${s.warn || 0} | ERROR=${s.error || 0}`,
+        ...rows.map((x: any) => `${x.table}: ${x.status} (count=${x.count ?? "?"}, min=${x.requiredMin ?? "?"})`),
+        ...extras.map((x: any) => `${x.key}: ${x.status} - ${x.message || ""}`),
+      ];
+      setMsg(lines.join("\n"));
+      await loadLogs();
+    } catch (e) {
+      const s = String(e);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const viteBoot = __MAT3AM_VITE_BOOT_STAMP__;
 
   return (
@@ -333,6 +394,12 @@ export default function DeveloperConnection() {
           <button type="button" className="btn btn-primary" onClick={() => void bootstrap()} disabled={busy}>
             تنفيذ التهيئة
           </button>
+          <button type="button" className="btn btn-ghost" onClick={() => void seedDefaultData()} disabled={busy} style={{ marginInlineStart: 8 }}>
+            تعبئة بيانات افتراضية كبداية
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => void verifySeedDefaultData()} disabled={busy} style={{ marginInlineStart: 8 }}>
+            تقرير تحقق ما بعد التهيئة
+          </button>
           <div style={{ marginTop: 10, color: "var(--muted)", fontSize: "0.9rem" }}>
             نظام اللوج يحتفظ ببيانات شهر (30 يوماً) ويتم تنظيف الأقدم تلقائياً.
           </div>
@@ -379,4 +446,3 @@ export default function DeveloperConnection() {
     </div>
   );
 }
-

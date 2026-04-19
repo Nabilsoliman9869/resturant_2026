@@ -1,0 +1,30 @@
+[
+  {
+    "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049",
+    "productName": "127-مشروبات ساخنة Hot Drinks",
+    "stopped": false,
+    "note": "",
+    "updatedAt": "2026-04-17T21:48:19.362376",
+    "updatedBy": "kitchen",
+    "stoppedAt": "2026-04-17T21:48:11.886748",
+    "resumedAt": "2026-04-17T21:48:19.362376"
+  },
+  {
+    "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+    "productName": "Alex Liver Sandwich",
+    "stopped": true,
+    "note": "نفد من المطبخ",
+    "updatedAt": "2026-04-17T21:48:34.884938",
+    "updatedBy": "kitchen",
+    "stoppedAt": "2026-04-17T21:48:34.884938"
+  },
+  {
+    "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70",
+    "productName": "Alex Liver Sandwich (SYRE ,SPIECY )",
+    "stopped": true,
+    "note": "نفد من المطبخ",
+    "updatedAt": "2026-04-17T22:08:06.059714",
+    "updatedBy": "kitchen",
+    "stoppedAt": "2026-04-17T22:08:06.059714"
+  }
+]

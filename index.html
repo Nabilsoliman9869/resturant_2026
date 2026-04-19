@@ -4,12 +4,44 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>مطاعم — XTRA</title>
+    <link rel="icon" type="image/png" href="/app-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Syne:wght@600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <div id="boot-splash" style="position:fixed;inset:0;background:#0b1220;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;text-align:center;padding:18px;">
+      <img src="/app-logo.png" alt="Mat3am Logo" style="width:96px;height:96px;object-fit:contain;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.35);" />
+      <div style="font-family:'IBM Plex Sans Arabic',sans-serif;font-size:15px;opacity:.9;">جاري تحميل النظام...</div>
+      <div style="width:38px;height:38px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;"></div>
+      <div style="font-family:Arial,sans-serif;font-size:12px;opacity:.85;max-width:620px;line-height:1.4;">
+        All rights reserved to Sir Consult Information Technology LLC.
+      </div>
+    </div>
     <div id="root"></div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script>
+      (function () {
+        var splash = document.getElementById("boot-splash");
+        var root = document.getElementById("root");
+        if (!splash || !root) return;
+        var done = false;
+        function hide() {
+          if (done) return;
+          done = true;
+          splash.style.opacity = "0";
+          splash.style.transition = "opacity .25s ease";
+          setTimeout(function () { splash.remove(); }, 280);
+        }
+        var obs = new MutationObserver(function () {
+          if (root.childNodes.length > 0) hide();
+        });
+        obs.observe(root, { childList: true });
+        setTimeout(hide, 6000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

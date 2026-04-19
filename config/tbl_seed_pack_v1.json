@@ -1,0 +1,131 @@
+{
+  "meta": {
+    "version": "v1",
+    "language": "ar-en",
+    "purpose": "initial content only for existing TBL tables",
+    "notes": [
+      "لا تنشئ جداول TBL. استخدم UPSERT فقط.",
+      "اعتمد على business_key المذكور لكل جدول.",
+      "يمكن تعديل المحتوى بعد التهيئة من واجهات النظام."
+    ]
+  },
+  "tables": {
+    "TBL004": {
+      "business_key": ["CardCode"],
+      "rows": [
+        { "CardCode": "1101", "AccountName": "الصندوق الرئيسي", "LatinName": "Main Cash", "NotActive": 0 },
+        { "CardCode": "1102", "AccountName": "الصندوق الفرعي", "LatinName": "Sub Cash", "NotActive": 0 },
+        { "CardCode": "1201", "AccountName": "بنك جاري", "LatinName": "Current Bank", "NotActive": 0 },
+        { "CardCode": "2101", "AccountName": "موردون", "LatinName": "Suppliers", "NotActive": 0 },
+        { "CardCode": "3101", "AccountName": "إيراد مبيعات المطعم", "LatinName": "Restaurant Sales Revenue", "NotActive": 0 },
+        { "CardCode": "5101", "AccountName": "تكلفة مواد خام", "LatinName": "Raw Material Cost", "NotActive": 0 },
+        { "CardCode": "5201", "AccountName": "مصاريف تشغيل", "LatinName": "Operating Expenses", "NotActive": 0 }
+      ]
+    },
+    "TBL005": {
+      "business_key": ["CostCenter"],
+      "rows": [
+        { "CostCenter": "صالة المطعم", "LatinName": "Dining Hall", "CardType": 0, "NotActive": 0 },
+        { "CostCenter": "المطبخ", "LatinName": "Kitchen", "CardType": 0, "NotActive": 0 },
+        { "CostCenter": "التيك اواي", "LatinName": "Takeaway", "CardType": 0, "NotActive": 0 },
+        { "CostCenter": "الدليفري الداخلي", "LatinName": "Internal Delivery", "CardType": 0, "NotActive": 0 },
+        { "CostCenter": "الإدارة", "LatinName": "Administration", "CardType": 0, "NotActive": 0 }
+      ]
+    },
+    "TBL006": {
+      "business_key": ["GroupName", "MainGroupName"],
+      "rows": [
+        { "GroupName": "خامات الطبخ بالمطعم", "LatinName": "Cooking ingredients", "MainGroupName": null },
+        { "GroupName": "خضروات طازجة", "LatinName": "Fresh Vegetables", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "حبوب وبقوليات", "LatinName": "Grains and Legumes", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "لحوم حمراء", "LatinName": "Red Meat", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "دواجن وبيض", "LatinName": "Poultry and Eggs", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "أسماك ومأكولات بحرية", "LatinName": "Seafood", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "ألبان وأجبان", "LatinName": "Dairy and Cheese", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "زيوت ودهون وصوصات", "LatinName": "Oils Fats Sauces", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "توابل وأعشاب جافة", "LatinName": "Spices and Dry Herbs", "MainGroupName": "خامات الطبخ بالمطعم" },
+        { "GroupName": "معلبات ومجمدات ومكسرات", "LatinName": "Canned Frozen Nuts", "MainGroupName": "خامات الطبخ بالمطعم" },
+
+        { "GroupName": "القائمة الرئيسية", "LatinName": "Main Menu", "MainGroupName": null },
+        { "GroupName": "المقبلات Appetizers", "LatinName": "Appetizers", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "السلطات Salada", "LatinName": "Salads", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "الشوربة Soup", "LatinName": "Soup", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "مشويات Grills", "LatinName": "Grills", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "الدجاج Chicken", "LatinName": "Chicken", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "اللحوم Beefs", "LatinName": "Beef Dishes", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "سى فود Sea Food", "LatinName": "Sea Food", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "البيتزا Pizza", "LatinName": "Pizza", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "الباستا Pasta", "LatinName": "Pasta", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "ساندوتشات البرجر Burger Sandwiches", "LatinName": "Burger Sandwiches", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "الحلويات Dessert", "LatinName": "Dessert", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "مشروبات ساخنة Hot Drinks", "LatinName": "Hot Drinks", "MainGroupName": "القائمة الرئيسية" },
+        { "GroupName": "مشروبات باردة Cold Drinks", "LatinName": "Cold Drinks", "MainGroupName": "القائمة الرئيسية" }
+      ]
+    },
+    "TBL007": {
+      "business_key": ["CardCode"],
+      "rows": [
+        { "CardCode": "TB0001", "ProductName": "بصل أبيض", "LatinName": "White Onion", "GroupName": "خضروات طازجة", "AgentPrice": 18, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+        { "CardCode": "TB0002", "ProductName": "طماطم", "LatinName": "Tomato", "GroupName": "خضروات طازجة", "AgentPrice": 22, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+        { "CardCode": "TB0101", "ProductName": "لحم بقري مفروم 80/20", "LatinName": "Ground Beef 80/20", "GroupName": "لحوم حمراء", "AgentPrice": 290, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+        { "CardCode": "TB0201", "ProductName": "صدر دجاج فيليه", "LatinName": "Chicken Breast Fillet", "GroupName": "دواجن وبيض", "AgentPrice": 145, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+        { "CardCode": "TB0301", "ProductName": "جمبري متوسط", "LatinName": "Medium Shrimp", "GroupName": "أسماك ومأكولات بحرية", "AgentPrice": 320, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+        { "CardCode": "TB0401", "ProductName": "زيت نباتي قلي", "LatinName": "Vegetable Frying Oil", "GroupName": "زيوت ودهون وصوصات", "AgentPrice": 68, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+        { "CardCode": "TB0501", "ProductName": "ملح ناعم", "LatinName": "Fine Salt", "GroupName": "توابل وأعشاب جافة", "AgentPrice": 9, "EndUserPrice": 0, "StockProduct": 1, "NotActive": 0 },
+
+        { "CardCode": "FD1001", "ProductName": "ساندوتش برجر", "LatinName": "Burger Sandwich", "GroupName": "ساندوتشات البرجر Burger Sandwiches", "AgentPrice": 0, "EndUserPrice": 120, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1002", "ProductName": "فاهيتا دجاج", "LatinName": "Chicken Fajita", "GroupName": "الدجاج Chicken", "AgentPrice": 0, "EndUserPrice": 165, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1003", "ProductName": "ستيك مشوي", "LatinName": "Grilled Steak", "GroupName": "مشويات Grills", "AgentPrice": 0, "EndUserPrice": 265, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1004", "ProductName": "بانيه دجاج", "LatinName": "Chicken Pane", "GroupName": "الدجاج Chicken", "AgentPrice": 0, "EndUserPrice": 145, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1005", "ProductName": "مكرونة بشاميل", "LatinName": "Pasta Bechamel", "GroupName": "الباستا Pasta", "AgentPrice": 0, "EndUserPrice": 135, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1006", "ProductName": "بيتزا مارغريتا", "LatinName": "Pizza Margherita", "GroupName": "البيتزا Pizza", "AgentPrice": 0, "EndUserPrice": 185, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1007", "ProductName": "شوربة خضار", "LatinName": "Vegetable Soup", "GroupName": "الشوربة Soup", "AgentPrice": 0, "EndUserPrice": 65, "StockProduct": 0, "NotActive": 0 },
+        { "CardCode": "FD1008", "ProductName": "كيكة شوكولاتة", "LatinName": "Chocolate Cake", "GroupName": "الحلويات Dessert", "AgentPrice": 0, "EndUserPrice": 75, "StockProduct": 0, "NotActive": 0 }
+      ]
+    },
+    "TBL015": {
+      "business_key": ["GroupName"],
+      "rows": [
+        { "GroupName": "عملاء نقدي", "MainGroupName": null },
+        { "GroupName": "عملاء أفراد", "MainGroupName": null },
+        { "GroupName": "عملاء شركات", "MainGroupName": null },
+        { "GroupName": "مندوبين توصيل", "MainGroupName": null }
+      ]
+    },
+    "TBL016": {
+      "business_key": ["AgentName", "Phone"],
+      "rows": [
+        { "AgentName": "عميل نقدي", "CardNumber": 1, "MainGroupName": "عملاء نقدي", "Phone": "0000000000", "Mobile": "0000000000", "FullAdress": "POS CASH", "NotActive": 0 },
+        { "AgentName": "ضيف صالة", "CardNumber": 2, "MainGroupName": "عملاء أفراد", "Phone": "01000000001", "Mobile": "01000000001", "FullAdress": "Walk-in", "NotActive": 0 }
+      ]
+    },
+    "TBL008": {
+      "business_key": ["WarehouseName"],
+      "rows": [
+        { "WarehouseName": "مخزن المطعم الرئيسي", "LatinName": "Main Restaurant Warehouse", "NotActive": 0 },
+        { "WarehouseName": "مخزن مطبخ تشغيل", "LatinName": "Kitchen Working Store", "NotActive": 0 }
+      ]
+    },
+    "TBL049": {
+      "business_key": ["ProjectName"],
+      "rows": [
+        { "ProjectName": "صالة المطعم" },
+        { "ProjectName": "تيك اواي" },
+        { "ProjectName": "دليفري داخلي" },
+        { "ProjectName": "طلبات أونلاين" }
+      ]
+    },
+    "TBL020": {
+      "business_key": ["InvoiceName"],
+      "rows": [
+        { "OrderKind": "table", "InvoiceName": "طلب طاولة", "LatinName": "Table Order", "TextValue01": "MAT3AM_ORDER_TABLE" },
+        { "OrderKind": "takeaway", "InvoiceName": "طلب تيك اواي", "LatinName": "Takeaway Order", "TextValue01": "MAT3AM_ORDER_TAKEAWAY" },
+        { "OrderKind": "delivery", "InvoiceName": "طلب دليفري", "LatinName": "Delivery Order", "TextValue01": "MAT3AM_ORDER_DELIVERY" },
+        { "OrderKind": "bar_quick", "InvoiceName": "طلب بار سريع", "LatinName": "Bar Quick Order", "TextValue01": "MAT3AM_ORDER_BAR" },
+        { "OrderKind": "catering", "InvoiceName": "طلب تجهيزات", "LatinName": "Catering Order", "TextValue01": "MAT3AM_ORDER_CATERING" },
+        { "OrderKind": "purchase", "InvoiceName": "مشتريات تشغيل", "LatinName": "Purchase", "TextValue01": "MAT3AM_ORDER_PURCHASE" }
+      ]
+    }
+  }
+}
+

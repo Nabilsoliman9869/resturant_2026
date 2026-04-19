@@ -57,6 +57,11 @@ export function documentToJson(doc: NormalizedFloorPlanDocument): Record<string,
     height: only.height,
     shell: only.shell,
     tables: only.tables,
+    textAnnotations: only.textAnnotations ?? [],
+    arrows: only.arrows ?? [],
+    obstacles: only.obstacles ?? [],
+    aisles: only.aisles ?? [],
+    zones: only.zones ?? [],
   };
 }
 
@@ -109,6 +114,8 @@ export function createEmptyFloor(id: string, name: string): FloorPlan {
       ],
     },
     tables: [],
+    textAnnotations: [],
+    arrows: [],
     obstacles: [],
     aisles: [],
     zones: [],

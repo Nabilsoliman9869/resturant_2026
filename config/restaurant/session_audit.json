@@ -1,0 +1,43 @@
+[
+  {
+    "at": "2026-04-12T23:39:35.362275",
+    "action": "transfer_table",
+    "sessionId": "c6550969-a507-4c99-8dbf-ffe89e617126",
+    "fromTableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "toTableId": "7944373E-C778-4FA7-8942-BA8E10D28274",
+    "actor": "waiter"
+  },
+  {
+    "at": "2026-04-13T00:19:35.096646",
+    "action": "merge_table",
+    "sessionId": "cb4791f2-10dd-43b7-b1c4-692ed6b27b77",
+    "fromTableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "toTableId": "7944373E-C778-4FA7-8942-BA8E10D28274",
+    "targetSessionId": "c6550969-a507-4c99-8dbf-ffe89e617126",
+    "actor": "waiter"
+  },
+  {
+    "at": "2026-04-13T16:14:32.993818",
+    "action": "transfer_table",
+    "sessionId": "1efe356b-13ca-4d18-852d-bad0aea2625b",
+    "fromTableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "toTableId": "3E8AC3AA-19A5-4459-9405-411E08BB27F7",
+    "actor": "waiter"
+  },
+  {
+    "at": "2026-04-13T16:17:45.242691",
+    "action": "transfer_table",
+    "sessionId": "b1e04ea9-ba21-4fa3-a07e-b5c05fab2676",
+    "fromTableId": "A748D10B-5B2D-41C0-BA68-35DDF36FD26C",
+    "toTableId": "D8680F71-47C5-4402-92F0-74A475301167",
+    "actor": "waiter"
+  },
+  {
+    "at": "2026-04-13T16:17:58.774751",
+    "action": "transfer_table",
+    "sessionId": "b1e04ea9-ba21-4fa3-a07e-b5c05fab2676",
+    "fromTableId": "D8680F71-47C5-4402-92F0-74A475301167",
+    "toTableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "actor": "waiter"
+  }
+]

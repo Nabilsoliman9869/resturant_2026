@@ -6,23 +6,38 @@
     "invoiceId": "54D481BE-B4CE-41BB-9F8D-E980BAA23386",
     "items": [
       {
+        "lineId": "683c1436-a9af-46e5-9557-e1a5e20f30e7",
         "name": "Alex Liver Sandwich (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:06:11.581064",
+        "sentAt": "2026-04-17T20:06:20.653256"
       },
       {
+        "lineId": "79cc502c-168f-4287-aa8e-946827333a7e",
         "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
-    "status": "ready",
+    "status": "preparing",
     "generalOrder": false,
     "createdAt": "2026-04-04T03:47:24.439122",
     "prepStartTime": "2026-04-04T03:52:16.957171",
-    "prepEndTime": "2026-04-04T03:53:01.785671"
+    "prepEndTime": "2026-04-17T20:06:57.807762",
+    "completedAt": null
   },
   {
     "id": "4db66e88-effe-4bf5-9f4d-1325cc4f370d",
@@ -32,22 +47,43 @@
     "finalInvoiceId": null,
     "items": [
       {
+        "lineId": "ab30e2a7-58dd-44f5-97c3-e7fe7c1929ee",
         "name": "Alex Liver Sandwich (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "2b8047a9-3fc9-4eee-9ded-52602bcf14d5",
         "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "e11aea46-a537-4e11-8efa-9813b18dc64d",
         "name": "anise (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "5B8BDE42-1C27-4B4A-B1A3-9126FCCB5191"
+        "productGuide": "5B8BDE42-1C27-4B4A-B1A3-9126FCCB5191",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
     "kitchenTotals": {
@@ -59,7 +95,10 @@
     "status": "pending",
     "generalOrder": false,
     "createdAt": "2026-04-09T21:47:12.929109",
-    "ticketNo": 1
+    "ticketNo": 1,
+    "prepStartTime": "2026-04-14T00:42:33.134032",
+    "prepEndTime": "2026-04-14T00:48:12.538353",
+    "completedAt": null
   },
   {
     "id": "c3d3d10a-e5af-47ee-924c-9718fe53b392",
@@ -69,16 +108,30 @@
     "finalInvoiceId": null,
     "items": [
       {
+        "lineId": "07a66feb-9404-4307-8898-ba36b3a64cf2",
         "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "c4525d0c-7d94-4569-9a4f-f152e193cd5c",
         "name": "Alex Liver Sandwich (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
     "kitchenTotals": {
@@ -90,7 +143,10 @@
     "status": "pending",
     "generalOrder": false,
     "createdAt": "2026-04-09T23:21:07.117832",
-    "ticketNo": 2
+    "ticketNo": 2,
+    "prepStartTime": "2026-04-14T00:46:32.341687",
+    "prepEndTime": "2026-04-14T00:48:20.682990",
+    "completedAt": null
   },
   {
     "id": "d04ff2e8-4a0a-4675-88de-585f8f96e8f4",
@@ -100,22 +156,43 @@
     "finalInvoiceId": null,
     "items": [
       {
+        "lineId": "b88b1ea3-f4bc-4f0a-a02e-6919624972e8",
         "name": "12% Service (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "E6F6CE09-AB15-4BC3-9548-D9E7AED24858"
+        "productGuide": "E6F6CE09-AB15-4BC3-9548-D9E7AED24858",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "7a0452ba-8b50-4d15-aca0-380858ac40bb",
         "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "0759e24e-353a-41da-98b4-7fabb9219a10",
         "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70"
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
     "kitchenTotals": {
@@ -127,7 +204,10 @@
     "status": "pending",
     "generalOrder": false,
     "createdAt": "2026-04-10T03:38:20.038009",
-    "ticketNo": 3
+    "ticketNo": 3,
+    "prepStartTime": "2026-04-14T01:11:51.549670",
+    "prepEndTime": "2026-04-14T01:11:55.824846",
+    "completedAt": null
   },
   {
     "id": "583561ef-61a5-43ad-bc7e-dfbea306053a",
@@ -137,34 +217,69 @@
     "finalInvoiceId": null,
     "items": [
       {
+        "lineId": "928897c6-f95f-4332-a09f-68c3f0ab1fe4",
         "name": "127-مشروبات ساخنة Hot Drinks (كرسي 4)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "f7ce9f58-bac8-45ca-ba8e-bd5f5fcb12dd",
         "name": "Alex Liver Sandwich (كرسي 4)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "71af8a35-7a44-48a9-8361-be2c9a599b43",
         "name": "Alex Liver Sandwich (FRE ) (كرسي 3)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "1d593c7f-8925-45cf-829f-dce234c32d57",
         "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 3)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70"
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "0ffede79-f135-46e1-a530-d02cb67a1a4f",
         "name": "Alexandarian Liver (كرسي 3)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C"
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
     "kitchenTotals": {
@@ -176,7 +291,10 @@
     "status": "pending",
     "generalOrder": false,
     "createdAt": "2026-04-10T03:42:08.385489",
-    "ticketNo": 4
+    "ticketNo": 4,
+    "prepStartTime": "2026-04-14T01:12:01.349429",
+    "prepEndTime": "2026-04-14T01:12:03.061570",
+    "completedAt": null
   },
   {
     "id": "d4f83740-da45-484b-968f-7e6042ff8fc8",
@@ -186,40 +304,82 @@
     "finalInvoiceId": null,
     "items": [
       {
+        "lineId": "6abdf146-b7ac-4d36-ad49-d809f40d4a8a",
         "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049"
+        "productGuide": "06532D84-6887-4609-9B77-F47F36EBE049",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "c01b0b6d-ff0d-44bd-9aa2-382bd2f23e55",
         "name": "Alex Liver Sandwich (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C"
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "8bdd7f35-6956-4457-934b-332a91401ca0",
         "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "6cf60bf7-bfc9-4e7d-9339-4256e14649ad",
         "name": "Apple Breeza (كرسي 2)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "3894CA6A-65EA-491A-84F6-A2816C815E38"
+        "productGuide": "3894CA6A-65EA-491A-84F6-A2816C815E38",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "547ee856-2669-454b-93ec-d3d8a917b8da",
         "name": "apple juice (كرسي 2)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "3EAAAEE9-17A4-42BD-86FE-D988315A4510"
+        "productGuide": "3EAAAEE9-17A4-42BD-86FE-D988315A4510",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "90ab6133-e5aa-4920-bbea-4765c86b6067",
         "name": "Asfor With Chicken Tagine (كرسي 2)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "1B4DAB30-125B-4355-B9A9-914BC567632D"
+        "productGuide": "1B4DAB30-125B-4355-B9A9-914BC567632D",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
     "kitchenTotals": {
@@ -231,32 +391,56 @@
     "status": "pending",
     "generalOrder": false,
     "createdAt": "2026-04-10T04:20:38.945864",
-    "ticketNo": 5
+    "ticketNo": 5,
+    "prepStartTime": "2026-04-14T01:11:56.525894",
+    "prepEndTime": "2026-04-14T01:11:59.076631",
+    "completedAt": null
   },
   {
     "id": "dcafd04d-1353-4120-bb51-879d08cbdc04",
     "sessionId": "c6550969-a507-4c99-8dbf-ffe89e617126",
-    "tableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "tableId": "7944373E-C778-4FA7-8942-BA8E10D28274",
     "invoiceId": null,
     "finalInvoiceId": null,
     "items": [
       {
+        "lineId": "b3bc2735-ac2b-4dcd-97a0-2a73957341e0",
         "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A"
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "9b974d28-aed4-49db-9c80-93d8ace60df4",
         "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70"
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       },
       {
+        "lineId": "5a61f205-c5a0-44ed-a9e8-de7301b4425f",
         "name": "Alexandarian Liver (كرسي 1)",
         "quantity": 1.0,
         "unitPrice": 0.0,
-        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C"
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
       }
     ],
     "kitchenTotals": {
@@ -268,6 +452,1084 @@
     "status": "pending",
     "generalOrder": false,
     "createdAt": "2026-04-10T04:35:00.454833",
-    "ticketNo": 6
+    "ticketNo": 6,
+    "prepStartTime": "2026-04-14T01:12:08.036929",
+    "prepEndTime": "2026-04-14T01:12:09.349125",
+    "tableGuid": "7944373E-C778-4FA7-8942-BA8E10D28274",
+    "tableLabel": "#102",
+    "completedAt": null
+  },
+  {
+    "id": "e525be27-e4a7-4c79-8d68-59121168e424",
+    "sessionId": "049b1317-6450-4610-a22c-a43a372ee8f9",
+    "tableId": "D8680F71-47C5-4402-92F0-74A475301167",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "lineId": "f475a97c-9940-4f49-b685-f1e58f5e7bea",
+        "name": "bojashsa (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "704A5CA9-8D79-4B18-87E8-31AA0FE632F2",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "66c6eeea-f6ab-4b84-9f1a-eeaad3a77928",
+        "name": "cachwo (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1DFD1FA5-1CB2-4B74-9515-6CFF0CDE26CB",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "5caef26f-9a06-45dc-b869-1eca2dabed82",
+        "name": "couscous with nuts (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "64B02EDE-3868-450D-B491-E6334BE52C22",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-14T00:19:56.120638",
+    "ticketNo": 7,
+    "prepStartTime": "2026-04-14T01:12:04.629050",
+    "prepEndTime": "2026-04-14T01:12:06.829242",
+    "tableGuid": "D8680F71-47C5-4402-92F0-74A475301167",
+    "tableLabel": "T11",
+    "completedAt": null
+  },
+  {
+    "id": "50b37d0b-cbdc-45c8-acb6-de6b73e304c6",
+    "sessionId": "d406c178-42d5-4ecb-aa6f-edf1200adcca",
+    "tableId": "55D65C69-D471-449D-8327-272A7AE0701B",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "lineId": "bc9fd116-549a-4778-a828-afabdd628bca",
+        "name": "Chicken Balls (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "B1E5E230-3227-432C-B4F9-48325B6E6B28",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "7301fa05-98db-4873-af0b-96882c0fabb9",
+        "name": "Chicken balls (KIDS ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "3B55012F-6146-474E-A8CD-DE96C7E8021C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "3c3bb99d-8f74-4d55-b6b9-a5c8817bb7a2",
+        "name": "Chicken balls (KIDS .AZOZ.. TAMAM ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "B370824C-D24F-4E38-B7E4-EC2D7F2D3362",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "952bceac-8306-4e81-9be0-84f6c457c745",
+        "name": "Chicken balls (KIDS TALIA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E9F1499E-238F-4290-BF99-5E03018DB57F",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-14T00:54:44.916242",
+    "ticketNo": 8,
+    "prepStartTime": "2026-04-14T01:12:10.845663",
+    "prepEndTime": "2026-04-14T01:12:12.212984",
+    "tableGuid": "55D65C69-D471-449D-8327-272A7AE0701B",
+    "tableLabel": "T21",
+    "completedAt": null
+  },
+  {
+    "id": "c9ace267-aab3-4089-8cef-61853eb77946",
+    "sessionId": "327f862f-1bb7-425b-aa9b-daebe7c2c54f",
+    "tableId": "37803964-84E0-4E86-9BA3-CBEEAA3080BD",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "lineId": "102ffad8-53ec-48d8-85dc-1829eb9da5b6",
+        "name": "boghasha custard (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "A16CCF74-96D4-46B8-BB17-D585BBB9EA91",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "6186bdfc-4c3a-4d1a-bdc7-10bbdb4b29ea",
+        "name": "bojashsa (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "704A5CA9-8D79-4B18-87E8-31AA0FE632F2",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "f5e80b74-02ff-44c8-a8e3-817dc85d5131",
+        "name": "cachwo (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1DFD1FA5-1CB2-4B74-9515-6CFF0CDE26CB",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "00a88b42-9636-4cae-99d8-6912480eb899",
+        "name": "Fattah Kawarea (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "DB639A23-4086-4CA9-A282-E51C424A5449",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "b7c3f395-01b7-4966-9f5b-789ae2df94f3",
+        "name": "Fattah Mozzah (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "FCB3C19D-A1A3-4DDD-BD51-911CB468E5D7",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "09fad079-5fae-4fcb-a341-5080f1dde386",
+        "name": "Fattah Shawerma Chicken (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1339F405-FF87-4542-92F0-B25B14FFD039",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "6d96aa35-1c8f-4643-b864-d8425d520648",
+        "name": "Fattah Shawerma Meat (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "972BCAA2-A96B-4E56-9C95-99727E0182B4",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "6d8d6b6e-e1fb-4ebb-822a-20154ed7a107",
+        "name": "زيت نباتي قلي (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 68.0,
+        "productGuide": "F7DE39C9-6FA0-4FEE-A952-6442212002E6",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "10cde9a3-7e18-4d26-8eba-3c4349321f4e",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 18.0,
+        "productGuide": "01D11EE2-CB0A-47EA-8D71-9C482843C34F",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "ae5b7b3e-53a3-46b9-b34e-140b6282a817",
+        "name": "طماطم (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 22.0,
+        "productGuide": "DD8A13E1-0CBC-4751-B543-12C324F5CCB6",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "9007d5ea-5bb6-433c-af11-2b69df869b3d",
+        "name": "بانيه دجاج (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FA627979-E5DA-44E1-8E89-06F57C732180",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "17463519-aad3-43c4-9648-81491f9997de",
+        "name": "فاهيتا دجاج (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "568B7F60-0C7A-40B5-A35C-A151CE6669FE",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 152.0,
+      "tax": 23.8336,
+      "serviceCharge": 18.24,
+      "total": 194.0736
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-14T00:58:06.938277",
+    "ticketNo": 9,
+    "prepStartTime": "2026-04-14T01:11:39.219062",
+    "prepEndTime": "2026-04-14T01:12:13.692711",
+    "tableGuid": "37803964-84E0-4E86-9BA3-CBEEAA3080BD",
+    "tableLabel": "T20",
+    "updatedAt": "2026-04-18T22:20:03.666925",
+    "completedAt": null
+  },
+  {
+    "id": "67b85005-b890-4a8f-b67b-38ed3f7ca269",
+    "sessionId": "b1e04ea9-ba21-4fa3-a07e-b5c05fab2676",
+    "tableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "items": [
+      {
+        "lineId": "078c5fec-4598-421c-8e69-605cec330279",
+        "name": "bojashsa (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "704A5CA9-8D79-4B18-87E8-31AA0FE632F2",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "ea6dee61-4650-48f7-afdf-5d56a804a0b7",
+        "name": "cachwo (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1DFD1FA5-1CB2-4B74-9515-6CFF0CDE26CB",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "d3ee755f-915c-46b9-a7b0-190a18358a87",
+        "name": "couscous with nuts (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "64B02EDE-3868-450D-B491-E6334BE52C22",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "26f45916-9ca3-445b-8691-b9d664ef025c",
+        "name": "Couscous With Nutts (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "8348D2D0-A50F-432E-B415-357520911CE7",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-14T01:12:56.524255",
+    "ticketNo": 10,
+    "tableGuid": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "tableLabel": "T10",
+    "completedAt": null
+  },
+  {
+    "id": "d8a57f7c-cd0f-44a4-a78e-273ad7030b68",
+    "sessionId": "b47e4ecb-6c17-4239-86cc-d01aa4735038",
+    "tableId": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "tableGuid": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "tableLabel": "T13",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "064f1235-1f63-482b-ba92-53e0fc238e65",
+        "name": "Fattah Mozzah (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FCB3C19D-A1A3-4DDD-BD51-911CB468E5D7",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:45:53.364175",
+        "sentAt": "2026-04-17T20:45:56.794957"
+      },
+      {
+        "lineId": "0c721197-9db5-417b-93bd-56207742b371",
+        "name": "Fattah Shawerma Chicken (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1339F405-FF87-4542-92F0-B25B14FFD039",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:46:30.011589",
+        "sentAt": "2026-04-17T20:46:54.684338"
+      },
+      {
+        "lineId": "5e40ae2c-a0d6-4341-8f52-1b4b2f5b9943",
+        "name": "fettah moza (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "6D55BA6D-3509-43F3-A611-46A55EE61721",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:07.305037",
+        "sentAt": "2026-04-17T20:47:14.857957"
+      },
+      {
+        "lineId": "68037111-f3e8-4d24-8a6d-844654f4357e",
+        "name": "Fattah Mozzah",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FCB3C19D-A1A3-4DDD-BD51-911CB468E5D7",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:29.684498",
+        "sentAt": "2026-04-17T20:47:57.315113"
+      },
+      {
+        "lineId": "05062032-ed7f-4eed-a2c7-1118b2dadf6c",
+        "name": "Fattah Shawerma Chicken",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "1339F405-FF87-4542-92F0-B25B14FFD039",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:49.415758",
+        "sentAt": "2026-04-17T20:47:58.001632"
+      },
+      {
+        "lineId": "bbbd5bf8-07c7-4d33-83c1-84b25015873f",
+        "name": "Mini Hot Dog",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "B7D36066-C404-44F4-A095-07D98F705E3E",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:51.257187",
+        "sentAt": "2026-04-17T20:47:58.826183"
+      },
+      {
+        "lineId": "ff815630-ef0e-42a4-9c11-f8c8f86aacb5",
+        "name": "Mini burger",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F65F67AB-B26A-4A53-8811-724350BF171B",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:52.499775",
+        "sentAt": "2026-04-17T20:47:59.643613"
+      },
+      {
+        "lineId": "6e6e8428-e3ae-4ee2-8e7a-d99c6fadb82a",
+        "name": "Basket Bread (7OOSSOO )",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F153AD12-8517-4678-A155-D6B5248D5F11",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:53.531438",
+        "sentAt": "2026-04-17T20:48:00.531211"
+      },
+      {
+        "lineId": "f52d20ae-df14-4879-a0fe-8f1a29b4fe74",
+        "name": "Basket Bread (DONE ,,7OOSSOO )",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "8A438221-C66E-41C0-B802-BA0AC79F0A93",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T20:47:54.652526",
+        "sentAt": "2026-04-17T20:48:01.418563"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "served",
+    "generalOrder": true,
+    "createdAt": "2026-04-17T19:53:29.365948",
+    "ticketNo": 11,
+    "prepStartTime": "2026-04-17T20:45:53.364175",
+    "completedAt": "2026-04-17T20:48:01.418563",
+    "kpiLeadMinutes": 54.53
+  },
+  {
+    "id": "fd3ab501-231b-41b9-a9e4-c91be0bd4b00",
+    "sessionId": "053cb228-bdd9-43cc-ab28-14f6ba2ffd15",
+    "tableId": "A748D10B-5B2D-41C0-BA68-35DDF36FD26C",
+    "tableGuid": "A748D10B-5B2D-41C0-BA68-35DDF36FD26C",
+    "tableLabel": "T14",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "733dc979-1b15-4e44-a3c3-198786a00faf",
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T22:02:35.177440",
+        "sentAt": "2026-04-17T22:04:08.337512"
+      },
+      {
+        "lineId": "7d1fb257-20b1-4601-83e5-0da23d80dded",
+        "name": "Mini burger (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F65F67AB-B26A-4A53-8811-724350BF171B",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-17T22:03:01.168936",
+        "sentAt": "2026-04-17T22:04:09.303968"
+      },
+      {
+        "lineId": "5c20edfd-b703-4f66-85b8-33f80e4f4b9a",
+        "name": "Mini Hot Dog (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "B7D36066-C404-44F4-A095-07D98F705E3E",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:17.570674",
+        "sentAt": null
+      },
+      {
+        "lineId": "6d7b686c-c282-4ba5-9744-1a031bfffc98",
+        "name": "Double Cheese Burger (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "3462D365-0982-45C4-9739-435755078DA8",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "44e53e1c-e63c-423a-a3c2-6a43736a3394",
+        "name": "Cheese Cake (1,B,B,,1,STRE ) (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "FFA1D33D-0F53-49C8-8841-529B6DD1ABDD",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "9e1130cf-be3c-439c-a6cd-e9ac05acbd0d",
+        "name": "Cheese Cake (1BB 1CHO ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F1DBC48A-B46D-4BB9-9594-F806A330AEDC",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "preparing",
+    "generalOrder": false,
+    "createdAt": "2026-04-17T21:54:51.737673",
+    "ticketNo": 12,
+    "completedAt": null,
+    "prepStartTime": "2026-04-17T22:02:35.177440"
+  },
+  {
+    "id": "5320b81d-412f-4f66-8b40-591a208a778c",
+    "sessionId": "5c371907-30c8-4508-be88-52f04fa99404",
+    "tableId": "FFB8D3C3-706F-4908-8685-3B2B6A072996",
+    "tableGuid": "FFB8D3C3-706F-4908-8685-3B2B6A072996",
+    "tableLabel": "T15",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "56dc937f-b4ba-4eea-8bbf-797bc61d5e36",
+        "name": "Lentil Soup (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "6ABD10DD-221A-430F-BC3A-B04096470B1F",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "6b8803e7-b832-4ff4-b71b-f4790108c7d1",
+        "name": "Corn Soup (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "4C99BD24-7AE2-43A7-9987-2DCE67B6A2A0",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "200607f8-4f59-471e-a6e6-114cc068fb92",
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FC2D28D7-E752-4142-B961-9F8922FF374A",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "6a2e2a39-1007-400c-849a-e2eec5b1ace1",
+        "name": "Alex Liver Sandwich (SYRE ,SPIECY ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C8965E82-1A53-411D-84E0-48E63EDCCB70",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "1ad28d18-1da7-42f8-a25d-6ecbc0f797e0",
+        "name": "Alexandarian Liver (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "376f842e-b10a-4b73-bcb3-0617389f2e82",
+        "name": "Basket Bread (DONE ,,7OOSSOO ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "8A438221-C66E-41C0-B802-BA0AC79F0A93",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "650513a8-26a8-414e-beca-89593162ea99",
+        "name": "Basket Bread (OK ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C662C5BF-68F6-4F91-895A-C80407DAC8C9",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "a6cdcaf0-c983-410d-aa8e-9b2fcf05c5da",
+        "name": "deps roman (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E8AC1812-4150-4FDE-A588-05303DBE3DF5",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-04-17T21:55:25.001392",
+    "ticketNo": 13,
+    "completedAt": null
+  },
+  {
+    "id": "35f4600d-cc26-4f24-915d-f70c0e859aa7",
+    "sessionId": "fe7fdbed-1a90-4ded-906e-c9598f70ae5f",
+    "tableId": "F2EDA31C-8E19-4004-8FBB-BA0B5ADE076C",
+    "tableGuid": "F2EDA31C-8E19-4004-8FBB-BA0B5ADE076C",
+    "tableLabel": "T22",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "18836431-e02b-4068-963f-f63d9f0873b9",
+        "name": "beef fillet 200 g (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "205A4BC0-5DB2-461B-A0C4-B7683CBCA839",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:35.401014",
+        "sentAt": null
+      },
+      {
+        "lineId": "78f1279d-1ebf-409f-a4a6-16cb7078d112",
+        "name": "beef fillet and shrimp (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E408B0CB-52A2-4FD9-A46F-59F50FE28517",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:34.088774",
+        "sentAt": null
+      },
+      {
+        "lineId": "f738c9b7-359c-4c8a-981f-566dc20b4cb7",
+        "name": "beef shawerma (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "0958ABAE-2D2D-4AEF-BC71-9DE80A44635F",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:30.361846",
+        "sentAt": null
+      },
+      {
+        "lineId": "1746d0b3-4a4a-41f3-b899-2e1ecae01cfe",
+        "name": "Basket Bread (DONE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5A265FCE-AED8-4FF3-B1BA-34923EDAD02A",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:28.482656",
+        "sentAt": null
+      },
+      {
+        "lineId": "9972985f-5e39-4cb4-ac20-64d709d081cf",
+        "name": "Basket Bread (DONE ,,7OOSSOO ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "8A438221-C66E-41C0-B802-BA0AC79F0A93",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:27.672988",
+        "sentAt": null
+      },
+      {
+        "lineId": "c028c1b4-8a50-4701-9c0d-432e73945cc7",
+        "name": "Basket Bread (OK ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C662C5BF-68F6-4F91-895A-C80407DAC8C9",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:26.791276",
+        "sentAt": null
+      },
+      {
+        "lineId": "65e2e5b2-ff2f-4782-a2a2-00c7c59b2c1f",
+        "name": "Mini burger (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F65F67AB-B26A-4A53-8811-724350BF171B",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:03:37.721045",
+        "sentAt": null
+      },
+      {
+        "lineId": "b2ac4430-b3f8-49bd-b2e9-8000751fcfe6",
+        "name": "Mini Hot Dog (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "B7D36066-C404-44F4-A095-07D98F705E3E",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-17T22:05:25.815051",
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "ready",
+    "generalOrder": false,
+    "createdAt": "2026-04-17T21:59:32.569264",
+    "ticketNo": 14,
+    "completedAt": null,
+    "prepStartTime": "2026-04-17T22:03:37.721045"
+  },
+  {
+    "id": "9ed9ecb2-acdc-4e56-8b78-f0678730c62d",
+    "sessionId": "1fae4006-2f7b-4291-908b-aab425504816",
+    "tableId": "688BF619-428C-498A-B211-8E647EEFA196",
+    "tableGuid": "688BF619-428C-498A-B211-8E647EEFA196",
+    "tableLabel": "T101",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "455dbbe2-850a-4e76-b5a4-104ad4cb2524",
+        "name": "شوربة خضار (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "AAD25D82-9F07-4EBB-87DE-CFA49B275AE8",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:15:20.753173",
+        "sentAt": "2026-04-18T22:15:37.405343"
+      },
+      {
+        "lineId": "f5247d74-d73d-47a4-93fc-ead2dbdc71b2",
+        "name": "طماطم (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 22.0,
+        "productGuide": "DD8A13E1-0CBC-4751-B543-12C324F5CCB6",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:15:23.552230",
+        "sentAt": "2026-04-18T22:15:38.165290"
+      },
+      {
+        "lineId": "8d782430-8b39-4bbb-ab9e-9b35cae540d7",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 18.0,
+        "productGuide": "01D11EE2-CB0A-47EA-8D71-9C482843C34F",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:15:28.098575",
+        "sentAt": "2026-04-18T22:15:39.009521"
+      },
+      {
+        "lineId": "13e58da0-86be-49e9-8bd0-907b97fa71b5",
+        "name": "ساندوتش برجر (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "011B7794-2CE4-46C9-B799-2ABBDCD0DE8B",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:15:30.179721",
+        "sentAt": "2026-04-18T22:15:40.438716"
+      },
+      {
+        "lineId": "f683d229-ca29-4f9d-be99-1554baa33a5e",
+        "name": "بانيه دجاج (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "FA627979-E5DA-44E1-8E89-06F57C732180",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:15:32.779366",
+        "sentAt": "2026-04-18T22:15:41.278719"
+      },
+      {
+        "lineId": "92552d51-5f45-41ae-aa0f-f6b34ea14804",
+        "name": "فاهيتا دجاج (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "568B7F60-0C7A-40B5-A35C-A151CE6669FE",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:15:34.041233",
+        "sentAt": "2026-04-18T22:15:41.974189"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 40.0,
+      "tax": 6.271999999999999,
+      "serviceCharge": 4.8,
+      "total": 51.071999999999996
+    },
+    "status": "served",
+    "generalOrder": false,
+    "createdAt": "2026-04-18T22:14:26.568713",
+    "ticketNo": 15,
+    "completedAt": "2026-04-18T22:15:41.974189",
+    "prepStartTime": "2026-04-18T22:15:20.753173",
+    "kpiLeadMinutes": 1.26
+  },
+  {
+    "id": "23c94ba5-67d6-4f9e-bc75-f56742b1531c",
+    "sessionId": "b508bc8e-464c-4792-a742-0a475f79c9b4",
+    "tableId": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "tableGuid": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "tableLabel": "T13",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "adc02f91-b24f-4856-a3aa-d6c2904292fa",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 18.0,
+        "productGuide": "01D11EE2-CB0A-47EA-8D71-9C482843C34F",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:21:50.294329",
+        "sentAt": "2026-04-18T22:22:29.736242"
+      },
+      {
+        "lineId": "e9f62cd2-9a96-49d2-9754-279a70e35d68",
+        "name": "طماطم (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 22.0,
+        "productGuide": "DD8A13E1-0CBC-4751-B543-12C324F5CCB6",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:22:22.979662",
+        "sentAt": "2026-04-18T22:22:30.392756"
+      },
+      {
+        "lineId": "82d447c7-a05b-43aa-afda-3a58c7979ab7",
+        "name": "صدر دجاج فيليه (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 145.0,
+        "productGuide": "9AA95C3D-49F2-4F3B-AF16-A2377BFD71B8",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:41:31.001834",
+        "sentAt": "2026-04-18T22:41:35.468959"
+      },
+      {
+        "lineId": "d2313d90-6903-4312-adb0-eeb8015c8b30",
+        "name": "جمبري متوسط (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 320.0,
+        "productGuide": "D188AD5E-A67D-4EDF-9CDC-B3F894F031D2",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-18T22:41:33.087882",
+        "sentAt": "2026-04-18T22:41:36.284438"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 650.0,
+      "tax": 101.92,
+      "serviceCharge": 78.0,
+      "total": 829.92
+    },
+    "status": "served",
+    "generalOrder": false,
+    "createdAt": "2026-04-18T22:19:34.398660",
+    "ticketNo": 16,
+    "completedAt": "2026-04-18T22:41:36.284438",
+    "prepStartTime": "2026-04-18T22:21:50.294329",
+    "kpiLeadMinutes": 22.03
   }
 ]

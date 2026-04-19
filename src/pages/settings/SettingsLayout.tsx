@@ -24,13 +24,22 @@ const SETTINGS_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
   {
     title: "التكاليف والتعريفات",
     items: [
+      { path: "costing-mode", label: "أساس احتساب التكاليف" },
       { path: "costing", label: "إعدادات التكاليف" },
+      { path: "price-lists", label: "قائمة الأسعار" },
+      { path: "daily-opening-custody", label: "عهدة أول اليوم" },
+      { path: "daily-return", label: "المسترد آخر اليوم" },
+      { path: "daily-overhead", label: "مصاريف التشغيل اليومية" },
+      { path: "daily-result", label: "النتيجة اليومية" },
+      { path: "kitchen-item-stop", label: "إيقاف أصناف المطبخ (وقتي)" },
+      { path: "daily-cost-engine", label: "محرك التكلفة اليومية (مجمّع)" },
       { path: "master-data", label: "التعريفات الأساسية" },
     ],
   },
   {
     title: "النظام والصيانة",
     items: [
+      { path: "workflow", label: "دورة العمل ومسارات الأدوار" },
       { path: "connection", label: "اتصال القاعدة" },
       { path: "init-db", label: "تهيئة الجداول والإجراءات" },
       { path: "users", label: "المستخدمون والأدوار" },

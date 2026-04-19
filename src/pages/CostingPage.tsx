@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
 
 type ComponentLine = {
@@ -9,14 +9,26 @@ type ComponentLine = {
   qty: number;
   unit: string;
   unitCost: number;
+  locked?: boolean;
+  priceSource?: "fun182" | "purchase" | "catalog";
+  latestAt?: string;
 };
 
 type Product = {
   CardGuide: string;
   ProductName: string;
   Price: number;
+  GroupGuide?: string;
+  GroupGuid?: string;
+};
+type ProductGroup = {
+  CardGuide: string;
+  MainGuide?: string;
+  LatinName?: string;
+  GroupName: string;
 };
 type BalanceRow = { itemName: string; unitCode: string; qtyBalance: number };
+type RawPriceRow = { productGuide: string; latestUnitCost: number; latestAt?: string };
 
 const LS_KEY = "mat3am_costing_draft_v1";
 
@@ -42,9 +54,11 @@ function loadDraft() {
 
 export default function CostingPage() {
   const draft = loadDraft();
+  const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(draft?.selectedProduct || "");
+  const [selectedRawGroup, setSelectedRawGroup] = useState("ALL");
   const [salePrice, setSalePrice] = useState<number>(draft?.salePrice ?? 0);
   const [overheadPercent, setOverheadPercent] = useState<number>(draft?.overheadPercent ?? 20);
   const [adminShare, setAdminShare] = useState<number>(draft?.adminShare ?? 0);
@@ -57,23 +71,63 @@ export default function CostingPage() {
         qty: l.qty ?? 0,
         unit: l.unit || "وحدة",
         unitCost: l.unitCost ?? 0,
+        locked: Boolean((l as ComponentLine).locked),
       }));
     }
-    return [{ id: nextId(), componentGuide: "", name: "", qty: 0, unit: "وحدة", unitCost: 0 }];
+    return [{ id: nextId(), componentGuide: "", name: "", qty: 0, unit: "وحدة", unitCost: 0, locked: false }];
   });
   const [msg, setMsg] = useState("");
   const [stock, setStock] = useState<BalanceRow[]>([]);
+  const [rawPriceByGuide, setRawPriceByGuide] = useState<Map<string, RawPriceRow>>(() => new Map());
+  const [rawProducts, setRawProducts] = useState<Product[]>([]);
+  const [rawProductsAll, setRawProductsAll] = useState<Product[]>([]);
 
   async function loadProducts() {
     setMsg("");
     try {
-      const r = await fetch(`${getApiBase()}/api/products`);
-      const j = await r.json();
-      const list: Product[] = Array.isArray(j.products) ? j.products : [];
+      const [rp, rg, rr] = await Promise.allSettled([
+        fetch(`${getApiBase()}/api/products`),
+        fetch(`${getApiBase()}/api/costing/raw-groups`),
+        fetch(`${getApiBase()}/api/costing/raw-material-prices`),
+      ]);
+      const jp =
+        rp.status === "fulfilled" ? await rp.value.json().catch(() => ({})) : {};
+      const jg =
+        rg.status === "fulfilled" ? await rg.value.json().catch(() => ({})) : {};
+      const jr =
+        rr.status === "fulfilled" ? await rr.value.json().catch(() => ({})) : {};
+      const list: Product[] = Array.isArray(jp.products) ? jp.products : [];
+      const gl: ProductGroup[] = Array.isArray(jg.groups) ? jg.groups : [];
+      const prices: RawPriceRow[] = Array.isArray(jr.prices) ? jr.prices : [];
+      const priceMap = new Map<string, RawPriceRow>();
+      for (const pr of prices) {
+        const k = String(pr?.productGuide || "").trim();
+        if (!k) continue;
+        priceMap.set(k, pr);
+      }
+      setRawPriceByGuide(priceMap);
+      setGroups(gl);
       setProducts(list);
       setLoaded(true);
+      await loadRawProducts("ALL", true);
+      if (!list.length) {
+        setMsg("لم يتم تحميل أصناف من TBL007. تحقق من بيانات الأصناف أو اتصال الـ API.");
+      }
     } catch (e) {
       setMsg(`تعذر تحميل الأصناف: ${String(e)}`);
+    }
+  }
+
+  async function loadRawProducts(groupGuid = "ALL", keepAsAll = false) {
+    try {
+      const r = await fetch(`${getApiBase()}/api/costing/raw-products?group_guid=${encodeURIComponent(groupGuid)}`);
+      if (!r.ok) return;
+      const j = await r.json().catch(() => ({}));
+      const list: Product[] = Array.isArray(j.products) ? j.products : [];
+      setRawProducts(list);
+      if (keepAsAll || groupGuid === "ALL") setRawProductsAll(list);
+    } catch {
+      setRawProducts([]);
     }
   }
 
@@ -176,6 +230,34 @@ export default function CostingPage() {
   }
 
   const selected = useMemo(() => products.find((p) => p.CardGuide === selectedProduct) || null, [products, selectedProduct]);
+  const rawGroups = groups;
+  const filteredRawProducts = useMemo(() => rawProducts.filter((p) => p.CardGuide !== selectedProduct), [rawProducts, selectedProduct]);
+  const componentOptionsByLine = useMemo(() => {
+    const byLine = new Map<string, Product[]>();
+    for (const l of lines) {
+      const source = l.locked ? rawProductsAll : rawProducts;
+      const arr = source.filter((p) => {
+        if (p.CardGuide === selectedProduct) return false;
+        return true;
+      });
+      if (l.componentGuide && !arr.some((p) => p.CardGuide === l.componentGuide)) {
+        const fromAll = rawProductsAll.find((p) => p.CardGuide === l.componentGuide) || products.find((p) => p.CardGuide === l.componentGuide);
+        if (fromAll) arr.push(fromAll);
+      }
+      byLine.set(l.id, arr);
+    }
+    return byLine;
+  }, [lines, rawProducts, rawProductsAll, products, selectedProduct]);
+
+  useEffect(() => {
+    void loadRawProducts(selectedRawGroup);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRawGroup]);
+
+  useEffect(() => {
+    if (!loaded) void loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const materialCost = useMemo(() => lines.reduce((acc, l) => acc + l.qty * l.unitCost, 0), [lines]);
   const overheadValue = useMemo(() => (materialCost * overheadPercent) / 100, [materialCost, overheadPercent]);
@@ -209,20 +291,43 @@ export default function CostingPage() {
   }
 
   function addLine() {
-    const next = [...lines, { id: nextId(), componentGuide: "", name: "", qty: 0, unit: "وحدة", unitCost: 0 }];
+    const next = [...lines, { id: nextId(), componentGuide: "", name: "", qty: 0, unit: "وحدة", unitCost: 0, locked: false }];
     setLines(next);
     syncDraft(next);
   }
 
-  function applyComponentProduct(lineId: string, cardGuide: string) {
+  async function applyComponentProduct(lineId: string, cardGuide: string) {
     const pr = products.find((x) => x.CardGuide === cardGuide);
+    const purchase = rawPriceByGuide.get(cardGuide);
+    let fun182Cost = 0;
+    try {
+      if (cardGuide) {
+        const r = await fetch(`${getApiBase()}/api/costing/unit-price?product_guide=${encodeURIComponent(cardGuide)}`);
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          fun182Cost = Number(j.unitPrice || 0);
+        }
+      }
+    } catch {
+      // fallback below
+    }
+    const pickedCost =
+      fun182Cost > 0
+        ? fun182Cost
+        : purchase && purchase.latestUnitCost > 0
+          ? purchase.latestUnitCost
+          : pr && pr.Price > 0
+            ? pr.Price
+            : 0;
     const next = lines.map((l) =>
       l.id === lineId
         ? {
             ...l,
             componentGuide: cardGuide,
             name: pr?.ProductName || l.name,
-            unitCost: pr && pr.Price > 0 ? pr.Price : l.unitCost,
+            unitCost: pickedCost,
+            priceSource: (fun182Cost > 0 ? "fun182" : purchase && purchase.latestUnitCost > 0 ? "purchase" : "catalog") as "fun182" | "purchase" | "catalog",
+            latestAt: purchase?.latestAt || "",
           }
         : l,
     );
@@ -244,22 +349,22 @@ export default function CostingPage() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>إعداد تكاليف التشغيل والوصفات</h2>
+      <h2 style={{ marginTop: 0 }}>تكلفة الطبق</h2>
       <p style={{ color: "var(--muted)" }}>
-        المنتج النهائي والمكونات كلها من <strong>TBL007</strong> (نفس جدول الأصناف): عند البيع يُخصم من المخزون كل مكوّن حسب كميته في الوصفة، مع ربط{" "}
-        <code>CardGuide</code> لكل مادة خام. الكمية والوحدة وسعر الوحدة تُحدَّد هنا للتكلفة؛ اسم الصنف يُحدَّث من القاعدة عند الحفظ.
+        شاشة مبسطة مثل طلب الطاولة: تختار الإعداد (الوجبة الجاهزة) من <strong>TBL007</strong>، ثم تختار المواد الخام بعد تصفيتها من مجموعات
+        <strong> TBL006</strong>. سعر خامات اليوم يُقرأ تلقائياً من آخر فواتير المشتريات عند توفرها.
       </p>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="btn" onClick={() => void loadProducts()}>
-            {loaded ? "إعادة تحميل الأصناف" : "تحميل الأصناف من TBL007"}
+            {loaded ? "تحديث البيانات" : "تحميل الأصناف من TBL006/TBL007"}
           </button>
           <button type="button" className="btn" onClick={() => void loadStockBalance()}>
             عرض رصيد المخزون
           </button>
           <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-            اختر كل مكوّناً من قائمة الأصناف؛ رصيد المخزون يُجمَّع حسب نفس المعرف عند وجوده في حركات الوارد/الصادر.
+            أصناف المكونات تُجلب بدلالة مجموعة الخامات المختارة من TBL006. سعر الوحدة يلتقط آخر سعر شراء تلقائياً إن وجد.
           </span>
         </div>
       </div>
@@ -267,9 +372,9 @@ export default function CostingPage() {
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.75rem" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            المنتج النهائي
+            الإعداد (الوجبة الجاهزة)
             <select value={selectedProduct} onChange={(e) => onSelectProduct(e.target.value)}>
-              <option value="">— اختر المنتج النهائي —</option>
+              <option value="">— اختر الإعداد —</option>
               {products.map((p) => (
                 <option key={p.CardGuide} value={p.CardGuide}>
                   {p.ProductName}
@@ -299,6 +404,34 @@ export default function CostingPage() {
       </div>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
+        <div style={{ marginBottom: 8, fontWeight: 700 }}>
+          مجموعات المواد الخام (TBL006)
+          <span style={{ marginInlineStart: 8, color: "var(--muted)", fontWeight: 600 }}>
+            — خامات الطبخ بالمطعم / Cooking ingredients
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button type="button" className="btn btn-ghost" onClick={() => setSelectedRawGroup("ALL")}>
+            ALL
+          </button>
+          {rawGroups.map((g) => (
+            <button
+              key={g.CardGuide}
+              type="button"
+              className="btn btn-ghost"
+              style={{
+                borderColor: selectedRawGroup === g.CardGuide ? "#0ea5e9" : undefined,
+                boxShadow: selectedRawGroup === g.CardGuide ? "0 0 0 2px rgba(14,165,233,0.25)" : undefined,
+              }}
+              onClick={() => setSelectedRawGroup(g.CardGuide)}
+            >
+              {g.GroupName}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <h3 style={{ margin: 0 }}>مكونات الطبق (Recipe / BOM)</h3>
           <button type="button" className="btn" onClick={addLine}>
@@ -311,9 +444,11 @@ export default function CostingPage() {
               <tr style={{ textAlign: "right", color: "var(--muted)" }}>
                 <th style={{ padding: "6px 8px" }}>صنف TBL007</th>
                 <th style={{ padding: "6px 8px" }}>الاسم (من القاعدة)</th>
+                <th style={{ padding: "6px 8px" }}>تأكيد</th>
                 <th style={{ padding: "6px 8px" }}>الكمية</th>
                 <th style={{ padding: "6px 8px" }}>الوحدة</th>
                 <th style={{ padding: "6px 8px" }}>سعر الوحدة</th>
+                <th style={{ padding: "6px 8px" }}>مصدر السعر</th>
                 <th style={{ padding: "6px 8px" }}>التكلفة</th>
                 <th style={{ padding: "6px 8px" }} />
               </tr>
@@ -325,12 +460,11 @@ export default function CostingPage() {
                     <select
                       value={l.componentGuide}
                       onChange={(e) => applyComponentProduct(l.id, e.target.value)}
+                      disabled={Boolean(l.locked)}
                       style={{ width: "100%" }}
                     >
                       <option value="">— اختر صنفاً —</option>
-                      {products
-                        .filter((p) => p.CardGuide !== selectedProduct)
-                        .map((p) => (
+                      {(componentOptionsByLine.get(l.id) ?? filteredRawProducts).map((p) => (
                           <option key={p.CardGuide} value={p.CardGuide}>
                             {p.ProductName}
                           </option>
@@ -338,6 +472,16 @@ export default function CostingPage() {
                     </select>
                   </td>
                   <td style={{ padding: "6px 8px", color: "var(--muted)" }}>{l.name || "—"}</td>
+                  <td style={{ padding: "6px 8px" }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.85rem" }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(l.locked)}
+                        onChange={(e) => updateLine(l.id, { locked: e.target.checked })}
+                      />
+                      ثابت
+                    </label>
+                  </td>
                   <td style={{ padding: "6px 8px" }}>
                     <input
                       type="number"
@@ -358,6 +502,9 @@ export default function CostingPage() {
                       onChange={(e) => updateLine(l.id, { unitCost: Number(e.target.value) || 0 })}
                       style={{ width: 110 }}
                     />
+                  </td>
+                  <td style={{ padding: "6px 8px", fontSize: "0.82rem" }}>
+                    {l.priceSource === "fun182" ? "Fun182" : l.priceSource === "purchase" ? "شراء يومي" : l.priceSource === "catalog" ? "سعر البطاقة" : "—"}
                   </td>
                   <td style={{ padding: "6px 8px" }}>{(l.qty * l.unitCost).toFixed(2)}</td>
                   <td style={{ padding: "6px 8px" }}>
@@ -407,4 +554,3 @@ export default function CostingPage() {
     </div>
   );
 }
-

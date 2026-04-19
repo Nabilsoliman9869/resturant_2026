@@ -2,6 +2,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+build/
+
+# مؤقتات Excel (ملفات قفل — لا تُرفع)
+~$*
 
 # أسرار — لا تُرفع
 .env

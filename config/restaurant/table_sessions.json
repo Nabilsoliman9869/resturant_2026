@@ -10,7 +10,8 @@
       "source": "reception"
     },
     "startTime": "2026-03-27T20:19:13.391021",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "a4bfe891-355c-4c85-8042-e811c404bdf5",
@@ -23,7 +24,8 @@
       "source": "reception"
     },
     "startTime": "2026-03-27T20:19:13.492737",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "49956de1-83d2-453d-94af-1318fbd1ced9",
@@ -86,7 +88,8 @@
       "specialRequests": "1222222"
     },
     "startTime": "2026-04-01T11:59:18.684610",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "43b02998-a6bf-40ee-9d00-d9364b40c9f7",
@@ -97,7 +100,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-04T06:51:37.804942",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "faee78bb-6f0f-421a-b232-c9f0acc01bcd",
@@ -112,7 +116,8 @@
       "specialRequests": ""
     },
     "startTime": "2026-04-09T03:20:18.702727",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "9bf0746a-bd24-4c8d-8963-a960b17a4f03",
@@ -123,7 +128,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-09T20:35:26.089694",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "07e82491-c705-4b8e-86c3-4d3554721d3a",
@@ -134,7 +140,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-10T03:05:49.883712",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "6514197e-4f5b-4131-a1ef-148c91ddbc46",
@@ -145,7 +152,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-10T03:13:55.214130",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "b30e2cfc-bb5a-4078-9b35-3c0d1d23d6bf",
@@ -156,7 +164,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-10T03:15:26.444080",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "9d9e0f96-9f62-4e5b-acee-0da663b01803",
@@ -167,18 +176,20 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-10T03:38:06.082085",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "c6550969-a507-4c99-8dbf-ffe89e617126",
-    "tableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "tableId": "7944373E-C778-4FA7-8942-BA8E10D28274",
     "projectId": null,
     "hostId": null,
-    "guestCount": 2,
+    "guestCount": 4,
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-10T04:30:54.168531",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "fff4a450-b525-44b0-9f7f-c1785ba3988d",
@@ -189,7 +200,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-10T04:34:30.734862",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "07ffb5a4-e476-47ef-946b-adce55389382",
@@ -200,7 +212,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-11T04:19:16.172146",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
   },
   {
     "id": "d59b8319-78fe-4b70-9ae1-95147b9897c4",
@@ -211,6 +224,234 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-11T04:32:48.475270",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "cb4791f2-10dd-43b7-b1c4-692ed6b27b77",
+    "tableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-12T23:43:30.866147",
+    "status": "merged",
+    "mergedIntoSessionId": "c6550969-a507-4c99-8dbf-ffe89e617126",
+    "closedAt": "2026-04-13T00:19:35.094647"
+  },
+  {
+    "id": "a69f578e-bbff-4eb6-8ff3-5d8ae65c4f6b",
+    "tableId": "54030BB5-1727-47BE-8AFC-D37B52F89547",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-13T00:26:19.710021",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "1efe356b-13ca-4d18-852d-bad0aea2625b",
+    "tableId": "3E8AC3AA-19A5-4459-9405-411E08BB27F7",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-13T03:23:08.908060",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "049b1317-6450-4610-a22c-a43a372ee8f9",
+    "tableId": "D8680F71-47C5-4402-92F0-74A475301167",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-13T16:06:53.379481",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "b1e04ea9-ba21-4fa3-a07e-b5c05fab2676",
+    "tableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-13T16:15:13.268878",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "573d2c8b-4556-442d-ab64-63e408e7d278",
+    "tableId": "235B5C69-03BF-41F7-930C-D332CC3B4B32",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-13T16:18:18.963891",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "d406c178-42d5-4ecb-aa6f-edf1200adcca",
+    "tableId": "55D65C69-D471-449D-8327-272A7AE0701B",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-14T00:53:59.405157",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "327f862f-1bb7-425b-aa9b-daebe7c2c54f",
+    "tableId": "37803964-84E0-4E86-9BA3-CBEEAA3080BD",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-14T00:57:59.913068",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "b47e4ecb-6c17-4239-86cc-d01aa4735038",
+    "tableId": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-17T19:52:08.718208",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "053cb228-bdd9-43cc-ab28-14f6ba2ffd15",
+    "tableId": "A748D10B-5B2D-41C0-BA68-35DDF36FD26C",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-17T21:49:58.948496",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "5c371907-30c8-4508-be88-52f04fa99404",
+    "tableId": "FFB8D3C3-706F-4908-8685-3B2B6A072996",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-17T21:55:02.613749",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "fe7fdbed-1a90-4ded-906e-c9598f70ae5f",
+    "tableId": "F2EDA31C-8E19-4004-8FBB-BA0B5ADE076C",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-17T21:59:08.364208",
+    "status": "completed",
+    "endTime": "2026-04-18T21:46:40.863385"
+  },
+  {
+    "id": "1fae4006-2f7b-4291-908b-aab425504816",
+    "tableId": "688BF619-428C-498A-B211-8E647EEFA196",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-18T00:46:35.381254",
+    "status": "completed",
+    "endTime": "2026-04-19T00:03:20.281725"
+  },
+  {
+    "id": "5e23e08b-f3e5-4786-baad-4eeeedfc9a41",
+    "tableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-18T21:56:39.028446",
+    "status": "completed",
+    "endTime": "2026-04-19T00:03:20.281725"
+  },
+  {
+    "id": "b508bc8e-464c-4792-a742-0a475f79c9b4",
+    "tableId": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-18T22:19:04.314522",
+    "status": "completed",
+    "endTime": "2026-04-19T00:03:20.281725"
+  },
+  {
+    "id": "6cde0c3d-f5fa-47d1-969b-df53cfed3ff8",
+    "tableId": "37803964-84E0-4E86-9BA3-CBEEAA3080BD",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-18T22:19:40.328165",
+    "status": "completed",
+    "endTime": "2026-04-19T00:03:20.281725"
+  },
+  {
+    "id": "d2b427a5-1b9f-4842-8a70-3743e810e549",
+    "tableId": "A748D10B-5B2D-41C0-BA68-35DDF36FD26C",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-18T22:26:54.870816",
+    "status": "completed",
+    "endTime": "2026-04-19T00:03:20.281725"
+  },
+  {
+    "id": "27092b47-68e9-4ab7-8ef4-eba0982a41ab",
+    "tableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-19T00:03:21.615563",
+    "status": "active"
+  },
+  {
+    "id": "dcd8ec47-a74c-4d32-a267-4d6f2b38c296",
+    "tableId": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-19T01:25:01.038597",
     "status": "active"
   }
 ]

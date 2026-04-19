@@ -35,6 +35,12 @@ function labelFromCode(code: string) {
   return /^\d+$/.test(code) ? `#${Number(code)}` : code;
 }
 
+function planTableLabel(table: { label?: string }, generatedCode: string) {
+  const manual = String(table?.label || "").trim();
+  if (manual) return manual;
+  return labelFromCode(generatedCode);
+}
+
 function tableKey(id: string) {
   return String(id || "").trim().toLowerCase();
 }
@@ -60,10 +66,11 @@ export function mapTablesToFloorPlanLabels<T extends TableLike>(planRaw: unknown
       const key = tableKey(apiId);
       if (labelById.has(key)) return;
       const code = tableCode(prefix, tableIndex);
+      const label = planTableLabel(table as { label?: string }, code);
       labelById.set(key, {
-        label: labelFromCode(code),
+        label,
         seats: table.seats,
-        number: /^\d+$/.test(code) ? Number(code) : undefined,
+        number: /^\d+$/.test(label.replace("#", "")) ? Number(label.replace("#", "")) : undefined,
       });
     });
   });
@@ -115,11 +122,12 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
       seen.add(key);
       const apiMatch = apiById.get(key);
       const code = tableCode(prefix, tableIndex);
+      const label = planTableLabel(table as { label?: string }, code);
       out.push({
         id: apiId,
-        name: labelFromCode(code),
+        name: label,
         seats: table.seats ?? apiMatch?.seats,
-        number: /^\d+$/.test(code) ? Number(code) : undefined,
+        number: /^\d+$/.test(label.replace("#", "")) ? Number(label.replace("#", "")) : undefined,
         status: apiMatch?.status,
         floorId: floor.id,
         floorName: floor.name,

@@ -1,4 +1,4 @@
-import type { FloorPlan, FloorTable, Point, TableLiveMap, Obstacle, AislePath, FloorZone } from "../lib/floorPlanModel";
+import type { FloorPlan, FloorTable, Point, TableLiveMap, Obstacle, AislePath, FloorZone, FloorTextAnnotation, FloorArrowAnnotation } from "../lib/floorPlanModel";
 
 type Props = {
   plan: FloorPlan;
@@ -79,6 +79,7 @@ function TableNode({
   const cx = table.x + table.w / 2;
   const cy = table.y + table.h / 2;
   const rotation = table.rotation ?? 0;
+  const noOrderDelay = String(orderPreview || "").includes("تأخر أخذ الطلب");
 
   return (
     <g transform={`rotate(${rotation} ${cx} ${cy})`}>
@@ -127,6 +128,14 @@ function TableNode({
       <text x={cx} y={cy + 16} textAnchor="middle" fontSize={13} fill="#111827">
         {progress != null ? `${progress}%` : status ?? "free"}
       </text>
+      {noOrderDelay ? (
+        <g>
+          <circle cx={table.x + table.w - 8} cy={table.y + 8} r={10} fill="#7c3aed" />
+          <text x={table.x + table.w - 8} y={table.y + 12} textAnchor="middle" fontSize={10} fontWeight={900} fill="#fff">
+            ⏱
+          </text>
+        </g>
+      ) : null}
       {orderCount && orderCount > 0 ? (
         <g>
           <rect x={table.x + table.w + 10} y={table.y + 6} width={120} height={34} rx={8} ry={8} fill="#fff7ed" stroke="#ea580c" strokeWidth={1.5} />
@@ -222,6 +231,43 @@ function renderZones(z?: FloorZone[]) {
   ));
 }
 
+function renderTextAnnotations(list?: FloorTextAnnotation[]) {
+  if (!Array.isArray(list) || !list.length) return null;
+  return list.map((t) => (
+    <text
+      key={t.id}
+      x={t.x}
+      y={t.y}
+      textAnchor="middle"
+      fontSize={t.fontSize ?? 22}
+      fontWeight={t.fontWeight ?? 800}
+      fill={t.color ?? "#0f172a"}
+      style={{ paintOrder: "stroke", stroke: "rgba(255,255,255,0.85)", strokeWidth: 4 }}
+    >
+      {t.text}
+    </text>
+  ));
+}
+
+function renderArrowAnnotations(list?: FloorArrowAnnotation[]) {
+  if (!Array.isArray(list) || !list.length) return null;
+  return list.map((a) => (
+    <g key={a.id}>
+      <defs>
+        <marker id={`arrow-head-${a.id}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill={a.color ?? "#2563eb"} />
+        </marker>
+      </defs>
+      <line x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2} stroke={a.color ?? "#2563eb"} strokeWidth={a.strokeWidth ?? 6} markerEnd={`url(#arrow-head-${a.id})`} />
+      {a.label ? (
+        <text x={(a.x1 + a.x2) / 2} y={(a.y1 + a.y2) / 2 - 6} textAnchor="middle" fontSize={14} fontWeight={700} fill={a.color ?? "#2563eb"}>
+          {a.label}
+        </text>
+      ) : null}
+    </g>
+  ));
+}
+
 /** عرض مخطط الصالة v1 — مضلع + طاولات؛ الحالة الحية منفصلة (TableLiveMap). */
 export function FloorPlanSvgView({ plan, live = {} }: Props) {
   return (
@@ -244,6 +290,8 @@ export function FloorPlanSvgView({ plan, live = {} }: Props) {
         {Array.isArray(plan.aisles) && plan.aisles.map(renderAisle)}
         {Array.isArray(plan.zones) && renderZones(plan.zones)}
         {Array.isArray(plan.obstacles) && plan.obstacles.map(renderObstacle)}
+        {renderArrowAnnotations(plan.arrows)}
+        {renderTextAnnotations(plan.textAnnotations)}
         {plan.tables.map((table) => {
           const liveState = live[`${plan.id}::${table.id}`] ?? live[table.id];
           return (

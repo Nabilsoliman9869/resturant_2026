@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { sessionDisplayName } from "../auth/displayUser";
 import { useAuth } from "../auth/AuthContext";
@@ -8,10 +8,12 @@ type Props = {
   backTo?: string;
   onBack?: () => void;
   hideBack?: boolean;
+  hideUser?: boolean;
+  titleStyle?: CSSProperties;
   rightSlot?: ReactNode;
 };
 
-export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, rightSlot }: Props) {
+export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hideUser, titleStyle, rightSlot }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -36,10 +38,12 @@ export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, rig
           </button>
         )}
         <div>
-          <div className="waiter-pos__title">{roleTitle}</div>
-          <div className="waiter-pos__user" title={user?.login || undefined}>
-            {sessionDisplayName(user)}
-          </div>
+          <div className="waiter-pos__title" style={titleStyle}>{roleTitle}</div>
+          {!hideUser ? (
+            <div className="waiter-pos__user" title={user?.login || undefined}>
+              {sessionDisplayName(user)}
+            </div>
+          ) : null}
         </div>
       </div>
       {rightSlot ? <div className="waiter-pos__header-right">{rightSlot}</div> : null}

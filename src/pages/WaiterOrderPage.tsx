@@ -8,22 +8,26 @@ import { applyPromotions, type Promotion } from "../lib/posPromotions";
 import { buildSegmentedTablesFromFloorPlan } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 import SmartProductSearch from "../components/SmartProductSearch";
-import { useAuth } from "../auth/AuthContext";
 
 type Product = {
   CardGuide: string;
   ProductName: string;
   Price: number;
+  PrepMinutes?: number;
+  Hieght3?: number;
   GroupGuid?: string | null;
   image?: string;
   imageUrl?: string;
 };
 
 type ProductGroup = { CardGuide: string; GroupName: string; image?: string; imageUrl?: string };
+type Agent = { CardGuide: string; AgentName: string; CardNumber?: string };
+type KitchenStopRow = { productGuide: string; stopped?: boolean; note?: string };
 
 type RestTable = {
   id: string;
   name: string;
+  status?: string;
   seats?: number;
   number?: number;
 };
@@ -70,14 +74,32 @@ function hashHue(s: string) {
 }
 
 function prepMinutes(p: Product) {
+  const db = Number((p as any).PrepMinutes ?? (p as any).Hieght3 ?? 0);
+  if (Number.isFinite(db) && db > 0) return Math.round(db);
   let s = 0;
   for (let i = 0; i < p.CardGuide.length; i++) s += p.CardGuide.charCodeAt(i);
   return 10 + (s % 26);
 }
 
+function normalizeGroupName(name: string) {
+  const cleaned = String(name || "").trim().replace(/\s+/g, " ");
+  return cleaned.replace(/^(.{2})\1+/u, "$1");
+}
+
+function normalizeTableStatus(raw: string): "ready" | "occupied" | "reserved" | "dirty" | "cleaning" {
+  const s = String(raw || "").toLowerCase().trim();
+  if (["available", "free", "open", "ready", "متاحة", "جاهزة"].includes(s)) return "ready";
+  if (["occupied", "busy", "مشغولة"].includes(s)) return "occupied";
+  if (["reserved", "محجوزة"].includes(s)) return "reserved";
+  if (["dirty", "متسخة"].includes(s)) return "dirty";
+  if (["cleaning", "تنظيف"].includes(s)) return "cleaning";
+  return "ready";
+}
+
+const SERVICE_RATE_FOR_CARD_PRICE = 0.125;
+
 export default function WaiterOrderPage() {
   const base = getApiBase();
-  const { logout } = useAuth();
   const resolveMediaUrl = (u?: string) => {
     const raw = String(u || "").trim();
     if (!raw) return "";
@@ -90,10 +112,12 @@ export default function WaiterOrderPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
+  const [kitchenStoppedMap, setKitchenStoppedMap] = useState<Map<string, string>>(() => new Map());
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [tables, setTables] = useState<RestTable[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [policy, setPolicy] = useState<PosPolicy>({
-    servicePercent: 12,
+    servicePercent: 12.5,
     vatPercent: 14,
     applyDiscountBeforeTax: true,
     serviceBeforeVat: true,
@@ -105,6 +129,8 @@ export default function WaiterOrderPage() {
   const [categoryKey, setCategoryKey] = useState<string>("all");
   const [couponCode, setCouponCode] = useState("");
   const [tipAmount, setTipAmount] = useState(0);
+  const [selectedAgentGuid, setSelectedAgentGuid] = useState("");
+  const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [cart, setCart] = useState<CartLine[]>([]);
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -123,20 +149,25 @@ export default function WaiterOrderPage() {
   const [mergeTargetTableId, setMergeTargetTableId] = useState("");
   const [sessionMoveBusy, setSessionMoveBusy] = useState(false);
   const [seatPanelOpen, setSeatPanelOpen] = useState(false);
-  const [tablesPanelOpen, setTablesPanelOpen] = useState(false);
   const seatPanelRef = useRef<HTMLDivElement | null>(null);
-  const tablesPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const normalizedGroups = useMemo(
+    () => groups.map((g) => ({ ...g, GroupName: normalizeGroupName(g.GroupName) })),
+    [groups]
+  );
 
   const groupNameById = useMemo(() => {
     const m = new Map<string, string>();
-    for (const g of groups) m.set(g.CardGuide, g.GroupName);
+    for (const g of normalizedGroups) m.set(g.CardGuide, g.GroupName);
     return m;
-  }, [groups]);
+  }, [normalizedGroups]);
 
   const selectedTable = useMemo(
     () => tables.find((t) => t.id === selectedTableId) || null,
     [tables, selectedTableId]
   );
+  const selectedTableStatus = normalizeTableStatus(String((selectedTable as any)?.status || ""));
+  const selectedTableBlocked = selectedTableStatus === "dirty" || selectedTableStatus === "cleaning";
 
   const seatCount = Math.max(1, selectedTable?.seats ?? 2);
   const seatDisplayCount = Math.min(6, seatCount);
@@ -144,7 +175,7 @@ export default function WaiterOrderPage() {
   const loadAll = useCallback(async () => {
     setMsg("");
     try {
-      const [pr, gr, fp, tb, pol, promo, dmRemote] = await Promise.all([
+      const [pr, gr, fp, tb, pol, promo, dmRemote, ar, ks] = await Promise.all([
         fetch(`${base}/api/products`),
         fetch(`${base}/api/product-groups`),
         fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
@@ -152,6 +183,8 @@ export default function WaiterOrderPage() {
         fetch(`${base}/api/pos/policy`),
         fetch(`${base}/api/pos/promotions?active_only=true`),
         fetchDailyMenuFromApi(),
+        fetch(`${base}/api/agents`),
+        fetch(`${base}/api/restaurant/kitchen/item-stops?active_only=true`),
       ]);
       const pj = tryParseJson<{ products?: unknown }>(await pr.text()) ?? {};
       const gj = tryParseJson<{ groups?: unknown }>(await gr.text()) ?? {};
@@ -159,12 +192,27 @@ export default function WaiterOrderPage() {
       const tj = tryParseJson<{ tables?: unknown }>(await tb.text()) ?? {};
       const polj = tryParseJson<Record<string, unknown>>(await pol.text()) ?? {};
       const promoj = tryParseJson<{ promotions?: unknown }>(await promo.text()) ?? {};
+      const aj = tryParseJson<{ agents?: unknown }>(await ar.text()) ?? {};
+      const ksj = tryParseJson<{ items?: unknown }>(await ks.text()) ?? {};
 
       setProducts(Array.isArray(pj.products) ? (pj.products as Product[]) : []);
-      setGroups(Array.isArray(gj.groups) ? (gj.groups as ProductGroup[]) : []);
+      const rawGroups = Array.isArray(gj.groups) ? (gj.groups as ProductGroup[]) : [];
+      const seenGroupIds = new Set<string>();
+      const uniqueGroups: ProductGroup[] = [];
+      for (const g of rawGroups) {
+        const id = String(g?.CardGuide || "").trim();
+        if (!id || seenGroupIds.has(id)) continue;
+        seenGroupIds.add(id);
+        uniqueGroups.push(g);
+      }
+      setGroups(uniqueGroups);
       const tlist: RestTable[] = Array.isArray(tj.tables) ? (tj.tables as RestTable[]) : [];
       const planRaw = fpj?.plan;
-      const outList = buildSegmentedTablesFromFloorPlan(planRaw, tlist).filter((table) => !table.isSeparator);
+      const statusById = new Map<string, string>();
+      for (const t of tlist) statusById.set(String(t.id), normalizeTableStatus(String(t.status || "")));
+      const outList = buildSegmentedTablesFromFloorPlan(planRaw, tlist)
+        .map((t) => ({ ...t, status: statusById.get(String((t as any).id)) || normalizeTableStatus(String((t as any).status || "")) }))
+        .filter((table) => !table.isSeparator);
       const fromUrl = searchParams.get("tableId");
       setTables(outList);
 
@@ -182,6 +230,23 @@ export default function WaiterOrderPage() {
         serviceBeforeVat: Boolean(polj.serviceBeforeVat ?? true),
       });
       setPromotions(Array.isArray(promoj.promotions) ? (promoj.promotions as Promotion[]) : []);
+      const alist = Array.isArray(aj.agents) ? (aj.agents as Agent[]) : [];
+      const stopRows = Array.isArray(ksj.items) ? (ksj.items as KitchenStopRow[]) : [];
+      const sm = new Map<string, string>();
+      for (const s of stopRows) {
+        if (!s || !s.productGuide || !s.stopped) continue;
+        sm.set(String(s.productGuide), String(s.note || "نفد من المطبخ"));
+      }
+      setKitchenStoppedMap(sm);
+      setAgents(alist);
+      setSelectedAgentGuid((prev) => {
+        if (prev && alist.some((a) => a.CardGuide === prev)) return prev;
+        const pick = alist.find((a) => {
+          const n = String(a?.AgentName || "").toLowerCase();
+          return n.includes("cash") || n.includes("عميل نقدي") || n.includes("نقدا") || n.includes("نقدي");
+        });
+        return pick?.CardGuide || alist[0]?.CardGuide || "";
+      });
       setDailyMenuState(dmRemote ?? loadDailyMenuState());
     } catch (e) {
       setMsg(`تعذر تحميل البيانات: ${String(e)}`);
@@ -191,6 +256,13 @@ export default function WaiterOrderPage() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    const applyToday = () => setBillDate(new Date().toISOString().slice(0, 10));
+    applyToday();
+    const id = window.setInterval(applyToday, 60000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (selectedSeat > seatDisplayCount) setSelectedSeat(seatDisplayCount);
@@ -211,9 +283,6 @@ export default function WaiterOrderPage() {
       const target = ev.target as Node | null;
       if (seatPanelRef.current && target && !seatPanelRef.current.contains(target)) {
         setSeatPanelOpen(false);
-      }
-      if (tablesPanelRef.current && target && !tablesPanelRef.current.contains(target)) {
-        setTablesPanelOpen(false);
       }
     }
     window.addEventListener("mousedown", onAnyPointerDown);
@@ -271,6 +340,11 @@ export default function WaiterOrderPage() {
       setSessionBusy(false);
       return;
     }
+    if (selectedTableBlocked) {
+      setActiveSessionId(null);
+      setSessionBusy(false);
+      return;
+    }
     let cancel = false;
     setSessionBusy(true);
     void resolveSessionForTable(selectedTableId)
@@ -283,7 +357,7 @@ export default function WaiterOrderPage() {
     return () => {
       cancel = true;
     };
-  }, [selectedTableId, resolveSessionForTable]);
+  }, [selectedTableId, resolveSessionForTable, selectedTableBlocked]);
 
   const loadSessionOrders = useCallback(async () => {
     if (!activeSessionId) {
@@ -375,6 +449,15 @@ export default function WaiterOrderPage() {
   const billingLocked = Boolean(billingRequestedAt);
 
   function addProduct(p: Product) {
+    if (selectedTableBlocked) {
+      setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
+      return;
+    }
+    const stopNote = kitchenStoppedMap.get(p.CardGuide);
+    if (stopNote) {
+      setMsg(`الصنف غير متاح الآن من المطبخ: ${p.ProductName}${stopNote ? ` — ${stopNote}` : ""}`);
+      return;
+    }
     if (billingLocked) {
       setMsg("تم طلب الحساب — لا يمكن إضافة بنود حتى يُسدّد الكاشير.");
       return;
@@ -452,6 +535,10 @@ export default function WaiterOrderPage() {
       setMsg("اختر طاولة.");
       return;
     }
+    if (selectedTableBlocked) {
+      setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
+      return;
+    }
     if (!activeSessionId) {
       setMsg(sessionBusy ? "جاري تجهيز الجلسة…" : "تعذر ربط جلسة نشطة بالطاولة. حدّث الصفحة أو تحقق من الاتصال.");
       return;
@@ -470,6 +557,10 @@ export default function WaiterOrderPage() {
         orderType: "table",
         sessionId: activeSessionId,
         tableId: selectedTableId,
+        tableGuid: selectedTableId,
+        tableName: selectedTable?.name || "",
+        agentGuid: selectedAgentGuid || undefined,
+        billDate: billDate || undefined,
         generalOrder: assignmentMode === "general",
         paymentMethod: "cash",
         postToSqlInvoice: false,
@@ -533,7 +624,14 @@ export default function WaiterOrderPage() {
       const r = await fetch(`${base}/api/restaurant/sessions/request-bill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: activeSessionId, splitBySeat, seatGroups: splitGroups, tipAmount: Math.max(0, tipAmount || 0) }),
+        body: JSON.stringify({
+          sessionId: activeSessionId,
+          splitBySeat,
+          seatGroups: splitGroups,
+          tipAmount: Math.max(0, tipAmount || 0),
+          agentGuid: selectedAgentGuid || undefined,
+          billDate: billDate || undefined,
+        }),
       });
       const t = await r.text();
       const j = tryParseJson<{ splitApplied?: boolean; invoices?: Array<{ name?: string }> }>(t) ?? {};
@@ -638,31 +736,87 @@ export default function WaiterOrderPage() {
   return (
     <div className="role-op waiter-pos">
       <OperationalRoleHeader
-        roleTitle="جارسون الطلبات"
+        roleTitle="✦ OYA Resturant ✦"
+        hideUser
+        titleStyle={{
+          fontSize: "2rem",
+          fontWeight: 900,
+          lineHeight: 1,
+          top: 8,
+          position: "absolute",
+          left: "47.5%",
+          transform: "translate(-50%, 5mm)",
+          fontStyle: "italic",
+          letterSpacing: "0.03em",
+          fontFamily: "'Segoe Script', 'Brush Script MT', 'Lucida Handwriting', cursive",
+          color: "#e879f9",
+          textShadow: "0 0 7px rgba(232,121,249,0.95), 0 0 14px rgba(217,70,239,0.7)",
+          borderBottom: "2px solid rgba(232,121,249,0.85)",
+          paddingBottom: 2,
+          whiteSpace: "nowrap",
+          zIndex: 2,
+        }}
         onBack={() => navigate("/app/waiter/tables")}
         rightSlot={
-          <>
-            <select
-              className="waiter-pos__select"
-              value={selectedTableId}
-              onChange={(e) => setSelectedTableId(e.target.value)}
-              aria-label="اختيار الطاولة"
-              style={{ minWidth: 220 }}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, direction: "ltr", minWidth: 0, width: "100%", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, minWidth: 280 }}>
+              <span style={{ fontSize: "0.68rem", fontWeight: 900, color: "#fb923c", textShadow: "0 0 8px rgba(251,146,60,0.7)", whiteSpace: "nowrap", lineHeight: 1 }}>
+                © 2026 جميع الحقوق محفوظة لشركة Sir Consult for Information Technology
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, width: "100%", transform: "translateY(3mm)" }}>
+                <select
+                  className="waiter-pos__select"
+                  value={selectedAgentGuid}
+                  onChange={(e) => setSelectedAgentGuid(e.target.value)}
+                  aria-label="اسم العميل"
+                  style={{ minWidth: 140, width: "100%", fontSize: "0.9rem", fontWeight: 700, padding: "0.45rem 0.6rem", textAlign: "right" }}
+                >
+                  {agents.length === 0 ? (
+                    <option value="">اسم العميل</option>
+                  ) : (
+                    agents.map((a) => (
+                      <option key={a.CardGuide} value={a.CardGuide}>
+                        {a.AgentName}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <input
+                  type="date"
+                  value={billDate}
+                  onChange={(e) => setBillDate(e.target.value)}
+                  aria-label="التاريخ"
+                  style={{ minWidth: 120, width: "100%", fontSize: "0.9rem", fontWeight: 700, padding: "0.45rem 0.6rem", borderRadius: 8, border: "1px solid #1e40af", background: "#fff", color: "#0f172a" }}
+                />
+              </div>
+              <select
+                className="waiter-pos__select"
+                value={selectedTableId}
+                onChange={(e) => setSelectedTableId(e.target.value)}
+                aria-label="اختيار الطاولة"
+                style={{ minWidth: 140, width: "clamp(140px, 22vw, 320px)", maxWidth: "100%", fontSize: "1.05rem", fontWeight: 800, padding: "0.6rem 0.9rem", transform: "translateY(3mm)", textAlign: "center", flexShrink: 0 }}
+              >
+                {tables.length === 0 ? (
+                  <option value="" disabled>لا توجد طاولات — تحقق من TBL005 أو مزامنة المخطط</option>
+                ) : (
+                  tables.map((t) => (
+                    <option key={t.id} value={t.id} disabled={["dirty", "cleaning"].includes(normalizeTableStatus(String((t as any).status || "")))}>
+                      {t.name || `طاولة ${t.number ?? ""}`}{["dirty", "cleaning"].includes(normalizeTableStatus(String((t as any).status || ""))) ? " (غير جاهزة)" : ""}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <button
+              type="button"
+              className="waiter-pos__close"
+              onClick={() => navigate("/app/waiter/tables")}
+              aria-label="إغلاق"
+              style={{ background: "#dc2626", color: "#fff", border: "1px solid #b91c1c", height: 44, width: 44, fontSize: "1.3rem", borderRadius: 10, transform: "translateY(3mm)" }}
             >
-              {tables.length === 0 ? (
-                <option value="" disabled>لا توجد طاولات — تحقق من TBL005 أو مزامنة المخطط</option>
-              ) : (
-                tables.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name || `طاولة ${t.number ?? ""}`}
-                  </option>
-                ))
-              )}
-            </select>
-            <button type="button" className="waiter-pos__close" onClick={() => navigate("/app/waiter/tables")} aria-label="إغلاق">
               ×
             </button>
-          </>
+          </div>
         }
       />
 
@@ -734,9 +888,9 @@ export default function WaiterOrderPage() {
       <div className="waiter-pos__body">
         <main className="waiter-pos__main">
           <div className="waiter-pos__topbar">
-            <div className="waiter-pos__top-card" style={{ gridColumn: "span 2" }}>
+            <div className="waiter-pos__top-card" style={{ gridColumn: "span 3" }}>
               <h3 style={{ marginTop: 0 }}>التصنيف - الفئة</h3>
-              <div className="waiter-pos__cats waiter-pos__cats-inbar" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(70px, 1fr))" }}>
+              <div className="waiter-pos__cats waiter-pos__cats-inbar" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}>
                 <button
                   type="button"
                   className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
@@ -744,11 +898,11 @@ export default function WaiterOrderPage() {
                   title="كل المجموعات"
                 >
                   <div className="waiter-pos__cat-wrap">
-                    <span className="waiter-pos__cat-noimg">ALL</span>
+                    <span className="waiter-pos__cat-noimg" />
                     <span className="waiter-pos__cat-label">الكل</span>
                   </div>
                 </button>
-                {groups.map((g) => (
+                {normalizedGroups.map((g) => (
                   <button
                     key={`side-${g.CardGuide}`}
                     type="button"
@@ -757,7 +911,7 @@ export default function WaiterOrderPage() {
                     title={g.GroupName}
                   >
                     <div className="waiter-pos__cat-wrap">
-                      <span className="waiter-pos__cat-noimg">{g.GroupName.slice(0, 2)}</span>
+                      <span className="waiter-pos__cat-noimg" />
                       <span className="waiter-pos__cat-label">{g.GroupName}</span>
                     </div>
                   </button>
@@ -781,46 +935,85 @@ export default function WaiterOrderPage() {
                   طلب سريع (بار)
                 </button>
               </div>
-              <h3 style={{ marginTop: 6, marginBottom: 0 }}>سبليت شيك حسب الكراسي</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-                <div style={{ display: "flex", border: "1px solid #1f2937", borderRadius: 8, overflow: "hidden" }}>
-                  <div style={{ background: "#1f2937", padding: "4px 8px", display: "flex", alignItems: "center", fontSize: "0.75rem" }}>#102</div>
-                  <select className="waiter-pos__select" value={transferTargetTableId} onChange={(e) => setTransferTargetTableId(e.target.value)} style={{ flex: 1, border: "none", padding: "4px 8px", background: "transparent", minWidth: 0 }}>
-                    <option value="">▼</option>
-                    {tables.filter((t) => t.id !== selectedTableId).map((t) => (
-                      <option key={`tr-top-${t.id}`} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                  <button type="button" className="waiter-pos__btn" style={{ background: "transparent", borderLeft: "1px solid #1f2937", borderRadius: 0, padding: "4px 8px" }} disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTable()}>
-                    تحويل
-                  </button>
-                </div>
-                <div style={{ display: "flex", border: "1px solid #1f2937", borderRadius: 8, overflow: "hidden" }}>
-                  <div style={{ background: "#1f2937", padding: "4px 8px", display: "flex", alignItems: "center", fontSize: "0.75rem" }}>#102</div>
-                  <select className="waiter-pos__select" value={mergeTargetTableId} onChange={(e) => setMergeTargetTableId(e.target.value)} style={{ flex: 1, border: "none", padding: "4px 8px", background: "transparent", minWidth: 0 }}>
-                    <option value="">▼</option>
-                    {tables.filter((t) => t.id !== selectedTableId).map((t) => (
-                      <option key={`mg-top-${t.id}`} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                  <button type="button" className="waiter-pos__btn" style={{ background: "transparent", borderLeft: "1px solid #1f2937", borderRadius: 0, padding: "4px 8px" }} disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId} onClick={() => void mergeIntoTable()}>
-                    دمج
-                  </button>
+              <h3 style={{ marginTop: 6, marginBottom: 0 }}>خيارات الطاولات</h3>
+              <div className="waiter-pos__split-box">
+                <div className="waiter-pos__dropdown-wrap" style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <select className="waiter-pos__select" value={transferTargetTableId} onChange={(e) => setTransferTargetTableId(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
+                      {tables.filter((t) => t.id !== selectedTableId).map((t) => (
+                        <option key={`tr-top-${t.id}`} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTable()}>
+                      تحويل
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <select className="waiter-pos__select" value={mergeTargetTableId} onChange={(e) => setMergeTargetTableId(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
+                      {tables.filter((t) => t.id !== selectedTableId).map((t) => (
+                        <option key={`mg-top-${t.id}`} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId} onClick={() => void mergeIntoTable()}>
+                      دمج
+                    </button>
+                  </div>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 2 }}>
+                    <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
+                    سبليت شيك حسب الكراسي
+                  </label>
                 </div>
               </div>
-            </div>
-
-            <div className="waiter-pos__top-card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <div style={{ fontWeight: 900 }}>{selectedTable?.name ?? "طاولة"}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
                 <button
                   type="button"
                   className="waiter-pos__btn waiter-pos__btn--ghost"
-                  style={{ fontSize: "0.75rem", padding: "5px 9px" }}
+                  style={{ fontSize: "0.8rem", padding: "6px 8px" }}
                   onClick={() => setShowSummary((prev) => !prev)}
                 >
                   {showSummary ? "إخفاء التقرير" : "تقرير الطاولة"}
                 </button>
+                <button
+                  type="button"
+                  className="waiter-pos__btn waiter-pos__btn--ghost"
+                  style={{ fontSize: "0.8rem", padding: "6px 8px" }}
+                  disabled={summonBusy || !activeSessionId}
+                  onClick={() => void summonCashier()}
+                >
+                  {summonBusy ? "…" : "استدعاء كاشير"}
+                </button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="waiter-pos__btn"
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: "1rem",
+                    fontWeight: 900,
+                    background: "linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)",
+                    color: "#fff",
+                    border: "1px solid #0369a1",
+                  }}
+                  disabled={requestBillBusy || !activeSessionId || billingLocked}
+                  onClick={() => void requestBill()}
+                >
+                  {requestBillBusy ? "…" : "طلب الحساب"}
+                </button>
+                <input
+                  className="waiter-pos__coupon"
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value)}
+                  placeholder="قيمة الكوبون"
+                  disabled={billingLocked}
+                  style={{ marginTop: 0, background: "#fff", color: "#0f172a", borderColor: "#94a3b8", padding: "10px 12px", fontSize: "0.95rem", fontWeight: 700 }}
+                />
+              </div>
+            </div>
+
+            <div className="waiter-pos__top-card" style={{ order: 99 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ fontWeight: 900 }}>{selectedTable?.name ?? "طاولة"}</div>
               </div>
               <div style={{ color: "var(--wp-muted)", marginTop: 4, fontSize: "0.8rem" }}>عنصر {itemCount}</div>
               {activeSessionId ? (
@@ -828,11 +1021,37 @@ export default function WaiterOrderPage() {
                   جلسة: {activeSessionId.slice(0, 8)}…
                 </div>
               ) : null}
-              <div style={{ marginTop: 7, display: "flex", gap: 6 }}>
-                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={summonBusy || !activeSessionId} onClick={() => void summonCashier()}>
-                  {summonBusy ? "…" : "استدعاء كاشير"}
-                </button>
+            </div>
+
+            <div className="waiter-pos__top-card">
+              <h3 style={{ marginTop: 0 }}>قيد الإرسال</h3>
+              <div className="waiter-pos__order-box">
+                {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
+                  <div key={`top-line-${l.id}`} className="waiter-pos__order-line">
+                    <div>{l.name}</div>
+                    <input type="number" min={1} value={l.qty} onChange={(e) => setQty(l.id, Number(e.target.value) || 0)} disabled={billingLocked} />
+                    <span>{Math.max(0, l.qty * l.unitPrice - (promoResult.lineDiscounts[l.id] || 0)).toFixed(0)} ج.م</span>
+                    <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
+                  </div>
+                ))}
               </div>
+              <button
+                type="button"
+                className="waiter-pos__btn"
+                style={{
+                  marginTop: 8,
+                  padding: "10px 12px",
+                  fontSize: "1rem",
+                  fontWeight: 900,
+                  background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                  color: "#fff",
+                  border: "1px solid #15803d",
+                }}
+                disabled={loading || billingLocked}
+                onClick={() => void submitSale()}
+              >
+                {loading ? "..." : "إرسال الطلب"}
+              </button>
             </div>
 
             <div className="waiter-pos__top-card">
@@ -849,10 +1068,6 @@ export default function WaiterOrderPage() {
                 <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" onClick={() => setSeatPanelOpen((v) => !v)} style={{ flex: 1 }}>
                   {seatPanelOpen ? "إخفاء الكراسي" : "إظهار الكراسي"}
                 </button>
-                <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: "0.8rem", fontWeight: 700, color: "#94a3b8" }}>
-                  <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
-                  سبليت شيك
-                </label>
               </div>
               {assignmentMode === "per_seat" && (
                 <div ref={seatPanelRef} className="waiter-pos__dropdown-wrap" style={{ display: seatPanelOpen ? "block" : "none" }}>
@@ -878,60 +1093,6 @@ export default function WaiterOrderPage() {
             </div>
 
             <div className="waiter-pos__top-card">
-              <div className="waiter-pos__split-box">
-                <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
-                  <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
-                  سبليت شيك حسب الكراسي
-                </label>
-              </div>
-              <div className="waiter-pos__split-box">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <div style={{ fontWeight: 700 }}>خيارات الطاولات</div>
-                  <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" onClick={() => setTablesPanelOpen((v) => !v)}>
-                    {tablesPanelOpen ? "إخفاء" : "إظهار"}
-                  </button>
-                </div>
-                <div ref={tablesPanelRef} className="waiter-pos__dropdown-wrap" style={{ display: tablesPanelOpen ? "grid" : "none", gap: 6 }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <select className="waiter-pos__select" value={transferTargetTableId} onChange={(e) => setTransferTargetTableId(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
-                      {tables.filter((t) => t.id !== selectedTableId).map((t) => (
-                        <option key={`tr-top-${t.id}`} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                    <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTable()}>
-                      تحويل
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <select className="waiter-pos__select" value={mergeTargetTableId} onChange={(e) => setMergeTargetTableId(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
-                      {tables.filter((t) => t.id !== selectedTableId).map((t) => (
-                        <option key={`mg-top-${t.id}`} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                    <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId} onClick={() => void mergeIntoTable()}>
-                      دمج
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="waiter-pos__top-card">
-              <h3 style={{ marginTop: 0 }}>قيد الإرسال</h3>
-              <div className="waiter-pos__order-box">
-                {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
-                  <div key={`top-line-${l.id}`} className="waiter-pos__order-line">
-                    <div>{l.name}</div>
-                    <input type="number" min={1} value={l.qty} onChange={(e) => setQty(l.id, Number(e.target.value) || 0)} disabled={billingLocked} />
-                    <span>{Math.max(0, l.qty * l.unitPrice - (promoResult.lineDiscounts[l.id] || 0)).toFixed(0)} ج.م</span>
-                    <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
-                  </div>
-                ))}
-              </div>
-              <input className="waiter-pos__coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="كوبون (اختياري)" disabled={billingLocked} />
-            </div>
-
-            <div className="waiter-pos__top-card">
               <div className="waiter-pos__sent">
                 <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>طلبات مُرسلة (هذه الجلسة)</h4>
                 {ordersBusy && !sessionOrders.length ? (
@@ -954,9 +1115,9 @@ export default function WaiterOrderPage() {
                 )}
               </div>
               <div className="waiter-pos__footer-totals">
-                <div style={{ color: "#cbd5e1", fontSize: "0.75rem" }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
-                <div style={{ color: "#cbd5e1", fontSize: "0.75rem" }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, color: "#cbd5e1", fontSize: "0.75rem" }}>
+                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
+                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>
                   <span>بقشيش:</span>
                   <input
                     type="number"
@@ -964,17 +1125,25 @@ export default function WaiterOrderPage() {
                     step="0.5"
                     value={tipAmount}
                     onChange={(e) => setTipAmount(Math.max(0, Number(e.target.value) || 0))}
-                    style={{ width: 60, padding: "2px 4px", borderRadius: 4, border: "1px solid #334155", background: "#1e293b", color: "#fff", fontSize: "0.75rem" }}
+                    style={{ width: 86, padding: "6px 8px", borderRadius: 8, border: "1px solid #94a3b8", background: "#ffffff", color: "#0f172a", fontSize: "0.95rem", fontWeight: 800 }}
                   />
                 </div>
-                <div style={{ fontWeight: 800, marginTop: 6, color: "#fff", fontSize: "0.85rem" }}>الإجمالي: {total.toFixed(2)} ج.م</div>
+                <div style={{ fontWeight: 900, marginTop: 6, color: "#0b3b2e", fontSize: "1rem" }}>الإجمالي: {total.toFixed(2)} ج.م</div>
                 <div className="waiter-pos__actions" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                  <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "4px 8px", fontSize: "0.75rem" }} onClick={() => void loadAll()}>تحديث</button>
-                  <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "4px 8px", fontSize: "0.75rem" }} disabled={requestBillBusy || !activeSessionId || billingLocked} onClick={() => void requestBill()}>
-                    {requestBillBusy ? "…" : "طلب الحساب"}
-                  </button>
-                  <button type="button" className="waiter-pos__btn waiter-pos__btn--primary" style={{ padding: "4px 8px", fontSize: "0.75rem", flex: 1 }} disabled={loading || billingLocked} onClick={() => void submitSale()}>
-                    {loading ? "..." : "إرسال الطلب"}
+                  <button
+                    type="button"
+                    className="waiter-pos__btn"
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: "1rem",
+                      fontWeight: 900,
+                      background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                      color: "#fff",
+                      border: "1px solid #15803d",
+                    }}
+                    onClick={() => void loadAll()}
+                  >
+                    تحديث
                   </button>
                 </div>
               </div>
@@ -984,7 +1153,11 @@ export default function WaiterOrderPage() {
           <div className="waiter-pos__search-wrap" style={{ marginBottom: "0.5rem" }}>
             <SmartProductSearch
               onSelect={(hit) =>
-                addProduct({ CardGuide: hit.CardGuide, ProductName: hit.ProductName, Price: Math.round(hit.AgentPrice || 0) })
+                addProduct({
+                  CardGuide: hit.CardGuide,
+                  ProductName: hit.ProductName,
+                  Price: Number(products.find((p) => String(p.CardGuide) === String(hit.CardGuide))?.Price || 0),
+                })
               }
               placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
             />
@@ -993,14 +1166,28 @@ export default function WaiterOrderPage() {
 
           <div className="waiter-pos__grid">
             {filteredProducts.map((p) => {
+              const stopped = kitchenStoppedMap.has(p.CardGuide);
+              const stopNote = kitchenStoppedMap.get(p.CardGuide) || "نفد من المطبخ";
               const hue = hashHue(p.CardGuide);
               const bg = `linear-gradient(135deg, hsl(${hue}, 55%, 42%) 0%, hsl(${(hue + 40) % 360}, 45%, 32%) 100%)`;
               const initial = (p.ProductName || "?").trim().charAt(0);
               const imgSrc = resolveMediaUrl(p.imageUrl || p.image);
               const hasImage = !!imgSrc;
               return (
-                <button key={p.CardGuide} type="button" className="waiter-pos__card" onClick={() => addProduct(p)}>
-                  <div className="waiter-pos__ribbon">{Math.round(p.Price || 0)} ج.م</div>
+                <button
+                  key={p.CardGuide}
+                  type="button"
+                  className="waiter-pos__card"
+                  onClick={() => addProduct(p)}
+                  style={{ opacity: stopped ? 0.55 : 1, position: "relative" }}
+                  title={stopped ? stopNote : undefined}
+                >
+                  {stopped ? (
+                    <div style={{ position: "absolute", top: 6, left: 6, zIndex: 3, background: "#b91c1c", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
+                      Out of Stock
+                    </div>
+                  ) : null}
+                  <div className="waiter-pos__ribbon">{Math.round((p.Price || 0) * (1 + SERVICE_RATE_FOR_CARD_PRICE))} ج.م</div>
                   <div className="waiter-pos__card-img" style={{ background: bg, position: "relative", overflow: "hidden" }}>
                     {hasImage && (
                       <img

@@ -12,10 +12,17 @@ type TableRec = {
   status?: string;
   position?: { x?: number; y?: number };
   seats?: number;
+  noOrderOverdue?: boolean;
+  noOrderMinutes?: number;
 };
 
-type SessionRec = { id: string; tableId?: string; status?: string };
-type OrderRec = { id: string; tableId?: string; status?: string; items?: Array<{ name?: string; quantity?: number }> };
+type SessionRec = { id: string; tableId?: string; status?: string; startTime?: string };
+type OrderRec = {
+  id: string;
+  tableId?: string;
+  status?: string;
+  items?: Array<{ name?: string; quantity?: number; lineStatus?: string; prepared?: boolean; sent?: boolean }>;
+};
 type PlanStatus = "api" | "missing" | "invalid" | "unavailable";
 
 function tableLabel(t: TableRec) {
@@ -41,6 +48,17 @@ function buildTableLiveMap(
   apiTables: TableRec[],
   liveKeyPrefix?: string,
 ): TableLiveMap {
+  const now = Date.now();
+  const activeSessionsByTable = new Map<string, SessionRec[]>();
+  for (const s of sessions) {
+    if ((s?.status || "").toLowerCase() !== "active") continue;
+    const tid = String(s?.tableId || "");
+    if (!tid) continue;
+    const arr = activeSessionsByTable.get(tid) || [];
+    arr.push(s);
+    activeSessionsByTable.set(tid, arr);
+  }
+
   const live: TableLiveMap = {};
   const keyPre = liveKeyPrefix ? `${liveKeyPrefix}::` : "";
   for (const ft of plan.tables) {
@@ -50,9 +68,8 @@ function buildTableLiveMap(
         String(o.tableId) === tid &&
         !["ready", "served", "paid"].includes((o.status || "").toLowerCase()),
     );
-    const hasSession = sessions.some(
-      (s) => (s.status || "").toLowerCase() === "active" && String(s.tableId) === tid,
-    );
+    const sessForTable = activeSessionsByTable.get(tid) || [];
+    const hasSession = sessForTable.length > 0;
     const apiT = apiTables.find((t) => String(t.id) === tid);
 
     let status: TableLiveStatus = "free";
@@ -70,9 +87,36 @@ function buildTableLiveMap(
 
     let progress: number | undefined;
     let orderPreview: string | undefined;
+    let orderCountOut = openOrders.length;
+    if (!openOrders.length && hasSession) {
+      const mins = sessForTable
+        .map((s) => {
+          const ts = Date.parse(String(s?.startTime || ""));
+          if (!Number.isFinite(ts)) return 0;
+          return Math.max(0, Math.floor((now - ts) / 60000));
+        })
+        .sort((a, b) => b - a)[0] || 0;
+      if (mins >= 10) {
+        status = "billing";
+        orderCountOut = 1;
+        orderPreview = `تأخر أخذ الطلب ${mins} د`;
+      }
+    }
+    if (apiT?.noOrderOverdue) {
+      status = "billing";
+      orderCountOut = 1;
+      orderPreview = `تأخر أخذ الطلب ${Number(apiT.noOrderMinutes || 0)} د`;
+    }
     if (openOrders.length) {
-      const sum = openOrders.reduce((a, o) => a + orderStatusWeight(o.status || ""), 0);
-      progress = Math.min(100, Math.round((sum / openOrders.length) * 100));
+      const allLines = openOrders.flatMap((o) => (Array.isArray(o.items) ? o.items : []));
+      if (allLines.length > 0) {
+        const sent = allLines.filter((it) => it?.sent || String(it?.lineStatus || "").toLowerCase() === "sent").length;
+        const prepared = allLines.filter((it) => it?.prepared || String(it?.lineStatus || "").toLowerCase() === "ready").length;
+        progress = Math.min(100, Math.round(((sent + prepared * 0.75) / allLines.length) * 100));
+      } else {
+        const sum = openOrders.reduce((a, o) => a + orderStatusWeight(o.status || ""), 0);
+        progress = Math.min(100, Math.round((sum / openOrders.length) * 100));
+      }
       const flat = openOrders
         .flatMap((o) => (Array.isArray(o.items) ? o.items : []))
         .map((it) => `${it?.name || "صنف"}${it?.quantity ? `×${it.quantity}` : ""}`)
@@ -80,7 +124,7 @@ function buildTableLiveMap(
       orderPreview = flat.slice(0, 2).join(" · ");
     }
 
-    live[`${keyPre}${ft.id}`] = { status, progress, orderCount: openOrders.length, orderPreview };
+    live[`${keyPre}${ft.id}`] = { status, progress, orderCount: orderCountOut, orderPreview };
   }
   return live;
 }
@@ -259,7 +303,7 @@ export default function FloorPlanLive() {
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => void load(), 20000);
+    const id = window.setInterval(() => void load(), 7000);
     return () => window.clearInterval(id);
   }, [load]);
 

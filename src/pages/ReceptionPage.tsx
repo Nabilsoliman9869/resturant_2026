@@ -4,7 +4,7 @@ import { getApiBase } from "../lib/apiBase";
 import { mapTablesToFloorPlanLabels } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 
-type TableStatus = "available" | "occupied" | "reserved";
+type TableStatus = "ready" | "occupied" | "reserved" | "dirty" | "cleaning";
 
 type TableRow = {
   id: string;
@@ -15,21 +15,27 @@ type TableRow = {
   features?: Record<string, unknown>;
 };
 
-function normalizeStatus(raw: string): "available" | "occupied" | "reserved" {
+function normalizeStatus(raw: string): TableStatus {
   const s = (raw || "").toLowerCase();
   if (s.includes("occupy") || s === "occupied" || s === "busy" || s === "مشغولة") return "occupied";
   if (s.includes("reserv") || s === "reserved" || s === "محجوزة") return "reserved";
-  return "available";
+  if (s === "dirty" || s === "متسخة") return "dirty";
+  if (s === "cleaning" || s === "تنظيف") return "cleaning";
+  return "ready";
 }
 
-function statusLabel(st: "available" | "occupied" | "reserved") {
+function statusLabel(st: TableStatus) {
   switch (st) {
     case "occupied":
       return "مشغولة";
     case "reserved":
       return "محجوزة";
+    case "dirty":
+      return "متسخة";
+    case "cleaning":
+      return "قيد التنظيف";
     default:
-      return "متاحة";
+      return "جاهزة";
   }
 }
 
@@ -66,7 +72,7 @@ export default function ReceptionPage() {
           }) => ({
             id: String(t.id || ""),
             name: String(t.name || "طاولة"),
-            status: normalizeStatus(String(t.status || "available")) as TableStatus,
+            status: normalizeStatus(String(t.status || "ready")) as TableStatus,
             seats: Number(t.seats) || 4,
             number: t.number,
             features: t.features,
@@ -90,6 +96,10 @@ export default function ReceptionPage() {
     }
     if (t.status === "reserved") {
       setMsg("الطاولة محجوزة — راجع الحالة قبل الإسكان.");
+      return;
+    }
+    if (t.status === "dirty" || t.status === "cleaning") {
+      setMsg("الطاولة غير جاهزة بعد. أكمل دورة التنظيف أولاً.");
       return;
     }
     setGuestCount(Math.min(t.seats || 4, 4));
@@ -151,7 +161,9 @@ export default function ReceptionPage() {
                   ? "role-op__map-card role-op__map-card--occupied"
                   : st === "reserved"
                     ? "role-op__map-card role-op__map-card--reserved"
-                    : "role-op__map-card role-op__map-card--available";
+                    : st === "dirty" || st === "cleaning"
+                      ? "role-op__map-card role-op__map-card--reserved"
+                      : "role-op__map-card role-op__map-card--available";
               const num = t.number != null ? `#${t.number}` : t.name.replace(/[^\d]/g, "") ? `#${t.name.replace(/[^\d]/g, "")}` : t.name;
               const btnClass =
                 st === "occupied"
@@ -172,8 +184,8 @@ export default function ReceptionPage() {
                 >
                   <div className="role-op__map-card-head">
                     <span className="role-op__map-num">{num}</span>
-                    <span className={st === "available" ? "role-op__map-icon-ok" : "role-op__map-icon-no"} aria-hidden>
-                      {st === "available" ? "✓" : "✕"}
+                    <span className={st === "ready" ? "role-op__map-icon-ok" : "role-op__map-icon-no"} aria-hidden>
+                    {st === "ready" ? "✓" : "✕"}
                     </span>
                   </div>
                   <div className="role-op__map-seats">🪑 مقاعد {t.seats}</div>

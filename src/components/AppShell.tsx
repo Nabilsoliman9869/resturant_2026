@@ -56,6 +56,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
   ],
   kitchen: [
     { to: "kitchen", label: "شاشة المطبخ" },
+    { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ" },
   ],
   server: [
     { to: "dashboard", label: "لوحة الصالة" },
@@ -121,6 +122,9 @@ export function AppShell({ role }: { role: RoleId }) {
               {sessionDisplayName(user)}
             </div>
           </div>
+          <button type="button" className="btn btn-ghost" onClick={logout} style={{ marginBottom: "0.6rem" }}>
+            خروج
+          </button>
           {items.map((n) => {
             const dest = `${base}/${n.to}`;
             const settingsPrefix = `${base}/settings`;
@@ -141,10 +145,6 @@ export function AppShell({ role }: { role: RoleId }) {
               </NavLink>
             );
           })}
-          <div style={{ flex: 1 }} />
-          <button type="button" className="btn btn-ghost" onClick={logout}>
-            خروج
-          </button>
         </aside>
       )}
       <main style={{ flex: 1, padding: isWaiterOrderTaker ? "0" : "1.5rem", overflow: "auto" }}>

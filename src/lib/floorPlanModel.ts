@@ -28,6 +28,27 @@ export type FloorTable = {
   linkedTableId?: string;
 };
 
+export type FloorTextAnnotation = {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  color?: string;
+  fontSize?: number;
+  fontWeight?: number;
+};
+
+export type FloorArrowAnnotation = {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color?: string;
+  strokeWidth?: number;
+  label?: string;
+};
+
 export type FloorPlan = {
   id: string;
   name: string;
@@ -35,6 +56,8 @@ export type FloorPlan = {
   height: number;
   shell: FloorShell;
   tables: FloorTable[];
+  textAnnotations?: FloorTextAnnotation[];
+  arrows?: FloorArrowAnnotation[];
   obstacles?: Obstacle[];
   aisles?: AislePath[];
   zones?: FloorZone[];
@@ -114,6 +137,43 @@ export function parseFloorPlan(data: unknown): FloorPlan | null {
     shell: { type: "polygon", points: sh.points as Point[] },
     tables,
   };
+
+  const txt = Array.isArray(o.textAnnotations)
+    ? o.textAnnotations
+      .filter((t) => t && typeof t === "object")
+      .map((t) => {
+        const r = t as Record<string, unknown>;
+        return {
+          id: typeof r.id === "string" ? r.id : `txt-${Date.now()}`,
+          text: typeof r.text === "string" ? r.text : "",
+          x: Number(r.x) || 0,
+          y: Number(r.y) || 0,
+          color: typeof r.color === "string" ? r.color : undefined,
+          fontSize: Number.isFinite(Number(r.fontSize)) ? Number(r.fontSize) : undefined,
+          fontWeight: Number.isFinite(Number(r.fontWeight)) ? Number(r.fontWeight) : undefined,
+        } satisfies FloorTextAnnotation;
+      })
+    : undefined;
+  if (txt) (out as any).textAnnotations = txt;
+
+  const arr = Array.isArray(o.arrows)
+    ? o.arrows
+      .filter((a) => a && typeof a === "object")
+      .map((a) => {
+        const r = a as Record<string, unknown>;
+        return {
+          id: typeof r.id === "string" ? r.id : `arr-${Date.now()}`,
+          x1: Number(r.x1) || 0,
+          y1: Number(r.y1) || 0,
+          x2: Number(r.x2) || 0,
+          y2: Number(r.y2) || 0,
+          color: typeof r.color === "string" ? r.color : undefined,
+          strokeWidth: Number.isFinite(Number(r.strokeWidth)) ? Number(r.strokeWidth) : undefined,
+          label: typeof r.label === "string" ? r.label : undefined,
+        } satisfies FloorArrowAnnotation;
+      })
+    : undefined;
+  if (arr) (out as any).arrows = arr;
 
   const maybeArr = (v: unknown) => (Array.isArray(v) ? v : undefined);
   const obs = maybeArr(o.obstacles);

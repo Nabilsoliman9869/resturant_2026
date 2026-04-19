@@ -5,10 +5,19 @@ import { tryParseJson } from "../lib/tryParseJson";
 import { playKitchenWarnBeep } from "../lib/kdsBeep";
 import "../styles/operationalRoles.css";
 
-type OrderItem = { name?: string; quantity?: number };
+type OrderItem = {
+  lineId?: string;
+  name?: string;
+  quantity?: number;
+  prepared?: boolean;
+  sent?: boolean;
+  lineStatus?: string;
+};
 type OrderRow = {
   id: string;
   tableId: string;
+  tableGuid?: string;
+  tableLabel?: string;
   sessionId?: string;
   status: string;
   items: OrderItem[];
@@ -18,6 +27,9 @@ type OrderRow = {
   /** يُملأ من فاتورة المطعم — رقم يظهر للمطبخ بدل مقطع UUID */
   billNumber?: number;
   ticketNo?: number;
+  createdAt?: string;
+  completedAt?: string;
+  kpiLeadMinutes?: number;
 };
 
 type KdsSettings = { prepTargetMinutes: number; warnBeforeEndMinutes: number };
@@ -25,6 +37,41 @@ type KdsSettings = { prepTargetMinutes: number; warnBeforeEndMinutes: number };
 function orderLabel(o: OrderRow) {
   const parts = (o.items || []).map((i) => `${i.name || "صنف"} ×${i.quantity || 1}`);
   return parts.length ? parts.join(" · ") : "بدون بنود";
+}
+
+function lineRemainingForSummary(i: OrderItem): number {
+  if (i.sent || i.prepared) return 0;
+  return Number(i.quantity || 0);
+}
+
+function normalizeSummaryItemName(raw: string): string {
+  let s = String(raw || "").trim();
+  if (!s) return "صنف";
+  // في الملخص: بدون كرسي/طاولة، تجميع بالاسم فقط
+  s = s.replace(/\([^)]*كرسي[^)]*\)/gi, "");
+  s = s.replace(/\s+/g, " ").trim();
+  return s || "صنف";
+}
+
+function hashHue(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+function summaryTileStyle(name: string, qty: number) {
+  const hue = hashHue(name);
+  const bg = `hsl(${hue} 75% 92%)`;
+  const border = qty >= 6 ? "#dc2626" : `hsl(${hue} 35% 62%)`;
+  return { bg, border, high: qty >= 6 };
+}
+
+function isTodayLocal(iso?: string): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return false;
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
 }
 
 function statusWeight(s: string) {
@@ -45,6 +92,10 @@ function kdsOrderDisplayTitle(o: OrderRow): string {
   const hex = (o.id || "").replace(/-/g, "");
   if (hex.length >= 6) return `طلب ${hex.slice(-6).toUpperCase()}`;
   return `طلب ${(o.id || "").slice(0, 8)}`;
+}
+
+function kitchenTableDisplay(o: OrderRow): string {
+  return String(o.tableLabel || o.tableId || "—");
 }
 
 function tableCompletion(orders: OrderRow[]) {
@@ -93,14 +144,14 @@ function usePrepCountdown(prepStartIso: string | undefined, targetMinutes: numbe
 function KdsOrderCard({
   order,
   settings,
-  onStart,
-  onFinish,
+  onTogglePrepared,
+  onSendLine,
   base,
 }: {
   order: OrderRow;
   settings: KdsSettings;
-  onStart: (id: string) => void;
-  onFinish: (id: string) => void;
+  onTogglePrepared: (orderId: string, lineId: string, prepared: boolean) => void;
+  onSendLine: (orderId: string, lineId: string) => void;
   base: string;
 }) {
   const target = Number(order.prepTargetMinutes) > 0 ? Number(order.prepTargetMinutes) : settings.prepTargetMinutes;
@@ -126,12 +177,12 @@ function KdsOrderCard({
         sourceKey: `kitchen_urgent:${order.id}`,
         title: `استعجال مطبخ · ${labelT}`,
         body: orderLabel(order).slice(0, 400),
-        tableId: order.tableId,
+        tableId: order.tableGuid || order.tableId,
         sessionId: order.sessionId || undefined,
         orderId: order.id,
       }),
     });
-  }, [preparing, urgent, overdue, base, order.id, order.tableId, order.sessionId, order.generalOrder, order.billNumber, order.ticketNo]);
+  }, [preparing, urgent, overdue, base, order.id, order.tableId, order.tableGuid, order.sessionId, order.generalOrder, order.billNumber, order.ticketNo]);
 
   useEffect(() => {
     if (!urgent && !overdue) return;
@@ -140,7 +191,17 @@ function KdsOrderCard({
     return () => window.clearInterval(id);
   }, [urgent, overdue]);
 
-  const pending = (order.status || "").toLowerCase() === "pending";
+  const leadLabel = (() => {
+    if (typeof order.kpiLeadMinutes === "number" && Number.isFinite(order.kpiLeadMinutes)) {
+      return `${order.kpiLeadMinutes.toFixed(1)} د`;
+    }
+    if (order.createdAt) {
+      const a = new Date(order.createdAt).getTime();
+      const b = Date.now();
+      if (Number.isFinite(a) && b >= a) return `${((b - a) / 60000).toFixed(1)} د`;
+    }
+    return "—";
+  })();
 
   return (
     <div className={`kds-card ${urgent || overdue ? "kds-card--urgent" : ""}`}>
@@ -161,9 +222,50 @@ function KdsOrderCard({
             </div>
           ) : null}
           <div style={{ color: "var(--wp-muted)", fontSize: "0.88rem", marginTop: 4 }}>
-            طاولة: <strong>{order.tableId || "—"}</strong> · الحالة: {order.status}
+            طاولة: <strong>{kitchenTableDisplay(order)}</strong> · الحالة: {order.status}
           </div>
           <div style={{ marginTop: 8, fontSize: "0.9rem", lineHeight: 1.45 }}>{orderLabel(order)}</div>
+          <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+            {(order.items || []).map((it, idx) => {
+              const lid = String(it.lineId || `${order.id}-${idx}`);
+              const prepared = Boolean(it.prepared);
+              const sent = Boolean(it.sent);
+              return (
+                <div
+                  key={lid}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto auto",
+                    gap: 8,
+                    alignItems: "center",
+                    padding: "6px 8px",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 10,
+                    opacity: sent ? 0.55 : 1,
+                  }}
+                >
+                  <div>{it.name || "صنف"} ×{it.quantity || 1}</div>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.83rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={prepared}
+                      disabled={sent}
+                      onChange={(e) => onTogglePrepared(order.id, lid, e.target.checked)}
+                    />
+                    تم التحضير
+                  </label>
+                  <button
+                    type="button"
+                    className="waiter-pos__btn waiter-pos__btn--ghost"
+                    disabled={!prepared || sent}
+                    onClick={() => onSendLine(order.id, lid)}
+                  >
+                    {sent ? "أُرسل" : "إرسال"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
       <div style={{ marginTop: 8, fontSize: "0.82rem", color: "var(--wp-muted)" }}>
@@ -174,17 +276,8 @@ function KdsOrderCard({
           {overdue ? <>تأخير عن الموعد: {label}</> : <>متبقٍ للموعد: {label}</>}
         </div>
       )}
-      <div className="kds-card__actions">
-        {pending && (
-          <button type="button" className="waiter-pos__btn waiter-pos__btn--primary" onClick={() => onStart(order.id)}>
-            بدء التحضير
-          </button>
-        )}
-        {preparing && (
-          <button type="button" className="waiter-pos__btn waiter-pos__btn--primary" onClick={() => onFinish(order.id)}>
-            انتهاء — جاهز للتسليم
-          </button>
-        )}
+      <div style={{ marginTop: 8, fontSize: "0.8rem", color: "var(--wp-muted)" }}>
+        KPI · من الاستقبال حتى آخر تنفيذ: <strong>{leadLabel}</strong>
       </div>
     </div>
   );
@@ -222,12 +315,24 @@ export default function KitchenPage() {
     return () => window.clearInterval(id);
   }, [loadAll]);
 
-  async function setStatus(orderId: string, status: string) {
+  async function togglePrepared(orderId: string, lineId: string, prepared: boolean) {
     try {
-      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/status`, {
+      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ prepared }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      await loadAll();
+    } catch (e) {
+      setMsg(String(e));
+    }
+  }
+
+  async function sendLine(orderId: string, lineId: string) {
+    try {
+      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}/send`, {
+        method: "POST",
       });
       if (!r.ok) throw new Error(await r.text());
       await loadAll();
@@ -239,7 +344,7 @@ export default function KitchenPage() {
   const pending = useMemo(
     () =>
       orders.filter(
-        (o) => !["ready", "served", "paid", "cancelled"].includes((o.status || "").toLowerCase()),
+        (o) => isTodayLocal(o.createdAt) && !["served", "paid", "cancelled"].includes((o.status || "").toLowerCase()),
       ),
     [orders],
   );
@@ -247,7 +352,7 @@ export default function KitchenPage() {
   const byTable = useMemo(() => {
     const m = new Map<string, OrderRow[]>();
     for (const o of pending) {
-      const tid = String(o.tableId || "—");
+      const tid = kitchenTableDisplay(o);
       if (!m.has(tid)) m.set(tid, []);
       m.get(tid)!.push(o);
     }
@@ -256,8 +361,21 @@ export default function KitchenPage() {
 
   const visible = useMemo(() => {
     if (!filterTable) return pending;
-    return pending.filter((o) => String(o.tableId || "—") === filterTable);
+    return pending.filter((o) => kitchenTableDisplay(o) === filterTable);
   }, [pending, filterTable]);
+
+  const summaryRows = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const o of pending) {
+      for (const it of o.items || []) {
+        const nm = normalizeSummaryItemName(String(it.name || "صنف"));
+        const q = lineRemainingForSummary(it);
+        if (q <= 0) continue;
+        m.set(nm, (m.get(nm) || 0) + q);
+      }
+    }
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  }, [pending]);
 
   return (
     <div className="role-op waiter-pos">
@@ -280,6 +398,47 @@ export default function KitchenPage() {
           وتنبيه صوتي متكرر. الشريط الجانبي يجمّع طلبات كل طاولة مع نسبة إكمال تقديرية.
         </p>
 
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 6, marginBottom: 12 }}>
+          {summaryRows.length === 0 ? (
+            <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا يوجد ملخص تجميعي حاليًا.</div>
+          ) : (
+            summaryRows.map(([name, qty]) => {
+              const st = summaryTileStyle(name, qty);
+              return (
+                <div
+                key={name}
+                style={{
+                  border: `2px solid ${st.border}`,
+                  borderRadius: 4,
+                  minHeight: 74,
+                  padding: "8px 10px",
+                  fontWeight: 700,
+                  background: st.bg,
+                  color: "#0f172a",
+                  display: "grid",
+                  gridTemplateRows: "1fr auto",
+                  alignItems: "center",
+                  position: "relative",
+                }}
+              >
+                {st.high ? (
+                  <div
+                    title="ضغط عالي — يحتاج دعم/زيادة عمالة"
+                    style={{ position: "absolute", top: 4, right: 6, color: "#dc2626", fontWeight: 900, fontSize: 12 }}
+                  >
+                    ضغط عالي
+                  </div>
+                ) : null}
+                <div style={{ textAlign: "center", lineHeight: 1.2 }}>{name}</div>
+                <div style={{ textAlign: "left", fontSize: "1.1rem", fontWeight: 900 }}>
+                  {Number(qty).toFixed(Number.isInteger(qty) ? 0 : 2)}
+                </div>
+              </div>
+              );
+            })
+          )}
+        </div>
+
         <div className="kds-layout">
           <div>
             {visible.length === 0 ? (
@@ -294,8 +453,8 @@ export default function KitchenPage() {
                     order={o}
                     settings={settings}
                     base={base}
-                    onStart={(id) => void setStatus(id, "preparing")}
-                    onFinish={(id) => void setStatus(id, "ready")}
+                    onTogglePrepared={(oid, lid, prepared) => void togglePrepared(oid, lid, prepared)}
+                    onSendLine={(oid, lid) => void sendLine(oid, lid)}
                   />
                 ))}
               </div>

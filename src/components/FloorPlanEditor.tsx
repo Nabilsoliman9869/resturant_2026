@@ -8,9 +8,9 @@ import {
   normalizeFloorPlanDocument,
   type NormalizedFloorPlanDocument,
 } from "../lib/floorPlanDocument";
-import type { FloorPlan, FloorTable, Point, Obstacle } from "../lib/floorPlanModel";
+import type { FloorPlan, FloorTable, Point, Obstacle, FloorTextAnnotation, FloorArrowAnnotation } from "../lib/floorPlanModel";
 
-type Tool = "select" | "drawShell" | "editShell" | "addRect" | "addCircle" | "addEllipse" | "addAisle" | "addObstacle";
+type Tool = "select" | "drawShell" | "editShell" | "addRect" | "addCircle" | "addEllipse" | "addAisle" | "addObstacle" | "addText" | "addArrow";
 
 type ObstaclePreset =
   | { kind: "rect"; type: "wall_segment" | "window" | "bar" | "counter" | "door" | "service" | "elevator" | "cashier" | "bath_male" | "bath_female" | "bath_access" }
@@ -54,10 +54,13 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
   const [draftShell, setDraftShell] = useState<Point[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedObstacleId, setSelectedObstacleId] = useState<string | null>(null);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [selectedArrowId, setSelectedArrowId] = useState<string | null>(null);
   const [selectedVertex, setSelectedVertex] = useState<number | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [draftAisle, setDraftAisle] = useState<Point[]>([]);
+  const [draftArrowStart, setDraftArrowStart] = useState<Point | null>(null);
   const [obstaclePreset, setObstaclePreset] = useState<ObstaclePreset | null>(null);
 
   const dragRef = useRef<
@@ -83,6 +86,24 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
       start: Point;
       originX: number;
       originY: number;
+    }
+    | {
+      kind: "text";
+      floorId: string;
+      textId: string;
+      start: Point;
+      originX: number;
+      originY: number;
+    }
+    | {
+      kind: "arrow";
+      floorId: string;
+      arrowId: string;
+      start: Point;
+      originX1: number;
+      originY1: number;
+      originX2: number;
+      originY2: number;
     }
     | null
   >(null);
@@ -148,6 +169,26 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
             obstacles: (f.obstacles ?? []).map((o: any) => (o.id === d.obstacleId ? { ...o, x: nx, y: ny } : o)) as any,
           }));
         }
+        if (d.kind === "text") {
+          const nx = d.originX + (mx - d.start[0]);
+          const ny = d.originY + (my - d.start[1]);
+          return updateFloor(prev, d.floorId, (f) => ({
+            ...f,
+            textAnnotations: (f.textAnnotations ?? []).map((t) => (t.id === d.textId ? { ...t, x: nx, y: ny } : t)),
+          }));
+        }
+        if (d.kind === "arrow") {
+          const dx = mx - d.start[0];
+          const dy = my - d.start[1];
+          return updateFloor(prev, d.floorId, (f) => ({
+            ...f,
+            arrows: (f.arrows ?? []).map((a) =>
+              a.id === d.arrowId
+                ? { ...a, x1: d.originX1 + dx, y1: d.originY1 + dy, x2: d.originX2 + dx, y2: d.originY2 + dy }
+                : a,
+            ),
+          }));
+        }
         if (d.kind !== "vertex") return prev;
         const fl = prev.floors.find((f) => f.id === d.floorId);
         if (!fl) return prev;
@@ -193,10 +234,33 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
     }
   };
 
+  const syncTablesToTBL005 = async () => {
+    setBusy(true);
+    setMsg("");
+    const base = getApiBase();
+    try {
+      const r = await fetch(`${base}/api/restaurant/floor-plan/sync-cost-centers`, { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "فشل مزامنة TBL005");
+      setMsg(`تمت مزامنة TBL005 بنجاح (${Number(j.syncedTables || 0)} طاولة).`);
+      await load();
+      onSaved?.();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const setActiveFloorId = (id: string) => {
     setDoc((d) => (d ? { ...d, activeFloorId: id } : null));
     setDraftShell([]);
+    setDraftAisle([]);
+    setDraftArrowStart(null);
     setSelectedTableId(null);
+    setSelectedObstacleId(null);
+    setSelectedTextId(null);
+    setSelectedArrowId(null);
     setSelectedVertex(null);
   };
 
@@ -230,6 +294,44 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
     }
     if (tool === "addAisle") {
       setDraftAisle((d) => [...d, [x, y]]);
+      return;
+    }
+    if (tool === "addText") {
+      const id = randomId("txt");
+      const txt: FloorTextAnnotation = { id, text: "منطقة جديدة", x, y, color: "#0f172a", fontSize: 26, fontWeight: 800 };
+      setDoc(updateFloor(doc, activeFloor.id, (f) => ({ ...f, textAnnotations: [...(f.textAnnotations ?? []), txt] })));
+      setSelectedTextId(id);
+      setSelectedTableId(null);
+      setSelectedObstacleId(null);
+      setSelectedArrowId(null);
+      setTool("select");
+      return;
+    }
+    if (tool === "addArrow") {
+      if (!draftArrowStart) {
+        setDraftArrowStart([x, y]);
+        setMsg("حدد نقطة نهاية السهم.");
+        return;
+      }
+      const id = randomId("arr");
+      const ar: FloorArrowAnnotation = {
+        id,
+        x1: draftArrowStart[0],
+        y1: draftArrowStart[1],
+        x2: x,
+        y2: y,
+        color: "#2563eb",
+        strokeWidth: 8,
+        label: "اتجاه السير",
+      };
+      setDoc(updateFloor(doc, activeFloor.id, (f) => ({ ...f, arrows: [...(f.arrows ?? []), ar] })));
+      setDraftArrowStart(null);
+      setSelectedArrowId(id);
+      setSelectedTableId(null);
+      setSelectedObstacleId(null);
+      setSelectedTextId(null);
+      setTool("select");
+      setMsg("تمت إضافة سهم اتجاه.");
       return;
     }
     if (tool === "addRect") {
@@ -361,6 +463,8 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
 
   const selectedTable = activeFloor?.tables.find((t) => t.id === selectedTableId) ?? null;
   const selectedObstacle = (activeFloor as any)?.obstacles?.find((o: any) => o.id === selectedObstacleId) ?? null;
+  const selectedText = (activeFloor?.textAnnotations ?? []).find((t) => t.id === selectedTextId) ?? null;
+  const selectedArrow = (activeFloor?.arrows ?? []).find((a) => a.id === selectedArrowId) ?? null;
 
   const updateSelectedObstacle = (patch: Partial<Obstacle>) => {
     if (!doc || !activeFloor || !selectedObstacleId) return;
@@ -376,6 +480,38 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
     if (!doc || !activeFloor || !selectedObstacleId) return;
     setDoc(updateFloor(doc, activeFloor.id, (f) => ({ ...f, obstacles: (f.obstacles ?? []).filter((o: any) => o.id !== selectedObstacleId) as any })));
     setSelectedObstacleId(null);
+  };
+
+  const updateSelectedText = (patch: Partial<FloorTextAnnotation>) => {
+    if (!doc || !activeFloor || !selectedTextId) return;
+    setDoc(
+      updateFloor(doc, activeFloor.id, (f) => ({
+        ...f,
+        textAnnotations: (f.textAnnotations ?? []).map((t) => (t.id === selectedTextId ? { ...t, ...patch } : t)),
+      })),
+    );
+  };
+
+  const deleteSelectedText = () => {
+    if (!doc || !activeFloor || !selectedTextId) return;
+    setDoc(updateFloor(doc, activeFloor.id, (f) => ({ ...f, textAnnotations: (f.textAnnotations ?? []).filter((t) => t.id !== selectedTextId) })));
+    setSelectedTextId(null);
+  };
+
+  const updateSelectedArrow = (patch: Partial<FloorArrowAnnotation>) => {
+    if (!doc || !activeFloor || !selectedArrowId) return;
+    setDoc(
+      updateFloor(doc, activeFloor.id, (f) => ({
+        ...f,
+        arrows: (f.arrows ?? []).map((a) => (a.id === selectedArrowId ? { ...a, ...patch } : a)),
+      })),
+    );
+  };
+
+  const deleteSelectedArrow = () => {
+    if (!doc || !activeFloor || !selectedArrowId) return;
+    setDoc(updateFloor(doc, activeFloor.id, (f) => ({ ...f, arrows: (f.arrows ?? []).filter((a) => a.id !== selectedArrowId) })));
+    setSelectedArrowId(null);
   };
 
   if (!doc || !activeFloor) {
@@ -422,6 +558,8 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
               ["addCircle", "طاولة دائرية"],
               ["addEllipse", "طاولة بيضاوية"],
               ["addAisle", "ممشى / طريق"],
+              ["addText", "نص/مسمى"],
+              ["addArrow", "سهم اتجاه"],
             ] as const
           ).map(([k, lab]) => (
             <button
@@ -432,6 +570,7 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
               onClick={() => {
                 setTool(k);
                 if (k === "drawShell") setDraftShell([]);
+                if (k !== "addArrow") setDraftArrowStart(null);
                 setSelectedVertex(null);
               }}
             >
@@ -461,6 +600,13 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => setDraftAisle([])}>
               مسح المسار
+            </button>
+          </div>
+        )}
+        {tool === "addArrow" && draftArrowStart && (
+          <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setDraftArrowStart(null)}>
+              مسح نقطة البداية
             </button>
           </div>
         )}
@@ -518,7 +664,7 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
               fill="transparent"
               style={{
                 cursor:
-                  tool === "drawShell" || tool === "addRect" || tool === "addCircle" || tool === "addEllipse" || tool === "addAisle" || tool === "addObstacle" ? "crosshair" : "default",
+                  tool === "drawShell" || tool === "addRect" || tool === "addCircle" || tool === "addEllipse" || tool === "addAisle" || tool === "addObstacle" || tool === "addText" || tool === "addArrow" ? "crosshair" : "default",
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -649,12 +795,79 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
               }
               return null;
             })}
+            {(activeFloor.arrows ?? []).map((ar) => {
+              const isSel = ar.id === selectedArrowId;
+              return (
+                <g
+                  key={ar.id}
+                  style={{ cursor: tool === "select" ? "grab" : "default" }}
+                  onPointerDown={(e) => {
+                    if (tool !== "select") return;
+                    e.stopPropagation();
+                    const svg = svgRef.current;
+                    if (!svg) return;
+                    const g = clientToSvg(svg, e.clientX, e.clientY);
+                    setSelectedArrowId(ar.id);
+                    setSelectedTextId(null);
+                    setSelectedTableId(null);
+                    setSelectedObstacleId(null);
+                    dragRef.current = {
+                      kind: "arrow",
+                      floorId: activeFloor.id,
+                      arrowId: ar.id,
+                      start: g,
+                      originX1: ar.x1,
+                      originY1: ar.y1,
+                      originX2: ar.x2,
+                      originY2: ar.y2,
+                    };
+                  }}
+                >
+                  <line x1={ar.x1} y1={ar.y1} x2={ar.x2} y2={ar.y2} stroke={ar.color ?? "#2563eb"} strokeWidth={isSel ? (ar.strokeWidth ?? 8) + 2 : ar.strokeWidth ?? 8} />
+                  <polygon
+                    points="0,0 10,4 0,8"
+                    fill={ar.color ?? "#2563eb"}
+                    transform={`translate(${ar.x2 - 10},${ar.y2 - 4}) rotate(${(Math.atan2(ar.y2 - ar.y1, ar.x2 - ar.x1) * 180) / Math.PI} 10 4)`}
+                  />
+                  {ar.label ? <text x={(ar.x1 + ar.x2) / 2} y={(ar.y1 + ar.y2) / 2 - 8} textAnchor="middle" fontSize={13} fontWeight={700} fill={ar.color ?? "#2563eb"}>{ar.label}</text> : null}
+                </g>
+              );
+            })}
+            {(activeFloor.textAnnotations ?? []).map((tx) => {
+              const isSel = tx.id === selectedTextId;
+              return (
+                <text
+                  key={tx.id}
+                  x={tx.x}
+                  y={tx.y}
+                  textAnchor="middle"
+                  fontSize={tx.fontSize ?? 26}
+                  fontWeight={tx.fontWeight ?? 800}
+                  fill={tx.color ?? "#0f172a"}
+                  style={{ cursor: tool === "select" ? "grab" : "default", paintOrder: "stroke", stroke: isSel ? "#a855f7" : "rgba(255,255,255,0.9)", strokeWidth: isSel ? 5 : 4 }}
+                  onPointerDown={(e) => {
+                    if (tool !== "select") return;
+                    e.stopPropagation();
+                    const svg = svgRef.current;
+                    if (!svg) return;
+                    const g = clientToSvg(svg, e.clientX, e.clientY);
+                    setSelectedTextId(tx.id);
+                    setSelectedArrowId(null);
+                    setSelectedTableId(null);
+                    setSelectedObstacleId(null);
+                    dragRef.current = { kind: "text", floorId: activeFloor.id, textId: tx.id, start: g, originX: tx.x, originY: tx.y };
+                  }}
+                >
+                  {tx.text}
+                </text>
+              );
+            })}
             {activeFloor.tables.map((t) => {
               const sel = t.id === selectedTableId;
               const cx = t.x + t.w / 2;
               const cy = t.y + t.h / 2;
               const rot = t.rotation ?? 0;
-              const passClicks = tool === "drawShell" || tool === "addRect" || tool === "addCircle" || tool === "addEllipse" || tool === "addAisle" || tool === "addObstacle";
+              const passClicks = tool === "drawShell" || tool === "addRect" || tool === "addCircle" || tool === "addEllipse" || tool === "addAisle" || tool === "addObstacle" || tool === "addText" || tool === "addArrow";
               return (
                 <g
                   key={t.id}
@@ -839,6 +1052,44 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
               </button>
             </>
           )}
+          {selectedText && (
+            <>
+              <div style={{ fontWeight: 700, margin: "0.75rem 0 0.35rem" }}>نص محدد</div>
+              <label style={{ fontSize: "0.82rem", color: "var(--muted)" }}>المحتوى</label>
+              <input style={{ width: "100%", marginBottom: "0.35rem" }} value={selectedText.text} onChange={(e) => updateSelectedText({ text: e.target.value })} />
+              <div style={{ display: "flex", gap: "0.35rem", marginBottom: "0.35rem" }}>
+                <input type="number" style={{ width: "50%" }} value={Math.round(selectedText.x)} onChange={(e) => updateSelectedText({ x: Number(e.target.value) || 0 })} />
+                <input type="number" style={{ width: "50%" }} value={Math.round(selectedText.y)} onChange={(e) => updateSelectedText({ y: Number(e.target.value) || 0 })} />
+              </div>
+              <div style={{ display: "flex", gap: "0.35rem", marginBottom: "0.35rem" }}>
+                <input type="number" style={{ width: "50%" }} value={selectedText.fontSize ?? 26} min={8} max={120} onChange={(e) => updateSelectedText({ fontSize: Number(e.target.value) || 26 })} />
+                <input type="color" style={{ width: "50%" }} value={selectedText.color ?? "#0f172a"} onChange={(e) => updateSelectedText({ color: e.target.value })} />
+              </div>
+              <button type="button" className="btn btn-ghost" style={{ width: "100%" }} onClick={deleteSelectedText}>
+                حذف النص
+              </button>
+            </>
+          )}
+          {selectedArrow && (
+            <>
+              <div style={{ fontWeight: 700, margin: "0.75rem 0 0.35rem" }}>سهم محدد</div>
+              <label style={{ fontSize: "0.82rem", color: "var(--muted)" }}>نص السهم</label>
+              <input style={{ width: "100%", marginBottom: "0.35rem" }} value={selectedArrow.label ?? ""} onChange={(e) => updateSelectedArrow({ label: e.target.value })} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.35rem", marginBottom: "0.35rem" }}>
+                <input type="number" value={Math.round(selectedArrow.x1)} onChange={(e) => updateSelectedArrow({ x1: Number(e.target.value) || 0 })} />
+                <input type="number" value={Math.round(selectedArrow.y1)} onChange={(e) => updateSelectedArrow({ y1: Number(e.target.value) || 0 })} />
+                <input type="number" value={Math.round(selectedArrow.x2)} onChange={(e) => updateSelectedArrow({ x2: Number(e.target.value) || 0 })} />
+                <input type="number" value={Math.round(selectedArrow.y2)} onChange={(e) => updateSelectedArrow({ y2: Number(e.target.value) || 0 })} />
+              </div>
+              <div style={{ display: "flex", gap: "0.35rem", marginBottom: "0.35rem" }}>
+                <input type="number" style={{ width: "50%" }} value={selectedArrow.strokeWidth ?? 8} min={1} max={30} onChange={(e) => updateSelectedArrow({ strokeWidth: Number(e.target.value) || 8 })} />
+                <input type="color" style={{ width: "50%" }} value={selectedArrow.color ?? "#2563eb"} onChange={(e) => updateSelectedArrow({ color: e.target.value })} />
+              </div>
+              <button type="button" className="btn btn-ghost" style={{ width: "100%" }} onClick={deleteSelectedArrow}>
+                حذف السهم
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -848,6 +1099,9 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
         </button>
         <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void load()}>
           إعادة التحميل من الخادم
+        </button>
+        <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void syncTablesToTBL005()}>
+          مزامنة جدول الطاولات TBL005
         </button>
       </div>
       {msg && (

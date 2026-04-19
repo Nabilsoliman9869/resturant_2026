@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>بطاقات المواد</title>
+  <style>
+    body { margin: 0; font-family: Tahoma, Arial, sans-serif; font-size: 11.5px; background: #DFEBF7; }
+    #toolbar {
+      position: relative;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 8px 12px 4px;
+      font-family: Tahoma, Arial, sans-serif;
+      font-size: 11.5px;
+    }
+    #toolbar select, #toolbar button, #toolbar input[type="text"] {
+      font-family: Tahoma, Arial, sans-serif;
+      font-size: 11.5px;
+      padding: 3px 6px;
+      margin-left: 6px;
+    }
+    #toolbar button { cursor: pointer; }
+    #statusLine { margin-top: 6px; color: #036; min-height: 18px; }
+    #wrapCards { position: relative; width: 900px; margin: 0 auto; min-height: 680px; }
+    #ItemsCards {
+      position: relative;
+      width: 830px;
+      min-height: 650px;
+      margin: 4px auto 16px;
+      border: solid 1px #6a8caf;
+      background: #e8f2fa;
+      font-size: 11.5px;
+      font-family: Tahoma, Arial, sans-serif;
+      direction: rtl;
+    }
+    #ItemsCards fieldset { border: 1px solid #9db7d0; background: rgba(255,255,255,0.35); }
+    #ItemsCards input[type="text"], #ItemsCards select, #ItemsCards textarea {
+      font-family: Tahoma, Arial, sans-serif;
+      font-size: 11.5px;
+      box-sizing: border-box;
+    }
+    #ItemsCards label { color: #1a2f45; }
+  </style>
+</head>
+<body bgcolor="#DFEBF7">
+  <div id="toolbar">
+    <span>مادة حالية:</span>
+    <select id="selProductList" style="min-width:220px;">
+      <option value="">— اختر للتحميل —</option>
+    </select>
+    <button type="button" id="btnLoad">تحميل</button>
+    <button type="button" id="btnNew">جديد</button>
+    <button type="button" id="btnSave">حفظ</button>
+    <input type="text" id="quickSearch" placeholder="بحث سريع بالاسم..." style="width:160px;" />
+    <button type="button" id="btnSearch">بحث</button>
+    <div id="statusLine"></div>
+  </div>
+
+  <div id="wrapCards">
+  <div id="ItemsCards" name="ItemsCards">
+    <input type="hidden" id="currentCardGuide" value="" />
+
+    <select id="selGroup" name="SrhGroup" style="position:absolute;width:236px;height:21px;top:12px;left:515px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">
+      <option value="">— مجموعة —</option>
+    </select>
+    <label id="lblSrhGroup" for="selGroup" style="vertical-align:middle;position:absolute;width:67px;height:21px;top:12px;left:751px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">المجموعة</label>
+
+    <input id="TxItemName" name="TxItemName" type="text" value="" style="position:absolute;width:384px;height:21px;top:44px;left:316px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+    <label id="lblTxItemName" for="TxItemName" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:44px;left:700px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">اسم المادة</label>
+
+    <input id="TxCode" name="TxCode" type="text" value="" style="position:absolute;width:201px;height:21px;top:44px;left:38px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+    <label id="lblTxCode" for="TxCode" style="vertical-align:middle;position:absolute;width:73px;height:21px;top:44px;left:239px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">رمز البطاقة</label>
+
+    <fieldset id="GrGeneral" name="GrGeneral" style="position:absolute;width:675px;height:503px;top:72px;left:28px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">
+      <legend>عام</legend>
+
+      <select id="selCurrency" name="SrhDefaultCurrency" style="position:absolute;width:212px;height:21px;top:467px;left:49px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">
+        <option value="">— عملة —</option>
+      </select>
+      <label id="lblSrhDefaultCurrency" for="selCurrency" style="vertical-align:middle;position:absolute;width:67px;height:21px;top:467px;left:261px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">العملة</label>
+
+      <select id="selAccount" name="TxAcc" style="position:absolute;width:212px;height:21px;top:467px;left:379px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">
+        <option value="">— حساب —</option>
+      </select>
+      <label id="lblTxAcc" for="selAccount" style="vertical-align:middle;position:absolute;width:67px;height:21px;top:467px;left:591px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">الحساب</label>
+
+      <input id="SrhItemCardCategory5" name="SrhItemCardCategory5" type="text" style="position:absolute;width:181px;height:21px;top:421px;left:379px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" readonly title="تصنيفات GUID عبر قاعدة إكسترا — للعرض" />
+      <label id="lblSrhItemCardCategory5" for="SrhItemCardCategory5" style="vertical-align:middle;position:absolute;width:98px;height:21px;top:421px;left:560px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">تصنيف بطاقة مادة 5</label>
+
+      <input id="SrhItemCardCategory4" name="SrhItemCardCategory4" type="text" style="position:absolute;width:181px;height:21px;top:391px;left:49px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" readonly />
+      <label id="lblSrhItemCardCategory4" for="SrhItemCardCategory4" style="vertical-align:middle;position:absolute;width:98px;height:21px;top:391px;left:230px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">تصنيف بطاقة مادة 4</label>
+
+      <input id="SrhItemCardCategory3" name="SrhItemCardCategory3" type="text" style="position:absolute;width:181px;height:21px;top:391px;left:379px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" readonly />
+      <label id="lblSrhItemCardCategory3" for="SrhItemCardCategory3" style="vertical-align:middle;position:absolute;width:98px;height:21px;top:391px;left:560px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">تصنيف بطاقة مادة 3</label>
+
+      <input id="EDDefaultExpiryDate" name="EDDefaultExpiryDate" type="text" placeholder="YYYY-MM-DD" style="position:absolute;width:176px;height:21px;top:230px;left:360px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblEDDefaultExpiryDate" for="EDDefaultExpiryDate" style="vertical-align:middle;position:absolute;width:122px;height:21px;top:230px;left:536px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">تاريخ الصلاحية الافتراضي</label>
+
+      <input id="NmbTax" name="NmbTax" type="text" value="" style="position:absolute;width:105px;height:21px;top:110px;left:76px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblNmbTax" for="NmbTax" style="vertical-align:middle;position:absolute;width:93px;height:21px;top:110px;left:181px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">نسبة الضريبة</label>
+
+      <input id="NmbAgentPrice" name="NmbAgentPrice" type="text" style="position:absolute;width:105px;height:21px;top:140px;left:76px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblNmbAgentPrice" for="NmbAgentPrice" style="vertical-align:middle;position:absolute;width:93px;height:21px;top:140px;left:181px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">سعر الوكيل</label>
+
+      <input id="NmbEndUserPrice" name="NmbEndUserPrice" type="text" style="position:absolute;width:105px;height:21px;top:170px;left:76px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblNmbEndUserPrice" for="NmbEndUserPrice" style="vertical-align:middle;position:absolute;width:93px;height:21px;top:170px;left:181px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">سعر المستهلك</label>
+
+      <input id="NmbPrepMinutes" name="NmbPrepMinutes" type="text" style="position:absolute;width:105px;height:21px;top:200px;left:76px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblNmbPrepMinutes" for="NmbPrepMinutes" style="vertical-align:middle;position:absolute;width:93px;height:21px;top:200px;left:181px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">دقائق التحضير</label>
+
+      <input id="enterNumberData16" name="enterNumberData16" type="text" style="position:absolute;width:127px;height:21px;top:80px;left:54px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterNumberData16" for="enterNumberData16" style="vertical-align:middle;position:absolute;width:93px;height:21px;top:80px;left:181px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">الحد الاعلى</label>
+
+      <input id="enterNumberData15" name="enterNumberData15" type="text" style="position:absolute;width:127px;height:21px;top:50px;left:54px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterNumberData15" for="enterNumberData15" style="vertical-align:middle;position:absolute;width:93px;height:21px;top:50px;left:181px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">الحد الادنى</label>
+
+      <select id="selRelatedAgent" name="xtrSearchData8" style="position:absolute;width:237px;height:21px;top:230px;left:43px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">
+        <option value="">— عميل مرتبط —</option>
+      </select>
+      <label id="lblxtrSearchData8" for="selRelatedAgent" style="vertical-align:middle;position:absolute;width:72px;height:21px;top:230px;left:280px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">العميل المرتبط</label>
+
+      <input id="SrhItemCardCategory2" name="SrhItemCardCategory2" type="text" style="position:absolute;width:181px;height:21px;top:361px;left:49px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" readonly />
+      <label id="lblSrhItemCardCategory2" for="SrhItemCardCategory2" style="vertical-align:middle;position:absolute;width:98px;height:21px;top:361px;left:230px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">تصنيف بطاقة مادة 2</label>
+
+      <input id="SrhItemCardCategory1" name="SrhItemCardCategory1" type="text" style="position:absolute;width:181px;height:21px;top:361px;left:379px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" readonly />
+      <label id="lblSrhItemCardCategory1" for="SrhItemCardCategory1" style="vertical-align:middle;position:absolute;width:98px;height:21px;top:361px;left:560px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">تصنيف بطاقة مادة 1</label>
+
+      <input id="enterTextData12" name="enterTextData12" type="text" style="position:absolute;width:180px;height:21px;top:200px;left:54px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterTextData12" for="enterTextData12" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:200px;left:234px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">مخصص 5</label>
+
+      <input id="enterTextData13" name="enterTextData13" type="text" style="position:absolute;width:180px;height:21px;top:170px;left:54px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterTextData13" for="enterTextData13" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:170px;left:234px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">مخصص 4</label>
+
+      <input id="TxLatinName" name="TxLatinName" type="text" value="" style="position:absolute;width:214px;height:21px;top:50px;left:326px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblTxLatinName" for="TxLatinName" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:50px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">اسم المادة اللاتيني</label>
+
+      <input id="enterTextData11" name="enterTextData11" type="text" style="position:absolute;width:180px;height:21px;top:200px;left:360px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterTextData11" for="enterTextData11" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:200px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">مخصص 3</label>
+
+      <input id="enterTextData10" name="enterTextData10" type="text" style="position:absolute;width:180px;height:21px;top:170px;left:360px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterTextData10" for="enterTextData10" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:170px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">مخصص 2</label>
+
+      <input id="TxStatementName" name="TxStatementName" type="text" value="" style="position:absolute;width:522px;height:21px;top:20px;left:18px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblTxStatementName" for="TxStatementName" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:20px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">الاسم بالكشف</label>
+
+      <input id="enterTextData9" name="enterTextData9" type="text" style="position:absolute;width:522px;height:21px;top:140px;left:18px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterTextData9" for="enterTextData9" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:140px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">مخصص</label>
+
+      <input id="enterTextData5" name="enterTextData5" type="text" style="position:absolute;width:212px;height:21px;top:110px;left:328px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;" />
+      <label id="lblenterTextData5" for="enterTextData5" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:110px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">المصدر</label>
+
+      <textarea id="enterTextData4" name="enterTextData4" rows="3" style="position:absolute;width:486px;height:66px;top:260px;left:54px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;resize:none;"></textarea>
+      <label id="lblenterTextData4" for="enterTextData4" style="vertical-align:middle;position:absolute;width:118px;height:66px;top:260px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">المواصفات</label>
+
+      <select id="CmbItemType" name="CmbItemType" style="position:absolute;width:212px;height:21px;top:80px;left:328px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">
+        <option value="مادة مستودعية">مادة مستودعية</option>
+        <option value="مادة خدمية" selected>مادة خدمية</option>
+      </select>
+      <label id="lblCmbItemType" for="CmbItemType" style="vertical-align:middle;position:absolute;width:118px;height:21px;top:80px;left:540px;font-size:11.5px;font-family:Tahoma,Arial,sans-serif;direction:rtl;">نوع المادة</label>
+    </fieldset>
+  </div>
+  </div>
+
+  <script>
+(function () {
+  var API_BASE = (new URLSearchParams(window.location.search)).get('api_base')
+    || (window.parent !== window && window.parent.document.getElementById('apiBase') && window.parent.document.getElementById('apiBase').value)
+    || localStorage.getItem('xtra_web_api_base')
+    || 'http://127.0.0.1:2288';
+
+  function status(t, ok) {
+    var el = document.getElementById('statusLine');
+    el.textContent = t;
+    el.style.color = ok ? '#064' : '#a00';
+  }
+
+  function val(id) {
+    var e = document.getElementById(id);
+    return e ? e.value : '';
+  }
+
+  function setv(id, x) {
+    var e = document.getElementById(id);
+    if (e) e.value = x != null && x !== undefined ? String(x) : '';
+  }
+
+  function numStr(v) {
+    if (v == null || v === '') return '';
+    var n = parseFloat(v);
+    return isNaN(n) ? '' : String(n);
+  }
+
+  function collectPayload() {
+    var p = {
+      TxItemName: val('TxItemName'),
+      TxCode: val('TxCode'),
+      TxLatinName: val('TxLatinName'),
+      TxStatementName: val('TxStatementName'),
+      GroupGuid: val('selGroup') || null,
+      DefaultCurrency: val('selCurrency') || null,
+      AccountGuide: val('selAccount') || null,
+      RelatedAgent: val('selRelatedAgent') || null,
+      CmbItemType: val('CmbItemType'),
+      NmbTax: val('NmbTax'),
+      enterNumberData15: val('enterNumberData15'),
+      enterNumberData16: val('enterNumberData16'),
+      EDDefaultExpiryDate: val('EDDefaultExpiryDate'),
+      enterTextData4: val('enterTextData4'),
+      enterTextData5: val('enterTextData5'),
+      enterTextData9: val('enterTextData9'),
+      enterTextData10: val('enterTextData10'),
+      enterTextData11: val('enterTextData11'),
+      enterTextData12: val('enterTextData12'),
+      enterTextData13: val('enterTextData13'),
+      AgentPrice: val('NmbAgentPrice'),
+      EndUserPrice: val('NmbEndUserPrice'),
+      NmbPrepMinutes: val('NmbPrepMinutes'),
+      Hieght3: val('NmbPrepMinutes'),
+    };
+    return p;
+  }
+
+  function clearForm() {
+    document.getElementById('currentCardGuide').value = '';
+    ['TxItemName','TxCode','TxLatinName','TxStatementName','NmbTax','NmbAgentPrice','NmbEndUserPrice','NmbPrepMinutes',
+     'enterNumberData15','enterNumberData16','EDDefaultExpiryDate','enterTextData4','enterTextData5',
+     'enterTextData9','enterTextData10','enterTextData11','enterTextData12','enterTextData13'].forEach(function (id) { setv(id, ''); });
+    document.getElementById('selGroup').value = '';
+    document.getElementById('selCurrency').value = '';
+    document.getElementById('selAccount').value = '';
+    document.getElementById('selRelatedAgent').value = '';
+    document.getElementById('CmbItemType').selectedIndex = 1;
+    for (var i = 1; i <= 5; i++) setv('SrhItemCardCategory' + i, '');
+  }
+
+  function applyServerCard(data) {
+    var v = data.values || {};
+    var d = data.display || {};
+    document.getElementById('currentCardGuide').value = v.CardGuide || '';
+    setv('TxItemName', v.ProductName);
+    setv('TxCode', v.CardCode);
+    setv('TxLatinName', v.LatinName);
+    var stmtCol = v.StatementName != null ? v.StatementName : v.BillStatementName;
+    setv('TxStatementName', stmtCol != null ? stmtCol : '');
+    setv('NmbTax', numStr(v.TaxRatio != null ? v.TaxRatio : (v.TaxPercent != null ? v.TaxPercent : v.Tax)));
+    setv('NmbAgentPrice', numStr(v.AgentPrice));
+    setv('NmbEndUserPrice', numStr(v.EndUserPrice));
+    setv('NmbPrepMinutes', numStr(v.Hieght3 != null ? v.Hieght3 : v.PrepMinutes));
+    setv('enterNumberData15', numStr(v.MinimumQuantity != null ? v.MinimumQuantity : v.MinLimit));
+    setv('enterNumberData16', numStr(v.MaximumQuantity != null ? v.MaximumQuantity : v.MaxLimit));
+    setv('EDDefaultExpiryDate', v.DefaultExpiryDate || v.ExpiryDate || '');
+    setv('enterTextData4', v.Specifications || v.Description || v.ProductSpecs || '');
+    setv('enterTextData5', v.SourceText || v.ProductSource || '');
+    setv('enterTextData9', v.CustomText1 || v.Text01 || v.EnterTextData9 || '');
+    setv('enterTextData10', v.CustomText2 || v.Text02 || '');
+    setv('enterTextData11', v.CustomText3 || v.Text03 || '');
+    setv('enterTextData12', v.CustomText4 || v.Text04 || '');
+    setv('enterTextData13', v.CustomText5 || v.Text05 || '');
+
+    var it = v.ItemType != null ? v.ItemType : v.ProductType;
+    var isSvc = v.IsService === 1 || v.IsService === true || it === 1;
+    document.getElementById('CmbItemType').value = isSvc ? 'مادة خدمية' : 'مادة مستودعية';
+
+    if (data.guides && data.guides.GroupGuid)
+      document.getElementById('selGroup').value = data.guides.GroupGuid;
+    else
+      document.getElementById('selGroup').value = v.GroupGuid || '';
+
+    if (data.guides && data.guides.DefaultCurrency)
+      document.getElementById('selCurrency').value = data.guides.DefaultCurrency;
+    else
+      document.getElementById('selCurrency').value = v.DefaultCurrency || '';
+
+    if (data.guides && data.guides.AccountGuide)
+      document.getElementById('selAccount').value = data.guides.AccountGuide;
+    else
+      document.getElementById('selAccount').value = '';
+
+    if (data.guides && data.guides.RelatedAgent)
+      document.getElementById('selRelatedAgent').value = data.guides.RelatedAgent;
+    else
+      document.getElementById('selRelatedAgent').value = '';
+
+    setv('SrhItemCardCategory1', d.SrhItemCardCategory1 || '');
+    setv('SrhItemCardCategory2', d.SrhItemCardCategory2 || '');
+    setv('SrhItemCardCategory3', d.SrhItemCardCategory3 || '');
+    setv('SrhItemCardCategory4', d.SrhItemCardCategory4 || '');
+    setv('SrhItemCardCategory5', d.SrhItemCardCategory5 || '');
+  }
+
+  function loadProductList() {
+    fetch(API_BASE + '/api/products')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var sel = document.getElementById('selProductList');
+        sel.innerHTML = '<option value="">— اختر للتحميل —</option>';
+        (d.products || []).forEach(function (p) {
+          var o = document.createElement('option');
+          o.value = p.CardGuide;
+          o.textContent = (p.ProductName || '—') + (p.Price != null ? ' (' + p.Price + ')' : '');
+          sel.appendChild(o);
+        });
+      })
+      .catch(function () { status('تعذر تحميل قائمة المواد', false); });
+  }
+
+  function fillSelect(url, selId, mapFn) {
+    fetch(API_BASE + url)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var sel = document.getElementById(selId);
+        var keep = sel.options[0];
+        sel.innerHTML = '';
+        sel.appendChild(keep);
+        mapFn(d, sel);
+      })
+      .catch(function () {});
+  }
+
+  function initLookups() {
+    fillSelect('/api/product-groups', 'selGroup', function (d, sel) {
+      (d.groups || []).forEach(function (g) {
+        var o = document.createElement('option');
+        o.value = g.CardGuide;
+        o.textContent = g.GroupName || g.CardGuide;
+        sel.appendChild(o);
+      });
+    });
+    fillSelect('/api/currencies', 'selCurrency', function (d, sel) {
+      (d.currencies || []).forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = c.CardGuide;
+        o.textContent = (c.CurrencyName || c.LatinName || '') + '';
+        sel.appendChild(o);
+      });
+    });
+    fillSelect('/api/accounts/sub?leaves_only=true&active_only=true', 'selAccount', function (d, sel) {
+      (d.accounts || []).slice(0, 400).forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = a.CardGuide;
+        var code = a.CardCode != null ? String(a.CardCode) : '';
+        o.textContent = (code ? code + ' — ' : '') + (a.AccountName || a.CardGuide);
+        sel.appendChild(o);
+      });
+    });
+    fillSelect('/api/agents', 'selRelatedAgent', function (d, sel) {
+      (d.agents || []).slice(0, 300).forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = a.CardGuide;
+        o.textContent = (a.AgentName || a.CardGuide);
+        sel.appendChild(o);
+      });
+    });
+  }
+
+  document.getElementById('btnLoad').onclick = function () {
+    var g = document.getElementById('selProductList').value;
+    if (!g) { status('اختر مادة من القائمة', false); return; }
+    status('جاري التحميل...', true);
+    fetch(API_BASE + '/api/products/' + encodeURIComponent(g) + '/xtra')
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (x) { throw new Error(x.detail || r.status); });
+        return r.json();
+      })
+      .then(function (data) {
+        applyServerCard(data);
+        status('تم التحميل', true);
+      })
+      .catch(function (e) { status('خطأ: ' + e.message, false); });
+  };
+
+  document.getElementById('btnNew').onclick = function () {
+    clearForm();
+    document.getElementById('selProductList').value = '';
+    status('بطاقة جديدة', true);
+  };
+
+  document.getElementById('btnSave').onclick = function () {
+    var name = val('TxItemName').trim();
+    if (!name) { status('اسم المادة مطلوب', false); return; }
+    var cg = document.getElementById('currentCardGuide').value.trim();
+    var payload = collectPayload();
+    var url = cg
+      ? (API_BASE + '/api/products/' + encodeURIComponent(cg) + '/xtra')
+      : (API_BASE + '/api/products/xtra');
+    var method = cg ? 'PUT' : 'POST';
+    status('جاري الحفظ...', true);
+    fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (x) { throw new Error(x.detail || JSON.stringify(x)); });
+        return r.json();
+      })
+      .then(function (res) {
+        if (!cg && res.CardGuide) {
+          document.getElementById('currentCardGuide').value = res.CardGuide;
+          loadProductList();
+        }
+        status('تم الحفظ — ' + (res.columns_written ? res.columns_written.length + ' حقل' : ''), true);
+      })
+      .catch(function (e) { status('خطأ: ' + e.message, false); });
+  };
+
+  document.getElementById('btnSearch').onclick = function () {
+    var q = document.getElementById('quickSearch').value.trim();
+    if (!q) { loadProductList(); return; }
+    fetch(API_BASE + '/api/products/search?search_text=' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var sel = document.getElementById('selProductList');
+        sel.innerHTML = '<option value="">— نتائج البحث —</option>';
+        (d.products || []).forEach(function (p) {
+          var o = document.createElement('option');
+          o.value = p.CardGuide;
+          o.textContent = p.ProductName || '—';
+          sel.appendChild(o);
+        });
+        status('نتائج: ' + (d.products || []).length, true);
+      })
+      .catch(function (e) { status('خطأ بحث: ' + e.message, false); });
+  };
+
+  initLookups();
+  loadProductList();
+  status('جاهز — API: ' + API_BASE, true);
+})();
+  </script>
+</body>
+</html>
