@@ -17,9 +17,19 @@ npm install
 npm run build
 ```
 
-النتيجة في `dist/`. يمكن نشرها على IIS أو فتح `dist/index.html` عبر خادم ثابت.
+مخرجات Vite تُكتب إلى **`ui/restaurant/`** (نفس ما يخدمه الـ API وما تُدخله PyInstaller من مجلد `ui`). مجلد `dist/` لم يعد مخرج البناء الافتراضي — لا تعتمد على ملفات قديمة هناك للـ EXE.
 
-## الخيار 3 — تطبيق سطح مكتب (.exe)
+## خيار PyInstaller (Mat3amPOS.exe)
+
+من جذر المشروع (بعد `pip install pyinstaller pyodbc uvicorn fastapi`):
+
+```bat
+pyinstaller Mat3amPOS.spec --noconfirm
+```
+
+الناتج: `dist\Mat3amPOS.exe` — يضم `ui` و`config` و`docs` كما في `Mat3amPOS.spec`.
+
+## الخيار 3 — تطبيق سطح مكتب (Electron / Tauri)
 
 1. ثبّت [Electron](https://www.electronjs.org/) أو [Tauri](https://tauri.app/) في المشروع.
 2. اربط نافذة `BrowserWindow` بـ `http://localhost:5290` بعد تشغيل الخلفية (أو افتح `dist/index.html` عبر `file://` مع خادم ثابت صغير يشغّل API من `backend/`).

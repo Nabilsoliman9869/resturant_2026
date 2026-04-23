@@ -441,7 +441,8 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-19T00:03:21.615563",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-20T08:32:09.026313"
   },
   {
     "id": "dcd8ec47-a74c-4d32-a267-4d6f2b38c296",
@@ -452,6 +453,81 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-04-19T01:25:01.038597",
-    "status": "active"
+    "status": "completed",
+    "endTime": "2026-04-20T08:32:09.026313"
+  },
+  {
+    "id": "5b753fa9-8ad8-4263-b6b2-6a1e39e8b535",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-19T15:07:22.542637",
+    "status": "completed",
+    "billingRequestedAt": "2026-04-19T16:02:36.937923",
+    "endTime": "2026-04-19T16:07:39.643103"
+  },
+  {
+    "id": "9445df8a-64fb-4a29-820e-173deba8a4a4",
+    "tableId": "10B7C06D-A4EA-4C57-88E3-17484F7E617B",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": false,
+      "specialRequests": ""
+    },
+    "startTime": "2026-04-19T15:33:29.903623",
+    "status": "completed",
+    "endTime": "2026-04-20T08:32:09.026313"
+  },
+  {
+    "id": "2a61cfff-90b5-4f0a-b7dd-44732adc0b5c",
+    "tableId": "7B14A454-9070-4513-8B2F-CE5AED71BCE6",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 4,
+    "childrenCount": 0,
+    "preferences": {
+      "source": "reception",
+      "hasAllergy": false,
+      "specialRequests": ""
+    },
+    "startTime": "2026-04-19T15:33:42.622597",
+    "status": "completed",
+    "endTime": "2026-04-20T08:32:09.026313"
+  },
+  {
+    "id": "4c5b13fb-c055-4580-9663-7f1c1b7404a8",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-22T21:29:27.563203",
+    "status": "completed",
+    "startedByRole": "waiter",
+    "startReason": "seat_assignment",
+    "endTime": "2026-04-23T00:23:09.435724"
+  },
+  {
+    "id": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 2,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-04-23T00:23:10.922578",
+    "status": "completed",
+    "startedByRole": "waiter",
+    "startReason": "seat_assignment",
+    "billingRequestedAt": "2026-04-23T11:07:09.748883",
+    "endTime": "2026-04-23T11:08:44.221973"
   }
 ]

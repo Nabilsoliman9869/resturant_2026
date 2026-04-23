@@ -3,10 +3,13 @@
     "version": "v1",
     "language": "ar-en",
     "purpose": "initial content only for existing TBL tables",
+    "masterDataFromDatabase": true,
     "notes": [
       "لا تنشئ جداول TBL. استخدم UPSERT فقط.",
       "اعتمد على business_key المذكور لكل جدول.",
-      "يمكن تعديل المحتوى بعد التهيئة من واجهات النظام."
+      "يمكن تعديل المحتوى بعد التهيئة من واجهات النظام.",
+      "TBL005/006/007 مع masterDataFromDatabase=true: إن كان الجدول فارغاً يُدمَج من الصفوف أدناه؛ إن وُجدت بيانات مسبقاً لا يُستبدل المحتوى من الملف (يُحترم الاستيراد). false = دمج JSON دائماً لهذه الجداول.",
+      "القراءة في التشغيل: /api/cost-centers و /api/product-groups و /api/products"
     ]
   },
   "tables": {

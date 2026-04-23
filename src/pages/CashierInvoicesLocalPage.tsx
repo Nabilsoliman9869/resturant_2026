@@ -3,16 +3,7 @@ import { getApiBase } from "../lib/apiBase";
 import { todayYmd } from "../lib/dailyMenuSettings";
 import { tryParseJson } from "../lib/tryParseJson";
 import SmartProductSearch from "../components/SmartProductSearch";
-
-type LocalInv = {
-  sessionId?: string;
-  invoiceId?: string;
-  total?: number;
-  paidAt?: string | null;
-  requestedAt?: string;
-  awaitingPayment?: boolean;
-  paymentMethod?: string;
-};
+import { CashierPayInvoiceModal, type CashierInvoiceRow } from "../components/CashierPayInvoiceModal";
 
 type PaymentFilter = "awaiting" | "paid" | "all";
 
@@ -21,13 +12,13 @@ export default function CashierInvoicesLocalPage() {
   const [from, setFrom] = useState(() => todayYmd());
   const [to, setTo] = useState(() => todayYmd());
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("awaiting");
-  const [rows, setRows] = useState<LocalInv[]>([]);
+  const [rows, setRows] = useState<CashierInvoiceRow[]>([]);
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
-  const [payingId, setPayingId] = useState<string | null>(null);
-  const [methodById, setMethodById] = useState<Record<string, string>>({});
-  const [closeSessionById, setCloseSessionById] = useState<Record<string, boolean>>({});
   const [searchText, setSearchText] = useState("");
+  const [payOpen, setPayOpen] = useState(false);
+  const [payInvoiceId, setPayInvoiceId] = useState<string | null>(null);
+  const [payInitialRow, setPayInitialRow] = useState<CashierInvoiceRow | null>(null);
 
   const load = useCallback(async () => {
     setMsg("");
@@ -44,13 +35,16 @@ export default function CashierInvoicesLocalPage() {
         const d = j.detail;
         throw new Error(typeof d === "string" ? d : txt.slice(0, 200) || "فشل التحميل");
       }
-      let list = Array.isArray(j.invoices) ? (j.invoices as LocalInv[]) : [];
+      let list = Array.isArray(j.invoices) ? (j.invoices as CashierInvoiceRow[]) : [];
       const qtxt = searchText.trim().toLowerCase();
       if (qtxt) {
         list = list.filter((inv) => {
           const id = String(inv.invoiceId || "").toLowerCase();
           const sid = String(inv.sessionId || "").toLowerCase();
-          return id.includes(qtxt) || sid.includes(qtxt);
+          const tbl = String((inv as { tableLabel?: string }).tableLabel || "").toLowerCase();
+          const tname = String((inv as { tableName?: string }).tableName || "").toLowerCase();
+          const bn = String((inv as { billNumber?: number }).billNumber ?? "").toLowerCase();
+          return id.includes(qtxt) || sid.includes(qtxt) || tbl.includes(qtxt) || tname.includes(qtxt) || bn.includes(qtxt);
         });
       }
       setRows(list);
@@ -66,41 +60,32 @@ export default function CashierInvoicesLocalPage() {
     void load();
   }, [load]);
 
-  async function markPaid(inv: LocalInv) {
-    const invoiceId = String(inv.invoiceId || "").trim();
-    if (!invoiceId) return;
-    const method = (methodById[invoiceId] || "cash").trim() || "cash";
-    const closeSession = Boolean(closeSessionById[invoiceId]);
-    setPayingId(invoiceId);
-    setMsg("");
-    try {
-      const r = await fetch(`${base}/api/restaurant/invoices-local/mark-paid`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoiceId, paymentMethod: method, closeSession }),
-      });
-      const txt = await r.text();
-      const j = tryParseJson<{ detail?: unknown }>(txt) ?? {};
-      if (!r.ok) {
-        const d = j.detail;
-        throw new Error(typeof d === "string" ? d : txt.slice(0, 200) || "فشل التسديد");
-      }
-      setMsg(closeSession ? "تم التسديد وإغلاق الجلسة." : "تم التسديد.");
-      void load();
-    } catch (e) {
-      setMsg(String(e));
-    } finally {
-      setPayingId(null);
-    }
+  function openPay(inv: CashierInvoiceRow) {
+    const id = String(inv.invoiceId || "").trim();
+    if (!id) return;
+    setPayInitialRow(inv);
+    setPayInvoiceId(id);
+    setPayOpen(true);
   }
 
   return (
     <div>
       <h1 style={{ marginTop: 0, fontFamily: "var(--display)", fontSize: "1.65rem" }}>فواتير المطعم (كاشير)</h1>
-      <p style={{ color: "var(--muted)", lineHeight: 1.6, marginTop: 0 }}>
-        بعد «طلب الحساب» من الجرسون تظهر الفواتير هنا في انتظار التسديد. الطلبات المفتوحة لا تُفوتر في SQL حتى هذه
-        الخطوة.
-      </p>
+
+      <CashierPayInvoiceModal
+        open={payOpen}
+        invoiceId={payInvoiceId}
+        initialRow={payInitialRow}
+        onClose={() => {
+          setPayOpen(false);
+          setPayInvoiceId(null);
+          setPayInitialRow(null);
+        }}
+        onPaid={() => {
+          setMsg("تم التسديد.");
+          void load();
+        }}
+      />
 
       <div className="card" style={{ marginBottom: "1rem", display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
         <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
@@ -149,9 +134,8 @@ export default function CashierInvoicesLocalPage() {
                 <th style={{ padding: "0.5rem" }}>طلب الحساب</th>
                 <th style={{ padding: "0.5rem" }}>التسديد</th>
                 <th style={{ padding: "0.5rem" }}>الإجمالي</th>
-                <th style={{ padding: "0.5rem" }}>طريقة الدفع</th>
-                <th style={{ padding: "0.5rem" }}>معرّف الفاتورة</th>
-                <th style={{ padding: "0.5rem" }}>جلسة</th>
+                <th style={{ padding: "0.5rem" }}>رقم الفاتورة</th>
+                <th style={{ padding: "0.5rem" }}>اسم الطاولة</th>
                 <th style={{ padding: "0.5rem" }}>إجراء</th>
               </tr>
             </thead>
@@ -161,48 +145,20 @@ export default function CashierInvoicesLocalPage() {
                 const awaiting = Boolean(inv.awaitingPayment);
                 const req = (inv.requestedAt || "").replace("T", " ").slice(0, 19) || "—";
                 const paid = (inv.paidAt || "").replace("T", " ").slice(0, 19) || "—";
+                const billNo = inv.billNumber != null ? String(inv.billNumber) : "—";
+                const tableTitle = (inv.tableName && inv.tableName.trim()) || inv.tableLabel || "—";
                 return (
                   <tr key={`${id}-${i}`} style={{ borderBottom: "1px solid var(--border)" }}>
                     <td style={{ padding: "0.6rem", whiteSpace: "nowrap" }}>{req}</td>
                     <td style={{ padding: "0.6rem", whiteSpace: "nowrap" }}>{paid}</td>
                     <td style={{ padding: "0.6rem" }}>{inv.total != null ? Number(inv.total).toFixed(2) : "—"}</td>
-                    <td style={{ padding: "0.6rem" }}>{inv.paymentMethod || "—"}</td>
-                    <td style={{ padding: "0.6rem", fontFamily: "monospace", fontSize: "0.8rem", wordBreak: "break-all" }}>
-                      {id || "—"}
-                    </td>
-                    <td style={{ padding: "0.6rem", fontFamily: "monospace", fontSize: "0.75rem", wordBreak: "break-all" }}>
-                      {inv.sessionId || "—"}
-                    </td>
+                    <td style={{ padding: "0.6rem", fontWeight: 700 }}>{billNo}</td>
+                    <td style={{ padding: "0.6rem" }}>{tableTitle}</td>
                     <td style={{ padding: "0.6rem", verticalAlign: "middle" }}>
                       {awaiting && id ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch", minWidth: 140 }}>
-                          <select
-                            value={methodById[id] || "cash"}
-                            onChange={(e) => setMethodById((m) => ({ ...m, [id]: e.target.value }))}
-                            aria-label="طريقة الدفع"
-                          >
-                            <option value="cash">نقدي</option>
-                            <option value="card">بطاقة</option>
-                            <option value="split">تقسيم</option>
-                          </select>
-                          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: "0.85rem" }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(closeSessionById[id])}
-                              onChange={(e) => setCloseSessionById((m) => ({ ...m, [id]: e.target.checked }))}
-                            />
-                            إغلاق الجلسة
-                          </label>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            style={{ fontSize: "0.85rem" }}
-                            disabled={payingId === id}
-                            onClick={() => void markPaid(inv)}
-                          >
-                            {payingId === id ? "…" : "تسديد"}
-                          </button>
-                        </div>
+                        <button type="button" className="btn btn-primary" style={{ fontSize: "0.85rem" }} onClick={() => openPay(inv)}>
+                          تسديد
+                        </button>
                       ) : (
                         <span style={{ color: "var(--muted)" }}>—</span>
                       )}

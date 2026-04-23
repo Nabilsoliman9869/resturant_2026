@@ -1,11 +1,15 @@
 """
 Standalone EXE entrypoint for Mat3am POS backend.
 Build target: single-file EXE via PyInstaller.
+
+يجب تعيين MAT3AM_BASE_DIR قبل استيراد api_server — وإلا يُستخدم مجلد مؤقت (_MEIPASS)
+ويُفقد ملف config/settings.json عند كل تشغيل.
 """
 from __future__ import annotations
 
 import ctypes
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -14,10 +18,58 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-import pyodbc
-import uvicorn
 
-from api_server import app, XTRA_API_PORT
+def _persistent_data_root() -> Path:
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", "") or ".") / "Mat3amPOS"
+    else:
+        base = Path.home() / ".Mat3amPOS"
+    base.mkdir(parents=True, exist_ok=True)
+    return base.resolve()
+
+
+def _seed_persistent_config_from_bundle(persist_root: Path, meipass: str) -> None:
+    """أول تشغيل: نسخ config من الحزمة إلى مجلد دائم إن لم يوجد إعداد اتصال."""
+    bundled = Path(meipass) / "config"
+    target = persist_root / "config"
+    settings = target / "settings.json"
+    if settings.is_file():
+        return
+    if not bundled.is_dir():
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    for root, _dirs, files in os.walk(bundled):
+        rel = Path(root).relative_to(bundled)
+        dest_dir = target / rel
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for name in files:
+            src_f = Path(root) / name
+            dst_f = dest_dir / name
+            if not dst_f.exists():
+                try:
+                    shutil.copy2(src_f, dst_f)
+                except Exception:
+                    pass
+
+
+def _configure_frozen_base_dir() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    if (os.environ.get("MAT3AM_BASE_DIR") or "").strip():
+        return
+    persist = _persistent_data_root()
+    os.environ["MAT3AM_BASE_DIR"] = str(persist)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if isinstance(meipass, str) and meipass:
+        _seed_persistent_config_from_bundle(persist, meipass)
+
+
+_configure_frozen_base_dir()
+
+import pyodbc  # noqa: E402
+import uvicorn  # noqa: E402
+
+from api_server import app, XTRA_API_PORT  # noqa: E402
 
 
 ODBC_DRIVER_CANDIDATES = (
@@ -25,7 +77,6 @@ ODBC_DRIVER_CANDIDATES = (
     "ODBC Driver 17 for SQL Server",
     "ODBC Driver 13 for SQL Server",
 )
-# Microsoft official short-link (current ODBC 18 x64 package).
 ODBC18_URL = "https://aka.ms/downloadmsodbcsql18"
 
 
@@ -39,13 +90,6 @@ def _is_admin() -> bool:
 def _show_info(msg: str, title: str = "Mat3am POS") -> None:
     try:
         ctypes.windll.user32.MessageBoxW(0, msg, title, 0x40)
-    except Exception:
-        print(msg)
-
-
-def _show_error(msg: str, title: str = "Mat3am POS") -> None:
-    try:
-        ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)
     except Exception:
         print(msg)
 
@@ -64,8 +108,6 @@ def _download_odbc_installer(dst_path: Path) -> None:
 
 
 def _run_silent_odbc_installer(installer_path: Path) -> None:
-    # Most recent package from aka.ms is an EXE bootstrapper.
-    # Keep arguments compatible with Microsoft setup silent mode.
     subprocess.run(
         [
             str(installer_path),
@@ -118,7 +160,6 @@ def _ensure_prerequisites() -> None:
 
 
 def _open_browser_later() -> None:
-    # Open the POS UI shortly after the API starts.
     time.sleep(1.2)
     try:
         webbrowser.open(f"http://127.0.0.1:{XTRA_API_PORT}/static/restaurant/")
@@ -126,8 +167,24 @@ def _open_browser_later() -> None:
         pass
 
 
+def _print_exe_build_stamp() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    me = getattr(sys, "_MEIPASS", None)
+    if not isinstance(me, str) or not me:
+        return
+    p = Path(me) / "config" / "mat3am_exe_build.txt"
+    try:
+        if p.is_file():
+            s = (p.read_text(encoding="utf-8") or "").strip().split("\n")[0][:300]
+            print(f"[mat3am] EXE_BUILD={s}", flush=True)
+    except Exception:
+        pass
+
+
 def main() -> None:
     os.environ.setdefault("MAT3AM_API", "1")
+    _print_exe_build_stamp()
     _ensure_prerequisites()
     t = threading.Thread(target=_open_browser_later, daemon=True)
     t.start()

@@ -13,7 +13,18 @@ type Row = {
 };
 type AuditRow = { id: number; action: string; entity: string; actor: string; details: string; loggedAt: string };
 
-const ALL_ROLES: RoleId[] = ["cashier", "accountant", "manager", "developer", "host", "waiter", "kitchen", "server"];
+const ALL_ROLES: RoleId[] = [
+  "cashier",
+  "accountant",
+  "manager",
+  "developer",
+  "host",
+  "waiter",
+  "kitchen",
+  "speed_order",
+  "server",
+  "kids_guard",
+];
 
 export default function DeveloperUsers() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -119,10 +130,7 @@ export default function DeveloperUsers() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>مستخدمون وأدوار (قاعدة البيانات)</h2>
-      <p style={{ color: "var(--muted)" }}>
-        إدارة فعلية من جدول <code>MAT3AM_APP_USERS</code> (إنشاء/تفعيل/تعطيل/تغيير رمز).
-      </p>
+      <h2 style={{ marginTop: 0 }}>مستخدمون وأدوار</h2>
       <form className="card" onSubmit={add} style={{ maxWidth: 620, marginBottom: "1rem" }}>
         <div style={{ display: "grid", gap: 10 }}>
           <input value={loginName} onChange={(e) => setLoginName(e.target.value)} placeholder="اسم المستخدم (login)" />

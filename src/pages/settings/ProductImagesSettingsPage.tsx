@@ -217,9 +217,6 @@ export default function ProductImagesSettingsPage() {
   return (
     <div className="card" style={{ padding: "1rem" }}>
       <h2 style={{ marginTop: 0 }}>إدارة صور المنيو</h2>
-      <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        رفع ملفات، لصق روابط، معاينة فورية، ثم مزامنة دفعة واحدة بين ملف JSON وقاعدة البيانات (TBL007.ProductImageUrl).
-      </p>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         <button className="btn btn-secondary" onClick={() => void bootstrapMenu()} disabled={busy}>

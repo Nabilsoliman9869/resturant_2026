@@ -41,7 +41,6 @@ export default function DailyResultPage() {
   return (
     <div className="page" style={{ direction: "rtl" }}>
       <h2 style={{ marginTop: 0 }}>النتيجة اليومية</h2>
-      <p style={{ color: "var(--muted)" }}>هذه الشاشة مخصصة فقط للنتيجة اليومية، ويتم تسجيلها في جدول مستقل لاستخدامها لاحقًا في قيد التكلفة.</p>
       <div className="card" style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           تاريخ اليوم

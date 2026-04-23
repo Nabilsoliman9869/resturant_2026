@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
+import { useDbSettingsRefresh } from "../context/DbSettingsRefreshContext";
 
 type DevLog = {
   id: number;
@@ -12,7 +13,12 @@ type DevLog = {
   message: string;
 };
 
+function apiUnreachable(): string {
+  return `تعذر الاتصال بـ API (${getApiBase()}).`;
+}
+
 export default function DeveloperConnection() {
+  const { bumpDbEpoch } = useDbSettingsRefresh();
   const [server, setServer] = useState("");
   const [port, setPort] = useState<string>("");
   const [database, setDatabase] = useState("");
@@ -22,17 +28,7 @@ export default function DeveloperConnection() {
   const [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<DevLog[]>([]);
   const [whoamiText, setWhoamiText] = useState<string>("");
-
-  function apiUnreachableHint() {
-    const base = getApiBase();
-    const isProxied =
-      typeof window !== "undefined" &&
-      (window.location.port === "9999" || window.location.port === "5290") &&
-      !import.meta.env.VITE_XTRA_API;
-    return isProxied
-      ? `تعذر الوصول للـ API عبر ${base}. شغّل خادم Python على http://127.0.0.1:2288 (مثلاً run_api.bat أو run_full_stack.bat) — البروكسي يمرّر /api إلى 2288.`
-      : `تعذر الوصول للـ API على ${base}. تحقق من تشغيل الخلفية ومن قيمة VITE_XTRA_API في .env إن استخدمتها.`;
-  }
+  const [probeText, setProbeText] = useState("");
 
   async function loadSettings() {
     const r = await fetch(`${getApiBase()}/api/settings/connection`);
@@ -62,7 +58,7 @@ export default function DeveloperConnection() {
       .catch(() => setWhoamiText(""));
     loadSettings()
       .then(() => loadLogs())
-      .catch(() => setMsg(apiUnreachableHint()));
+      .catch(() => setMsg(apiUnreachable()));
   }, []);
 
   async function save() {
@@ -82,10 +78,11 @@ export default function DeveloperConnection() {
         }),
       });
       if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
-      setMsg("تم حفظ إعدادات الاتصال في config/settings.json.");
+      setMsg("تم الحفظ.");
+      bumpDbEpoch();
     } catch (e) {
       const s = String(e);
-      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachable() : s);
     } finally {
       setBusy(false);
     }
@@ -112,19 +109,17 @@ export default function DeveloperConnection() {
       try {
         j = text ? (JSON.parse(text) as typeof j) : {};
       } catch {
-        setMsg(
-          `رد غير متوقع من الخادم (HTTP ${r.status}). إن كان الخادم يعمل، تحقق من البروكسي والمنفذ 2288.\n${text.slice(0, 280)}`,
-        );
+        setMsg(`HTTP ${r.status}`);
         return;
       }
       if (!r.ok) {
-        setMsg(j.detail || `HTTP ${r.status}: ${text.slice(0, 200)}`);
+        setMsg(j.detail || `HTTP ${r.status}`);
         return;
       }
-      setMsg(j.ok ? "اختبار الاتصال ناجح." : j.detail || JSON.stringify(j));
+      setMsg(j.ok ? "الاتصال ناجح." : j.detail || JSON.stringify(j));
     } catch (e) {
       const s = String(e);
-      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachable() : s);
     } finally {
       setBusy(false);
     }
@@ -137,79 +132,17 @@ export default function DeveloperConnection() {
       const r = await fetch(`${getApiBase()}/api/dev/bootstrap`, { method: "POST" });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.detail || j.message || `HTTP ${r.status}`);
-      const tbl = Array.isArray(j.tables) ? j.tables.join(", ") : "جداول الدعم";
+      const tbl = Array.isArray(j.tables) ? j.tables.join(", ") : "—";
       const n = typeof j.defaultAppUsersInserted === "number" ? j.defaultAppUsersInserted : null;
       const usersLine =
-        n != null && n > 0
-          ? ` — تم إدراج ${n} مستخدم افتراضي (كاشير/محاسب/…).`
-          : n === 0
-            ? " — جدول المستخدمين كان غير فارغ؛ لم يُدرَج مستخدمون افتراضيون."
-            : "";
-      const seed = j.restaurantInvoiceTypesSeed as
-        | {
-            ok?: boolean;
-            note?: string;
-            created?: unknown[];
-            skipped?: string[];
-            errors?: { orderKind?: string; detail?: string }[];
-            tbl020SeededDirect?: boolean;
-            tbl020TemplateInserted?: boolean;
-          }
-        | undefined;
-      const invOk = seed?.ok !== false && j.restaurantInvoiceTypesOk !== false;
-      let invLine = "";
-      if (seed) {
-        const cr = Array.isArray(seed.created) ? seed.created.length : 0;
-        const sk = Array.isArray(seed.skipped) ? seed.skipped.length : 0;
-        const er = Array.isArray(seed.errors) ? seed.errors : [];
-        invLine = `\n\nأنواع فواتير المطعم (TBL020 / MAT3AM): ${invOk ? "حسب التوقع" : "⚠ فشل أو نقص"}\n— أُنشئ/حدّث: ${cr} — تخطّي (موجود مسبقاً): ${sk}`;
-        if (seed.note) invLine += `\n— ملاحظة: ${seed.note}`;
-        if (er.length) {
-          invLine += `\n— أخطاء:\n${er.map((e) => `  • ${e.orderKind ?? "?"}: ${e.detail ?? ""}`).join("\n")}`;
-        }
-        invLine += `\n— تحقق في SSMS: SELECT CardGuide, InvoiceName FROM TBL020 WHERE InvoiceName LIKE N'مطاعم —%';`;
-      }
-      if (!invOk) {
-        invLine += "\n\n⚠ نفّذ SELECT على TBL020؛ إن لم تظهر الصفوف الستة فالنسخ من القالب فشل (راجع رسالة SQL أعلاه أو هيكل TBL020).";
-      }
-      const rev = typeof j.bootstrapSchemaRevision === "number" ? j.bootstrapSchemaRevision : 0;
-      const stSeed = j.restaurantStoresSeed as
-        | {
-            ok?: boolean;
-            note?: string;
-            created?: unknown[];
-            skipped?: string[];
-            errors?: { orderKind?: string; detail?: string }[];
-            tbl008Mat3amNameRows?: number | null;
-          }
-        | undefined;
-      const stOk = stSeed?.ok !== false && j.restaurantStoresOk !== false;
-      let storeLine = "";
-      if (!("restaurantStoresSeed" in j) || rev < 3) {
-        storeLine = `\n\n⚠ المخازن (TBL008): رد الخادم قديم أو لا يشمل تهيئة المخازن (bootstrapSchemaRevision=${rev || "غير مرسل"}). أوقف الخادم ثم شغّل من مجلد المشروع: python backend/api_server.py (أو run_api.bat) وتأكد أن الملف المحدّث يُحمَّل.`;
-      } else if (stSeed) {
-        const cr = Array.isArray(stSeed.created) ? stSeed.created.length : 0;
-        const sk = Array.isArray(stSeed.skipped) ? stSeed.skipped.length : 0;
-        const er = Array.isArray(stSeed.errors) ? stSeed.errors : [];
-        const cnt = stSeed.tbl008Mat3amNameRows;
-        storeLine = `\n\nمخازن المطعم (TBL008 / MAT3AM_RESTAURANT_STORES): ${stOk ? "حسب التوقع" : "⚠ فشل أو نقص"}\n— أُنشئ/حدّث خريطة: ${cr} — تخطّي (موجود مسبقاً): ${sk}`;
-        if (typeof cnt === "number") storeLine += `\n— صفوف TBL008 باسم «مطاعم —»: ${cnt} (بعد التهيئة)`;
-        if (stSeed.note) storeLine += `\n— ملاحظة: ${stSeed.note}`;
-        if (er.length) {
-          storeLine += `\n— أخطاء:\n${er.map((e) => `  • ${e.orderKind ?? "?"}: ${e.detail ?? ""}`).join("\n")}`;
-        }
-        storeLine += `\n— تحقق في SSMS: SELECT CardGuide, WarehouseName FROM dbo.TBL008 WHERE WarehouseName LIKE N'مطاعم —%';`;
-        storeLine += `\n— SELECT OrderKind, Tbl008CardGuide FROM dbo.MAT3AM_RESTAURANT_STORES;`;
-      }
-      if (rev >= 3 && !stOk && stSeed) {
-        storeLine += "\n\n⚠ فشل تهيئة المخازن — لن يُحفَظ StoreGuide في TBL022 حتى تُصلَح؛ راجع التفاصيل أعلاه.";
-      }
-      setMsg(`تهيئة: ${tbl}${usersLine}.${invLine}${storeLine}`);
+        n != null && n > 0 ? ` — مستخدمون افتراضيون: ${n}.` : n === 0 ? " — لم يُدرَج مستخدمون افتراضيون." : "";
+      setMsg(`تهيئة: ${tbl}${usersLine}`);
+      bumpDbEpoch();
       await loadSettings();
       await loadLogs();
     } catch (e) {
       const s = String(e);
-      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachable() : s);
     } finally {
       setBusy(false);
     }
@@ -221,7 +154,15 @@ export default function DeveloperConnection() {
     try {
       const r = await fetch(`${getApiBase()}/api/dev/seed-default-data`, { method: "POST" });
       const t = await r.text();
-      let j: any = {};
+      let j: {
+        ok?: boolean;
+        detail?: string;
+        message?: string;
+        tables?: Record<string, unknown>;
+        seedVersion?: string;
+        masterDataNote?: string;
+        fromDatabase?: unknown;
+      } = {};
       try {
         j = t ? JSON.parse(t) : {};
       } catch {
@@ -229,16 +170,87 @@ export default function DeveloperConnection() {
       }
       if (!r.ok || !j.ok) throw new Error(j.detail || j.message || `HTTP ${r.status}`);
       const out = j.tables || {};
+      const fd = j.fromDatabase as
+        | {
+            TBL005?: { rowCount?: number };
+            TBL006?: { rowCount?: number };
+            TBL007?: { totalProducts?: number; distinctActiveGroups?: number };
+          }
+        | undefined;
+      const summaryDb =
+        fd && (fd.TBL005 || fd.TBL006 || fd.TBL007)
+          ? `قاعدة: TBL005=${fd.TBL005?.rowCount ?? "—"} مركز، TBL006=${fd.TBL006?.rowCount ?? "—"} مجموعة، TBL007=${fd.TBL007?.totalProducts ?? "—"} صنف (${fd.TBL007?.distinctActiveGroups ?? "—"} مجموعة بها أصناف نشطة)`
+          : "";
       const lines = Object.keys(out).map((k) => {
-        const s = out[k] || {};
+        const s = out[k] as {
+          source?: string;
+          snapshot?: {
+            rowCount?: number;
+            totalProducts?: number;
+            distinctActiveGroups?: number;
+            error?: string;
+          };
+          inserted?: number;
+          updated?: number;
+          skipped?: number;
+          errors?: unknown[];
+        };
+        if (s.source === "database") {
+          const sn = s.snapshot;
+          if (k === "TBL007" && sn && typeof sn.totalProducts === "number") {
+            return `${k}: من القاعدة — ${sn.totalProducts} صنف، ${sn.distinctActiveGroups ?? "?"} مجموعة (أصناف نشطة)`;
+          }
+          if (sn?.error) return `${k}: من القاعدة — خطأ ${sn.error}`;
+          if (sn && typeof sn.rowCount === "number") return `${k}: من القاعدة — ${sn.rowCount} صف`;
+          return `${k}: من القاعدة (لقطة)`;
+        }
         const errs = Array.isArray(s.errors) ? s.errors.length : 0;
         return `${k}: +${s.inserted || 0} / ~${s.updated || 0} / =${s.skipped || 0}${errs ? ` / !${errs}` : ""}`;
       });
-      setMsg(`تمت تعبئة بيانات افتراضية كبداية (Seed ${j.seedVersion || ""}).\n${lines.join("\n")}`);
+      const head = [j.masterDataNote ? String(j.masterDataNote) : "", summaryDb].filter(Boolean).join("\n");
+      setMsg(`Seed ${j.seedVersion || ""}${head ? `\n${head}` : ""}\n${lines.join("\n")}`);
+      bumpDbEpoch();
       await loadLogs();
     } catch (e) {
       const s = String(e);
-      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachable() : s);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mat3amProbe() {
+    setProbeText("");
+    setBusy(true);
+    try {
+      const r = await fetch(`${getApiBase()}/api/dev/mat3am-schema-probe`);
+      const j = await r.json();
+      setProbeText(JSON.stringify(j, null, 2));
+    } catch (e) {
+      setProbeText(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mat3amEnsure() {
+    setProbeText("");
+    setBusy(true);
+    try {
+      const r = await fetch(`${getApiBase()}/api/dev/mat3am-schema-ensure`, { method: "POST" });
+      const t = await r.text();
+      if (!r.ok) {
+        setProbeText(t || `HTTP ${r.status}`);
+        return;
+      }
+      try {
+        setProbeText(JSON.stringify(JSON.parse(t), null, 2));
+      } catch {
+        setProbeText(t || `HTTP ${r.status}`);
+      }
+      bumpDbEpoch();
+    } catch (e) {
+      setProbeText(String(e));
     } finally {
       setBusy(false);
     }
@@ -250,7 +262,17 @@ export default function DeveloperConnection() {
     try {
       const r = await fetch(`${getApiBase()}/api/dev/seed-default-data/verify`);
       const t = await r.text();
-      let j: any = {};
+      let j: {
+        ok?: boolean;
+        detail?: string;
+        message?: string;
+        status?: string;
+        summary?: { ok?: number; warn?: number; error?: number };
+        tables?: { table?: string; status?: string; count?: number; requiredMin?: number }[];
+        extraChecks?: { key?: string; status?: string; message?: string }[];
+        verifySchemaRevision?: number;
+        checksPlanned?: number;
+      } = {};
       try {
         j = t ? JSON.parse(t) : {};
       } catch {
@@ -260,17 +282,35 @@ export default function DeveloperConnection() {
       const s = j.summary || {};
       const rows = Array.isArray(j.tables) ? j.tables : [];
       const extras = Array.isArray(j.extraChecks) ? j.extraChecks : [];
+      const rev = j.verifySchemaRevision;
+      const planned = j.checksPlanned;
+      const headerLines: string[] = [];
+      if (typeof rev === "number" && typeof planned === "number") {
+        headerLines.push(`تقرير التحقق v${rev} — ${planned} فحصاً للجداول (ثم فحوص إضافية في الأسفل)`);
+        if (rows.length < planned) {
+          headerLines.push(
+            `تحذير: وصل ${rows.length} صفاً بينما المتوقع ${planned} — راجع اتصال الـ API أو أعد تشغيل الخادم.`,
+          );
+        }
+      } else {
+        headerLines.push(
+          "تحذير: خادم API قديم (لا يُرجع verifySchemaRevision/checksPlanned). أعد تشغيل api_server من مجلد المشروع أو أعد بناء EXE.",
+        );
+        headerLines.push(
+          "إن كان الملخص OK≈11 ولا تظهر صفوف MAT3AM_* فالعملية القديمة لا تزال تعمل على المنفذ 2288.",
+        );
+      }
       const lines = [
-        `الحالة العامة: ${j.status || "UNKNOWN"}`,
-        `OK=${s.ok || 0} | WARN=${s.warn || 0} | ERROR=${s.error || 0}`,
-        ...rows.map((x: any) => `${x.table}: ${x.status} (count=${x.count ?? "?"}, min=${x.requiredMin ?? "?"})`),
-        ...extras.map((x: any) => `${x.key}: ${x.status} - ${x.message || ""}`),
+        ...headerLines,
+        `${j.status || ""} — OK=${s.ok || 0} WARN=${s.warn || 0} ERR=${s.error || 0}`,
+        ...rows.map((x) => `${x.table}: ${x.status} (${x.count ?? "?"})`),
+        ...extras.map((x) => `${x.key}: ${x.status}`),
       ];
       setMsg(lines.join("\n"));
       await loadLogs();
     } catch (e) {
       const s = String(e);
-      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachableHint() : s);
+      setMsg(s.includes("Failed to fetch") || s.includes("NetworkError") ? apiUnreachable() : s);
     } finally {
       setBusy(false);
     }
@@ -280,72 +320,20 @@ export default function DeveloperConnection() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>لوحة المطور — الاتصال والتهيئة</h2>
-      <div
-        className="card"
-        style={{
-          marginBottom: 16,
-          padding: "12px 14px",
-          background: "var(--surface-2, rgba(0,0,0,0.06))",
-          border: "1px solid var(--border, #ccc)",
-        }}
-      >
-        <div style={{ fontWeight: 600, marginBottom: 6 }}>بصمة التشغيل الحالية (للتأكد أنك لست على نسخة قديمة)</div>
-        <div style={{ fontSize: "0.88rem", lineHeight: 1.5 }}>
-          <div>
-            واجهة Vite — وقت إقلاع السيرفر: <code>{viteBoot || "—"}</code>
-          </div>
-          <div style={{ marginTop: 4 }}>
-            عنوانك في المتصفح: <code>{typeof window !== "undefined" ? window.location.href : "—"}</code>
-          </div>
-          {whoamiText ? (
-            <pre
-              style={{
-                margin: "8px 0 0",
-                padding: 8,
-                fontSize: "0.8rem",
-                overflow: "auto",
-                background: "var(--bg, #fff)",
-                borderRadius: 4,
-              }}
-            >
-              {whoamiText}
-            </pre>
-          ) : (
-            <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-              لم يُحمَّل <code>/__whoami__</code> — شغّل API من مجلد مطاعم (<code>run_api.bat</code> أو{" "}
-              <code>restart_from_zero.bat</code>) ثم حدّث الصفحة.
-            </p>
-          )}
-        </div>
-        <p style={{ margin: "10px 0 0", fontSize: "0.82rem", color: "var(--muted)" }}>
-          إن بقي وقت Vite أو <code>API_FILE_MTIME_UNIX</code> كما كان بعد إعادة تشغيل واضحة، فأنت إما لم تُغلِق العملية
-          القديمة على المنفذ أو المتصفح يخبّئ كاشاً — استخدم <code>restart_from_zero.bat</code> ثم Ctrl+Shift+R.
-        </p>
+      <h2 style={{ marginTop: 0 }}>اتصال القاعدة والتهيئة</h2>
+      <div className="card" style={{ marginBottom: 12, padding: "10px 12px", fontSize: "0.85rem", color: "var(--muted)" }}>
+        <code>{viteBoot || "—"}</code>
+        {whoamiText ? (
+          <pre style={{ margin: "8px 0 0", fontSize: "0.78rem", overflow: "auto" }}>{whoamiText}</pre>
+        ) : null}
       </div>
-      <p style={{ color: "var(--muted)" }}>
-        عنوان الطلبات من المتصفح: <code>{getApiBase()}</code>
-        {typeof window !== "undefined" &&
-          !import.meta.env.VITE_XTRA_API &&
-          (window.location.port === "9999" || window.location.port === "5290") && (
-          <>
-            {" "}
-            — طلبات <code>/api</code> تُوجَّه بالبروكسي إلى الخلفية على <code>http://127.0.0.1:2288</code> (يجب أن تكون
-            شغّالة).
-          </>
-        )}
-      </p>
-      <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-        منفذ واجهة Vite الحالي في المشروع: <code>9999</code> (انظر <code>vite.config.ts</code>). لتجاوز البروكسي، انسخ{" "}
-        <code>.env.example</code> إلى <code>.env</code> وعيّن <code>VITE_XTRA_API</code> لعنوان الـ API المباشر.
-      </p>
 
       <div className="grid-2">
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>إعدادات قاعدة البيانات</h3>
+          <h3 style={{ marginTop: 0 }}>قاعدة البيانات</h3>
           <label style={{ display: "block", marginBottom: 4 }}>السيرفر</label>
           <input value={server} onChange={(e) => setServer(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
-          <label style={{ display: "block", marginBottom: 4 }}>المنفذ (اختياري)</label>
+          <label style={{ display: "block", marginBottom: 4 }}>المنفذ</label>
           <input value={port} onChange={(e) => setPort(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
           <label style={{ display: "block", marginBottom: 4 }}>قاعدة البيانات</label>
           <input value={database} onChange={(e) => setDatabase(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
@@ -363,9 +351,9 @@ export default function DeveloperConnection() {
               حفظ
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => void test()} disabled={busy}>
-              اختبار الاتصال
+              اختبار
             </button>
-            {busy ? <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>جاري الطلب…</span> : null}
+            {busy ? <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>…</span> : null}
           </div>
           <div
             role="status"
@@ -382,39 +370,63 @@ export default function DeveloperConnection() {
               whiteSpace: "pre-wrap",
             }}
           >
-            {msg || (busy ? "" : "اضغط «اختبار الاتصال» أو «حفظ» — تظهر النتيجة هنا.")}
+            {msg}
           </div>
         </div>
 
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>تهيئة النظام</h3>
-          <p style={{ color: "var(--muted)" }}>
-            الزر التالي ينشئ تلقائياً جداول الدعم الناقصة (المستخدمين، سجل الأخطاء، وصفات التكاليف) داخل قاعدة البيانات.
+          <h3 style={{ marginTop: 0 }}>تهيئة</h3>
+          <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: 0 }}>
+            إن رأيت في «تحقق» OK≈11 فقط بدون صفوف MAT3AM_* فغالباً تعمل نسخة قديمة من الخادم على 2288 — أوقفها وشغّل{" "}
+            <code>run_api.bat</code> من مجلد المشروع، ثم استخدم «تشخيص جداول MAT3AM» أدناه.
           </p>
           <button type="button" className="btn btn-primary" onClick={() => void bootstrap()} disabled={busy}>
             تنفيذ التهيئة
           </button>
           <button type="button" className="btn btn-ghost" onClick={() => void seedDefaultData()} disabled={busy} style={{ marginInlineStart: 8 }}>
-            تعبئة بيانات افتراضية كبداية
+            بيانات افتراضية
           </button>
           <button type="button" className="btn btn-ghost" onClick={() => void verifySeedDefaultData()} disabled={busy} style={{ marginInlineStart: 8 }}>
-            تقرير تحقق ما بعد التهيئة
+            تحقق
           </button>
-          <div style={{ marginTop: 10, color: "var(--muted)", fontSize: "0.9rem" }}>
-            نظام اللوج يحتفظ ببيانات شهر (30 يوماً) ويتم تنظيف الأقدم تلقائياً.
-          </div>
+          <button type="button" className="btn btn-ghost" onClick={() => void mat3amProbe()} disabled={busy} style={{ marginInlineStart: 8 }}>
+            تشخيص جداول MAT3AM
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => void mat3amEnsure()} disabled={busy} style={{ marginInlineStart: 8 }}>
+            إنشاء/تحديث الجداول
+          </button>
         </div>
       </div>
 
+      {probeText ? (
+        <div className="card" style={{ marginTop: "1rem" }}>
+          <h3 style={{ marginTop: 0 }}>تشخيص القاعدة الفعلية (ما يراه هذا الخادم)</h3>
+          <pre
+            style={{
+              fontSize: "0.78rem",
+              overflow: "auto",
+              maxHeight: 420,
+              margin: 0,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "rgba(15, 23, 42, 0.35)",
+            }}
+          >
+            {probeText}
+          </pre>
+        </div>
+      ) : null}
+
       <div className="card" style={{ marginTop: "1rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <h3 style={{ margin: 0 }}>سجل الأخطاء الأخير</h3>
+          <h3 style={{ margin: 0 }}>سجل الأخطاء</h3>
           <button type="button" className="btn btn-ghost" onClick={() => void loadLogs()}>
             تحديث
           </button>
         </div>
         {logs.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>لا توجد أخطاء مسجلة حالياً.</div>
+          <div style={{ color: "var(--muted)" }}>لا توجد سجلات.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
@@ -442,7 +454,6 @@ export default function DeveloperConnection() {
           </div>
         )}
       </div>
-
     </div>
   );
 }

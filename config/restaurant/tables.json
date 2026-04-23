@@ -93,5 +93,14 @@
       "vipSection": false,
       "zone": "القاعة"
     }
+  },
+  {
+    "id": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "status": "dirty",
+    "name": "T10",
+    "statusUpdatedAt": "2026-04-23T11:08:44.413050",
+    "dirtyAt": "2026-04-23T11:08:44.413050",
+    "cleaningStartedAt": null,
+    "readyAt": null
   }
 ]

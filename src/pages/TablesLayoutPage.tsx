@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 
 type TableStatus = "free" | "occupied" | "reserved" | "dirty";
@@ -247,32 +246,10 @@ export default function TablesLayoutPage() {
 
   return (
     <div>
-      <div
-        className="card"
-        style={{
-          marginBottom: "1rem",
-          border: "1px solid rgba(249, 115, 22, 0.45)",
-          background: "rgba(249, 115, 22, 0.08)",
-        }}
-      >
-        <p style={{ margin: 0, lineHeight: 1.55 }}>
-          <strong>قائمة بيانات الطاولات</strong> من <code>/api/restaurant/tables</code> (ومحلياً).{" "}
-          <strong>مخطط الصالة المرئي</strong> (مضلع المساحة و SVG) في{" "}
-          <NavLink to="../settings/venue" style={{ fontWeight: 700, textDecoration: "underline" }}>
-            إعدادات النظام ← المكان والطابق والمساحات
-          </NavLink>
-          .
-        </p>
-      </div>
-
       <div style={{ display: "flex", alignItems: "baseline", gap: "1rem", flexWrap: "wrap" }}>
         <h1 style={{ marginTop: 0, fontFamily: "var(--display)", fontSize: "1.85rem" }}>
           قائمة الطاولات وحالاتها
         </h1>
-        <div style={{ color: "var(--muted)" }}>
-          نفس بيانات الطاولات المستخدمة في الاستقبال وجارسون الطلبات (<code>/api/restaurant/tables</code>) مع نسخة احتياطية في
-          المتصفح.
-        </div>
       </div>
 
       {loading && <p style={{ color: "var(--muted)" }}>جاري تحميل الطاولات…</p>}

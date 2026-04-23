@@ -199,9 +199,6 @@ export default function ReportsPage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>تقارير الحسابات</h2>
-      <p style={{ color: "var(--muted)", marginTop: 0 }}>
-        تشغيل من خادم إكسترا: <code style={{ color: "var(--accent2)" }}>{base}</code>
-      </p>
 
       <div className="card" style={{ marginBottom: "1rem", display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
         <span style={{ color: "var(--muted)" }}>الخادم:</span>

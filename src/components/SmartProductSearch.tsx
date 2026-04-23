@@ -7,6 +7,11 @@ type ProductHit = {
     AgentPrice?: number;
 };
 
+type ProductHitContext = {
+    title?: string;
+    lines: string[];
+};
+
 function normArabic(s: string) {
     const t = (s || "").toLowerCase();
     return t
@@ -20,7 +25,15 @@ function normArabic(s: string) {
         .trim();
 }
 
-export default function SmartProductSearch({ onSelect, placeholder = "ابحث باسم الصنف…" }: { onSelect: (hit: ProductHit) => void; placeholder?: string }) {
+export default function SmartProductSearch({
+    onSelect,
+    placeholder = "ابحث باسم الصنف…",
+    getContext,
+}: {
+    onSelect: (hit: ProductHit) => void;
+    placeholder?: string;
+    getContext?: (hit: ProductHit) => ProductHitContext | null;
+}) {
     const base = getApiBase();
     const [q, setQ] = useState("");
     const [hits, setHits] = useState<ProductHit[]>([]);
@@ -77,6 +90,16 @@ export default function SmartProductSearch({ onSelect, placeholder = "ابحث �
         }
     };
 
+    const openHitContext = (hit: ProductHit): boolean => {
+        if (!getContext) return false;
+        const ctx = getContext(hit);
+        if (!ctx) return false;
+        const header = ctx.title ? `${ctx.title}\n` : "";
+        const body = (ctx.lines || []).join("\n");
+        window.alert(`${header}${body}`.trim());
+        return true;
+    };
+
     return (
         <div style={{ position: "relative", marginBottom: "0.75rem" }}>
             <input
@@ -109,6 +132,20 @@ export default function SmartProductSearch({ onSelect, placeholder = "ابحث �
                                     onSelect(h);
                                     setQ("");
                                     setHits([]);
+                                }}
+                                onContextMenu={(e) => {
+                                    if (!openHitContext(h)) return;
+                                    e.preventDefault();
+                                }}
+                                onMouseDown={(e) => {
+                                    if (e.button !== 2) return;
+                                    if (!openHitContext(h)) return;
+                                    e.preventDefault();
+                                }}
+                                onAuxClick={(e) => {
+                                    if (e.button !== 2) return;
+                                    if (!openHitContext(h)) return;
+                                    e.preventDefault();
                                 }}
                                 style={{
                                     display: "flex",

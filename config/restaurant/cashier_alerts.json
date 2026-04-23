@@ -70,5 +70,53 @@
     "sourceKey": "kitchen_urgent:23c94ba5-67d6-4f9e-bc75-f56742b1531c",
     "createdAt": "2026-04-18T22:37:43.998225",
     "dismissedAt": null
+  },
+  {
+    "id": "cf533571-8e10-4e80-8557-91d03fe7a03b",
+    "type": "kitchen_urgent",
+    "title": "استعجال مطبخ · تذكرة #19",
+    "body": "Cheese Cake (CRA ) (كرسي 1) ×1 · Chicken Cranchy (كرسي 1) ×1 · Coffe With Milk (EXTRA..EX.EX ) (كرسي 1) ×1",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "sessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "orderId": "a1c797d0-f262-4acb-a7db-5e6a4a493719",
+    "sourceKey": "kitchen_urgent:a1c797d0-f262-4acb-a7db-5e6a4a493719",
+    "createdAt": "2026-04-23T01:44:20.964162",
+    "dismissedAt": null
+  },
+  {
+    "id": "1e656fe7-4115-4ee7-a91d-bc136ec4fffe",
+    "type": "kitchen_urgent",
+    "title": "استعجال مطبخ · تذكرة #19",
+    "body": "Cheese Cake (CRA ) (كرسي 1) ×1 · Chicken Cranchy (كرسي 1) ×1 · Coffe With Milk (EXTRA..EX.EX ) (كرسي 1) ×1",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "sessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "orderId": "a1c797d0-f262-4acb-a7db-5e6a4a493719",
+    "sourceKey": "kitchen_urgent:a1c797d0-f262-4acb-a7db-5e6a4a493719",
+    "createdAt": "2026-04-23T01:49:44.248517",
+    "dismissedAt": null
+  },
+  {
+    "id": "c54ffe08-2866-4a26-b48e-debd97d6724e",
+    "type": "waiter_summon",
+    "title": "طلب ماكينة فيزا",
+    "body": null,
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "sessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "orderId": null,
+    "sourceKey": null,
+    "createdAt": "2026-04-23T11:07:10.022478",
+    "dismissedAt": null
+  },
+  {
+    "id": "aaabffbe-c9d4-48f1-aa83-203e424cb0fd",
+    "type": "waiter_summon",
+    "title": "طلب مندوب تحصيل كاش",
+    "body": null,
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "sessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "orderId": null,
+    "sourceKey": null,
+    "createdAt": "2026-04-23T11:07:10.078745",
+    "dismissedAt": null
   }
 ]

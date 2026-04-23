@@ -32,4 +32,9 @@ export default defineConfig({
     },
   },
   base: "./",
+  /** يجب أن يطابق ما يخدمه api_server (REST_DIR = ui/restaurant) وحزمة PyInstaller (مجلد ui). */
+  build: {
+    outDir: "ui/restaurant",
+    emptyOutDir: true,
+  },
 });

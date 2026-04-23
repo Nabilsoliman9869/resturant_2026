@@ -12,6 +12,9 @@
 
 - `config/tbl_seed_pack_v1.json`
 
+لتوليد ملف مرشح من قاعدة SQL الحالية (للمراجعة والدمج): `backend/tools/export_tbl_seed_from_db.py` → `config/tbl_seed_pack_from_db.generated.json`.  
+ملفات تشغيل المطعم ومنطقة الأطفال (JSON) وواجهاتها: راجع `docs/MAT3AM_DEFAULT_BOOTSTRAP.md`.
+
 يحتوي:
 
 - تعريف `business_key` لكل جدول.

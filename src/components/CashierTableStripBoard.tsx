@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
+import { CashierPayInvoiceModal } from "./CashierPayInvoiceModal";
 
 export type TableOverviewSession = {
   sessionId: string;
@@ -25,6 +26,8 @@ export function CashierTableStripBoard() {
   const [generatedAt, setGeneratedAt] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(true);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payInvoiceId, setPayInvoiceId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +64,18 @@ export function CashierTableStripBoard() {
 
   return (
     <div className="card" style={{ marginBottom: "1rem" }}>
+      <CashierPayInvoiceModal
+        open={payOpen}
+        invoiceId={payInvoiceId}
+        initialRow={null}
+        onClose={() => {
+          setPayOpen(false);
+          setPayInvoiceId(null);
+        }}
+        onPaid={() => {
+          void load();
+        }}
+      />
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: "0.5rem" }}>
         <h3 style={{ margin: 0, fontSize: "1.05rem" }}>شرائح الطاولات النشطة</h3>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
@@ -80,9 +95,6 @@ export function CashierTableStripBoard() {
           </NavLink>
         </div>
       </div>
-      <p style={{ color: "var(--muted)", fontSize: "0.82rem", marginTop: "0.35rem", marginBottom: "0.75rem" }}>
-        مصدر واحد <code>/api/restaurant/cashier/table-overview</code> — يُحدَّث تلقائياً كل {POLL_MS / 1000} ثانية لتفادي ضغط على الخادم.
-      </p>
       {msg ? <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>{msg}</p> : null}
 
       {sessions.length === 0 ? (
@@ -96,7 +108,14 @@ export function CashierTableStripBoard() {
           }}
         >
           {sessions.map((s) => (
-            <TableStrip key={s.sessionId} s={s} />
+            <TableStrip
+              key={s.sessionId}
+              s={s}
+              onOpenPay={(invoiceId) => {
+                setPayInvoiceId(invoiceId);
+                setPayOpen(true);
+              }}
+            />
           ))}
         </div>
       )}
@@ -104,7 +123,7 @@ export function CashierTableStripBoard() {
   );
 }
 
-function TableStrip({ s }: { s: TableOverviewSession }) {
+function TableStrip({ s, onOpenPay }: { s: TableOverviewSession; onOpenPay: (invoiceId: string) => void }) {
   const bill = Boolean(s.billingRequestedAt);
   const pay = Boolean(s.awaitingPayment);
   const sub = typeof s.itemsSubtotal === "number" ? s.itemsSubtotal : 0;
@@ -130,7 +149,24 @@ function TableStrip({ s }: { s: TableOverviewSession }) {
         {s.guestCount != null ? ` · ${s.guestCount} ضيف` : ""}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: "0.75rem" }}>
-        {pay ? (
+        {pay && s.awaitingInvoiceId ? (
+          <button
+            type="button"
+            onClick={() => onOpenPay(String(s.awaitingInvoiceId))}
+            style={{
+              padding: "2px 10px",
+              borderRadius: 999,
+              background: "rgba(234,179,8,0.28)",
+              fontWeight: 700,
+              border: "1px solid rgba(234,179,8,0.45)",
+              color: "inherit",
+              cursor: "pointer",
+              font: "inherit",
+            }}
+          >
+            تسديد
+          </button>
+        ) : pay ? (
           <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(234,179,8,0.2)", fontWeight: 700 }}>بانتظار التسديد</span>
         ) : null}
         {bill && !pay ? (

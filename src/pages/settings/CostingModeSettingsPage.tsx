@@ -42,7 +42,6 @@ export default function CostingModeSettingsPage() {
   return (
     <div className="page" style={{ direction: "rtl" }}>
       <h2 style={{ marginTop: 0 }}>أساس احتساب التكاليف</h2>
-      <p style={{ color: "var(--muted)" }}>خياران واضحان للمطور: Recipe أو محرك التحليل الاقتصادي (SCI). ويمكن وضع Hybrid.</p>
       <div className="card">
         <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
           <input type="radio" checked={mode === "recipe"} onChange={() => setMode("recipe")} />

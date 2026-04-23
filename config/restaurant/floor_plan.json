@@ -1,664 +1,659 @@
 {
-  "schemaVersion": 2,
-  "activeFloorId": "main-floor",
-  "floors": [
+  "id": "main-floor",
+  "name": "الطابق الرئيسي",
+  "width": 1400,
+  "height": 920,
+  "shell": {
+    "type": "polygon",
+    "points": [
+      [
+        30,
+        30
+      ],
+      [
+        1370,
+        30
+      ],
+      [
+        1370,
+        890
+      ],
+      [
+        30,
+        890
+      ]
+    ]
+  },
+  "tables": [
     {
-      "id": "main-floor",
-      "name": "الطابق الرئيسي",
-      "width": 1400,
-      "height": 920,
-      "shell": {
-        "type": "polygon",
-        "points": [
-          [
-            30,
-            30
-          ],
-          [
-            1370,
-            30
-          ],
-          [
-            1370,
-            890
-          ],
-          [
-            30,
-            890
-          ]
-        ]
-      },
-      "tables": [
-        {
-          "id": "T1",
-          "label": "T10",
-          "shape": "rect",
-          "x": 120,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E"
-        },
-        {
-          "id": "T2",
-          "label": "T11",
-          "shape": "rect",
-          "x": 220,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "D8680F71-47C5-4402-92F0-74A475301167"
-        },
-        {
-          "id": "T3",
-          "label": "T12",
-          "shape": "rect",
-          "x": 320,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "3E8AC3AA-19A5-4459-9405-411E08BB27F7"
-        },
-        {
-          "id": "T4",
-          "label": "T13",
-          "shape": "rect",
-          "x": 420,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "E4FEDE28-B79C-4E7A-BE4D-6AB671D1DBAF"
-        },
-        {
-          "id": "T5",
-          "label": "T14",
-          "shape": "rect",
-          "x": 520,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "A748D10B-5B2D-41C0-BA68-35DDF36FD26C"
-        },
-        {
-          "id": "T6",
-          "label": "T15",
-          "shape": "rect",
-          "x": 620,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "FFB8D3C3-706F-4908-8685-3B2B6A072996"
-        },
-        {
-          "id": "T7",
-          "label": "T20",
-          "shape": "rect",
-          "x": 740,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "37803964-84E0-4E86-9BA3-CBEEAA3080BD"
-        },
-        {
-          "id": "T8",
-          "label": "T21",
-          "shape": "rect",
-          "x": 840,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "55D65C69-D471-449D-8327-272A7AE0701B"
-        },
-        {
-          "id": "T9",
-          "label": "T22",
-          "shape": "rect",
-          "x": 940,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "F2EDA31C-8E19-4004-8FBB-BA0B5ADE076C"
-        },
-        {
-          "id": "T10",
-          "label": "T23",
-          "shape": "rect",
-          "x": 1040,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "235B5C69-03BF-41F7-930C-D332CC3B4B32"
-        },
-        {
-          "id": "T11",
-          "label": "T24",
-          "shape": "rect",
-          "x": 1140,
-          "y": 78,
-          "w": 82,
-          "h": 56,
-          "seats": 9,
-          "linkedTableId": "CA309527-16E9-432F-9E0A-ADF6975B9614"
-        },
-        {
-          "id": "T12",
-          "label": "T100",
-          "shape": "rect",
-          "x": 95,
-          "y": 188,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "1B20261C-581B-4850-A473-3BADFB1951B1"
-        },
-        {
-          "id": "T13",
-          "label": "T101",
-          "shape": "rect",
-          "x": 210,
-          "y": 188,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "688BF619-428C-498A-B211-8E647EEFA196"
-        },
-        {
-          "id": "T14",
-          "label": "T150",
-          "shape": "rect",
-          "x": 470,
-          "y": 188,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "C5A2BEDA-E9EF-4682-8B59-A09578C197D4"
-        },
-        {
-          "id": "T15",
-          "label": "T151",
-          "shape": "rect",
-          "x": 585,
-          "y": 188,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "8212A8D4-1DCF-4C23-8AB0-4FE5D2D0D6F2"
-        },
-        {
-          "id": "T16",
-          "label": "T41",
-          "shape": "rect",
-          "x": 840,
-          "y": 188,
-          "w": 92,
-          "h": 62,
-          "seats": 4,
-          "linkedTableId": "166E4174-5F8D-46AB-8E02-DA055FEB9A37"
-        },
-        {
-          "id": "T17",
-          "label": "T26",
-          "shape": "rect",
-          "x": 1065,
-          "y": 188,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "7BBFF8D0-229E-4FB4-B0E6-511AAE785096"
-        },
-        {
-          "id": "T18",
-          "label": "T30",
-          "shape": "rect",
-          "x": 1235,
-          "y": 305,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "806E844A-C539-4B28-AC41-D44CE5F39C3B"
-        },
-        {
-          "id": "T19",
-          "label": "T31",
-          "shape": "rect",
-          "x": 1235,
-          "y": 385,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "0B6BF421-0415-494F-AEBE-A6141D497976"
-        },
-        {
-          "id": "T20",
-          "label": "T32",
-          "shape": "rect",
-          "x": 1035,
-          "y": 305,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "522489BB-7396-4C1C-B899-AF527D589CCE"
-        },
-        {
-          "id": "T21",
-          "label": "T33",
-          "shape": "rect",
-          "x": 1035,
-          "y": 395,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "556A5CCC-609B-4AD8-A969-F5012C6BB887"
-        },
-        {
-          "id": "T22",
-          "label": "T34",
-          "shape": "rect",
-          "x": 1035,
-          "y": 485,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "621D8119-1A1D-4538-9012-F989310950D9"
-        },
-        {
-          "id": "T23",
-          "label": "T35",
-          "shape": "rect",
-          "x": 1035,
-          "y": 575,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "63900A86-16FE-4A04-99BB-6C2627E3CFC0"
-        },
-        {
-          "id": "T24",
-          "label": "T40",
-          "shape": "rect",
-          "x": 170,
-          "y": 590,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "F314D49F-2A6C-4329-BF6F-ADCC0B5CB061"
-        },
-        {
-          "id": "T25",
-          "label": "T281",
-          "shape": "rect",
-          "x": 290,
-          "y": 590,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "4B2A000F-A05B-4724-BAB6-207EB53818F6"
-        },
-        {
-          "id": "T26",
-          "label": "T42",
-          "shape": "rect",
-          "x": 410,
-          "y": 480,
-          "w": 92,
-          "h": 62,
-          "seats": 4,
-          "linkedTableId": "5C819B6D-26E5-45E7-822B-C7EDBCC2EEE5"
-        },
-        {
-          "id": "T27",
-          "label": "T43",
-          "shape": "rect",
-          "x": 530,
-          "y": 480,
-          "w": 92,
-          "h": 62,
-          "seats": 4,
-          "linkedTableId": "EE893005-DAA8-4899-A809-ED10F58AFECF"
-        },
-        {
-          "id": "T28",
-          "label": "T44",
-          "shape": "rect",
-          "x": 650,
-          "y": 480,
-          "w": 92,
-          "h": 62,
-          "seats": 4,
-          "linkedTableId": "B1BFEAA4-6745-4327-9CEA-893FC6897EE7"
-        },
-        {
-          "id": "T29",
-          "label": "T45",
-          "shape": "rect",
-          "x": 835,
-          "y": 590,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "8BE90A7C-F3D7-4FA9-B889-73275ECCE8D7"
-        },
-        {
-          "id": "T30",
-          "label": "T50",
-          "shape": "rect",
-          "x": 1160,
-          "y": 615,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "321D83FE-6FE1-4E35-8183-0854723BC948"
-        },
-        {
-          "id": "T31",
-          "label": "T51",
-          "shape": "rect",
-          "x": 1260,
-          "y": 615,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "271DF55B-CEC0-470C-89E6-B96F07DEB42E"
-        },
-        {
-          "id": "T32",
-          "label": "T53",
-          "shape": "rect",
-          "x": 1160,
-          "y": 705,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "1D19A5A3-6288-4686-AFFD-C11ADEA85DC1"
-        },
-        {
-          "id": "T33",
-          "label": "T54",
-          "shape": "rect",
-          "x": 1260,
-          "y": 705,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "AE7066FF-4E57-4712-9FF0-24FD754E9292"
-        },
-        {
-          "id": "T34",
-          "label": "T55",
-          "shape": "rect",
-          "x": 1360,
-          "y": 705,
-          "w": 92,
-          "h": 62,
-          "seats": 5,
-          "linkedTableId": "22B59B9F-911D-433D-8EB6-1A50BCF73E82"
-        }
-      ],
-      "obstacles": [
-        {
-          "id": "bar-main",
-          "type": "bar",
-          "shape": "rect",
-          "x": 330,
-          "y": 305,
-          "w": 540,
-          "h": 74,
-          "label": "BAR + Screens"
-        },
-        {
-          "id": "cashier-core",
-          "type": "counter",
-          "shape": "rect",
-          "x": 330,
-          "y": 255,
-          "w": 540,
-          "h": 48,
-          "label": "Cashier + System Screens"
-        },
-        {
-          "id": "bar-inner",
-          "type": "bar",
-          "shape": "rect",
-          "x": 420,
-          "y": 560,
-          "w": 360,
-          "h": 62,
-          "label": "BAR + Screens"
-        }
-      ],
-      "zones": [
-        {
-          "id": "front",
-          "name": "Front Area",
-          "boundary": [
-            [
-              60,
-              120
-            ],
-            [
-              1280,
-              120
-            ],
-            [
-              1280,
-              245
-            ],
-            [
-              60,
-              245
-            ]
-          ]
-        },
-        {
-          "id": "center",
-          "name": "Center Area",
-          "boundary": [
-            [
-              140,
-              250
-            ],
-            [
-              1230,
-              250
-            ],
-            [
-              1230,
-              440
-            ],
-            [
-              140,
-              440
-            ]
-          ]
-        },
-        {
-          "id": "right",
-          "name": "Right Area",
-          "boundary": [
-            [
-              980,
-              245
-            ],
-            [
-              1330,
-              245
-            ],
-            [
-              1330,
-              670
-            ],
-            [
-              980,
-              670
-            ]
-          ]
-        },
-        {
-          "id": "service",
-          "name": "Service Stations",
-          "boundary": [
-            [
-              300,
-              245
-            ],
-            [
-              900,
-              640
-            ],
-            [
-              900,
-              670
-            ],
-            [
-              300,
-              670
-            ]
-          ]
-        },
-        {
-          "id": "back",
-          "name": "Back Area",
-          "boundary": [
-            [
-              820,
-              660
-            ],
-            [
-              1330,
-              660
-            ],
-            [
-              1330,
-              840
-            ],
-            [
-              820,
-              840
-            ]
-          ]
-        },
-        {
-          "id": "shisha",
-          "name": "Shisha Area",
-          "boundary": [
-            [
-              60,
-              675
-            ],
-            [
-              800,
-              675
-            ],
-            [
-              800,
-              840
-            ],
-            [
-              60,
-              840
-            ]
-          ]
-        }
-      ],
-      "textAnnotations": [
-        {
-          "id": "txt-shisha",
-          "text": "Shisha Area",
-          "x": 170,
-          "y": 780,
-          "color": "#0f172a",
-          "fontSize": 36,
-          "fontWeight": 900
-        },
-        {
-          "id": "txt-oriental",
-          "text": "Oriental Kitchen",
-          "x": 270,
-          "y": 620,
-          "color": "#1f2937",
-          "fontSize": 34,
-          "fontWeight": 800
-        },
-        {
-          "id": "txt-italian",
-          "text": "Italian Kitchen",
-          "x": 815,
-          "y": 620,
-          "color": "#1f2937",
-          "fontSize": 34,
-          "fontWeight": 800
-        },
-        {
-          "id": "txt-back",
-          "text": "Back Area",
-          "x": 1180,
-          "y": 770,
-          "color": "#1f2937",
-          "fontSize": 38,
-          "fontWeight": 900
-        },
-        {
-          "id": "txt-fettes",
-          "text": "Fettes [Storage | Prep]",
-          "x": 730,
-          "y": 785,
-          "color": "#14532d",
-          "fontSize": 28,
-          "fontWeight": 800
-        },
-        {
-          "id": "txt-st4",
-          "text": "ST4",
-          "x": 760,
-          "y": 205,
-          "color": "#1d4ed8",
-          "fontSize": 28,
-          "fontWeight": 900
-        }
-      ],
-      "arrows": [
-        {
-          "id": "arr-1",
-          "x1": 110,
-          "y1": 285,
-          "x2": 930,
-          "y2": 285,
-          "color": "#2563eb",
-          "strokeWidth": 8,
-          "label": "اتجاه الخدمة"
-        },
-        {
-          "id": "arr-2",
-          "x1": 935,
-          "y1": 285,
-          "x2": 935,
-          "y2": 620,
-          "color": "#2563eb",
-          "strokeWidth": 8,
-          "label": "اتجاه السير"
-        },
-        {
-          "id": "arr-3",
-          "x1": 780,
-          "y1": 735,
-          "x2": 1030,
-          "y2": 735,
-          "color": "#0ea5e9",
-          "strokeWidth": 8,
-          "label": "Back Route"
-        }
-      ],
-      "floorCostCenterId": "11111111-1111-4111-8111-111111111111"
+      "id": "T1",
+      "label": "T10",
+      "shape": "rect",
+      "x": 120,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D"
+    },
+    {
+      "id": "T2",
+      "label": "T11",
+      "shape": "rect",
+      "x": 220,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "10B7C06D-A4EA-4C57-88E3-17484F7E617B"
+    },
+    {
+      "id": "T3",
+      "label": "T12",
+      "shape": "rect",
+      "x": 320,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "7B14A454-9070-4513-8B2F-CE5AED71BCE6"
+    },
+    {
+      "id": "T4",
+      "label": "T13",
+      "shape": "rect",
+      "x": 420,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "A5C3430F-A60B-49C8-81E2-DB9542734565"
+    },
+    {
+      "id": "T5",
+      "label": "T14",
+      "shape": "rect",
+      "x": 520,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "CA066DF0-56CE-416F-9F1E-6F641B656741"
+    },
+    {
+      "id": "T6",
+      "label": "T15",
+      "shape": "rect",
+      "x": 620,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "1AD8C760-A7D7-4331-BFAA-3F71FDAB3999"
+    },
+    {
+      "id": "T7",
+      "label": "T20",
+      "shape": "rect",
+      "x": 740,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "4D66D93E-C55A-4FF3-B4CE-916C297712ED"
+    },
+    {
+      "id": "T8",
+      "label": "T21",
+      "shape": "rect",
+      "x": 840,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "741A51B6-CB19-4ABF-A8B8-5A1792A6C457"
+    },
+    {
+      "id": "T9",
+      "label": "T22",
+      "shape": "rect",
+      "x": 940,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "2FF21A35-0066-4378-81E6-434F08F010FA"
+    },
+    {
+      "id": "T10",
+      "label": "T23",
+      "shape": "rect",
+      "x": 1040,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "4A9C81BD-8390-4720-9803-97D4D0E1FCD4"
+    },
+    {
+      "id": "T11",
+      "label": "T24",
+      "shape": "rect",
+      "x": 1140,
+      "y": 78,
+      "w": 82,
+      "h": 56,
+      "seats": 9,
+      "linkedTableId": "6947E632-5EBC-487F-982D-5F8B6A88A959"
+    },
+    {
+      "id": "T12",
+      "label": "T100",
+      "shape": "rect",
+      "x": 95,
+      "y": 188,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "B9A1DB04-D991-4F23-82C6-837C4D7116F0"
+    },
+    {
+      "id": "T13",
+      "label": "T101",
+      "shape": "rect",
+      "x": 210,
+      "y": 188,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "5B111EC1-2065-4B1C-ADD5-2EE36D3437AF"
+    },
+    {
+      "id": "T14",
+      "label": "T150",
+      "shape": "rect",
+      "x": 470,
+      "y": 188,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "53ECD6E2-CBC0-4727-8DEF-267C19CFF5A2"
+    },
+    {
+      "id": "T15",
+      "label": "T151",
+      "shape": "rect",
+      "x": 585,
+      "y": 188,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "A3EC9284-A2D8-4B97-AD51-4BC8635655F5"
+    },
+    {
+      "id": "T16",
+      "label": "T41",
+      "shape": "rect",
+      "x": 840,
+      "y": 188,
+      "w": 92,
+      "h": 62,
+      "seats": 4,
+      "linkedTableId": "86FD7C07-EEB6-4F19-ABB6-2FA05703E290"
+    },
+    {
+      "id": "T17",
+      "label": "T26",
+      "shape": "rect",
+      "x": 987.3270263671875,
+      "y": 189.89447021484375,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "19FCBE7D-B398-4B63-A7F2-5F27D732CC8C"
+    },
+    {
+      "id": "T18",
+      "label": "T30",
+      "shape": "rect",
+      "x": 1235,
+      "y": 305,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "3D6796DF-65E5-4CDE-8302-5C33070AEB25"
+    },
+    {
+      "id": "T19",
+      "label": "T31",
+      "shape": "rect",
+      "x": 1238.7889404296875,
+      "y": 398.26123046875,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "5C5A0B38-A06B-49DA-8E8A-5AC89BAAD1B6"
+    },
+    {
+      "id": "T20",
+      "label": "T32",
+      "shape": "rect",
+      "x": 995.2161865234375,
+      "y": 305,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "663A6963-674C-433B-9287-CE69083F7136"
+    },
+    {
+      "id": "T21",
+      "label": "T33",
+      "shape": "rect",
+      "x": 989.5328369140625,
+      "y": 393.10552978515625,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "9392B0ED-BDF3-488F-81EC-5D747902672F"
+    },
+    {
+      "id": "T22",
+      "label": "T34",
+      "shape": "rect",
+      "x": 991.4273681640625,
+      "y": 485,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "20E6598F-87D4-48D5-BAE6-40A5DE6A1FD6"
+    },
+    {
+      "id": "T23",
+      "label": "T35",
+      "shape": "rect",
+      "x": 991.4273681640625,
+      "y": 576.8944702148438,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "88126BD3-94B3-4297-88FC-C112A5687A1F"
+    },
+    {
+      "id": "T24",
+      "label": "T40",
+      "shape": "rect",
+      "x": 166.2110595703125,
+      "y": 633.5726928710938,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "1BC025A6-31CA-49C5-95E8-1170A18A7B2C"
+    },
+    {
+      "id": "T25",
+      "label": "T281",
+      "shape": "rect",
+      "x": 293.7889404296875,
+      "y": 633.5726928710938,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "73C0B2DA-A52B-4F62-AA1D-44D1BF01AE6C"
+    },
+    {
+      "id": "T26",
+      "label": "T42",
+      "shape": "rect",
+      "x": 413.7889404296875,
+      "y": 455.3719787597656,
+      "w": 92,
+      "h": 62,
+      "seats": 4,
+      "linkedTableId": "7048AEAE-F20B-4955-95A4-5193A88ACEB8"
+    },
+    {
+      "id": "T27",
+      "label": "T43",
+      "shape": "rect",
+      "x": 530.0000610351562,
+      "y": 455.3719177246094,
+      "w": 92,
+      "h": 62,
+      "seats": 4,
+      "linkedTableId": "B0ED6542-B53B-4039-A45A-428739E747A5"
+    },
+    {
+      "id": "T28",
+      "label": "T44",
+      "shape": "rect",
+      "x": 651.8944702148438,
+      "y": 459.160888671875,
+      "w": 92,
+      "h": 62,
+      "seats": 4,
+      "linkedTableId": "19406B73-D73A-456D-8203-70FA2C16A93A"
+    },
+    {
+      "id": "T29",
+      "label": "T45",
+      "shape": "rect",
+      "x": 763.0103149414062,
+      "y": 459.2818298339844,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "89A27E77-A41F-4C0C-A779-627664E3D300"
+    },
+    {
+      "id": "T30",
+      "label": "T50",
+      "shape": "rect",
+      "x": 1124.0052490234375,
+      "y": 577.1106567382812,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "3AE5CC3C-12DD-45B8-A599-3F9CBCD1954A"
+    },
+    {
+      "id": "T31",
+      "label": "T51",
+      "shape": "rect",
+      "x": 1242.94970703125,
+      "y": 577.1107177734375,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "D741287B-FE64-48B5-86BD-B49D0AC0DB24"
+    },
+    {
+      "id": "T32",
+      "label": "T53",
+      "shape": "rect",
+      "x": 995.1815185546875,
+      "y": 655.743896484375,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "4734208A-EEFF-471F-BDDE-454097AB61DC"
+    },
+    {
+      "id": "T33",
+      "label": "T54",
+      "shape": "rect",
+      "x": 1123.598388671875,
+      "y": 657.6383666992188,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "0B553A13-144B-4D6C-99E9-E6E47026679B"
+    },
+    {
+      "id": "T34",
+      "label": "T55",
+      "shape": "rect",
+      "x": 1244.4376220703125,
+      "y": 659.5328369140625,
+      "w": 92,
+      "h": 62,
+      "seats": 5,
+      "linkedTableId": "7E35F125-84E6-4003-8CAC-0D17BDDAC922"
     }
-  ]
+  ],
+  "textAnnotations": [
+    {
+      "id": "txt-shisha",
+      "text": "Shisha Area",
+      "x": 170,
+      "y": 780,
+      "color": "#0f172a",
+      "fontSize": 36,
+      "fontWeight": 900
+    },
+    {
+      "id": "txt-oriental",
+      "text": "Oriental Kitchen",
+      "x": 270,
+      "y": 620,
+      "color": "#1f2937",
+      "fontSize": 34,
+      "fontWeight": 800
+    },
+    {
+      "id": "txt-italian",
+      "text": "Italian Kitchen",
+      "x": 815,
+      "y": 620,
+      "color": "#1f2937",
+      "fontSize": 34,
+      "fontWeight": 800
+    },
+    {
+      "id": "txt-back",
+      "text": "Back Area",
+      "x": 1180,
+      "y": 770,
+      "color": "#1f2937",
+      "fontSize": 38,
+      "fontWeight": 900
+    },
+    {
+      "id": "txt-fettes",
+      "text": "Fettes [Storage | Prep]",
+      "x": 730,
+      "y": 785,
+      "color": "#14532d",
+      "fontSize": 28,
+      "fontWeight": 800
+    },
+    {
+      "id": "txt-st4",
+      "text": "ST4",
+      "x": 760,
+      "y": 205,
+      "color": "#1d4ed8",
+      "fontSize": 28,
+      "fontWeight": 900
+    }
+  ],
+  "arrows": [
+    {
+      "id": "arr-1",
+      "x1": 117.57781982421875,
+      "y1": 281.2110900878906,
+      "x2": 937.5778198242188,
+      "y2": 281.2110900878906,
+      "color": "#2563eb",
+      "strokeWidth": 8,
+      "label": "اتجاه الخدمة"
+    },
+    {
+      "id": "arr-2",
+      "x1": 935,
+      "y1": 285,
+      "x2": 935,
+      "y2": 620,
+      "color": "#2563eb",
+      "strokeWidth": 8,
+      "label": "اتجاه السير"
+    },
+    {
+      "id": "arr-3",
+      "x1": 780,
+      "y1": 735,
+      "x2": 1030,
+      "y2": 735,
+      "color": "#0ea5e9",
+      "strokeWidth": 8,
+      "label": "Back Route"
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "bar-main",
+      "type": "bar",
+      "shape": "rect",
+      "x": 328.10552978515625,
+      "y": 361.833984375,
+      "w": 540,
+      "h": 74,
+      "label": "BAR + Screens"
+    },
+    {
+      "id": "cashier-core",
+      "type": "counter",
+      "shape": "rect",
+      "x": 328.10552978515625,
+      "y": 300.4671936035156,
+      "w": 540,
+      "h": 48,
+      "label": "Cashier + System Screens"
+    },
+    {
+      "id": "bar-inner",
+      "type": "bar",
+      "shape": "rect",
+      "x": 397.26641845703125,
+      "y": 527.7940673828125,
+      "w": 360,
+      "h": 62,
+      "label": "BAR + Screens"
+    }
+  ],
+  "aisles": [],
+  "zones": [
+    {
+      "id": "front",
+      "name": "Front Area",
+      "boundary": [
+        [
+          60,
+          120
+        ],
+        [
+          1280,
+          120
+        ],
+        [
+          1280,
+          245
+        ],
+        [
+          60,
+          245
+        ]
+      ]
+    },
+    {
+      "id": "center",
+      "name": "Center Area",
+      "boundary": [
+        [
+          140,
+          250
+        ],
+        [
+          1230,
+          250
+        ],
+        [
+          1230,
+          440
+        ],
+        [
+          140,
+          440
+        ]
+      ]
+    },
+    {
+      "id": "right",
+      "name": "Right Area",
+      "boundary": [
+        [
+          980,
+          245
+        ],
+        [
+          1330,
+          245
+        ],
+        [
+          1330,
+          670
+        ],
+        [
+          980,
+          670
+        ]
+      ]
+    },
+    {
+      "id": "service",
+      "name": "Service Stations",
+      "boundary": [
+        [
+          300,
+          245
+        ],
+        [
+          900,
+          640
+        ],
+        [
+          900,
+          670
+        ],
+        [
+          300,
+          670
+        ]
+      ]
+    },
+    {
+      "id": "back",
+      "name": "Back Area",
+      "boundary": [
+        [
+          820,
+          660
+        ],
+        [
+          1330,
+          660
+        ],
+        [
+          1330,
+          840
+        ],
+        [
+          820,
+          840
+        ]
+      ]
+    },
+    {
+      "id": "shisha",
+      "name": "Shisha Area",
+      "boundary": [
+        [
+          60,
+          675
+        ],
+        [
+          800,
+          675
+        ],
+        [
+          800,
+          840
+        ],
+        [
+          60,
+          840
+        ]
+      ]
+    }
+  ],
+  "floorCostCenterId": "2EEF7F5B-59B1-494A-9823-FF5FAB66E640"
 }

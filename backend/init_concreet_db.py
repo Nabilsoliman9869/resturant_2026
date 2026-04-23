@@ -286,6 +286,33 @@ def run():
     END
     """))
 
+    # MAT3AM_RESTAURANT_STATE — حالة مطعم مشتركة بين الأجهزة (طلبات، منيو يومي، إلخ)
+    tables.append(("MAT3AM_RESTAURANT_STATE", """
+    IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_STATE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_RESTAURANT_STATE (
+            StateKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+            PayloadJson NVARCHAR(MAX) NULL,
+            UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        CREATE INDEX IX_MAT3AM_RESTAURANT_STATE_UpdatedAt ON dbo.MAT3AM_RESTAURANT_STATE(UpdatedAt DESC);
+    END
+    """))
+
+    # MAT3AM_WORKFLOW_SETTINGS — إعدادات مسار التشغيل المشتركة بين كل الأجهزة
+    tables.append(("MAT3AM_WORKFLOW_SETTINGS", """
+    IF OBJECT_ID(N'dbo.MAT3AM_WORKFLOW_SETTINGS', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_WORKFLOW_SETTINGS (
+            SettingsKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+            PayloadJson NVARCHAR(MAX) NULL,
+            UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedBy NVARCHAR(100) NULL
+        );
+        CREATE INDEX IX_MAT3AM_WORKFLOW_SETTINGS_UpdatedAt ON dbo.MAT3AM_WORKFLOW_SETTINGS(UpdatedAt DESC);
+    END
+    """))
+
     # MAT3AM_RECIPE_HDR — رأس وصفة المنتج النهائي
     tables.append(("MAT3AM_RECIPE_HDR", """
     IF OBJECT_ID(N'dbo.MAT3AM_RECIPE_HDR', N'U') IS NULL
@@ -383,6 +410,122 @@ def run():
             UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
         );
         CREATE INDEX IX_MAT3AM_PROMOTION_Active ON dbo.MAT3AM_PROMOTION(IsActive, PriorityNo);
+    END
+    """))
+
+    # مطابقة api_server: _ensure_price_list_schema
+    tables.append(("MAT3AM_PRICE_LIST_HDR_LINE", """
+    IF OBJECT_ID(N'dbo.MAT3AM_PRICE_LIST_HDR', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_PRICE_LIST_HDR (
+            PriceListGuid UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+            NameAr NVARCHAR(200) NULL,
+            NameEn NVARCHAR(200) NULL,
+            DateFrom DATE NULL,
+            DateTo DATE NULL,
+            DecisionNo NVARCHAR(100) NULL,
+            DecisionDate DATE NULL,
+            DecisionText NVARCHAR(MAX) NULL,
+            IncreasePercent FLOAT NOT NULL DEFAULT(0),
+            GroupGuid UNIQUEIDENTIFIER NULL,
+            CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+    END
+    IF OBJECT_ID(N'dbo.MAT3AM_PRICE_LIST_LINE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_PRICE_LIST_LINE (
+            Id INT IDENTITY(1,1) PRIMARY KEY,
+            PriceListGuid UNIQUEIDENTIFIER NOT NULL,
+            ProductGuide UNIQUEIDENTIFIER NOT NULL,
+            OldEndUserPrice FLOAT NOT NULL DEFAULT(0),
+            NewEndUserPrice FLOAT NOT NULL DEFAULT(0),
+            Applied BIT NOT NULL DEFAULT(0),
+            Note NVARCHAR(200) NULL
+        );
+        CREATE INDEX IX_MAT3AM_PRICE_LIST_LINE_List ON dbo.MAT3AM_PRICE_LIST_LINE(PriceListGuid);
+    END
+    """))
+
+    # مطابقة api_server: _ensure_daily_engine_schema
+    tables.append(("MAT3AM_DAILY_ENGINE", """
+    IF OBJECT_ID(N'dbo.MAT3AM_DAILY_CUSTODY_LINE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_DAILY_CUSTODY_LINE (
+            Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            DateKey DATE NOT NULL,
+            ProductGuide UNIQUEIDENTIFIER NOT NULL,
+            ProductName NVARCHAR(255) NULL,
+            Qty FLOAT NOT NULL DEFAULT(0),
+            UnitCost FLOAT NOT NULL DEFAULT(0),
+            TotalCost FLOAT NOT NULL DEFAULT(0),
+            Note NVARCHAR(300) NULL
+        );
+        CREATE INDEX IX_MAT3AM_DAILY_CUSTODY_LINE_DateKey ON dbo.MAT3AM_DAILY_CUSTODY_LINE(DateKey);
+    END
+    IF OBJECT_ID(N'dbo.MAT3AM_DAILY_RETURN_LINE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_DAILY_RETURN_LINE (
+            Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            DateKey DATE NOT NULL,
+            ProductGuide UNIQUEIDENTIFIER NOT NULL,
+            ProductName NVARCHAR(255) NULL,
+            Qty FLOAT NOT NULL DEFAULT(0),
+            UnitCost FLOAT NOT NULL DEFAULT(0),
+            TotalCost FLOAT NOT NULL DEFAULT(0),
+            Note NVARCHAR(300) NULL
+        );
+        CREATE INDEX IX_MAT3AM_DAILY_RETURN_LINE_DateKey ON dbo.MAT3AM_DAILY_RETURN_LINE(DateKey);
+    END
+    IF OBJECT_ID(N'dbo.MAT3AM_DAILY_OVERHEAD_LINE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_DAILY_OVERHEAD_LINE (
+            Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            DateKey DATE NOT NULL,
+            CostName NVARCHAR(255) NOT NULL,
+            BasisType NVARCHAR(30) NOT NULL DEFAULT(N'daily'),
+            BasisAmount FLOAT NOT NULL DEFAULT(0),
+            Divisor FLOAT NOT NULL DEFAULT(1),
+            DailyAmount FLOAT NOT NULL DEFAULT(0),
+            Note NVARCHAR(500) NULL
+        );
+        CREATE INDEX IX_MAT3AM_DAILY_OVERHEAD_LINE_DateKey ON dbo.MAT3AM_DAILY_OVERHEAD_LINE(DateKey);
+    END
+    IF OBJECT_ID(N'dbo.MAT3AM_DAILY_CLOSE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_DAILY_CLOSE (
+            DateKey DATE NOT NULL PRIMARY KEY,
+            OpeningCustody FLOAT NOT NULL DEFAULT(0),
+            ReturnedCustody FLOAT NOT NULL DEFAULT(0),
+            RawConsumed FLOAT NOT NULL DEFAULT(0),
+            OverheadTotal FLOAT NOT NULL DEFAULT(0),
+            TotalCost FLOAT NOT NULL DEFAULT(0),
+            RevenueTotal FLOAT NOT NULL DEFAULT(0),
+            ProfitTotal FLOAT NOT NULL DEFAULT(0),
+            UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+    END
+    IF OBJECT_ID(N'dbo.MAT3AM_DAILY_RESULT', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_DAILY_RESULT (
+            DateKey DATE NOT NULL PRIMARY KEY,
+            OpeningCustody FLOAT NOT NULL DEFAULT(0),
+            ReturnedCustody FLOAT NOT NULL DEFAULT(0),
+            RawConsumed FLOAT NOT NULL DEFAULT(0),
+            OverheadTotal FLOAT NOT NULL DEFAULT(0),
+            TotalCost FLOAT NOT NULL DEFAULT(0),
+            RevenueTotal FLOAT NOT NULL DEFAULT(0),
+            ProfitTotal FLOAT NOT NULL DEFAULT(0),
+            SavedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+    END
+    IF OBJECT_ID(N'dbo.MAT3AM_COSTING_MODE', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.MAT3AM_COSTING_MODE (
+            Id INT IDENTITY(1,1) PRIMARY KEY,
+            ModeCode NVARCHAR(20) NOT NULL,
+            UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        INSERT INTO dbo.MAT3AM_COSTING_MODE (ModeCode) VALUES (N'hybrid');
     END
     """))
 
@@ -533,7 +676,9 @@ def run():
                 ("host", "123", "host", "جارسون الاستقبال"),
                 ("waiter", "123", "waiter", "جارسون الطلبات"),
                 ("kitchen", "123", "kitchen", "المطبخ"),
+                ("speed", "123", "speed_order", "الطلبات السريعة"),
                 ("server", "123", "server", "جارسون المناولة"),
+                ("kids", "123", "kids_guard", "كيدز إيريا"),
             ]
             for login_name, pin, role_code, display_name in default_users:
                 cur.execute("""

@@ -1,0 +1,15 @@
+{
+  "packages": [
+    {
+      "id": "std",
+      "nameAr": "عادي (بالساعة)",
+      "pricePerHour": 50.0
+    },
+    {
+      "id": "vip",
+      "nameAr": "مميز (بالساعة)",
+      "pricePerHour": 100.0
+    }
+  ],
+  "defaultPackageId": "std"
+}

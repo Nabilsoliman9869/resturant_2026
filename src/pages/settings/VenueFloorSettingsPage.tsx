@@ -7,12 +7,10 @@ export default function VenueFloorSettingsPage() {
       <h1 style={{ marginTop: 0, fontFamily: "var(--display)", fontSize: "1.65rem" }}>
         المكان والطابق والمساحات
       </h1>
-      <p style={{ color: "var(--muted)", lineHeight: 1.6, marginTop: 0 }}>
-        للرسم والطوابق استخدم{" "}
-        <NavLink to="../floor-editor" style={{ fontWeight: 600 }}>
+      <p style={{ marginTop: "0.5rem" }}>
+        <NavLink to="../floor-editor" className="btn btn-ghost" style={{ fontSize: "0.9rem" }}>
           محرّر مخطط الصالة
         </NavLink>
-        . المصدر: <code>floor_plan.json</code> عبر <code>GET/PUT /api/restaurant/floor-plan</code>.
       </p>
       <FloorPlanLive />
     </div>

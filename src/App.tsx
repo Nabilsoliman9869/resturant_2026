@@ -16,9 +16,9 @@ import DeveloperInitDb from "./pages/DeveloperInitDb";
 import DeveloperUsers from "./pages/DeveloperUsers";
 import CostingPage from "./pages/CostingPage";
 import MasterDataPage from "./pages/MasterDataPage";
-import PosAdminPage from "./pages/PosAdminPage";
 import ReceptionPage from "./pages/ReceptionPage";
 import KitchenPage from "./pages/KitchenPage";
+import SpeedOrderPage from "./pages/SpeedOrderPage";
 import RunnerPage from "./pages/RunnerPage";
 import WaiterOrderPage from "./pages/WaiterOrderPage";
 import WaiterTablesPage from "./pages/WaiterTablesPage";
@@ -39,6 +39,14 @@ import KitchenItemStopPage from "./pages/settings/KitchenItemStopPage";
 import CashierTableSessionsPage from "./pages/CashierTableSessionsPage";
 import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
 import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
+import PosVenueSettingsPage from "./pages/settings/PosVenueSettingsPage";
+import PosKdsSettingsPage from "./pages/settings/PosKdsSettingsPage";
+import KdsPrepTimesSettingsPage from "./pages/settings/KdsPrepTimesSettingsPage";
+import PosTaxPolicySettingsPage from "./pages/settings/PosTaxPolicySettingsPage";
+import PaymentRoutingSettingsPage from "./pages/settings/PaymentRoutingSettingsPage";
+import PosPromotionsSettingsPage from "./pages/settings/PosPromotionsSettingsPage";
+import KidsAreaPage from "./pages/KidsAreaPage";
+import PosAdminPage from "./pages/PosAdminPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
   const { user } = useAuth();
@@ -68,6 +76,19 @@ export default function App() {
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="table-sessions" element={<CashierTableSessionsPage />} />
         <Route path="invoices-local" element={<CashierInvoicesLocalPage />} />
+        <Route path="kids-area" element={<KidsAreaPage />} />
+      </Route>
+
+      <Route
+        path="/app/kids-guard/*"
+        element={
+          <RequireRole role="kids_guard">
+            <AppShell role="kids_guard" />
+          </RequireRole>
+        }
+      >
+        <Route index element={<Navigate to="kids-area" replace />} />
+        <Route path="kids-area" element={<KidsAreaPage />} />
       </Route>
 
       <Route
@@ -118,20 +139,26 @@ export default function App() {
           <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
           <Route path="menus" element={<MenusDailySettingsPage />} />
           <Route path="product-images" element={<ProductImagesSettingsPage />} />
-          <Route path="pos" element={<PosAdminPage />} />
+          <Route path="pos" element={<Navigate to="../pos-venue" replace />} />
+          <Route path="pos-venue" element={<PosVenueSettingsPage />} />
+          <Route path="pos-kds" element={<PosKdsSettingsPage />} />
+          <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
+          <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
+          <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
+          <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
-          <Route path="connection" element={<DeveloperConnection />} />
-          <Route path="init-db" element={<DeveloperInitDb />} />
-          <Route path="users" element={<DeveloperUsers />} />
+          <Route path="connection" element={<Navigate to="venue" replace />} />
+          <Route path="init-db" element={<Navigate to="venue" replace />} />
+          <Route path="users" element={<Navigate to="venue" replace />} />
         </Route>
         <Route path="tables" element={<Navigate to="settings/tables" replace />} />
         <Route path="costing" element={<Navigate to="settings/costing" replace />} />
         <Route path="master-data" element={<Navigate to="settings/master-data" replace />} />
-        <Route path="pos-admin" element={<Navigate to="settings/pos" replace />} />
-        <Route path="connection" element={<Navigate to="settings/connection" replace />} />
-        <Route path="init-db" element={<Navigate to="settings/init-db" replace />} />
-        <Route path="users" element={<Navigate to="settings/users" replace />} />
+        <Route path="pos-admin" element={<Navigate to="settings/pos-venue" replace />} />
+        <Route path="connection" element={<Navigate to="settings/venue" replace />} />
+        <Route path="init-db" element={<Navigate to="settings/venue" replace />} />
+        <Route path="users" element={<Navigate to="settings/venue" replace />} />
       </Route>
 
       <Route
@@ -159,6 +186,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="runner" element={<RunnerPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
       </Route>
 
@@ -173,6 +201,18 @@ export default function App() {
         <Route index element={<Navigate to="kitchen" replace />} />
         <Route path="kitchen" element={<KitchenPage />} />
         <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
+      </Route>
+
+      <Route
+        path="/app/speed_order/*"
+        element={
+          <RequireRole role="speed_order">
+            <AppShell role="speed_order" />
+          </RequireRole>
+        }
+      >
+        <Route index element={<Navigate to="speed-order" replace />} />
+        <Route path="speed-order" element={<SpeedOrderPage />} />
       </Route>
 
       <Route
@@ -205,7 +245,7 @@ export default function App() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />
         <Route path="settings" element={<SettingsLayout />}>
-          <Route index element={<Navigate to="venue" replace />} />
+          <Route index element={<Navigate to="connection" replace />} />
           <Route path="venue" element={<VenueFloorSettingsPage />} />
           <Route path="floor-editor" element={<FloorPlanEditorPage />} />
           <Route path="tables" element={<TablesLayoutPage />} />
@@ -220,7 +260,14 @@ export default function App() {
           <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
           <Route path="menus" element={<MenusDailySettingsPage />} />
           <Route path="product-images" element={<ProductImagesSettingsPage />} />
-          <Route path="pos" element={<PosAdminPage />} />
+          <Route path="pos" element={<Navigate to="../pos-venue" replace />} />
+          <Route path="pos-venue" element={<PosVenueSettingsPage />} />
+          <Route path="pos-kds" element={<PosKdsSettingsPage />} />
+          <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
+          <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
+          <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
+          <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
+          <Route path="pos-admin-legacy" element={<PosAdminPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
@@ -230,7 +277,7 @@ export default function App() {
         <Route path="tables" element={<Navigate to="settings/tables" replace />} />
         <Route path="costing" element={<Navigate to="settings/costing" replace />} />
         <Route path="master-data" element={<Navigate to="settings/master-data" replace />} />
-        <Route path="pos-admin" element={<Navigate to="settings/pos" replace />} />
+        <Route path="pos-admin" element={<Navigate to="settings/pos-venue" replace />} />
         <Route path="connection" element={<Navigate to="settings/connection" replace />} />
         <Route path="init-db" element={<Navigate to="settings/init-db" replace />} />
         <Route path="users" element={<Navigate to="settings/users" replace />} />

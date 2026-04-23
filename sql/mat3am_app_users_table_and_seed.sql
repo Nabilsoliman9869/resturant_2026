@@ -41,9 +41,15 @@ IF NOT EXISTS (SELECT 1 FROM dbo.MAT3AM_APP_USERS WHERE LoginName = N'waiter')
 IF NOT EXISTS (SELECT 1 FROM dbo.MAT3AM_APP_USERS WHERE LoginName = N'kitchen')
     INSERT INTO dbo.MAT3AM_APP_USERS (Id, LoginName, PinHash, RoleCode, DisplayName, IsActive, CreatedAt)
     VALUES (NEWID(), N'kitchen', N'123', N'kitchen', N'المطبخ', 1, SYSUTCDATETIME());
+IF NOT EXISTS (SELECT 1 FROM dbo.MAT3AM_APP_USERS WHERE LoginName = N'speed')
+    INSERT INTO dbo.MAT3AM_APP_USERS (Id, LoginName, PinHash, RoleCode, DisplayName, IsActive, CreatedAt)
+    VALUES (NEWID(), N'speed', N'123', N'speed_order', N'الطلبات السريعة', 1, SYSUTCDATETIME());
 IF NOT EXISTS (SELECT 1 FROM dbo.MAT3AM_APP_USERS WHERE LoginName = N'server')
     INSERT INTO dbo.MAT3AM_APP_USERS (Id, LoginName, PinHash, RoleCode, DisplayName, IsActive, CreatedAt)
     VALUES (NEWID(), N'server', N'123', N'server', N'جارسون المناولة', 1, SYSUTCDATETIME());
+IF NOT EXISTS (SELECT 1 FROM dbo.MAT3AM_APP_USERS WHERE LoginName = N'kids')
+    INSERT INTO dbo.MAT3AM_APP_USERS (Id, LoginName, PinHash, RoleCode, DisplayName, IsActive, CreatedAt)
+    VALUES (NEWID(), N'kids', N'123', N'kids_guard', N'كيدز إيريا', 1, SYSUTCDATETIME());
 GO
 
 SELECT LoginName, RoleCode, DisplayName, IsActive FROM dbo.MAT3AM_APP_USERS ORDER BY LoginName;

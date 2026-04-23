@@ -4,7 +4,7 @@ import { tryParseJson } from "../lib/tryParseJson";
 import { applyPromotions, type Promotion } from "../lib/posPromotions";
 import { useVenue } from "../context/VenueContext";
 import { computePosTotals, type PosLineInput } from "../lib/posTotals";
-import { defaultOrderTypeForVenue, readCachedVenueType, venuePosHint } from "../lib/venueType";
+import { defaultOrderTypeForVenue, readCachedVenueType } from "../lib/venueType";
 
 type Product = { CardGuide: string; ProductName: string; Price: number };
 type CartLine = {
@@ -292,11 +292,6 @@ export default function PosPlaceholder() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>نقطة البيع — احترافي</h2>
-      <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: "-0.5rem", marginBottom: "0.75rem" }}>
-        API: <code>{getApiBase()}</code> — يمكن ضبط <code>VITE_XTRA_API</code> في <code>.env</code>.
-        <br />
-        {venuePosHint(venueType)}
-      </p>
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="btn" onClick={() => void loadProducts()}>

@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-/** نموذج صرف مصروفات للكاشير — يربط لاحقاً بـ API إكسترا (سند/قيد أو جدول مخصص) */
 export default function CashExpensePage() {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
@@ -16,9 +15,6 @@ export default function CashExpensePage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>صرف مصروفات</h2>
-      <p style={{ color: "var(--muted)" }}>
-        نافذة للكاشير لتسجيل أي مصروف نقدي. الحفظ الفعلي يُربط بقاعدة إكسترا عند توفر المسار في الـ API.
-      </p>
       <form className="card" onSubmit={save} style={{ maxWidth: 480 }}>
         <label style={{ display: "block", marginBottom: 6 }}>المبلغ</label>
         <input

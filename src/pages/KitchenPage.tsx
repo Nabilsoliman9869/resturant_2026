@@ -12,6 +12,7 @@ type OrderItem = {
   prepared?: boolean;
   sent?: boolean;
   lineStatus?: string;
+  cancelled?: boolean;
 };
 type OrderRow = {
   id: string;
@@ -66,12 +67,14 @@ function summaryTileStyle(name: string, qty: number) {
   return { bg, border, high: qty >= 6 };
 }
 
-function isTodayLocal(iso?: string): boolean {
-  if (!iso) return false;
+/** طلبات تظهر في KDS: لا نخفي الطلب لأن createdAt ناقص، أو بسبب اختلاف يوم التقويم بين الأجهزة — نافذة 72 ساعة */
+function isKitchenShiftWindow(iso?: string): boolean {
+  if (!iso) return true;
   const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return false;
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (!Number.isFinite(d.getTime())) return true;
+  const age = Date.now() - d.getTime();
+  if (age < -600_000) return false;
+  return age < 72 * 3600 * 1000;
 }
 
 function statusWeight(s: string) {
@@ -98,8 +101,28 @@ function kitchenTableDisplay(o: OrderRow): string {
   return String(o.tableLabel || o.tableId || "—");
 }
 
+function replaceOrderById(prev: OrderRow[], nextOrder: OrderRow): OrderRow[] {
+  const idx = prev.findIndex((o) => o.id === nextOrder.id);
+  if (idx === -1) return [nextOrder, ...prev];
+  const copy = [...prev];
+  copy[idx] = nextOrder;
+  return copy;
+}
+
 function tableCompletion(orders: OrderRow[]) {
   if (!orders.length) return 0;
+  let lines = 0;
+  let done = 0;
+  for (const o of orders) {
+    for (const it of o.items || []) {
+      if (it.cancelled) continue;
+      lines += 1;
+      if (it.sent || it.prepared) done += 1;
+    }
+  }
+  if (lines > 0) {
+    return Math.min(100, Math.round((done / lines) * 100));
+  }
   const sum = orders.reduce((a, o) => a + statusWeight(o.status), 0);
   return Math.min(100, Math.round((sum / orders.length) * 100));
 }
@@ -147,12 +170,16 @@ function KdsOrderCard({
   onTogglePrepared,
   onSendLine,
   base,
+  alertType,
+  alertTitlePrefix,
 }: {
   order: OrderRow;
   settings: KdsSettings;
   onTogglePrepared: (orderId: string, lineId: string, prepared: boolean) => void;
   onSendLine: (orderId: string, lineId: string) => void;
   base: string;
+  alertType: string;
+  alertTitlePrefix: string;
 }) {
   const target = Number(order.prepTargetMinutes) > 0 ? Number(order.prepTargetMinutes) : settings.prepTargetMinutes;
   const warn = settings.warnBeforeEndMinutes;
@@ -173,16 +200,16 @@ function KdsOrderCard({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        type: "kitchen_urgent",
-        sourceKey: `kitchen_urgent:${order.id}`,
-        title: `استعجال مطبخ · ${labelT}`,
+        type: alertType,
+        sourceKey: `${alertType}:${order.id}`,
+        title: `${alertTitlePrefix} · ${labelT}`,
         body: orderLabel(order).slice(0, 400),
         tableId: order.tableGuid || order.tableId,
         sessionId: order.sessionId || undefined,
         orderId: order.id,
       }),
     });
-  }, [preparing, urgent, overdue, base, order.id, order.tableId, order.tableGuid, order.sessionId, order.generalOrder, order.billNumber, order.ticketNo]);
+  }, [preparing, urgent, overdue, base, order.id, order.tableId, order.tableGuid, order.sessionId, order.generalOrder, order.billNumber, order.ticketNo, alertType, alertTitlePrefix]);
 
   useEffect(() => {
     if (!urgent && !overdue) return;
@@ -283,8 +310,13 @@ function KdsOrderCard({
   );
 }
 
-export default function KitchenPage() {
+export type KitchenPageMode = "kitchen" | "speed";
+
+export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMode }) {
   const base = getApiBase();
+  const kdsQ = mode === "speed" ? "kdsStation=speed" : "kdsStation=kitchen";
+  const alertType = mode === "speed" ? "speed_order_urgent" : "kitchen_urgent";
+  const alertTitlePrefix = mode === "speed" ? "استعجال طلبات سريعة" : "استعجال مطبخ";
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [settings, setSettings] = useState<KdsSettings>({ prepTargetMinutes: 20, warnBeforeEndMinutes: 5 });
   const [msg, setMsg] = useState("");
@@ -294,7 +326,7 @@ export default function KitchenPage() {
     setMsg("");
     try {
       const [or, ks] = await Promise.all([
-        fetch(`${base}/api/restaurant/orders`),
+        fetch(`${base}/api/restaurant/orders?${kdsQ}`),
         fetch(`${base}/api/restaurant/kds-settings`),
       ]);
       const oj = tryParseJson<{ orders?: OrderRow[] }>(await or.text()) ?? {};
@@ -307,7 +339,7 @@ export default function KitchenPage() {
     } catch (e) {
       setMsg(`تعذر التحميل: ${String(e)}`);
     }
-  }, [base]);
+  }, [base, kdsQ]);
 
   useEffect(() => {
     void loadAll();
@@ -316,26 +348,40 @@ export default function KitchenPage() {
   }, [loadAll]);
 
   async function togglePrepared(orderId: string, lineId: string, prepared: boolean) {
+    setMsg("");
     try {
       const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prepared }),
       });
-      if (!r.ok) throw new Error(await r.text());
-      await loadAll();
+      const txt = await r.text();
+      if (!r.ok) throw new Error(txt);
+      const j = tryParseJson<{ order?: OrderRow }>(txt) ?? {};
+      if (j.order && typeof j.order.id === "string") {
+        setOrders((prev) => replaceOrderById(prev, j.order as OrderRow));
+      } else {
+        await loadAll();
+      }
     } catch (e) {
       setMsg(String(e));
     }
   }
 
   async function sendLine(orderId: string, lineId: string) {
+    setMsg("");
     try {
       const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}/send`, {
         method: "POST",
       });
-      if (!r.ok) throw new Error(await r.text());
-      await loadAll();
+      const txt = await r.text();
+      if (!r.ok) throw new Error(txt);
+      const j = tryParseJson<{ order?: OrderRow }>(txt) ?? {};
+      if (j.order && typeof j.order.id === "string") {
+        setOrders((prev) => replaceOrderById(prev, j.order as OrderRow));
+      } else {
+        await loadAll();
+      }
     } catch (e) {
       setMsg(String(e));
     }
@@ -344,7 +390,7 @@ export default function KitchenPage() {
   const pending = useMemo(
     () =>
       orders.filter(
-        (o) => isTodayLocal(o.createdAt) && !["served", "paid", "cancelled"].includes((o.status || "").toLowerCase()),
+        (o) => isKitchenShiftWindow(o.createdAt) && !["served", "paid", "cancelled"].includes((o.status || "").toLowerCase()),
       ),
     [orders],
   );
@@ -380,7 +426,7 @@ export default function KitchenPage() {
   return (
     <div className="role-op waiter-pos">
       <OperationalRoleHeader
-        roleTitle="المطبخ — KDS"
+        roleTitle={mode === "speed" ? "الطلبات السريعة — KDS" : "المطبخ — KDS"}
         hideBack
         rightSlot={
           <span style={{ fontSize: "0.85rem", color: "var(--wp-muted)" }}>
@@ -391,11 +437,19 @@ export default function KitchenPage() {
 
       <div className="role-op__main">
         <h2 className="role-op__section-title" style={{ marginBottom: "0.35rem" }}>
-          شاشة التحضير
+          {mode === "speed" ? "تجهيز (شيشة / مشروبات / غير طبخ)" : "شاشة التحضير"}
         </h2>
         <p style={{ color: "var(--wp-muted)", fontSize: "0.9rem", marginTop: 0, marginBottom: "1rem" }}>
-          اضغط «بدء التحضير» لبدء العدّاد حتى زمن التنفيذ من الإعدادات. قبل انتهاء المدة بـ {settings.warnBeforeEndMinutes} دقائق: وميض
-          وتنبيه صوتي متكرر. الشريط الجانبي يجمّع طلبات كل طاولة مع نسبة إكمال تقديرية.
+          {mode === "speed" ? (
+            <>
+              تظهر هنا فقط الأصناف المربوطة بمجموعة القائمة «شيشة وطلبات سريعة» (TBL006). الباقي يبقى في شاشة المطبخ.
+            </>
+          ) : (
+            <>
+              اضغط «بدء التحضير» لبدء العدّاد حتى زمن التنفيذ من الإعدادات. قبل انتهاء المدة بـ {settings.warnBeforeEndMinutes} دقائق: وميض
+              وتنبيه صوتي متكرر. الشريط الجانبي يجمّع طلبات كل طاولة مع نسبة إكمال تقديرية.
+            </>
+          )}
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 6, marginBottom: 12 }}>
@@ -453,6 +507,8 @@ export default function KitchenPage() {
                     order={o}
                     settings={settings}
                     base={base}
+                    alertType={alertType}
+                    alertTitlePrefix={alertTitlePrefix}
                     onTogglePrepared={(oid, lid, prepared) => void togglePrepared(oid, lid, prepared)}
                     onSendLine={(oid, lid) => void sendLine(oid, lid)}
                   />

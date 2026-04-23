@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   loadDailyMenuState,
   saveDailyMenuState,
+  fetchDailyMenuSchedule,
+  pushDailyMenuSchedule,
   type DailyMenuState,
+  type DailyMenuScheduleEntry,
 } from "../../lib/dailyMenuSettings";
-import { fetchDailyMenuSchedule, pushDailyMenuSchedule, type DailyMenuScheduleEntry } from "../../lib/dailyMenuSettings";
+import { getApiBase } from "../../lib/apiBase";
 
 export default function MenusDailySettingsPage() {
+  const base = getApiBase();
   const [state, setState] = useState<DailyMenuState>(() => loadDailyMenuState());
   const [entries, setEntries] = useState<DailyMenuScheduleEntry[]>([]);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -40,7 +44,7 @@ export default function MenusDailySettingsPage() {
       return;
     }
     try {
-      const r = await fetch(`/api/products/search?search_text=${encodeURIComponent(q)}`);
+      const r = await fetch(`${base}/api/products/search?search_text=${encodeURIComponent(q)}`);
       const j = await r.json();
       const arr = Array.isArray(j.products) ? j.products : [];
       setSearchResults(arr.map((p: any) => ({ CardGuide: String(p.CardGuide), ProductName: String(p.ProductName || "") })));
@@ -48,7 +52,7 @@ export default function MenusDailySettingsPage() {
       setSearchResults([]);
       setSchedMsg(String(e));
     }
-  }, [searchText]);
+  }, [base, searchText]);
 
   function addRangeItem(it: { CardGuide: string; ProductName: string }) {
     if (!it.CardGuide) return;
@@ -86,15 +90,9 @@ export default function MenusDailySettingsPage() {
       <h1 style={{ marginTop: 0, fontFamily: "var(--display)", fontSize: "1.65rem" }}>
         المنيو والقائمة اليومية
       </h1>
-      <p style={{ color: "var(--muted)", lineHeight: 1.6, marginTop: 0 }}>
-        حدّد أصناف TBL007 المتاحة ضمن مدى تاريخ يومي أو ممتد. سيتم توصيل هذه الجدولة مع شاشة الجرسون/‏POS.
-      </p>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0 }}>إعدادات القائمة اليومية (حسب الأصناف من TBL007)</h3>
-        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginTop: 0 }}>
-          اختر أصنافًا من قاعدة البيانات وحدد مدى التاريخ. المدى يمكن أن يكون يوميًا (نفس التاريخ بداية/نهاية) أو ممتدًا.
-        </p>
+        <h3 style={{ marginTop: 0 }}>القائمة اليومية</h3>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center", marginBottom: "0.5rem" }}>
           <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
             <span style={{ color: "var(--muted)" }}>من</span>
@@ -155,13 +153,13 @@ export default function MenusDailySettingsPage() {
           <div style={{ fontWeight: 700 }}>الأصناف</div>
           <div></div>
           {entries.map((e, i) => (
-            <>
-              <div key={`range-${i}`}>{e.dateFrom} → {e.dateTo}</div>
-              <div key={`items-${i}`}>{e.items.map((it) => it.ProductName).join("، ")}</div>
-              <div key={`actions-${i}`} style={{ display: "flex", gap: "0.5rem" }}>
+            <Fragment key={`${e.dateFrom}-${e.dateTo}-${i}`}>
+              <div>{e.dateFrom} → {e.dateTo}</div>
+              <div>{e.items.map((it) => it.ProductName).join("، ")}</div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setEntries((prev) => prev.filter((_, idx) => idx !== i))}>حذف</button>
               </div>
-            </>
+            </Fragment>
           ))}
         </div>
         <div style={{ marginTop: "0.75rem" }}>

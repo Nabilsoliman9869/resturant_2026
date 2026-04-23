@@ -7,6 +7,9 @@ build/
 # مؤقتات Excel (ملفات قفل — لا تُرفع)
 ~$*
 
+# لقطة TBL مولّدة من أداة التصدير — تُعاد محلياً
+config/tbl_seed_pack_from_db.generated.json
+
 # أسرار — لا تُرفع
 .env
 .env.*.local

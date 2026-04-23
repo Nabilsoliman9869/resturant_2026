@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 
+_SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
+_ICON = os.path.join(_SPEC_DIR, "assets", "mat3am_icon.ico")
+_VER = os.path.join(_SPEC_DIR, "assets", "file_version_info.txt")
 
 a = Analysis(
     ['backend\\mat3am_exe_entry.py'],
-    pathex=[],
+    pathex=[_SPEC_DIR],
     binaries=[],
-    datas=[('ui', 'ui'), ('config', 'config'), ('docs', 'docs')],
+    datas=[('ui', 'ui'), ('config', 'config'), ('docs', 'docs'), ('public', 'public')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,4 +39,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_ICON,
+    version=_VER,
 )

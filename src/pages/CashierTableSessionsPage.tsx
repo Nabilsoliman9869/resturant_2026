@@ -104,7 +104,7 @@ export default function CashierTableSessionsPage() {
       if (!r.ok) throw new Error(t);
       await load();
     } catch (e) {
-      setMsg(`فشل النقل: ${String(e)}`);
+      setMsg(`فشل تغيير الطاولة: ${String(e)}`);
     }
   }
 
@@ -160,11 +160,6 @@ export default function CashierTableSessionsPage() {
   return (
     <div>
       <h1 style={{ marginTop: 0, fontFamily: "var(--display)", fontSize: "1.65rem" }}>جلسات الطاولات النشطة</h1>
-      <p style={{ color: "var(--muted)", lineHeight: 1.6, marginTop: 0 }}>
-        جلسة نشطة واحدة لكل طاولة عند الإسكان الجديد (يُعاد استخدام الجلسة الحالية). الطلب المفتوح والفاتورة عند التسديد يتبعان
-        التدفق: مطبخ ← طلب حساب ← كاشير. التكرار الظاهر هنا غالباً من بيانات قديمة — استخدم «تنظيف التكرار الفارغ» أو أغلق
-        الجلسات يدوياً.
-      </p>
 
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem", alignItems: "center" }}>
         <button type="button" className="btn btn-ghost" disabled={loading} onClick={() => void load()}>
@@ -275,7 +270,7 @@ export default function CashierTableSessionsPage() {
                         <th style={{ padding: "0.45rem 0.35rem" }}>طلبات</th>
                         <th style={{ padding: "0.45rem 0.35rem" }}>الحساب</th>
                         <th style={{ padding: "0.45rem 0.35rem" }}>جلسة</th>
-                        <th style={{ padding: "0.45rem 0.35rem" }}>نقل</th>
+                        <th style={{ padding: "0.45rem 0.35rem" }}>تغيير الطاولة</th>
                         <th style={{ padding: "0.45rem 0.35rem" }}>إنهاء</th>
                       </tr>
                     </thead>
@@ -364,7 +359,7 @@ function SessionRow({
               setTargetTable("");
             }}
           >
-            نقل
+            تغيير
           </button>
         </div>
       </td>

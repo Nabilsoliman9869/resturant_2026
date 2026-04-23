@@ -127,6 +127,43 @@ export async function fetchDailyMenuSchedule(): Promise<DailyMenuScheduleEntry[]
   }
 }
 
+/** يوم بصيغة yyyy-mm-dd داخل مدى من–إلى (تواريخ حقل date input) */
+export function ymdInRange(ymd: string, from: string, to: string): boolean {
+  const d = (ymd || "").trim();
+  const a = (from || "").trim();
+  const b = (to || "").trim() || a;
+  if (!d || !a) return false;
+  return d >= a && d <= b;
+}
+
+/**
+ * قيود جدول المدى اليومي للجرسون:
+ * - لا يوجد مدى يغطي اليوم → لا قيد (عرض الكل حسب باقي القواعد).
+ * - يوجد مدى و`items` فارغ → لا قيد (عرض كل الأصناف غير الموقوفة).
+ * - يوجد مدى و`items` غير فارغ → السماح بهذه الأدلة فقط.
+ */
+export function scheduleRestrictionForDate(
+  entries: DailyMenuScheduleEntry[],
+  ymd: string
+): { limited: boolean; allowedGuides: Set<string> } {
+  const hits = (entries || []).filter((e) => ymdInRange(ymd, e.dateFrom, e.dateTo));
+  if (!hits.length) return { limited: false, allowedGuides: new Set() };
+  const merged = new Set<string>();
+  let anyItems = false;
+  for (const h of hits) {
+    const it = Array.isArray(h.items) ? h.items : [];
+    if (it.length) {
+      anyItems = true;
+      for (const x of it) {
+        const g = String((x as DailyMenuScheduleItem).ProductGuide || "").trim();
+        if (g) merged.add(g.toUpperCase());
+      }
+    }
+  }
+  if (!anyItems) return { limited: false, allowedGuides: new Set() };
+  return { limited: true, allowedGuides: merged };
+}
+
 export async function pushDailyMenuSchedule(entries: DailyMenuScheduleEntry[]): Promise<{ ok: boolean; detail?: string }> {
   try {
     const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu-schedule`, {

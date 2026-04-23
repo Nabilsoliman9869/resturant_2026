@@ -235,6 +235,8 @@ export default function CostingPage() {
   const componentOptionsByLine = useMemo(() => {
     const byLine = new Map<string, Product[]>();
     for (const l of lines) {
+      // غير مثبت: خيارات القائمة وفق مجموعة المواد الخام المختارة فقط.
+      // مثبت (ثابت): لا يخضع لفلترة المجموعة — كل أصناف الخام المتاحة.
       const source = l.locked ? rawProductsAll : rawProducts;
       const arr = source.filter((p) => {
         if (p.CardGuide === selectedProduct) return false;
@@ -350,22 +352,15 @@ export default function CostingPage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>تكلفة الطبق</h2>
-      <p style={{ color: "var(--muted)" }}>
-        شاشة مبسطة مثل طلب الطاولة: تختار الإعداد (الوجبة الجاهزة) من <strong>TBL007</strong>، ثم تختار المواد الخام بعد تصفيتها من مجموعات
-        <strong> TBL006</strong>. سعر خامات اليوم يُقرأ تلقائياً من آخر فواتير المشتريات عند توفرها.
-      </p>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="btn" onClick={() => void loadProducts()}>
-            {loaded ? "تحديث البيانات" : "تحميل الأصناف من TBL006/TBL007"}
+            {loaded ? "تحديث البيانات" : "تحميل الأصناف"}
           </button>
           <button type="button" className="btn" onClick={() => void loadStockBalance()}>
             عرض رصيد المخزون
           </button>
-          <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-            أصناف المكونات تُجلب بدلالة مجموعة الخامات المختارة من TBL006. سعر الوحدة يلتقط آخر سعر شراء تلقائياً إن وجد.
-          </span>
         </div>
       </div>
 

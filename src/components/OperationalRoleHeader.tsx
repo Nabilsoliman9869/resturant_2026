@@ -11,9 +11,11 @@ type Props = {
   hideUser?: boolean;
   titleStyle?: CSSProperties;
   rightSlot?: ReactNode;
+  /** صف إضافي أسفل عنوان الشريط (مثلاً مجموعات منيو نصية + أوامر سريعة) */
+  subToolbar?: ReactNode;
 };
 
-export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hideUser, titleStyle, rightSlot }: Props) {
+export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hideUser, titleStyle, rightSlot, subToolbar }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -30,23 +32,26 @@ export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hid
   }
 
   return (
-    <header className="waiter-pos__header">
-      <div className="waiter-pos__header-left">
-        {!hideBack && (
-          <button type="button" className="waiter-pos__back" onClick={() => goBack()} aria-label="رجوع">
-            ←
-          </button>
-        )}
-        <div>
-          <div className="waiter-pos__title" style={titleStyle}>{roleTitle}</div>
-          {!hideUser ? (
-            <div className="waiter-pos__user" title={user?.login || undefined}>
-              {sessionDisplayName(user)}
-            </div>
-          ) : null}
+    <header className={`waiter-pos__header${subToolbar ? " waiter-pos__header--stacked" : ""}`}>
+      <div className="waiter-pos__header__row">
+        <div className="waiter-pos__header-left">
+          {!hideBack && (
+            <button type="button" className="waiter-pos__back" onClick={() => goBack()} aria-label="رجوع">
+              ←
+            </button>
+          )}
+          <div>
+            <div className="waiter-pos__title" style={titleStyle}>{roleTitle}</div>
+            {!hideUser ? (
+              <div className="waiter-pos__user" title={user?.login || undefined}>
+                {sessionDisplayName(user)}
+              </div>
+            ) : null}
+          </div>
         </div>
+        {rightSlot ? <div className="waiter-pos__header-right">{rightSlot}</div> : null}
       </div>
-      {rightSlot ? <div className="waiter-pos__header-right">{rightSlot}</div> : null}
+      {subToolbar ? <div className="waiter-pos__header__sub">{subToolbar}</div> : null}
     </header>
   );
 }

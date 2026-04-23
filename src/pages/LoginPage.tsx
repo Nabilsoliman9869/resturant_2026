@@ -1,12 +1,24 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { ROLE_LABELS, ROLE_ROUTES, type RoleId } from "../auth/roles";
+import { ROLE_ROUTES, type RoleId } from "../auth/roles";
 import type { SessionUser } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
 import { checkApiReadyAfterLogin } from "../lib/postLoginHealth";
+import { DbConnectionBar } from "../components/DbConnectionBar";
 
-const ROLE_SET = new Set<RoleId>(["cashier", "accountant", "manager", "developer", "host", "waiter", "kitchen", "server"]);
+const ROLE_SET = new Set<RoleId>([
+  "cashier",
+  "accountant",
+  "manager",
+  "developer",
+  "host",
+  "waiter",
+  "kitchen",
+  "speed_order",
+  "server",
+  "kids_guard",
+]);
 
 export default function LoginPage() {
   const { user, login } = useAuth();
@@ -15,7 +27,6 @@ export default function LoginPage() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  /** بعد نجاح كلمة السر: انتظار تحقق خفيف أو سؤال المستخدم */
   const [pendingSession, setPendingSession] = useState<{
     user: SessionUser;
     route: string;
@@ -123,96 +134,43 @@ export default function LoginPage() {
         padding: "2rem",
       }}
     >
-      <div className="card" style={{ maxWidth: 460, width: "100%" }}>
+      <div style={{ position: "fixed", top: "0.65rem", insetInlineEnd: "0.65rem", zIndex: 20, maxWidth: "min(96vw, 320px)" }}>
+        <DbConnectionBar compact />
+      </div>
+      <div className="card" style={{ maxWidth: 400, width: "100%" }}>
         <h1
           style={{
             fontFamily: "var(--display)",
-            margin: "0 0 0.5rem",
+            margin: "0 0 1rem",
             fontSize: "1.75rem",
           }}
         >
-          دخول حسب الدور
+          دخول
         </h1>
-        <div
-          style={{
-            marginBottom: "1rem",
-            padding: "0.75rem 0.85rem",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "rgba(34, 211, 238, 0.06)",
-            fontSize: "0.88rem",
-            lineHeight: 1.5,
-            color: "var(--text)",
-          }}
-        >
-          <strong>حساب المطوّر (دائم):</strong> <code>dev</code> / <code>dev@123</code> — دور مطوّر لا يعتمد على جدول
-          المستخدمين؛ يعمل قبل وبعد التهيئة في أي وقت (زر سريع أدناه أو إدخال يدوي ثم «دخول»).
-          <br />
-          للعمل اليومي بعد التهيئة استخدم حسابات القاعدة — مثل <code>cashier</code> / <code>1001</code> أو{" "}
-          <code>manager</code>. من «اتصال القاعدة والتهيئة» يمكن إعادة تنفيذ التهيئة متى لزم.
-        </div>
-        <p style={{ color: "var(--muted)", marginTop: 0, fontSize: "0.9rem" }}>
-          يمكن تغيير اسم/رمز الدخول المبدئي من متغيرات البيئة <code>MAT3AM_INITIAL_DEV_LOGIN</code> و{" "}
-          <code>MAT3AM_INITIAL_DEV_PIN</code> على الخادم.
-        </p>
-        <p style={{ color: "var(--muted)", marginTop: 0, fontSize: "0.82rem", lineHeight: 1.5 }}>
-          طلب الدخول يُرسل إلى: <code style={{ wordBreak: "break-all" }}>{getApiBase()}</code>
-          {" — "}افتح{" "}
-          <a href={`${getApiBase()}/__whoami__`} target="_blank" rel="noreferrer">
-            __whoami__
-          </a>{" "}
-          — يجب أن يظهر سطر <code>MAT3AM_API=1 DEV_LOGIN_ALWAYS=1</code>. إن لم يظهر فالمنفذ 2288 يشغّل{" "}
-          <strong>خادماً قديماً</strong> (ليس من مجلد <code>مطاعم/backend</code>): أوقف كل Python على 2288 ثم شغّل{" "}
-          <code>restart_from_zero.bat</code> من جذر مجلد مطاعم.
-        </p>
         <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <label style={{ display: "block", marginBottom: 6, color: "var(--muted)" }}>
-              اسم المستخدم
-            </label>
+            <label style={{ display: "block", marginBottom: 6, color: "var(--muted)" }}>اسم المستخدم</label>
             <input
               value={loginName}
               onChange={(e) => setLoginName(e.target.value)}
-              placeholder="dev أو cashier"
-              autoComplete="off"
+              autoComplete="username"
               style={{ width: "100%" }}
               disabled={!!pendingSession}
             />
           </div>
           <div>
-            <label style={{ display: "block", marginBottom: 6, color: "var(--muted)" }}>
-              الرمز
-            </label>
+            <label style={{ display: "block", marginBottom: 6, color: "var(--muted)" }}>الرمز</label>
             <input
               value={pin}
               onChange={(e) => setPin(e.target.value)}
-              placeholder="dev@123 أو رمز المستخدم من القاعدة"
               type="password"
-              autoComplete="off"
+              autoComplete="current-password"
               style={{ width: "100%" }}
               disabled={!!pendingSession}
             />
           </div>
           {err && (
-            <div style={{ color: "var(--danger)", fontSize: "0.9rem", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-              {err}
-              {err.includes("تمت تهيئة مستخدمي التطبيق") && err.includes("وليس dev") ? (
-                <div
-                  style={{
-                    marginTop: "0.75rem",
-                    padding: "0.65rem 0.75rem",
-                    borderRadius: 8,
-                    border: "1px solid var(--border)",
-                    background: "rgba(249, 115, 22, 0.12)",
-                    color: "var(--text)",
-                  }}
-                >
-                  هذه الرسالة <strong>لا تصدر</strong> من نسخة <code>مطاعم/backend</code> الحالية — الخادم على 2288 قديم.
-                  أوقف العملية القديمة وشغّل <code>run_api.bat</code> أو <code>restart_from_zero.bat</code> من مجلد مطاعم،
-                  ثم تحقق من <code>__whoami__</code> أن يظهر <code>MAT3AM_API=1</code>.
-                </div>
-              ) : null}
-            </div>
+            <div style={{ color: "var(--danger)", fontSize: "0.9rem", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{err}</div>
           )}
           {pendingSession && verifyFailed && (
             <div
@@ -222,20 +180,15 @@ export default function LoginPage() {
                 border: "1px solid rgba(249, 115, 22, 0.45)",
                 background: "rgba(249, 115, 22, 0.08)",
                 fontSize: "0.9rem",
-                lineHeight: 1.55,
               }}
             >
-              <strong>تعذّر التأكد من جاهزية الخادم بعد الدخول.</strong>
-              <div style={{ marginTop: "0.5rem", color: "var(--muted)" }}>
-                تم قبول اسم المستخدم والرمز؛ للحد من أعطال الشاشات التالية يُفضّل التأكد من تشغيل API. يمكنك إعادة المحاولة
-                أو المتابعة على مسؤوليتك.
-              </div>
+              تعذّر التحقق من جاهزية الخادم.
               <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
                 <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void retryVerifyAfterLogin()}>
-                  {busy ? "جاري التحقق…" : "إعادة التحقق"}
+                  {busy ? "…" : "إعادة المحاولة"}
                 </button>
                 <button type="button" className="btn btn-ghost" disabled={busy} onClick={finishLoginDespiteVerify}>
-                  متابعة الدخول
+                  متابعة
                 </button>
                 <button
                   type="button"
@@ -246,14 +199,14 @@ export default function LoginPage() {
                     setVerifyFailed(false);
                   }}
                 >
-                  إلغاء والرجوع
+                  إلغاء
                 </button>
               </div>
             </div>
           )}
 
           <button type="submit" className="btn btn-primary" disabled={busy || !!pendingSession}>
-            {busy && !verifyFailed ? "جاري التحقق من النظام…" : busy ? "جاري المعالجة…" : "دخول"}
+            {busy && !verifyFailed ? "جاري التحقق…" : busy ? "…" : "دخول"}
           </button>
           <button
             type="button"
@@ -265,18 +218,9 @@ export default function LoginPage() {
               void attemptLogin("dev", "dev@123");
             }}
           >
-            دخول مطوّر — dev / dev@123 (دائماً)
+            مطوّر
           </button>
         </form>
-
-        <div style={{ marginTop: "1.25rem", fontSize: "0.85rem", color: "var(--muted)" }}>
-          <div>أدوار العمل بعد التهيئة:</div>
-          {(Object.keys(ROLE_LABELS) as RoleId[]).map((r) => (
-            <div key={r}>
-              • {ROLE_LABELS[r]}
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

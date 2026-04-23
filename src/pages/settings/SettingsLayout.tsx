@@ -3,49 +3,58 @@ import type { RoleId } from "../../auth/roles";
 
 type SettingsNavItem = { path: string; label: string };
 
-/** ترتيب منطقي: مكان → تشغيل يومي → محاسبة → صيانة */
-const SETTINGS_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
+/** إعدادات التشغيل — المدير + المطوّر */
+const OPERATIONAL_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
   {
     title: "المكان والصالة",
     items: [
-      { path: "venue", label: "المكان والطابق والمساحات" },
-      { path: "floor-editor", label: "محرّر مخطط الصالة" },
+      { path: "venue", label: "المكان والطابق" },
+      { path: "floor-editor", label: "مخطط الصالة" },
       { path: "tables", label: "الطاولات والمناطق" },
     ],
   },
   {
     title: "القوائم والمبيعات",
     items: [
-      { path: "menus", label: "المنيو والقائمة اليومية" },
+      { path: "menus", label: "المنيو" },
       { path: "product-images", label: "صور المنتجات" },
-      { path: "pos", label: "سياسات POS والعروض" },
+      { path: "pos-venue", label: "نوع المنشأ (POS)" },
+      { path: "pos-kds", label: "شاشة المطبخ (KDS)" },
+      { path: "pos-prep-times", label: "زمن التحضير لكل صنف" },
+      { path: "pos-tax", label: "الضريبة والخدمة" },
+      { path: "payment-routing", label: "ربط التحصيل (حسابات)" },
+      { path: "pos-promos", label: "العروض" },
     ],
   },
   {
     title: "التكاليف والتعريفات",
     items: [
-      { path: "costing-mode", label: "أساس احتساب التكاليف" },
-      { path: "costing", label: "إعدادات التكاليف" },
-      { path: "price-lists", label: "قائمة الأسعار" },
+      { path: "costing-mode", label: "أساس التكلفة" },
+      { path: "costing", label: "التكاليف" },
+      { path: "price-lists", label: "قوائم الأسعار" },
       { path: "daily-opening-custody", label: "عهدة أول اليوم" },
-      { path: "daily-return", label: "المسترد آخر اليوم" },
-      { path: "daily-overhead", label: "مصاريف التشغيل اليومية" },
+      { path: "daily-return", label: "المسترد" },
+      { path: "daily-overhead", label: "مصاريف التشغيل" },
       { path: "daily-result", label: "النتيجة اليومية" },
-      { path: "kitchen-item-stop", label: "إيقاف أصناف المطبخ (وقتي)" },
-      { path: "daily-cost-engine", label: "محرك التكلفة اليومية (مجمّع)" },
+      { path: "kitchen-item-stop", label: "إيقاف أصناف المطبخ" },
+      { path: "daily-cost-engine", label: "التكلفة اليومية" },
       { path: "master-data", label: "التعريفات الأساسية" },
     ],
   },
   {
-    title: "النظام والصيانة",
-    items: [
-      { path: "workflow", label: "دورة العمل ومسارات الأدوار" },
-      { path: "connection", label: "اتصال القاعدة" },
-      { path: "init-db", label: "تهيئة الجداول والإجراءات" },
-      { path: "users", label: "المستخدمون والأدوار" },
-    ],
+    title: "التشغيل",
+    items: [{ path: "workflow", label: "دورة العمل والأدوار" }],
   },
 ];
+
+const TECH_SECTION: { title: string; items: SettingsNavItem[] } = {
+  title: "تقنية",
+  items: [
+    { path: "connection", label: "اتصال القاعدة" },
+    { path: "init-db", label: "تهيئة SQL" },
+    { path: "users", label: "مستخدمو التطبيق" },
+  ],
+};
 
 function roleFromPath(pathname: string): RoleId | null {
   const m = pathname.match(/^\/app\/([^/]+)\//);
@@ -56,6 +65,11 @@ export default function SettingsLayout() {
   const loc = useLocation();
   const role = roleFromPath(loc.pathname);
   const base = role ? `/app/${role}/settings` : "/app/manager/settings";
+  const isDeveloper = role === "developer";
+
+  const sections = isDeveloper ? [TECH_SECTION, ...OPERATIONAL_SECTIONS] : OPERATIONAL_SECTIONS;
+
+  const asideTitle = isDeveloper ? "إعدادات" : "إعدادات التشغيل";
 
   return (
     <div style={{ display: "flex", gap: "1.25rem", alignItems: "stretch", minHeight: "70vh" }}>
@@ -81,9 +95,9 @@ export default function SettingsLayout() {
             color: "var(--muted)",
           }}
         >
-          إعدادات النظام
+          {asideTitle}
         </div>
-        {SETTINGS_SECTIONS.map((sec) => (
+        {sections.map((sec) => (
           <div key={sec.title}>
             <div
               style={{

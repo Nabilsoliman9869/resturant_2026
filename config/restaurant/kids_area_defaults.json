@@ -1,0 +1,11 @@
+{
+  "packages": [
+    { "id": "std", "nameAr": "عادي (بالساعة)", "pricePerHour": 50.0 },
+    { "id": "vip", "nameAr": "مميز (بالساعة)", "pricePerHour": 100.0 }
+  ],
+  "defaultPackageId": "std",
+  "_meta": {
+    "module": "kids_area",
+    "note": "يُنسخ تلقائياً إلى kids_area_settings.json عند أول تشغيل/تهيئة إذا لم يوجد الملف. ليس جدول SQL — تخزين ملفات فقط."
+  }
+}

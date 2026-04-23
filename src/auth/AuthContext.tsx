@@ -28,10 +28,13 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function loadStored(): SessionUser | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) ?? sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const p = JSON.parse(raw) as SessionUser;
     if (!p?.id || !p?.role) return null;
+    /* مزامنة بين localStorage و sessionStorage لتقليل فقدان الجلسة عند تحديث الصفحة أو اختلاف السلوك بين المتصفحات */
+    localStorage.setItem(STORAGE_KEY, raw);
+    sessionStorage.setItem(STORAGE_KEY, raw);
     return p;
   } catch {
     return null;
@@ -43,12 +46,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((u: SessionUser) => {
     setUser(u);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+    const s = JSON.stringify(u);
+    localStorage.setItem(STORAGE_KEY, s);
+    sessionStorage.setItem(STORAGE_KEY, s);
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
   }, []);
 
   const value = useMemo(

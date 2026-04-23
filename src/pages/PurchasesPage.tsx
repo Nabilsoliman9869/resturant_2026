@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 
@@ -49,6 +49,7 @@ function nextLineId() {
 
 export default function PurchasesPage() {
   const base = getApiBase();
+  const nextNumberReqRef = useRef(0);
 
   const [apiStatus, setApiStatus] = useState<"idle" | "ok" | "fail">("idle");
   const [loadErr, setLoadErr] = useState("");
@@ -86,6 +87,7 @@ export default function PurchasesPage() {
 
   const refreshNextNumber = useCallback(
     async (typeGuid: string) => {
+      const reqId = ++nextNumberReqRef.current;
       if (!typeGuid) {
         setBillNumber(null);
         return;
@@ -97,8 +99,11 @@ export default function PurchasesPage() {
         const bodyText = await r.text();
         if (!r.ok) throw new Error(bodyText || `HTTP ${r.status}`);
         const j = tryParseJson<{ next_number?: number }>(bodyText);
+        // تجاهل ردود الطلبات الأقدم حتى لا يظهر رقم فاتورة لنوع مختلف.
+        if (reqId !== nextNumberReqRef.current) return;
         setBillNumber(typeof j?.next_number === "number" ? j.next_number : null);
       } catch {
+        if (reqId !== nextNumberReqRef.current) return;
         setBillNumber(null);
       }
     },
@@ -136,9 +141,15 @@ export default function PurchasesPage() {
       setInvoiceTypes(types);
 
       const chosen = pickPurchaseType(types);
-      if (chosen) {
-        setInvoiceTypeGuid(chosen.CardGuide);
-        void refreshNextNumber(chosen.CardGuide);
+      const currentGuid = String(invoiceTypeGuid || "").toUpperCase();
+      const hasCurrent = currentGuid && types.some((t) => t.CardGuide === currentGuid);
+      const targetGuid = hasCurrent ? currentGuid : String(chosen?.CardGuide || "");
+      if (targetGuid) {
+        if (targetGuid !== currentGuid) setInvoiceTypeGuid(targetGuid);
+        void refreshNextNumber(targetGuid);
+      } else {
+        setInvoiceTypeGuid("");
+        setBillNumber(null);
       }
 
       setSuppliers((aJson.agents ?? []).map((x) => ({ CardGuide: x.CardGuide, AgentName: x.AgentName })));
@@ -153,7 +164,7 @@ export default function PurchasesPage() {
       setApiStatus("fail");
       setLoadErr(e instanceof Error ? e.message : String(e));
     }
-  }, [base, refreshNextNumber]);
+  }, [base, refreshNextNumber, invoiceTypeGuid]);
 
   useEffect(() => {
     void loadAll();
@@ -183,6 +194,11 @@ export default function PurchasesPage() {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    // ضمان تزامن رقم الفاتورة مع النمط المختار حتى عند الاسترجاع من المسودة.
+    void refreshNextNumber(invoiceTypeGuid);
+  }, [invoiceTypeGuid, refreshNextNumber]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -335,14 +351,6 @@ export default function PurchasesPage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>فاتورة مشتريات</h2>
-      <p style={{ color: "var(--muted)" }}>
-        إدخال فاتورة وارد مرتبطة بنوع من{" "}
-        <code style={{ color: "var(--text)" }}>TBL020</code>، والمورد من مجموعة الموردين في{" "}
-        <code style={{ color: "var(--text)" }}>TBL016</code>، والأصناف من{" "}
-        <code style={{ color: "var(--text)" }}>TBL007</code>. يتطلب تشغيل خادم{" "}
-        <code style={{ color: "var(--text)" }}>api_server.py</code> على نفس عنوان{" "}
-        <code style={{ color: "var(--text)" }}>VITE_XTRA_API</code>.
-      </p>
 
       {apiStatus === "fail" && (
         <div className="card" style={{ borderColor: "rgba(248, 113, 113, 0.35)", marginBottom: "1rem" }}>

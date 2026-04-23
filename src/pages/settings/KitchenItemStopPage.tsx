@@ -75,7 +75,6 @@ export default function KitchenItemStopPage() {
   return (
     <div className="page" style={{ direction: "rtl" }}>
       <h2 style={{ marginTop: 0 }}>إعدادات المطبخ - إيقاف الأصناف (وقتي)</h2>
-      <p style={{ color: "var(--muted)" }}>هذه الشاشة وقتية للمطبخ. عند الإيقاف يختفي/يتعطل الصنف فورًا لدى الجرسون.</p>
       <div className="card" style={{ marginBottom: 10, display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           المجموعة

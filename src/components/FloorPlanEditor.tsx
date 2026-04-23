@@ -578,11 +578,6 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
             </button>
           ))}
         </div>
-        {tool === "drawShell" && (
-          <p style={{ margin: "0.5rem 0 0", fontSize: "0.85rem", color: "var(--muted)" }}>
-            انقر داخل الرسم لإضافة نقاط بالترتيب؛ ثم «إغلاق المضلع». يُستبدل محيط الصالة بالكامل.
-          </p>
-        )}
         {tool === "drawShell" && draftShell.length > 0 && (
           <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
             <button type="button" className="btn btn-primary" onClick={closeDraftShell}>

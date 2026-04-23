@@ -346,27 +346,12 @@ export default function FloorPlanLive() {
           </button>
         </div>
       </div>
-      <p style={{ color: "var(--muted)", fontSize: "0.88rem", marginTop: "0.35rem", marginBottom: "0.75rem" }}>
-        {planStatus === "api" && plan ? (
-          <>
-            مصدر الشكل: <code>floor_plan.json</code> عبر <code>GET /api/restaurant/floor-plan</code> — مضلع الصالة + طاولات بـ SVG.
-            الاستيراد/التصدير: <code>PUT /api/restaurant/floor-plan</code> (نفس بنية الملف) مع مزامنة تلقائية لطاولات المخطط إلى
-            <code> TBL005</code> وتعبئة <code>linkedTableId</code> عند الحاجة.
-          </>
-        ) : planStatus === "unavailable" ? (
-          <>
-            تعذر تحميل <code>floor_plan.json</code> من <code>GET /api/restaurant/floor-plan</code> لأن الخادم الخلفي غير متاح أو لا يستجيب.
-          </>
-        ) : planStatus === "invalid" ? (
-          <>
-            تم العثور على <code>config/restaurant/floor_plan.json</code> لكن محتواه غير صالح للعرض حالياً — يتم استخدام التخطيط القديم مؤقتاً.
-          </>
-        ) : (
-          <>
-            لا يوجد <code>config/restaurant/floor_plan.json</code> — يُعرض التخطيط القديم من <code>tables.json</code> و<code>position</code>.
-          </>
-        )}
-      </p>
+      {planStatus === "unavailable" && (
+        <p style={{ color: "var(--danger)", fontSize: "0.88rem", marginTop: "0.35rem" }}>تعذر تحميل المخطط.</p>
+      )}
+      {planStatus === "invalid" && (
+        <p style={{ color: "var(--danger)", fontSize: "0.88rem", marginTop: "0.35rem" }}>مخطط غير صالح.</p>
+      )}
       {msg && <p style={{ color: "var(--danger)", fontSize: "0.88rem" }}>{msg}</p>}
 
       {plan ? (

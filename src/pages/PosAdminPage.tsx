@@ -161,16 +161,9 @@ export default function PosAdminPage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>إدارة ضرائب POS والعروض</h2>
-      <p style={{ color: "var(--muted)" }}>
-        ترتيب المعالجة المحاسبية: خصومات ثم خدمة ثم VAT (على السعر + الخدمة عند تفعيل «الخدمة قبل VAT»). يمكن تعديل السياسة هنا.
-      </p>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0 }}>نوع المنشأ (بدون تغيير قاعدة البيانات)</h3>
-        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginTop: 0 }}>
-          يُحفظ في <code>config/restaurant/venue.json</code> ويغيّر العنوان في الشريط، تسميات القائمة، وافتراض نوع الطلب في نقطة البيع (طاولة
-          مقابل سفري).
-        </p>
+        <h3 style={{ marginTop: 0 }}>نوع المنشأ</h3>
         <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
@@ -198,10 +191,6 @@ export default function PosAdminPage() {
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <h3 style={{ marginTop: 0 }}>شاشة المطبخ (KDS)</h3>
-        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginTop: 0 }}>
-          يُحفظ في <code>config/restaurant/kds_settings.json</code>. زمن التنفيذ الافتراضي لكل كارت، ونافذة التنبيه (وميض + صوت)
-          قبل نهاية المدة.
-        </p>
         <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ display: "block" }}>
             زمن التحضير الافتراضي (دقيقة)

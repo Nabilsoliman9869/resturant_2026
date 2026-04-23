@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel, model_validator
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import pyodbc
 from datetime import datetime
 import uuid
@@ -15,6 +15,7 @@ import subprocess
 import json
 import os
 import re
+import random
 import sys
 import tempfile
 import unicodedata
@@ -25,6 +26,35 @@ try:
     XTRA_API_PORT = int(os.environ.get("XTRA_API_PORT", "2288"))
 except ValueError:
     XTRA_API_PORT = 2288
+
+# يزيد عند تغيير قائمة فحوص GET /api/dev/seed-default-data/verify أو جداول التهيئة — للتمييز عن عمليات api_server قديمة
+MAT3AM_VERIFY_SCHEMA_REVISION = 8
+
+# جداول MAT3AM التي يفترض أن تنشئها _ensure_mat3am_dev_schema — للتشخيص فقط (OBJECT_ID + COUNT)
+MAT3AM_DDL_TABLE_NAMES: Tuple[str, ...] = (
+    "MAT3AM_APP_USERS",
+    "MAT3AM_ERROR_LOG",
+    "MAT3AM_AUDIT_LOG",
+    "MAT3AM_RESTAURANT_INVOICE_TYPES",
+    "MAT3AM_RESTAURANT_STORES",
+    "MAT3AM_RESTAURANT_STATE",
+    "MAT3AM_WORKFLOW_SETTINGS",
+    "MAT3AM_RECIPE_HDR",
+    "MAT3AM_RECIPE_LINE",
+    "MAT3AM_STOCK_MOVEMENT",
+    "MAT3AM_POS_POLICY",
+    "MAT3AM_PROMOTION",
+    "MAT3AM_PAYMENT_ROUTING",
+    "MAT3AM_INV_PAYMENT_LINE",
+    "MAT3AM_PRICE_LIST_HDR",
+    "MAT3AM_PRICE_LIST_LINE",
+    "MAT3AM_DAILY_CUSTODY_LINE",
+    "MAT3AM_DAILY_RETURN_LINE",
+    "MAT3AM_DAILY_OVERHEAD_LINE",
+    "MAT3AM_DAILY_CLOSE",
+    "MAT3AM_DAILY_RESULT",
+    "MAT3AM_COSTING_MODE",
+)
 
 # دخول تهيئة / مطوّر: لا يعتمد على MAT3AM_APP_USERS ولا يُعطّل أبداً بعد التهيئة (dev / dev@123 أو MAT3AM_INITIAL_DEV_*).
 MAT3AM_INITIAL_DEV_LOGIN = (os.environ.get("MAT3AM_INITIAL_DEV_LOGIN") or "dev").strip().strip("\ufeff")
@@ -101,36 +131,67 @@ def whoami_typo_redirect():
     return RedirectResponse(url="/__whoami__", status_code=307)
 
 
+# مسارات التشغيل:
+# - BUNDLE_DIR: أصول للقراءة فقط (ui، modules) — من sys._MEIPASS في EXE أحادي الملف
+# - DATA_DIR: إعدادات وحالة مطعم قابلة للكتابة — MAT3AM_BASE_DIR (مثل %LOCALAPPDATA%\Mat3amPOS) أو جذر المشروع في التطوير
+# لا تخلط الاثنين: إن جعلنا BASE_DIR = AppData فقط، يختفي ui/restaurant من المسار ويصبح /static/restaurant = 404
+_frozen = getattr(sys, "frozen", False)
+_meipass = getattr(sys, "_MEIPASS", None)
+if _frozen and _meipass:
+    BUNDLE_DIR = Path(_meipass).resolve()
+else:
+    BUNDLE_DIR = Path(__file__).resolve().parents[1]
+
+_env_base = (os.environ.get("MAT3AM_BASE_DIR") or "").strip()
+if _env_base:
+    DATA_DIR = Path(_env_base).resolve()
+else:
+    DATA_DIR = BUNDLE_DIR
+
+BASE_DIR = DATA_DIR
+_root = str(DATA_DIR)
+REST_DIR = BUNDLE_DIR / "ui" / "restaurant"
+
+# إعدادات الاتصال من ملف (إن وُجد) — يُحمّل من config/settings.json
+_settings_path = str(DATA_DIR / "config" / "settings.json")
+try:
+    print(
+        f"[mat3am] DATA_DIR={DATA_DIR} BUNDLE_DIR={BUNDLE_DIR} settings_exists={os.path.isfile(_settings_path)}",
+        flush=True,
+    )
+except Exception:
+    pass
+
+
+def _mat3am_exe_build_stamp_for_whoami() -> str:
+    """طابع بناء الـ EXE (config/mat3am_exe_build.txt داخل الحزمة)."""
+    try:
+        p = BUNDLE_DIR / "config" / "mat3am_exe_build.txt"
+        if p.is_file():
+            return (p.read_text(encoding="utf-8") or "").strip().split("\n")[0][:400]
+    except Exception:
+        pass
+    return ""
+
+
 @app.get("/__whoami__", include_in_schema=False)
 def whoami():
-    """اختبار: هل الخادم الذي يعمل هو هذا الملف؟ (سطر MAT3AM يظهر فقط في نسخة مطاعم الحالية)"""
+    """اختبار: هل الخادم الذي يعمل هو هذا الملف؟"""
     try:
         _mt = int(os.path.getmtime(__file__))
     except Exception:
         _mt = 0
+    stamp = _mat3am_exe_build_stamp_for_whoami()
     body = (
         "api_server.py: WHOAMI OK\n"
         "MAT3AM_API=1 DEV_LOGIN_ALWAYS=1\n"
         f"API_FILE_MTIME_UNIX={_mt}\n"
+        f"VERIFY_SCHEMA_REVISION={MAT3AM_VERIFY_SCHEMA_REVISION}\n"
+        f"API_FILE_PATH={os.path.abspath(__file__)}\n"
+        f"DATA_DIR={_root}\n"
+        + (f"EXE_BUILD={stamp}\n" if stamp else "")
     )
     return PlainTextResponse(body)
-
-
-# مسارات التشغيل:
-# - Dev: يعتمد على جذر المشروع
-# - PyInstaller onefile: يعتمد على sys._MEIPASS (ملفات مدمجة داخل EXE)
-_env_base = (os.environ.get("MAT3AM_BASE_DIR") or "").strip()
-if _env_base:
-    BASE_DIR = Path(_env_base).resolve()
-elif getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    BASE_DIR = Path(getattr(sys, "_MEIPASS")).resolve()
-else:
-    BASE_DIR = Path(__file__).resolve().parents[1]
-_root = str(BASE_DIR)
-REST_DIR = BASE_DIR / "ui" / "restaurant"
-
-# إعدادات الاتصال من ملف (إن وُجد) — يُحمّل من config/settings.json
-_settings_path = str(BASE_DIR / "config" / "settings.json")
 
 
 def _load_mat3am_settings() -> dict:
@@ -198,8 +259,8 @@ def _get_connection_string_from_settings():
     except Exception:
         return None
 
-# مجلد الواجهة
-static_dir = str(BASE_DIR / "ui")
+# مجلد الواجهة (من الحزمة، ليس من مجلد البيانات)
+static_dir = str(BUNDLE_DIR / "ui")
 if not os.path.isdir(static_dir):
     static_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -219,6 +280,24 @@ if REST_DIR.exists():
         index_file = REST_DIR / "index.html"
         if index_file.is_file():
             return FileResponse(index_file, media_type="text/html")
+        raise HTTPException(status_code=503, detail="ui/restaurant/index.html غير موجود")
+
+    _spa_index_html = REST_DIR / "index.html"
+
+    @app.get("/login", include_in_schema=False)
+    def restaurant_spa_login():
+        """React Router يستخدم /login — بدون هذا المسار يعيد الخادم 404 عند تحديث الصفحة."""
+        if _spa_index_html.is_file():
+            return FileResponse(_spa_index_html, media_type="text/html")
+        raise HTTPException(status_code=503, detail="ui/restaurant/index.html غير موجود")
+
+    @app.get("/app", include_in_schema=False)
+    @app.get("/app/", include_in_schema=False)
+    @app.get("/app/{full_path:path}", include_in_schema=False)
+    def restaurant_spa_app_shell(full_path: str = ""):
+        """مسارات /app/... للواجهة الموحدة — تحديث المتصفح يحتاج إرجاع index وليس 404."""
+        if _spa_index_html.is_file():
+            return FileResponse(_spa_index_html, media_type="text/html")
         raise HTTPException(status_code=503, detail="ui/restaurant/index.html غير موجود")
 
 else:
@@ -391,6 +470,94 @@ def _ensure_menu_tables(cursor) -> None:
             ALTER TABLE dbo.TBL007 ADD ProductImageUrl nvarchar(500) NULL;
         """
     )
+
+
+# TBL006: مجموعة «طلبات سريعة» — المنتجات عبر TBL007.GroupGuid تظهر في Speed Order
+KDS_SPEED_ORDER_GROUP_NAME = "شيشة وطلبات سريعة"
+_kds_speed_group_guid: Optional[str] = None
+_kds_speed_group_resolved: bool = False
+
+
+def _kds_invalidate_speed_group_cache() -> None:
+    global _kds_speed_group_guid, _kds_speed_group_resolved
+    _kds_speed_group_guid = None
+    _kds_speed_group_resolved = False
+
+
+def _ensure_speed_order_product_group(cursor) -> None:
+    _ensure_menu_tables(cursor)
+    cursor.execute(
+        """
+        IF NOT EXISTS (
+            SELECT 1 FROM dbo.TBL006
+            WHERE RTRIM(LTRIM(ISNULL(GroupName, N''))) = ?
+        )
+        BEGIN
+            INSERT INTO dbo.TBL006 (CardGuide, GroupName) VALUES (NEWID(), ?)
+        END
+        """,
+        (KDS_SPEED_ORDER_GROUP_NAME, KDS_SPEED_ORDER_GROUP_NAME),
+    )
+    _kds_invalidate_speed_group_cache()
+
+
+def _kds_resolve_speed_group_guid_for_cursor(cursor) -> Optional[str]:
+    global _kds_speed_group_guid, _kds_speed_group_resolved
+    if _kds_speed_group_resolved:
+        return _kds_speed_group_guid
+    _kds_speed_group_resolved = True
+    _ensure_menu_tables(cursor)
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide FROM dbo.TBL006
+            WHERE RTRIM(LTRIM(ISNULL(GroupName, N''))) = ?
+            """,
+            (KDS_SPEED_ORDER_GROUP_NAME,),
+        )
+        row = cursor.fetchone()
+        _kds_speed_group_guid = str(row[0]) if row and row[0] else None
+    except Exception:
+        _kds_speed_group_guid = None
+    return _kds_speed_group_guid
+
+
+def _kds_batch_product_group_guids(cursor, product_guides: set) -> dict:
+    out: dict = {}
+    if not product_guides:
+        return out
+    guids = [str(p or "").strip() for p in product_guides if str(p or "").strip()]
+    if not guids:
+        return out
+    ph = ",".join("?" * len(guids))
+    try:
+        cursor.execute(
+            f"SELECT CardGuide, GroupGuid FROM dbo.TBL007 WHERE CardGuide IN ({ph})",
+            tuple(guids),
+        )
+        for r in cursor.fetchall() or []:
+            if r and r[0] and r[1] is not None:
+                cg = str(r[0])
+                gg = str(r[1])
+                out[cg.lower()] = gg
+                out[cg] = gg
+    except Exception:
+        pass
+    return out
+
+
+def _kds_item_is_speed_line(it: dict, gmap: dict, speed_guid: Optional[str]) -> bool:
+    if not speed_guid or not isinstance(it, dict):
+        return False
+    pg = str(it.get("productGuide") or "").strip()
+    if not pg:
+        return False
+    gg = gmap.get(pg.lower()) or gmap.get(pg)
+    if not gg:
+        return False
+    a = str(gg).replace("{", "").replace("}", "").lower()
+    b = str(speed_guid).replace("{", "").replace("}", "").lower()
+    return a == b
 
 
 def _enrich_invoice_lines_from_menu(cursor, lines: list) -> list:
@@ -584,6 +751,7 @@ def api_settings_connection_get():
 @app.put("/api/settings/connection")
 def api_settings_connection_put(body: dict):
     """حفظ إعدادات الاتصال في config/settings.json (يُحفَظ قسم mat3am وغيره إن وُجد دون مسحه)."""
+    global _restaurant_sql_table_ready
     try:
         os.makedirs(os.path.dirname(_settings_path), exist_ok=True)
         port_val = _normalize_sql_port(body.get("port"))
@@ -601,8 +769,26 @@ def api_settings_connection_put(body: dict):
         merged["database"] = body.get("database", "")
         merged["uid"] = body.get("uid", "")
         merged["password"] = body.get("password", "")
-        with open(_settings_path, "w", encoding="utf-8") as f:
-            json.dump(merged, f, indent=2, ensure_ascii=False)
+        import tempfile
+
+        dirpath = os.path.dirname(os.path.abspath(_settings_path))
+        fd, tmp_path = tempfile.mkstemp(prefix="settings_", suffix=".json", dir=dirpath)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(merged, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, _settings_path)
+        except Exception:
+            try:
+                if os.path.isfile(tmp_path):
+                    os.unlink(tmp_path)
+            except Exception:
+                pass
+            raise
+        _restaurant_sql_table_ready = False
+        try:
+            _reset_tbl007_columns_cache()
+        except Exception:
+            pass
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -660,7 +846,9 @@ ALLOWED_ROLE_CODES = {
     "host",
     "waiter",
     "kitchen",
+    "speed_order",
     "server",
+    "kids_guard",
 }
 
 
@@ -1694,6 +1882,73 @@ def _ensure_costing_and_stock_schema(cursor):
         END
         """
     )
+    _ensure_payment_routing_schema(cursor)
+
+
+def _ensure_payment_routing_schema(cursor) -> None:
+    """ربط طرق التحصيل (نقدي/فيزا/…) بحسابات TBL004 + سجل بنود التسديد لكل فاتورة."""
+    cursor.execute(
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_PAYMENT_ROUTING', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_PAYMENT_ROUTING (
+                RouteKey NVARCHAR(40) NOT NULL PRIMARY KEY,
+                DisplayName NVARCHAR(200) NOT NULL,
+                AccountGuide UNIQUEIDENTIFIER NULL,
+                SortOrder INT NOT NULL DEFAULT 100,
+                IsActive BIT NOT NULL DEFAULT 1,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        END
+        IF OBJECT_ID(N'dbo.MAT3AM_INV_PAYMENT_LINE', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_INV_PAYMENT_LINE (
+                Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+                InvoiceGuid UNIQUEIDENTIFIER NOT NULL,
+                SessionId NVARCHAR(64) NULL,
+                RouteKey NVARCHAR(40) NOT NULL,
+                Amount FLOAT NOT NULL,
+                AccountGuide UNIQUEIDENTIFIER NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+            CREATE INDEX IX_MAT3AM_INV_PAYMENT_Inv ON dbo.MAT3AM_INV_PAYMENT_LINE(InvoiceGuid);
+            CREATE INDEX IX_MAT3AM_INV_PAYMENT_CreatedAt ON dbo.MAT3AM_INV_PAYMENT_LINE(CreatedAt DESC);
+        END
+        """
+    )
+    try:
+        cursor.execute("SELECT COUNT(*) FROM dbo.MAT3AM_PAYMENT_ROUTING")
+        rc = cursor.fetchone()
+        n = int(rc[0]) if rc and rc[0] is not None else 0
+        if n == 0:
+            seeds = [
+                ("cash", "نقدي / صندوق", 10),
+                ("visa", "فيزا — ماكينة بنكية (افتراضي)", 20),
+                ("wallet", "محفظة إلكترونية", 30),
+                ("instapay", "إنستاباي / تحويل فوري", 40),
+            ]
+            for rk, dn, so in seeds:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.MAT3AM_PAYMENT_ROUTING (RouteKey, DisplayName, SortOrder, IsActive)
+                    VALUES (?, ?, ?, 1)
+                    """,
+                    (rk, dn, so),
+                )
+    except Exception:
+        pass
+
+
+def _payment_routing_account_for_key(cursor, route_key: str):
+    try:
+        cursor.execute(
+            "SELECT AccountGuide FROM dbo.MAT3AM_PAYMENT_ROUTING WHERE RouteKey = ? AND IsActive = 1",
+            (route_key,),
+        )
+        r = cursor.fetchone()
+        return r[0] if r else None
+    except Exception:
+        return None
 
 
 def _get_invoice_type_name(cursor, invoice_type_guid: Optional[str]) -> str:
@@ -2530,23 +2785,63 @@ def api_ping():
     return {"server": "api_server", "ok": True, "port": XTRA_API_PORT}
 
 
+def _sql_settings_display_meta() -> dict:
+    """بيانات العرض من settings.json (بدون اتصال) — اسم السيرفر وقاعدة الربط المُعرّفة."""
+    out: dict = {"server": None, "database": None}
+    if not os.path.exists(_settings_path):
+        return out
+    try:
+        with open(_settings_path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        s = (d.get("server") or "").strip()
+        port = _normalize_sql_port(d.get("port"))
+        db = (d.get("database") or "").strip()
+        if s and port:
+            s = f"{s},{port}"
+        out["server"] = s or None
+        out["database"] = db or None
+    except Exception:
+        pass
+    return out
+
+
 def _mat3am_db_probe_for_ready() -> dict:
     """فحص سريع اختياري للقاعدة — لا يمنع تشغيل الواجهة إن فشل."""
+    meta = _sql_settings_display_meta()
+    srv = meta.get("server")
+    db_cfg = meta.get("database")
     conn_str = _get_connection_string_from_settings()
     if not conn_str:
-        return {"status": "not_configured", "detail": None}
+        return {
+            "status": "not_configured",
+            "detail": None,
+            "databaseName": db_cfg,
+            "serverLabel": srv,
+        }
     try:
         conn = pyodbc.connect(conn_str, timeout=4)
         try:
             cur = conn.cursor()
             cur.execute("SELECT 1")
             cur.fetchone()
+            dbn = None
+            try:
+                cur.execute("SELECT DB_NAME()")
+                r = cur.fetchone()
+                dbn = str(r[0]) if r and r[0] is not None else None
+            except Exception:
+                pass
             cur.close()
         finally:
             conn.close()
-        return {"status": "ok", "detail": None}
+        return {"status": "ok", "detail": None, "databaseName": dbn or db_cfg, "serverLabel": srv}
     except Exception as e:
-        return {"status": "unreachable", "detail": str(e)[:400]}
+        return {
+            "status": "unreachable",
+            "detail": str(e)[:400],
+            "databaseName": db_cfg,
+            "serverLabel": srv,
+        }
 
 
 @app.get("/api/ready")
@@ -2568,6 +2863,53 @@ def api_ready(check_db: int = 0):
     else:
         payload["database"] = {"status": "not_checked", "detail": None}
     return payload
+
+
+@app.get("/api/restaurant/dashboard-stats")
+def restaurant_dashboard_stats():
+    """ملخص للوحة الأداء: جلسات، طلبات مفتوحة، فواتير بانتظار التسديد."""
+    orders = _restaurant_load("orders", [])
+    sessions = _restaurant_load("table_sessions", [])
+    inv_local = _restaurant_load("invoices", [])
+    active_sessions = 0
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("status") or "").lower() != "active":
+            continue
+        active_sessions += 1
+    open_kitchen_orders = 0
+    for o in orders:
+        if not isinstance(o, dict):
+            continue
+        st = str(o.get("status") or "").lower()
+        if st in ("served", "paid", "cancelled"):
+            continue
+        open_kitchen_orders += 1
+    awaiting_cashier = 0
+    for x in inv_local:
+        if not isinstance(x, dict):
+            continue
+        if x.get("awaitingPayment") and not x.get("paidAt"):
+            awaiting_cashier += 1
+    total_tables = 0
+    try:
+        conn = get_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM dbo.TBL005 WHERE ISNULL(NotActive,0)=0")
+            r = cur.fetchone()
+            total_tables = int(r[0]) if r and r[0] is not None else 0
+            cur.close()
+            conn.close()
+    except Exception:
+        total_tables = 0
+    return {
+        "activeSessions": active_sessions,
+        "openKitchenOrders": open_kitchen_orders,
+        "awaitingCashierInvoices": awaiting_cashier,
+        "tablesInCatalog": total_tables,
+    }
 
 
 # ========== Agent Groups ==========
@@ -2869,6 +3211,8 @@ def create_agent(agent: dict):
         agent_name = agent.get('AgentName', '').strip()
         if not agent_name:
             raise HTTPException(status_code=400, detail="اسم العميل مطلوب")
+        if not (agent.get("MainGroupGuide") or agent.get("group_guide")):
+            raise HTTPException(status_code=400, detail="مجموعة العميل (MainGroupGuide) مطلوبة — اختر مجموعة من TBL015")
         
         # تحويل التواريخ
         birthdate = None
@@ -2911,7 +3255,7 @@ def create_agent(agent: dict):
             agent.get('Phone2') or None,
             agent.get('FullAdress') or None,
             agent.get('TaxCode') or None,
-            agent.get('MainGroupGuide') or None,
+            agent.get('MainGroupGuide') or agent.get('group_guide') or None,
             agent.get('NotActive', 0),
             agent.get('IDNumber') or None,
             birthdate,
@@ -3061,6 +3405,8 @@ def create_product(body: dict):
         _ensure_menu_tables(cursor)
         g = str(uuid.uuid4()).upper()
         group_guid = body.get("GroupGuid") or body.get("group") or None
+        if not group_guid or not str(group_guid).strip():
+            raise HTTPException(status_code=400, detail="مجموعة الصنف (GroupGuid) مطلوبة — اختر مجموعة من TBL006")
         price = float(body.get("AgentPrice") or body.get("Price") or body.get("price") or 0)
         latin = (body.get("LatinName") or "").strip() or None
         image_url = str(body.get("imageUrl") or body.get("ProductImageUrl") or "").strip() or None
@@ -3086,6 +3432,44 @@ def create_product(body: dict):
         try:
             if conn: conn.close()
         except Exception: pass
+
+
+@app.put("/api/products/{card_guide}/prep-minutes")
+def put_product_prep_minutes(card_guide: str, body: dict):
+    """زمن التحضير التقريبي (دقائق) — يُحفظ في عمود Hieght3 في TBL007 عند وجوده."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        cols = _fetch_tbl007_columns(cursor)
+        col = _tbl007_pick_column(cols, "Hieght3", "PrepMinutes", "NmbPrepMinutes")
+        if not col:
+            raise HTTPException(status_code=400, detail="لا يوجد عمود زمن تحضير في TBL007")
+        v = body.get("PrepMinutes")
+        if v is None:
+            v = body.get("Hieght3")
+        try:
+            minutes = float(v or 0)
+        except (TypeError, ValueError):
+            minutes = 0.0
+        cursor.execute(f"UPDATE dbo.TBL007 SET [{col}] = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (minutes, card_guide))
+        conn.commit()
+        return {"ok": True, "CardGuide": card_guide, "minutes": minutes}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 @app.get("/api/products/search")
 def search_products(search_text: str):
@@ -4160,6 +4544,14 @@ def _upsert_cost_center_by_name(name: str, main_cost_center: Optional[str] = Non
             conn.close()
         except Exception:
             pass
+
+
+MAT3AM_QUICK_KITCHEN_COST_CENTER_NAME = "مطاعم — مطبخ الطلبات السريعة"
+
+
+def _ensure_quick_kitchen_cost_center() -> Optional[str]:
+    """مركز تكلفة ثابت لطلبات الدليفري/البار السريعة المرتبطة بالمطبخ."""
+    return _upsert_cost_center_by_name(MAT3AM_QUICK_KITCHEN_COST_CENTER_NAME)
 
 # ========== محطة الخرسانة — عربيات الخلط (مراكز كلفة TBL005) ==========
 # البادئة TRUCK|لوحة|سعة|سائق|هاتف — لتمييز عربيات الخلط عن مراكز كلفة أخرى
@@ -5653,6 +6045,20 @@ def save_invoice(invoice: InvoiceHeader):
             pm_key,
             payment_method_map.get(pm_key.casefold(), MAT3AM_INVOICE_TBL019_PAYTERM_ID),
         )
+
+        # تثبيت رقم الفاتورة على نفس نمط TBL020 المختار (MainGuide).
+        # إذا أرسل العميل رقماً قديماً/مكررًا نرفع للرقم التالي الصحيح.
+        cursor.execute(
+            "SELECT ISNULL(MAX(BillNumber), 0) FROM TBL022 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+            (_mat3am_guid_sql_param(invoice_type),),
+        )
+        _mx = cursor.fetchone()
+        max_bill = int(_mx[0]) if _mx and _mx[0] is not None else 0
+        try:
+            req_bill = int(invoice.BillNumber) if invoice.BillNumber is not None else 0
+        except Exception:
+            req_bill = 0
+        final_bill_number = req_bill if req_bill > max_bill else (max_bill + 1)
         
         # الفاتورة المصدر (حافظة المرتبطة) للربط في TBL022 و TBL023
         source_bill_guid = invoice.SourceBill.strip() if invoice.SourceBill else None
@@ -5748,7 +6154,7 @@ def save_invoice(invoice: InvoiceHeader):
         vals.extend(
             [
                 invoice_type,
-                invoice.BillNumber,
+                final_bill_number,
                 bill_date,
                 done_in,
                 invoice.AgentGuide,
@@ -5915,7 +6321,7 @@ def save_invoice(invoice: InvoiceHeader):
             "MainGuide": main_guide,
             "CardGuide": main_guide,
             "InvoiceTypeGuid": invoice_type,
-            "BillNumber": invoice.BillNumber,
+            "BillNumber": final_bill_number,
             "message": "تم حفظ الفاتورة بنجاح",
             "stockMovementOk": stock_movement_ok,
             **({"stockMovementWarning": stock_movement_detail} if stock_movement_detail else {}),
@@ -5947,18 +6353,16 @@ def get_next_invoice_number(invoice_type: Optional[str] = None):
     try:
         cursor = conn.cursor()
         
-        # إذا لم يتم تحديد النمط، استخدم المبيعات كافتراضي
-        if not invoice_type:
-            invoice_type = "3478A885-6D69-4058-892E-8A57496DB9BC"  # فاتورة الكترونية
-        
-        # البحث عن أكبر رقم فاتورة من نفس النمط
-        # MainGuide في TBL022 = CardGuide في TBL020 (نوع الفاتورة)
+        # إذا لم يتم تحديد النمط، استخدم الافتراضي.
+        chosen_type = str(invoice_type or FALLBACK_INVOICE_TYPE_GUID).strip()
+        # المعادلة المرجعية المطلوبة:
+        # SELECT MAX(BillNumber)+1 FROM TBL022 WHERE MainGuide = المختار من TBL020
         query = """
-        SELECT MAX(BillNumber) 
-        FROM TBL022 
+        SELECT ISNULL(MAX(BillNumber), 0)
+        FROM TBL022
         WHERE MainGuide = CAST(? AS uniqueidentifier)
         """
-        cursor.execute(query, invoice_type)
+        cursor.execute(query, (chosen_type,))
         result = cursor.fetchone()
         max_num = int(result[0]) if result[0] else 0
         next_number = max_num + 1
@@ -8157,68 +8561,70 @@ def get_costing_raw_groups():
 @app.get("/api/costing/raw-products")
 def get_costing_raw_products(group_guid: Optional[str] = None):
     """
-    أصناف خامات الطبخ من TBL007 بدلالة مجموعات خامات الطبخ.
-    - ALL: كل الأصناف التابعة لفروع Root.
-    - group_guid: أصناف مجموعة محددة بشرط أنها ضمن فروع Root.
+    أصناف خامات الطبخ من TBL007 — مجموعات TBL006 تحت جذر «خامات الطبخ» بشكل متكرر (كل المستويات).
     """
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    _cte = """
+                ;WITH Canonical AS (
+                    SELECT N'خضروات طازجة' AS GroupName
+                    UNION ALL SELECT N'حبوب وبقوليات'
+                    UNION ALL SELECT N'لحوم حمراء'
+                    UNION ALL SELECT N'دواجن وبيض'
+                    UNION ALL SELECT N'أسماك ومأكولات بحرية'
+                    UNION ALL SELECT N'ألبان وأجبان'
+                    UNION ALL SELECT N'زيوت ودهون وصوصات'
+                    UNION ALL SELECT N'توابل وأعشاب جافة'
+                    UNION ALL SELECT N'معلبات ومجمدات ومكسرات'
+                ),
+                RootQ AS (
+                    SELECT TOP (1) r.CardGuide
+                    FROM dbo.TBL006 r
+                    WHERE
+                        (
+                            r.GroupName LIKE N'%خامات الطبخ بالمطعم%'
+                            OR r.GroupName LIKE N'%خامات الطبخ%'
+                            OR r.GroupName LIKE N'%مواد الطبخ%'
+                            OR r.GroupName LIKE N'%الخامات%'
+                            OR r.LatinName LIKE N'%Cooking ingredients%'
+                        )
+                        AND r.MainGuide IS NULL
+                    ORDER BY
+                        CASE
+                            WHEN r.GroupName LIKE N'%خامات الطبخ بالمطعم%' THEN 0
+                            WHEN r.LatinName LIKE N'%Cooking ingredients%' THEN 1
+                            ELSE 2
+                        END,
+                        r.ID
+                ),
+                RootUnion AS (
+                    SELECT CardGuide FROM RootQ
+                    UNION ALL
+                    SELECT CAST('8A5CB706-B2D5-4CB6-8FE9-08ECFBEDF2D8' AS uniqueidentifier) AS CardGuide
+                    WHERE NOT EXISTS (SELECT 1 FROM RootQ)
+                ),
+                GroupTree AS (
+                    SELECT g.CardGuide
+                    FROM dbo.TBL006 g
+                    WHERE g.CardGuide IN (SELECT CardGuide FROM RootUnion)
+                    UNION
+                    SELECT g.CardGuide
+                    FROM dbo.TBL006 g
+                    INNER JOIN Canonical c ON c.GroupName = g.GroupName
+                    UNION ALL
+                    SELECT g.CardGuide
+                    FROM dbo.TBL006 g
+                    INNER JOIN GroupTree gt ON g.MainGuide = gt.CardGuide
+                )
+    """
     try:
         cursor = conn.cursor()
         gg = (group_guid or "ALL").strip()
         if gg and gg.upper() != "ALL":
             cursor.execute(
-                """
-                ;WITH Canonical AS (
-                    SELECT N'خضروات طازجة' AS GroupName
-                    UNION ALL SELECT N'حبوب وبقوليات'
-                    UNION ALL SELECT N'لحوم حمراء'
-                    UNION ALL SELECT N'دواجن وبيض'
-                    UNION ALL SELECT N'أسماك ومأكولات بحرية'
-                    UNION ALL SELECT N'ألبان وأجبان'
-                    UNION ALL SELECT N'زيوت ودهون وصوصات'
-                    UNION ALL SELECT N'توابل وأعشاب جافة'
-                    UNION ALL SELECT N'معلبات ومجمدات ومكسرات'
-                ),
-                Root AS (
-                    SELECT TOP (1) r.CardGuide
-                    FROM dbo.TBL006 r
-                    WHERE
-                        (
-                            r.GroupName LIKE N'%خامات الطبخ بالمطعم%'
-                            OR r.GroupName LIKE N'%خامات الطبخ%'
-                            OR r.GroupName LIKE N'%مواد الطبخ%'
-                            OR r.GroupName LIKE N'%الخامات%'
-                            OR r.LatinName LIKE N'%Cooking ingredients%'
-                        )
-                        AND r.MainGuide IS NULL
-                    ORDER BY
-                        CASE
-                            WHEN r.GroupName LIKE N'%خامات الطبخ بالمطعم%' THEN 0
-                            WHEN r.LatinName LIKE N'%Cooking ingredients%' THEN 1
-                            ELSE 2
-                        END,
-                        r.ID
-                ),
-                RootFallback AS (
-                    SELECT CAST('8A5CB706-B2D5-4CB6-8FE9-08ECFBEDF2D8' AS uniqueidentifier) AS CardGuide
-                    WHERE NOT EXISTS (SELECT 1 FROM Root)
-                ),
-                RootFinal AS (
-                    SELECT CardGuide FROM Root
-                    UNION ALL
-                    SELECT CardGuide FROM RootFallback
-                ),
-                AllowedGroups AS (
-                    SELECT g.CardGuide
-                    FROM dbo.TBL006 g
-                    INNER JOIN RootFinal rt ON g.MainGuide = rt.CardGuide
-                    UNION
-                    SELECT g.CardGuide
-                    FROM dbo.TBL006 g
-                    INNER JOIN Canonical c ON c.GroupName = g.GroupName
-                )
+                _cte
+                + """
                 SELECT TOP 5000
                     p.CardGuide,
                     p.ProductName,
@@ -8228,67 +8634,20 @@ def get_costing_raw_products(group_guid: Optional[str] = None):
                     p.ProductImageUrl,
                     p.Hieght3
                 FROM dbo.TBL007 p
-                INNER JOIN AllowedGroups ag ON p.GroupGuid = ag.CardGuide
+                INNER JOIN GroupTree ag ON p.GroupGuid = ag.CardGuide
                 WHERE
                     p.GroupGuid = CAST(? AS uniqueidentifier)
                     AND ISNULL(p.NotActive, 0) = 0
                 ORDER BY p.ProductName
+                OPTION (MAXRECURSION 200)
                 """,
                 (gg,),
             )
         else:
             cursor.execute(
-                """
-                ;WITH Canonical AS (
-                    SELECT N'خضروات طازجة' AS GroupName
-                    UNION ALL SELECT N'حبوب وبقوليات'
-                    UNION ALL SELECT N'لحوم حمراء'
-                    UNION ALL SELECT N'دواجن وبيض'
-                    UNION ALL SELECT N'أسماك ومأكولات بحرية'
-                    UNION ALL SELECT N'ألبان وأجبان'
-                    UNION ALL SELECT N'زيوت ودهون وصوصات'
-                    UNION ALL SELECT N'توابل وأعشاب جافة'
-                    UNION ALL SELECT N'معلبات ومجمدات ومكسرات'
-                ),
-                Root AS (
-                    SELECT TOP (1) r.CardGuide
-                    FROM dbo.TBL006 r
-                    WHERE
-                        (
-                            r.GroupName LIKE N'%خامات الطبخ بالمطعم%'
-                            OR r.GroupName LIKE N'%خامات الطبخ%'
-                            OR r.GroupName LIKE N'%مواد الطبخ%'
-                            OR r.GroupName LIKE N'%الخامات%'
-                            OR r.LatinName LIKE N'%Cooking ingredients%'
-                        )
-                        AND r.MainGuide IS NULL
-                    ORDER BY
-                        CASE
-                            WHEN r.GroupName LIKE N'%خامات الطبخ بالمطعم%' THEN 0
-                            WHEN r.LatinName LIKE N'%Cooking ingredients%' THEN 1
-                            ELSE 2
-                        END,
-                        r.ID
-                ),
-                RootFallback AS (
-                    SELECT CAST('8A5CB706-B2D5-4CB6-8FE9-08ECFBEDF2D8' AS uniqueidentifier) AS CardGuide
-                    WHERE NOT EXISTS (SELECT 1 FROM Root)
-                ),
-                RootFinal AS (
-                    SELECT CardGuide FROM Root
-                    UNION ALL
-                    SELECT CardGuide FROM RootFallback
-                ),
-                AllowedGroups AS (
-                    SELECT g.CardGuide
-                    FROM dbo.TBL006 g
-                    INNER JOIN RootFinal rt ON g.MainGuide = rt.CardGuide
-                    UNION
-                    SELECT g.CardGuide
-                    FROM dbo.TBL006 g
-                    INNER JOIN Canonical c ON c.GroupName = g.GroupName
-                )
-                SELECT TOP 5000
+                _cte
+                + """
+                SELECT TOP 8000
                     p.CardGuide,
                     p.ProductName,
                     p.LatinName,
@@ -8297,9 +8656,10 @@ def get_costing_raw_products(group_guid: Optional[str] = None):
                     p.ProductImageUrl,
                     p.Hieght3
                 FROM dbo.TBL007 p
-                INNER JOIN AllowedGroups ag ON p.GroupGuid = ag.CardGuide
+                INNER JOIN GroupTree ag ON p.GroupGuid = ag.CardGuide
                 WHERE ISNULL(p.NotActive, 0) = 0
                 ORDER BY p.ProductName
+                OPTION (MAXRECURSION 200)
                 """
             )
         rows = cursor.fetchall()
@@ -9167,6 +9527,114 @@ def get_costing_unit_price(product_guide: str, invoice_type_guid: Optional[str] 
             pass
 
 
+def _mat3am_pos_policy_row_from_cursor(cursor) -> dict:
+    """قراءة سياسة الضريبة/الخدمة من MAT3AM_POS_POLICY (بدون فتح اتصال جديد)."""
+    cursor.execute(
+        """
+        SELECT TOP 1 ServicePercent, VatPercent, ApplyDiscountBeforeTax, ServiceBeforeVat
+        FROM dbo.MAT3AM_POS_POLICY
+        WHERE IsActive = 1
+        ORDER BY UpdatedAt DESC, Id DESC
+        """
+    )
+    r = cursor.fetchone()
+    if not r:
+        return {"servicePercent": 12.0, "vatPercent": 14.0, "applyDiscountBeforeTax": True, "serviceBeforeVat": True}
+    return {
+        "servicePercent": float(r[0] or 0),
+        "vatPercent": float(r[1] or 0),
+        "applyDiscountBeforeTax": bool(r[2]),
+        "serviceBeforeVat": bool(r[3]),
+    }
+
+
+def _mat3am_tbl007_service_fee_lookup(cursor) -> dict:
+    """
+    نسبة رسوم الخدمة السياحية من TBL007: اسم يحتوي على «خدمة» و«12» (بحث مرن بـ LIKE).
+    يُفضّل AgentPrice أو EndUserPrice إذا كانت بين 0 و100 كقيمة نسبة مئوية.
+    """
+    out: dict = {"matched": False, "percent": None, "productName": None, "source": None}
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 ProductName, AgentPrice, EndUserPrice
+            FROM dbo.TBL007
+            WHERE ISNULL(NotActive, 0) = 0
+              AND ProductName IS NOT NULL
+              AND ProductName LIKE N'%خدمة%'
+              AND ProductName LIKE N'%12%'
+            ORDER BY ProductName
+            """
+        )
+        r = cursor.fetchone()
+        if not r:
+            return out
+        name = str(r[0] or "").strip()
+        try:
+            ap = float(r[1] or 0)
+        except (TypeError, ValueError):
+            ap = 0.0
+        try:
+            ep = float(r[2] or 0)
+        except (TypeError, ValueError):
+            ep = 0.0
+        pct = None
+        if 0 < ap <= 100:
+            pct = ap
+            out["source"] = "AgentPrice"
+        elif 0 < ep <= 100:
+            pct = ep
+            out["source"] = "EndUserPrice"
+        if pct is None:
+            m = re.search(r"(\d+(?:\.\d+)?)\s*%", name)
+            if m:
+                try:
+                    pv = float(m.group(1))
+                    if 0 < pv <= 100:
+                        pct = pv
+                        out["source"] = "name"
+                except (TypeError, ValueError):
+                    pass
+        if pct is not None:
+            out["matched"] = True
+            out["percent"] = round(pct, 4)
+            out["productName"] = name[:200]
+        return out
+    except Exception as ex:
+        out["error"] = str(ex)
+        return out
+
+
+@app.get("/api/restaurant/pricing/cashier-snapshot")
+def restaurant_pricing_cashier_snapshot():
+    """
+    لشاشة الكاشير: سياسة POS + محاولة قراءة نسبة خدمة 12% من TBL007 (اسم يشبه «12% خدمة»).
+    effectiveServicePercent = من TBL007 إن وُجدت وإلا ServicePercent من السياسة.
+    """
+    conn = get_connection()
+    if not conn:
+        pol = {"servicePercent": 12.0, "vatPercent": 14.0, "applyDiscountBeforeTax": True, "serviceBeforeVat": True}
+        return {"ok": False, "policy": pol, "tbl007Service": {"matched": False}, "effectiveServicePercent": pol["servicePercent"], "message": "no_db"}
+    try:
+        cursor = conn.cursor()
+        try:
+            _ensure_costing_and_stock_schema(cursor)
+        except Exception:
+            pass
+        pol = _mat3am_pos_policy_row_from_cursor(cursor)
+        tbl = _mat3am_tbl007_service_fee_lookup(cursor)
+        eff = float(tbl["percent"]) if tbl.get("matched") and tbl.get("percent") is not None else float(pol.get("servicePercent") or 0)
+        return {"ok": True, "policy": pol, "tbl007Service": tbl, "effectiveServicePercent": eff}
+    except Exception as e:
+        pol = {"servicePercent": 12.0, "vatPercent": 14.0, "applyDiscountBeforeTax": True, "serviceBeforeVat": True}
+        return {"ok": False, "policy": pol, "tbl007Service": {"matched": False}, "effectiveServicePercent": pol["servicePercent"], "message": str(e)}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.get("/api/pos/policy")
 def get_pos_policy():
     conn = get_connection()
@@ -9175,23 +9643,7 @@ def get_pos_policy():
     try:
         cursor = conn.cursor()
         _ensure_costing_and_stock_schema(cursor)
-        cursor.execute(
-            """
-            SELECT TOP 1 ServicePercent, VatPercent, ApplyDiscountBeforeTax, ServiceBeforeVat
-            FROM dbo.MAT3AM_POS_POLICY
-            WHERE IsActive = 1
-            ORDER BY UpdatedAt DESC, Id DESC
-            """
-        )
-        r = cursor.fetchone()
-        if not r:
-            return {"servicePercent": 12.5, "vatPercent": 14.0, "applyDiscountBeforeTax": True, "serviceBeforeVat": True}
-        return {
-            "servicePercent": float(r[0] or 0),
-            "vatPercent": float(r[1] or 0),
-            "applyDiscountBeforeTax": bool(r[2]),
-            "serviceBeforeVat": bool(r[3]),
-        }
+        return _mat3am_pos_policy_row_from_cursor(cursor)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -9387,7 +9839,7 @@ def _bootstrap_mat3am_runtime() -> None:
         os.makedirs(_restaurant_dir, exist_ok=True)
         fp = _restaurant_path("floor_plan")
         if not os.path.exists(fp):
-            template = os.path.join(str(BASE_DIR), "config", "restaurant", "floor_plan.json")
+            template = os.path.join(str(BUNDLE_DIR), "config", "restaurant", "floor_plan.json")
             if os.path.isfile(template):
                 shutil.copy2(template, fp)
                 print("[mat3am] bootstrap: تم نسخ floor_plan.json الافتراضي")
@@ -9403,6 +9855,37 @@ def _bootstrap_mat3am_runtime() -> None:
                 with open(fp, "w", encoding="utf-8") as f:
                     json.dump(minimal, f, ensure_ascii=False, indent=2)
                 print("[mat3am] bootstrap: تم إنشاء floor_plan.json أولي")
+
+        # منطقة الأطفال (Kids Area) — ملفات JSON فقط، لا جداول SQL جديدة للمديول
+        ks = os.path.join(_restaurant_dir, "kids_area_settings.json")
+        if not os.path.exists(ks):
+            tmpl = os.path.join(str(BUNDLE_DIR), "config", "restaurant", "kids_area_defaults.json")
+            if os.path.isfile(tmpl):
+                shutil.copy2(tmpl, ks)
+                try:
+                    with open(ks, "r", encoding="utf-8") as f:
+                        kd = json.load(f)
+                    if isinstance(kd, dict) and "_meta" in kd:
+                        kd.pop("_meta", None)
+                        with open(ks, "w", encoding="utf-8") as wf:
+                            json.dump(kd, wf, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+                print("[mat3am] bootstrap: تم نسخ kids_area_settings.json من القالب")
+            else:
+                with open(ks, "w", encoding="utf-8") as f:
+                    json.dump(_kids_area_default_settings(), f, ensure_ascii=False, indent=2)
+                print("[mat3am] bootstrap: تم إنشاء kids_area_settings.json أولي")
+        sess_path = os.path.join(_restaurant_dir, "kids_area_sessions.json")
+        if not os.path.exists(sess_path):
+            with open(sess_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            print("[mat3am] bootstrap: kids_area_sessions.json فارغ")
+        prof_path = os.path.join(_restaurant_dir, "kids_area_profiles.json")
+        if not os.path.exists(prof_path):
+            with open(prof_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            print("[mat3am] bootstrap: kids_area_profiles.json فارغ")
     except Exception as e:
         print("[mat3am] bootstrap warning:", e)
 
@@ -9412,20 +9895,339 @@ def _mat3am_startup_bootstrap():
     _bootstrap_mat3am_runtime()
 
 
-def _restaurant_load(name: str, default: list):
+_RESTAURANT_SQL_KEYS = frozenset(
+    {
+        "orders",
+        "table_sessions",
+        "invoices",
+        "kitchen_notifications",
+        "daily_menu",
+        "daily_menu_schedule",
+    }
+)
+_restaurant_sql_table_ready = False
+
+
+def _restaurant_sql_ensure_table(cursor) -> None:
+    cursor.execute(
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_STATE', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_RESTAURANT_STATE (
+                StateKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+                PayloadJson NVARCHAR(MAX) NULL,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        END
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes WHERE name = N'IX_MAT3AM_RESTAURANT_STATE_UpdatedAt'
+              AND object_id = OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_STATE')
+        )
+        BEGIN
+            CREATE INDEX IX_MAT3AM_RESTAURANT_STATE_UpdatedAt ON dbo.MAT3AM_RESTAURANT_STATE(UpdatedAt DESC);
+        END
+        """
+    )
+
+
+@app.on_event("startup")
+def _mat3am_startup_ensure_restaurant_state_sql():
+    """نفس منطق POST /api/dev/bootstrap: جداول MAT3AM كاملة عند الإقلاع إن وُجد اتصال (لا تعتمد على الضغط على زر التهيئة)."""
+    global _restaurant_sql_table_ready
+    _restaurant_sql_table_ready = False
+    conn = get_connection()
+    if not conn:
+        print("[mat3am] MAT3AM schema: تأجيل — لا اتصال SQL عند الإقلاع", flush=True)
+        return
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+        conn.commit()
+        _restaurant_sql_table_ready = True
+        print("[mat3am] MAT3AM: تم التأكد من جداول التطبيق (تهيئة كاملة مثل bootstrap)", flush=True)
+    except Exception as e:
+        print(f"[mat3am] MAT3AM schema: {e}", flush=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _restaurant_sql_ready() -> bool:
+    """جدول حالة المطعم المشتركة بين الأجهزة — أي اتصال SQL ناجح (إعدادات أو config الافتراضي)."""
+    global _restaurant_sql_table_ready
+    if _restaurant_sql_table_ready:
+        return True
+    conn = get_connection()
+    if not conn:
+        return False
+    try:
+        cursor = conn.cursor()
+        # مسار سريع: أغلب بيئات التشغيل لديها الجدول بالفعل لكن بدون صلاحية CREATE/ALTER.
+        # لا نحاول DDL أولًا حتى لا تفشل المشاركة بين الأجهزة بسبب صلاحيات محدودة.
+        try:
+            cursor.execute("SELECT TOP 1 StateKey FROM dbo.MAT3AM_RESTAURANT_STATE")
+            _restaurant_sql_table_ready = True
+            return True
+        except Exception:
+            pass
+        # fallback: عند بيئة تطوير كاملة الصلاحيات نحاول إنشاء الجدول مرة واحدة.
+        try:
+            _restaurant_sql_ensure_table(cursor)
+            conn.commit()
+            _restaurant_sql_table_ready = True
+            return True
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _restaurant_sql_get(key: str):
+    if key not in _RESTAURANT_SQL_KEYS:
+        return None
+    if not _restaurant_sql_ready():
+        return None
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT PayloadJson FROM dbo.MAT3AM_RESTAURANT_STATE WHERE StateKey = ?", (key,))
+        row = cursor.fetchone()
+        if not row or row[0] is None:
+            return None
+        return json.loads(str(row[0]))
+    except Exception:
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _restaurant_sql_set(key: str, data) -> bool:
+    if key not in _RESTAURANT_SQL_KEYS:
+        return False
+    if not _restaurant_sql_ready():
+        return False
+    conn = get_connection()
+    if not conn:
+        return False
+    try:
+        cursor = conn.cursor()
+        js = json.dumps(data, ensure_ascii=False)
+        cursor.execute("SELECT 1 FROM dbo.MAT3AM_RESTAURANT_STATE WHERE StateKey = ?", (key,))
+        if cursor.fetchone():
+            cursor.execute(
+                "UPDATE dbo.MAT3AM_RESTAURANT_STATE SET PayloadJson = ?, UpdatedAt = SYSUTCDATETIME() WHERE StateKey = ?",
+                (js, key),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO dbo.MAT3AM_RESTAURANT_STATE (StateKey, PayloadJson) VALUES (?, ?)",
+                (key, js),
+            )
+        conn.commit()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _restaurant_load(name: str, default: Any):
+    """تحميل ملفات JSON للمطعم — مع تفضيل التخزين في SQL للمفاتيح المشتركة بين الأجهزة."""
+    if name in _RESTAURANT_SQL_KEYS:
+        sqlv = _restaurant_sql_get(name)
+        if sqlv is not None:
+            return sqlv
     p = _restaurant_path(name)
     if not os.path.exists(p):
         return default
     try:
         with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except Exception:
         return default
+    if name in _RESTAURANT_SQL_KEYS:
+        _restaurant_sql_set(name, data)
+    return data
 
-def _restaurant_save(name: str, data: list):
-    p = _restaurant_path(name)
-    with open(p, "w", encoding="utf-8") as f:
+
+def _restaurant_save(name: str, data: Any):
+    """حفظ حالة المطعم: للمفاتيح المشتركة يُكتب SQL أولاً ثم نسخة JSON على القرص كاحتياطي محلي."""
+    sql_ok = False
+    if name in _RESTAURANT_SQL_KEYS:
+        sql_ok = _restaurant_sql_set(name, data)
+    try:
+        p = _restaurant_path(name)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as ex:
+        if name in _RESTAURANT_SQL_KEYS and not sql_ok:
+            raise HTTPException(
+                status_code=500,
+                detail=f"تعذر حفظ {name}: لا اتصال SQL ولا كتابة الملف المحلي ({ex})",
+            ) from ex
+        if name in _RESTAURANT_SQL_KEYS and sql_ok:
+            print(f"[mat3am] _restaurant_save: فشلت النسخة الاحتياطية JSON لكن SQL نجح — {name}: {ex}", flush=True)
+            return
+        raise
+    if name in _RESTAURANT_SQL_KEYS and not sql_ok:
+        print(f"[mat3am] _restaurant_save: SQL غير متاح — تُحفظ نسخة ملف فقط لـ {name}", flush=True)
+
+
+def _kids_area_json_path(filename: str) -> str:
+    os.makedirs(_restaurant_dir, exist_ok=True)
+    return os.path.join(_restaurant_dir, filename)
+
+
+def _kids_area_default_settings() -> dict:
+    return {
+        "packages": [
+            {"id": "std", "nameAr": "عادي (بالساعة)", "pricePerHour": 50.0},
+            {"id": "vip", "nameAr": "مميز (بالساعة)", "pricePerHour": 100.0},
+        ],
+        "defaultPackageId": "std",
+    }
+
+
+def _kids_area_load_settings() -> dict:
+    p = _kids_area_json_path("kids_area_settings.json")
+    if not os.path.exists(p):
+        d = _kids_area_default_settings()
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return d
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else _kids_area_default_settings()
+    except Exception:
+        return _kids_area_default_settings()
+
+
+def _kids_area_save_settings(d: dict) -> None:
+    with open(_kids_area_json_path("kids_area_settings.json"), "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+
+
+def _kids_area_load_sessions() -> list:
+    p = _kids_area_json_path("kids_area_sessions.json")
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return raw if isinstance(raw, list) else []
+    except Exception:
+        return []
+
+
+def _kids_area_save_sessions(data: list) -> None:
+    with open(_kids_area_json_path("kids_area_sessions.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _kids_area_load_profiles() -> list:
+    p = _kids_area_json_path("kids_area_profiles.json")
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return raw if isinstance(raw, list) else []
+    except Exception:
+        return []
+
+
+def _kids_area_save_profiles(data: list) -> None:
+    with open(_kids_area_json_path("kids_area_profiles.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _kids_area_upsert_profile(phone: str, father_name: str, child_name: str) -> None:
+    ph = re.sub(r"\s+", "", str(phone or "").strip())
+    if len(ph) < 6:
+        return
+    profs = _kids_area_load_profiles()
+    if not isinstance(profs, list):
+        profs = []
+    now = datetime.now().isoformat()
+    found = None
+    for p in profs:
+        if isinstance(p, dict) and re.sub(r"\s+", "", str(p.get("phone") or "")) == ph:
+            found = p
+            break
+    if found:
+        found["fatherName"] = father_name or found.get("fatherName")
+        found["lastChildName"] = child_name or found.get("lastChildName")
+        found["updatedAt"] = now
+        ch = found.get("children")
+        if not isinstance(ch, list):
+            ch = []
+        if child_name and not any(isinstance(c, dict) and str(c.get("name") or "").strip() == child_name.strip() for c in ch):
+            ch.append({"name": child_name.strip(), "since": now})
+        found["children"] = ch
+    else:
+        profs.append(
+            {
+                "phone": ph,
+                "fatherName": father_name,
+                "lastChildName": child_name,
+                "children": [{"name": child_name, "since": now}] if child_name else [],
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+    _kids_area_save_profiles(profs)
+
+
+def _kids_area_parse_iso(s: str) -> Optional[datetime]:
+    if not s or not str(s).strip():
+        return None
+    raw = str(s).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(raw)
+    except Exception:
+        return None
+
+
+def _kids_area_package_price(settings: dict, package_id: str) -> float:
+    pkgs = settings.get("packages") if isinstance(settings, dict) else None
+    if not isinstance(pkgs, list):
+        return 0.0
+    for p in pkgs:
+        if isinstance(p, dict) and str(p.get("id") or "") == str(package_id):
+            try:
+                return float(p.get("pricePerHour") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
 
 
 def _restaurant_venue_path() -> str:
@@ -9456,12 +10258,17 @@ def _restaurant_read_venue() -> dict:
 
 def _restaurant_workflow_default() -> dict:
     return {
-        "receiveGuestBy": "host",            # manager | waiter | captain | customer_self | none
-        "takeOrderBy": "waiter",             # manager | waiter | captain | customer_self | none
-        "deliverFromKitchenBy": "server",    # server | waiter | kitchen_window
-        "cleanTableBy": "server",            # server | waiter | cleaner
-        "checkRequestBy": "waiter",          # waiter | manager | cashier
+        "receiveGuestBy": "host",            # host | manager | waiter | customer_self | server
+        "takeOrderBy": "waiter",             # host | manager | waiter | customer_self | server
+        "deliverFromKitchenBy": "server",    # server | waiter | manager | host | kitchen_window
+        "cleanTableBy": "server",            # server | waiter | manager | cleaner
+        "checkRequestBy": "waiter",          # waiter | manager | cashier | server
         "cashierDispatchMode": "both",       # visa_machine | cash_collector | both
+        # سياسة التنظيف (Workflow Policy)
+        "cleaningStartTrigger": "payment_completed",  # request_check | payment_completed | manager_command | waiter_command
+        "cleaningExecutionBy": "server",              # server | waiter | manager | cleaner
+        "cleaningReviewBy": "none",                   # none | manager | waiter | cleaner
+        "cleaningStartStatus": "dirty",               # dirty | cleaning
     }
 
 
@@ -9470,11 +10277,103 @@ def _restaurant_workflow_path() -> str:
     return os.path.join(_restaurant_dir, "workflow_settings.json")
 
 
+def _workflow_sql_ensure_table(cursor) -> None:
+    cursor.execute(
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_WORKFLOW_SETTINGS', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_WORKFLOW_SETTINGS (
+                SettingsKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+                PayloadJson NVARCHAR(MAX) NULL,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                UpdatedBy NVARCHAR(100) NULL
+            );
+        END
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes WHERE name = N'IX_MAT3AM_WORKFLOW_SETTINGS_UpdatedAt'
+              AND object_id = OBJECT_ID(N'dbo.MAT3AM_WORKFLOW_SETTINGS')
+        )
+        BEGIN
+            CREATE INDEX IX_MAT3AM_WORKFLOW_SETTINGS_UpdatedAt ON dbo.MAT3AM_WORKFLOW_SETTINGS(UpdatedAt DESC);
+        END
+        """
+    )
+
+
+def _workflow_sql_read() -> Optional[dict]:
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        _workflow_sql_ensure_table(cursor)
+        conn.commit()
+        cursor.execute("SELECT TOP 1 PayloadJson FROM dbo.MAT3AM_WORKFLOW_SETTINGS WHERE SettingsKey = N'default'")
+        row = cursor.fetchone()
+        if not row or row[0] is None:
+            return None
+        try:
+            raw = json.loads(str(row[0]))
+            return raw if isinstance(raw, dict) else None
+        except Exception:
+            return None
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _workflow_sql_write(payload: dict, updated_by: str = "system") -> None:
+    conn = get_connection()
+    if not conn:
+        return
+    try:
+        cursor = conn.cursor()
+        _workflow_sql_ensure_table(cursor)
+        pj = json.dumps(payload, ensure_ascii=False)
+        cursor.execute(
+            """
+            MERGE dbo.MAT3AM_WORKFLOW_SETTINGS AS T
+            USING (SELECT CAST(? AS NVARCHAR(80)) AS SettingsKey) AS S
+            ON T.SettingsKey = S.SettingsKey
+            WHEN MATCHED THEN
+                UPDATE SET PayloadJson = ?, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = ?
+            WHEN NOT MATCHED THEN
+                INSERT (SettingsKey, PayloadJson, UpdatedBy) VALUES (S.SettingsKey, ?, ?);
+            """,
+            ("default", pj, str(updated_by or "system"), pj, str(updated_by or "system")),
+        )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _restaurant_read_workflow() -> dict:
     d = _restaurant_workflow_default()
+    sql_obj = _workflow_sql_read()
+    if isinstance(sql_obj, dict):
+        for k in d.keys():
+            if k in sql_obj and str(sql_obj.get(k) or "").strip():
+                d[k] = str(sql_obj.get(k)).strip()
+        return _restaurant_normalize_workflow_settings(d)
     p = _restaurant_workflow_path()
     if not os.path.exists(p):
-        return d
+        return _restaurant_normalize_workflow_settings(d)
     try:
         with open(p, "r", encoding="utf-8") as f:
             j = json.load(f)
@@ -9482,20 +10381,75 @@ def _restaurant_read_workflow() -> dict:
             for k in d.keys():
                 if k in j and str(j.get(k) or "").strip():
                     d[k] = str(j.get(k)).strip()
+            # migration: if legacy JSON exists and SQL has no row yet, sync once to SQL
+            _workflow_sql_write(d, updated_by="json_migration")
     except Exception:
         pass
-    return d
+    return _restaurant_normalize_workflow_settings(d)
+
+
+def _restaurant_normalize_workflow_settings(raw: dict) -> dict:
+    cur = _restaurant_workflow_default()
+    if not isinstance(raw, dict):
+        return cur
+    role_like = {"host", "manager", "waiter", "customer_self", "server", "cashier", "cleaner", "kitchen_window", "none"}
+    receive_allowed = {"host", "manager", "waiter", "customer_self", "server"}
+    take_allowed = {"host", "manager", "waiter", "customer_self", "server"}
+    deliver_allowed = {"server", "waiter", "manager", "host", "kitchen_window"}
+    clean_allowed = {"server", "waiter", "manager", "cleaner"}
+    check_allowed = {"waiter", "manager", "cashier", "server"}
+    dispatch_allowed = {"visa_machine", "cash_collector", "both"}
+    clean_trigger_allowed = {"request_check", "payment_completed", "manager_command", "waiter_command"}
+    clean_exec_allowed = {"server", "waiter", "manager", "cleaner"}
+    clean_review_allowed = {"none", "manager", "waiter", "cleaner"}
+    clean_start_status_allowed = {"dirty", "cleaning"}
+
+    for k in list(cur.keys()):
+        v = str(raw.get(k) or "").strip().lower()
+        if not v:
+            continue
+        if k in ("receiveGuestBy", "takeOrderBy", "deliverFromKitchenBy", "cleanTableBy", "checkRequestBy", "cleaningExecutionBy", "cleaningReviewBy") and v not in role_like:
+            continue
+        cur[k] = v
+
+    if cur["receiveGuestBy"] not in receive_allowed:
+        cur["receiveGuestBy"] = "host"
+    if cur["takeOrderBy"] not in take_allowed:
+        cur["takeOrderBy"] = "waiter"
+    if cur["deliverFromKitchenBy"] not in deliver_allowed:
+        cur["deliverFromKitchenBy"] = "server"
+    if cur["cleanTableBy"] not in clean_allowed:
+        cur["cleanTableBy"] = "server"
+    if cur["checkRequestBy"] not in check_allowed:
+        cur["checkRequestBy"] = "waiter"
+    if cur["cashierDispatchMode"] not in dispatch_allowed:
+        cur["cashierDispatchMode"] = "both"
+    if cur["cleaningStartTrigger"] not in clean_trigger_allowed:
+        cur["cleaningStartTrigger"] = "payment_completed"
+    if cur["cleaningExecutionBy"] not in clean_exec_allowed:
+        cur["cleaningExecutionBy"] = "server"
+    if cur["cleaningReviewBy"] not in clean_review_allowed:
+        cur["cleaningReviewBy"] = "none"
+    if cur["cleaningStartStatus"] not in clean_start_status_allowed:
+        cur["cleaningStartStatus"] = "dirty"
+    # منع تضارب المفتاحين legacy/new:
+    # cleanTableBy (قديم) و cleaningExecutionBy (الحالي) يجب أن يكونا نفس القيمة دائمًا.
+    cur["cleanTableBy"] = cur["cleaningExecutionBy"]
+    return cur
 
 
 def _restaurant_write_workflow(body: dict) -> dict:
     cur = _restaurant_read_workflow()
+    merged = dict(cur)
     if isinstance(body, dict):
-        for k in list(cur.keys()):
+        for k in list(merged.keys()):
             if k in body and str(body.get(k) or "").strip():
-                cur[k] = str(body.get(k)).strip()
+                merged[k] = str(body.get(k)).strip()
+    cur = _restaurant_normalize_workflow_settings(merged)
     p = _restaurant_workflow_path()
     with open(p, "w", encoding="utf-8") as f:
         json.dump(cur, f, ensure_ascii=False, indent=2)
+    _workflow_sql_write(cur, updated_by="settings_ui")
     return cur
 
 
@@ -9509,12 +10463,48 @@ def _workflow_role_for(action: str) -> str:
     if a == "pickup_kitchen":
         return str(w.get("deliverFromKitchenBy") or "server")
     if a == "clean_table":
-        return str(w.get("cleanTableBy") or "server")
+        return str(w.get("cleaningExecutionBy") or w.get("cleanTableBy") or "server")
     if a == "request_check":
         return str(w.get("checkRequestBy") or "waiter")
     if a == "dispatch_cashier":
         return str(w.get("cashierDispatchMode") or "both")
     return "waiter"
+
+
+def _workflow_delivery_receiver_role() -> str:
+    w = _restaurant_read_workflow()
+    role = str(w.get("deliverFromKitchenBy") or "server").strip().lower()
+    if role in ("server", "waiter", "manager", "host"):
+        return role
+    return "none"
+
+
+def _workflow_apply_cleaning_policy(table_id: str, event: str, actor_role: Optional[str] = None) -> dict:
+    """
+    event: request_check | payment_completed | direct_command
+    actor_role عند direct_command: manager | waiter
+    """
+    tid = str(table_id or "").strip()
+    if not tid:
+        return {"applied": False, "reason": "missing_table_id"}
+    wf = _restaurant_read_workflow()
+    trigger = str(wf.get("cleaningStartTrigger") or "payment_completed").strip().lower()
+    actor = str(actor_role or "").strip().lower()
+    ev = str(event or "").strip().lower()
+    should = False
+    if trigger in ("request_check", "payment_completed") and ev == trigger:
+        should = True
+    elif trigger == "manager_command" and ev == "direct_command" and actor == "manager":
+        should = True
+    elif trigger == "waiter_command" and ev == "direct_command" and actor == "waiter":
+        should = True
+    if not should:
+        return {"applied": False, "reason": "trigger_not_matched", "trigger": trigger, "event": ev, "actorRole": actor}
+    status = str(wf.get("cleaningStartStatus") or "dirty").strip().lower()
+    if status not in ("dirty", "cleaning"):
+        status = "dirty"
+    restaurant_update_table_status(tid, {"status": status})
+    return {"applied": True, "tableId": tid, "status": status, "trigger": trigger, "event": ev}
 
 
 @app.get("/api/restaurant/workflow-settings")
@@ -9525,6 +10515,167 @@ def restaurant_workflow_settings_get():
 @app.put("/api/restaurant/workflow-settings")
 def restaurant_workflow_settings_put(body: dict):
     return _restaurant_write_workflow(body if isinstance(body, dict) else {})
+
+
+@app.get("/api/restaurant/settings/payment-routing")
+def restaurant_payment_routing_get():
+    """قائمة ربط طرق التحصيل (نقدي/فيزا/…) بحسابات TBL004 — تُخزَّن في SQL."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_payment_routing_schema(cur)
+        conn.commit()
+        cur.execute(
+            """
+            SELECT RouteKey, DisplayName, AccountGuide, SortOrder, IsActive
+            FROM dbo.MAT3AM_PAYMENT_ROUTING
+            ORDER BY SortOrder, RouteKey
+            """
+        )
+        routes = []
+        for r in cur.fetchall() or []:
+            ag = r[2]
+            routes.append(
+                {
+                    "routeKey": r[0],
+                    "displayName": r[1],
+                    "accountGuide": str(ag).upper() if ag else None,
+                    "sortOrder": int(r[3] or 0),
+                    "isActive": bool(r[4]),
+                }
+            )
+        return {"routes": routes}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.put("/api/restaurant/settings/payment-routing")
+def restaurant_payment_routing_put(body: dict):
+    """استبدال جدول ربط التحصيل — يُنصح بمفاتيح: cash, visa, wallet, instapay + أي طرق إضافية (مثل visa_b2)."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    routes = body.get("routes")
+    if not isinstance(routes, list) or not routes:
+        raise HTTPException(status_code=400, detail="routes مطلوبة (مصفوفة غير فارغة)")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_payment_routing_schema(cur)
+        validated = []
+        seen = set()
+        for item in routes:
+            if not isinstance(item, dict):
+                continue
+            rk = str(item.get("routeKey") or "").strip()[:40]
+            if not rk or not re.match(r"^[A-Za-z0-9_]+$", rk):
+                raise HTTPException(status_code=400, detail=f"مفتاح غير صالح: {rk!r}")
+            if rk in seen:
+                raise HTTPException(status_code=400, detail=f"تكرار routeKey: {rk}")
+            seen.add(rk)
+            dn = str(item.get("displayName") or rk).strip()[:200] or rk
+            try:
+                so = int(item.get("sortOrder") if item.get("sortOrder") is not None else 100)
+            except (TypeError, ValueError):
+                so = 100
+            is_act = bool(item.get("isActive", True))
+            ag_raw = str(item.get("accountGuide") or "").strip()
+            ag = None
+            if ag_raw:
+                try:
+                    uuid.UUID(ag_raw)
+                except Exception:
+                    raise HTTPException(status_code=400, detail=f"accountGuide غير صالح لـ {rk}") from None
+                cur.execute(
+                    "SELECT 1 FROM dbo.TBL004 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    (ag_raw,),
+                )
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400, detail=f"الحساب غير موجود في TBL004 لـ {rk}")
+                ag = ag_raw
+            validated.append((rk, dn, ag, so, is_act))
+        if not validated:
+            raise HTTPException(status_code=400, detail="لا توجد بنود صالحة في routes")
+        cur.execute("DELETE FROM dbo.MAT3AM_PAYMENT_ROUTING")
+        for rk, dn, ag, so, is_act in validated:
+            cur.execute(
+                """
+                INSERT INTO dbo.MAT3AM_PAYMENT_ROUTING (RouteKey, DisplayName, AccountGuide, SortOrder, IsActive)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (rk, dn, ag, so, is_act),
+            )
+        conn.commit()
+        return restaurant_payment_routing_get()
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.get("/api/restaurant/accounts-for-routing")
+def restaurant_accounts_for_routing(q: Optional[str] = None):
+    """عيّنة من TBL004 لاختيار حساب التحصيل في إعدادات الدفع."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        qq = (q or "").strip()
+        if qq:
+            like = f"%{qq[:80]}%"
+            cur.execute(
+                """
+                SELECT TOP 120 CardGuide, CardCode, AccountName
+                FROM dbo.TBL004
+                WHERE AccountName LIKE ? OR CardCode LIKE ? OR CAST(CardGuide AS NVARCHAR(36)) LIKE ?
+                ORDER BY CardCode
+                """,
+                (like, like, like),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT TOP 120 CardGuide, CardCode, AccountName
+                FROM dbo.TBL004
+                WHERE AccountName IS NOT NULL
+                ORDER BY CardCode
+                """
+            )
+        rows = []
+        for r in cur.fetchall() or []:
+            rows.append(
+                {
+                    "cardGuide": str(r[0]).upper() if r[0] else "",
+                    "cardCode": str(r[1] or ""),
+                    "accountName": str(r[2] or ""),
+                }
+            )
+        return {"accounts": rows}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _restaurant_write_venue(body: dict) -> dict:
@@ -10080,6 +11231,34 @@ def restaurant_get_tables():
     _close_stale_active_sessions()
     local_state = _local_table_state_map()
     no_order_map = _table_no_order_overdue_map(10)
+    active_table_ids_upper = set()
+    sessions_now = _restaurant_load("table_sessions", [])
+    if isinstance(sessions_now, list):
+        for s in sessions_now:
+            if not _session_active_today(s):
+                continue
+            tid = str((s or {}).get("tableId") or "").strip().upper()
+            if tid:
+                active_table_ids_upper.add(tid)
+    orders_now = _restaurant_load("orders", [])
+    if isinstance(orders_now, list):
+        for o in orders_now:
+            if not isinstance(o, dict):
+                continue
+            st = str(o.get("status") or "").strip().lower()
+            if st not in ("pending", "preparing", "ready"):
+                continue
+            tid = str(o.get("tableId") or "").strip().upper()
+            if tid:
+                active_table_ids_upper.add(tid)
+
+    def _normalized_table_status(table_id: str, raw_status: Any) -> str:
+        st = str(raw_status or "ready").strip().lower() or "ready"
+        tid = str(table_id or "").strip().upper()
+        # لا نعرض occupied من حالة محفوظة قديمة إذا لا توجد جلسة/طلب نشط فعلياً.
+        if st == "occupied" and tid and tid not in active_table_ids_upper:
+            return "ready"
+        return st
 
     # 1) قاعدة البيانات (TBL005)
     conn = get_connection()
@@ -10113,7 +11292,7 @@ def restaurant_get_tables():
                         continue
                     used.add(gid)
                     st_row = local_state.get(gid.upper(), {})
-                    status_v = str(st_row.get("status") or "ready")
+                    status_v = _normalized_table_status(gid, st_row.get("status"))
                     dirty_at = st_row.get("dirtyAt")
                     clean_started = st_row.get("cleaningStartedAt")
                     overdue = False
@@ -10140,7 +11319,7 @@ def restaurant_get_tables():
                 for i, row in enumerate(rows, 1):
                     gid = str(row[0])
                     st_row = local_state.get(gid.upper(), {})
-                    status_v = str(st_row.get("status") or "ready")
+                    status_v = _normalized_table_status(gid, st_row.get("status"))
                     dirty_at = st_row.get("dirtyAt")
                     clean_started = st_row.get("cleaningStartedAt")
                     overdue = False
@@ -10181,7 +11360,7 @@ def restaurant_get_tables():
             if not isinstance(t, dict):
                 continue
             tid = str(t.get("id") or "").strip()
-            st = str(t.get("status") or "ready")
+            st = _normalized_table_status(tid, t.get("status"))
             dirty_at = t.get("dirtyAt")
             overdue = False
             if st == "dirty" and dirty_at:
@@ -10211,23 +11390,215 @@ def restaurant_get_tables():
 @app.post("/api/restaurant/tables")
 def restaurant_save_table(body: dict):
     """حفظ/إنشاء طاولة"""
+    def _parse_table_number(raw_number: Any, raw_name: Any, fallback: int) -> int:
+        try:
+            n = int(raw_number)
+            if n > 0:
+                return n
+        except Exception:
+            pass
+        try:
+            nm = str(raw_name or "")
+            m = re.search(r"(\d+)", nm)
+            if m:
+                n2 = int(m.group(1))
+                if n2 > 0:
+                    return n2
+        except Exception:
+            pass
+        return max(1, int(fallback))
+
+    def _point_in_polygon(px: float, py: float, poly_points: list) -> bool:
+        if not isinstance(poly_points, list) or len(poly_points) < 3:
+            return True
+        inside = False
+        j = len(poly_points) - 1
+        for i in range(len(poly_points)):
+            try:
+                xi = float(poly_points[i][0])
+                yi = float(poly_points[i][1])
+                xj = float(poly_points[j][0])
+                yj = float(poly_points[j][1])
+            except Exception:
+                j = i
+                continue
+            intersects = ((yi > py) != (yj > py)) and (px < ((xj - xi) * (py - yi) / ((yj - yi) or 1e-9) + xi))
+            if intersects:
+                inside = not inside
+            j = i
+        return inside
+
+    def _table_overlaps(x: float, y: float, w: float, h: float, existing_tables: list) -> bool:
+        x2 = x + w
+        y2 = y + h
+        for et in existing_tables:
+            if not isinstance(et, dict):
+                continue
+            try:
+                ex = float(et.get("x") or 0.0)
+                ey = float(et.get("y") or 0.0)
+                ew = float(et.get("w") or 0.0)
+                eh = float(et.get("h") or 0.0)
+            except Exception:
+                continue
+            if ew <= 0 or eh <= 0:
+                continue
+            ex2 = ex + ew
+            ey2 = ey + eh
+            if x < ex2 and x2 > ex and y < ey2 and y2 > ey:
+                return True
+        return False
+
+    def _auto_place_table_into_floor_plan(table_rec: dict) -> None:
+        fp = _restaurant_path("floor_plan")
+        if not os.path.exists(fp):
+            return
+        try:
+            with open(fp, "r", encoding="utf-8") as f:
+                raw_doc = json.load(f)
+        except Exception:
+            return
+        if not isinstance(raw_doc, dict):
+            return
+
+        is_v2 = raw_doc.get("schemaVersion") == 2 and isinstance(raw_doc.get("floors"), list)
+        floors = raw_doc.get("floors") if is_v2 else [raw_doc]
+        if not isinstance(floors, list) or not floors:
+            return
+
+        active_id = str(raw_doc.get("activeFloorId") or "")
+        target_floor = None
+        for fl in floors:
+            if isinstance(fl, dict) and active_id and str(fl.get("id") or "") == active_id:
+                target_floor = fl
+                break
+        if target_floor is None:
+            target_floor = floors[0] if isinstance(floors[0], dict) else None
+        if not isinstance(target_floor, dict):
+            return
+
+        tbls = target_floor.get("tables")
+        if not isinstance(tbls, list):
+            target_floor["tables"] = []
+            tbls = target_floor["tables"]
+
+        linked_id = str(table_rec.get("id") or "").strip()
+        if not linked_id:
+            return
+        for t in tbls:
+            if not isinstance(t, dict):
+                continue
+            if str(t.get("linkedTableId") or "").strip() == linked_id:
+                return
+
+        shell = target_floor.get("shell") if isinstance(target_floor.get("shell"), dict) else {}
+        points = shell.get("points") if isinstance(shell, dict) else []
+        if not isinstance(points, list) or len(points) < 3:
+            return
+        xs = []
+        ys = []
+        for p in points:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    xs.append(float(p[0]))
+                    ys.append(float(p[1]))
+                except Exception:
+                    pass
+        if len(xs) < 3 or len(ys) < 3:
+            return
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        if max_x - min_x < 60 or max_y - min_y < 60:
+            return
+
+        rect_w = 92.0
+        rect_h = 62.0
+        pad = 8.0
+        place_x = min_x + 20.0
+        place_y = min_y + 20.0
+        for _ in range(80):
+            try_x = random.uniform(min_x + pad, max_x - rect_w - pad)
+            try_y = random.uniform(min_y + pad, max_y - rect_h - pad)
+            cx = try_x + rect_w / 2.0
+            cy = try_y + rect_h / 2.0
+            if not _point_in_polygon(cx, cy, points):
+                continue
+            if _table_overlaps(try_x, try_y, rect_w, rect_h, tbls):
+                continue
+            place_x = try_x
+            place_y = try_y
+            break
+
+        max_tnum = 0
+        for t in tbls:
+            if not isinstance(t, dict):
+                continue
+            tid = str(t.get("id") or "")
+            m = re.search(r"(\d+)$", tid)
+            if m:
+                try:
+                    max_tnum = max(max_tnum, int(m.group(1)))
+                except Exception:
+                    pass
+        floor_table_id = f"T{max_tnum + 1}"
+        label = str(table_rec.get("name") or f"طاولة {table_rec.get('number') or ''}").strip() or floor_table_id
+        seats = int(table_rec.get("seats") or 4)
+        if seats < 1:
+            seats = 1
+        tbls.append(
+            {
+                "id": floor_table_id,
+                "label": label,
+                "shape": "rect",
+                "x": round(place_x, 2),
+                "y": round(place_y, 2),
+                "w": rect_w,
+                "h": rect_h,
+                "seats": seats,
+                "linkedTableId": linked_id,
+            }
+        )
+
+        try:
+            with open(fp, "w", encoding="utf-8") as f:
+                json.dump(raw_doc, f, ensure_ascii=False, indent=2)
+        except Exception:
+            return
+
     data = _restaurant_load("tables", [])
+    if not isinstance(data, list):
+        data = []
     tid = body.get("id") or str(uuid.uuid4())
+    table_number = _parse_table_number(body.get("number"), body.get("name"), len(data) + 1)
     rec = {
         "id": tid,
-        "number": body.get("number", len(data) + 1),
+        "number": table_number,
         "name": body.get("name", "طاولة " + str(len(data) + 1)),
         "seats": body.get("seats", 4),
         "status": body.get("status", "available"),
         "position": body.get("position", {"x": 0, "y": 0}),
         "features": body.get("features", {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False}),
     }
+    rec_number_norm = str(rec.get("number")).strip()
+    for t in data:
+        if not isinstance(t, dict):
+            continue
+        if str(t.get("id") or "") == str(tid):
+            continue
+        if str(t.get("number")).strip() == rec_number_norm:
+            raise HTTPException(status_code=409, detail=f"رقم الطاولة مستخدم بالفعل: {rec_number_norm}")
     existing = [i for i, t in enumerate(data) if t.get("id") == tid]
+    is_new = not bool(existing)
     if existing:
         data[existing[0]] = rec
     else:
         data.append(rec)
     _restaurant_save("tables", data)
+    if is_new:
+        try:
+            _auto_place_table_into_floor_plan(rec)
+        except Exception:
+            pass
     # upsert into TBL005 as a cost center
     try:
         cc_label = str(rec.get("name") or "").strip()
@@ -10318,6 +11689,17 @@ def restaurant_table_start_cleaning(table_id: str):
 @app.patch("/api/restaurant/tables/{table_id}/mark-ready")
 def restaurant_table_mark_ready(table_id: str):
     return restaurant_update_table_status(table_id, {"status": "ready"})
+
+
+@app.post("/api/restaurant/tables/{table_id}/apply-cleaning-policy")
+def restaurant_table_apply_cleaning_policy(table_id: str, body: dict):
+    """تنفيذ سياسة التنظيف بأمر مباشر (manager/waiter)."""
+    actor = ""
+    if isinstance(body, dict):
+        actor = str(body.get("actorRole") or body.get("actor") or "").strip().lower()
+    if actor not in ("manager", "waiter"):
+        raise HTTPException(status_code=400, detail="actorRole يجب أن يكون manager أو waiter")
+    return _workflow_apply_cleaning_policy(table_id, event="direct_command", actor_role=actor)
 
 
 def _restaurant_session_order_counts() -> dict:
@@ -10420,6 +11802,8 @@ def restaurant_create_session(body: dict):
     if not table_id:
         raise HTTPException(status_code=400, detail="tableId مطلوب")
     force_new = body.get("forceNewSession") in (True, "1", "true", "yes", 1)
+    started_by_role = str(body.get("startedByRole") or body.get("actorRole") or body.get("actor") or "").strip().lower()
+    start_reason = str(body.get("startReason") or "").strip().lower()
     _close_stale_active_sessions()
     data = _restaurant_load("table_sessions", [])
     if not isinstance(data, list):
@@ -10459,7 +11843,12 @@ def restaurant_create_session(body: dict):
             s["workflow"] = {
                 "receiveGuestBy": _workflow_role_for("receive_guest"),
                 "takeOrderBy": _workflow_role_for("take_order"),
+                "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
             }
+            if started_by_role:
+                s["startedByRole"] = started_by_role
+            if start_reason:
+                s["startReason"] = start_reason
             return s
     sid = str(uuid.uuid4())
     rec = {
@@ -10472,6 +11861,8 @@ def restaurant_create_session(body: dict):
         "preferences": body.get("preferences", {}) if isinstance(body.get("preferences"), dict) else {},
         "startTime": datetime.now().isoformat(),
         "status": "active",
+        "startedByRole": started_by_role or None,
+        "startReason": start_reason or None,
     }
     data.append(rec)
     _restaurant_save("table_sessions", data)
@@ -10482,6 +11873,7 @@ def restaurant_create_session(body: dict):
     rec["workflow"] = {
         "receiveGuestBy": _workflow_role_for("receive_guest"),
         "takeOrderBy": _workflow_role_for("take_order"),
+        "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
     }
     return rec
 
@@ -10532,9 +11924,51 @@ def restaurant_cleanup_duplicate_empty_sessions():
     _restaurant_save("table_sessions", data)
     return {"ok": True, "completedSessionIds": completed, "count": len(completed)}
 
+
+def _restaurant_cancel_open_kitchen_orders_for_session(session_id: str) -> int:
+    """إلغاء بنود طلبات المطبخ المفتوحة المرتبطة بجلسة أُغلقت حتى لا تبقى تذاكر يتيمة مع جلسة جديدة لنفس الطاولة."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return 0
+    data = _restaurant_load("orders", [])
+    if not isinstance(data, list):
+        return 0
+    changed = False
+    n = 0
+    now_iso = datetime.now().isoformat()
+    for o in data:
+        if not isinstance(o, dict):
+            continue
+        if str(o.get("sessionId") or "").strip() != sid:
+            continue
+        st = str(o.get("status") or "").lower()
+        if st in ("served", "paid", "cancelled"):
+            continue
+        items = [_kds_normalize_item(x) for x in (o.get("items") or []) if isinstance(x, dict)]
+        for it in items:
+            if bool(it.get("cancelled")):
+                continue
+            it["cancelled"] = True
+            it["lineStatus"] = "cancelled"
+            it["cancelledAt"] = now_iso
+            it["prepared"] = False
+            it["sent"] = False
+            it["preparedAt"] = None
+            it["sentAt"] = None
+            it["handoffAt"] = None
+        o["items"] = items
+        _kds_refresh_order_status(o)
+        n += 1
+        changed = True
+    if changed:
+        _restaurant_save("orders", data)
+    return n
+
+
 @app.patch("/api/restaurant/table-sessions/{session_id}/complete")
 def restaurant_complete_session(session_id: str, force: bool = Query(False, description="تجاوز فحص فاتورة بانتظار التسديد (غير مستحسن)")):
-    """إغلاق سجل الجلسة في الملف المحلي فقط — لا يُسدّد فاتورة ولا يحذف الطلبات.
+    """إغلاق سجل الجلسة في الملف المحلي فقط — لا يُسدّد فاتورة.
+    تُلغى تلقائياً طلبات المطبخ المفتوحة لهذه الجلسة حتى لا تظهر بجانب جلسة لاحقة.
     إن وُجدت فاتورة محلية بانتظار الكاشير لنفس الجلسة يُرفض الإغلاق ما لم يُمرَّر force=true."""
     if not force:
         invs = _restaurant_load("invoices", [])
@@ -10558,6 +11992,10 @@ def restaurant_complete_session(session_id: str, force: bool = Query(False, desc
             s["endTime"] = datetime.now().isoformat()
             s["status"] = "completed"
             _restaurant_save("table_sessions", data)
+            try:
+                _restaurant_cancel_open_kitchen_orders_for_session(str(session_id))
+            except Exception:
+                pass
             try:
                 tid = str(s.get("tableId") or "").strip()
                 if tid:
@@ -10779,7 +12217,7 @@ def _append_session_audit_entry(entry: dict) -> None:
 
 @app.patch("/api/restaurant/table-sessions/{session_id}")
 def restaurant_patch_session(session_id: str, body: dict):
-    """نقل جلسة نشطة إلى طاولة أخرى (نفس sessionId) + تحديث tableId في الطلبات المرتبطة."""
+    """تغيير طاولة جلسة نشطة + تحديث الطلبات وحالة الطاولتين (القديمة جاهزة/الجديدة مشغولة)."""
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
     new_table = str(body.get("tableId") or "").strip()
@@ -10797,6 +12235,17 @@ def restaurant_patch_session(session_id: str, body: dict):
         raise HTTPException(status_code=400, detail="لا يمكن نقل جلسة غير نشطة")
     old_table = found.get("tableId")
     found["tableId"] = new_table
+    # تغيير الطاولة (Transfer): نفس الجلسة انتقلت لطاولة أخرى.
+    # الطاولة القديمة تُصبح جاهزة والجديدة تُصبح مشغولة.
+    try:
+        if old_table and str(old_table).strip() and str(old_table).strip() != new_table:
+            restaurant_update_table_status(str(old_table).strip(), {"status": "ready"})
+    except Exception:
+        pass
+    try:
+        restaurant_update_table_status(new_table, {"status": "occupied"})
+    except Exception:
+        pass
     _restaurant_save("table_sessions", data)
     odata = _restaurant_load("orders", [])
     for o in odata:
@@ -10846,12 +12295,14 @@ def restaurant_merge_session(session_id: str, body: dict):
     orders = _restaurant_load("orders", [])
     if not isinstance(orders, list):
         orders = []
+    # الدمج (Merge): الحساب النهائي يخرج من الجلسة/الطاولة الهدف،
+    # لكن الجلسة المصدر تبقى نشطة على طاولتها ويمكن استقبال طلبات جديدة.
+    # نوسم الطلبات السابقة فقط بأنها تابعة لفوترة الجلسة الهدف.
     for o in orders:
         if not isinstance(o, dict):
             continue
         if str(o.get("sessionId") or "") == str(session_id):
-            o["sessionId"] = str(dst.get("id"))
-            o["tableId"] = str(dst.get("tableId"))
+            o["billingSessionId"] = str(dst.get("id"))
     _restaurant_save("orders", orders)
     try:
         src_gc = int(src.get("guestCount") or 0)
@@ -10860,9 +12311,9 @@ def restaurant_merge_session(session_id: str, body: dict):
             dst["guestCount"] = dst_gc + src_gc
     except Exception:
         pass
-    src["status"] = "merged"
+    src["status"] = "active"
     src["mergedIntoSessionId"] = str(dst.get("id"))
-    src["closedAt"] = datetime.now().isoformat()
+    src["mergedAt"] = datetime.now().isoformat()
     _restaurant_save("table_sessions", sessions)
     _append_session_audit_entry(
         {
@@ -10878,29 +12329,42 @@ def restaurant_merge_session(session_id: str, body: dict):
     return {"ok": True, "sourceSessionId": str(session_id), "targetSession": dst}
 
 
+def _restaurant_billing_session_ids(root_session_id: str) -> list[str]:
+    """يجمع كل sessionId التي تُفوتر مع الجلسة الجذر (نفس الجلسة + المدموجة إليها)."""
+    rid = str(root_session_id or "").strip()
+    if not rid:
+        return []
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    ids = {rid}
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id") or "").strip()
+        if not sid:
+            continue
+        if str(s.get("mergedIntoSessionId") or "").strip() == rid:
+            ids.add(sid)
+    return list(ids)
+
+
 @app.get("/api/restaurant/daily-menu")
 def restaurant_daily_menu_get():
-    """قائمة اليوم للفلترة في الجرسون/POS — ملف daily_menu.json"""
-    p = _restaurant_path("daily_menu")
-    if not os.path.isfile(p):
-        return {"menu": {"forDate": "", "allowedTokens": [], "notes": ""}}
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if isinstance(d, dict):
-            toks = d.get("allowedTokens")
-            if not isinstance(toks, list):
-                toks = []
-            return {
-                "menu": {
-                    "forDate": str(d.get("forDate") or ""),
-                    "allowedTokens": [str(x) for x in toks if x is not None],
-                    "notes": str(d.get("notes") or ""),
-                }
-            }
-    except Exception:
-        pass
-    return {"menu": {"forDate": "", "allowedTokens": [], "notes": ""}}
+    """قائمة اليوم للفلترة في الجرسون/POS — يُفضّل التخزين في SQL (MAT3AM_RESTAURANT_STATE) لمزامنة الأجهزة."""
+    d = _restaurant_load("daily_menu", {})
+    if not isinstance(d, dict):
+        d = {}
+    toks = d.get("allowedTokens")
+    if not isinstance(toks, list):
+        toks = []
+    return {
+        "menu": {
+            "forDate": str(d.get("forDate") or ""),
+            "allowedTokens": [str(x) for x in toks if x is not None],
+            "notes": str(d.get("notes") or ""),
+        }
+    }
 
 
 @app.put("/api/restaurant/daily-menu")
@@ -10918,9 +12382,7 @@ def restaurant_daily_menu_put(body: dict):
         "allowedTokens": [str(x).strip() for x in toks if str(x).strip()][:500],
         "notes": str(m.get("notes") or "")[:4000],
     }
-    p = _restaurant_path("daily_menu")
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+    _restaurant_save("daily_menu", out)
     return {"ok": True, "menu": out}
 
 
@@ -10928,33 +12390,26 @@ def restaurant_daily_menu_put(body: dict):
 @app.get("/api/restaurant/daily-menu-schedule")
 def restaurant_daily_menu_schedule_get():
     """جدولة القائمة اليومية حسب الأصناف: entries[{dateFrom,dateTo,items[{ProductGuide,ProductName}]}]"""
-    p = _restaurant_path("daily_menu_schedule")
-    if not os.path.isfile(p):
+    d = _restaurant_load("daily_menu_schedule", {"entries": []})
+    if not isinstance(d, dict) or not isinstance(d.get("entries"), list):
         return {"entries": []}
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if isinstance(d, dict) and isinstance(d.get("entries"), list):
-            out_entries = []
-            for e in d["entries"]:
-                if not isinstance(e, dict):
-                    continue
-                date_from = str(e.get("dateFrom") or "")[:32]
-                date_to = str(e.get("dateTo") or "")[:32]
-                items = e.get("items") if isinstance(e.get("items"), list) else []
-                norm_items = []
-                for it in items:
-                    if not isinstance(it, dict):
-                        continue
-                    pg = str(it.get("ProductGuide") or it.get("CardGuide") or "")
-                    pn = str(it.get("ProductName") or it.get("name") or "")
-                    if pg:
-                        norm_items.append({"ProductGuide": pg, "ProductName": pn})
-                out_entries.append({"dateFrom": date_from, "dateTo": date_to or date_from, "items": norm_items[:300]})
-            return {"entries": out_entries}
-    except Exception:
-        pass
-    return {"entries": []}
+    out_entries = []
+    for e in d["entries"]:
+        if not isinstance(e, dict):
+            continue
+        date_from = str(e.get("dateFrom") or "")[:32]
+        date_to = str(e.get("dateTo") or "")[:32]
+        items = e.get("items") if isinstance(e.get("items"), list) else []
+        norm_items = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            pg = str(it.get("ProductGuide") or it.get("CardGuide") or "")
+            pn = str(it.get("ProductName") or it.get("name") or "")
+            if pg:
+                norm_items.append({"ProductGuide": pg, "ProductName": pn})
+        out_entries.append({"dateFrom": date_from, "dateTo": date_to or date_from, "items": norm_items[:300]})
+    return {"entries": out_entries}
 
 
 @app.put("/api/restaurant/daily-menu-schedule")
@@ -10978,9 +12433,8 @@ def restaurant_daily_menu_schedule_put(body: dict):
             if pg:
                 norm_items.append({"ProductGuide": pg, "ProductName": pn})
         out_entries.append({"dateFrom": df, "dateTo": dt, "items": norm_items[:300]})
-    p = _restaurant_path("daily_menu_schedule")
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump({"entries": out_entries}, f, ensure_ascii=False, indent=2)
+    payload = {"entries": out_entries}
+    _restaurant_save("daily_menu_schedule", payload)
     return {"ok": True, "entries": out_entries}
 
 
@@ -11012,14 +12466,111 @@ def restaurant_invoices_local(
             continue
         if date_to and day and day > date_to[:10]:
             continue
-        rows.append(inv)
+        rows.append(_restaurant_enrich_invoice_with_table(inv))
     rows.sort(key=lambda x: str(x.get("requestedAt") or x.get("paidAt") or ""), reverse=True)
     return {"invoices": rows, "count": len(rows)}
 
 
+def _restaurant_table_phrase_for_bill_notes(session_id: str) -> str:
+    """نص يُكتب في ملاحظات الفاتورة (TBL022) — رقم/اسم الطاولة بدل معرّف الجلسة UUID."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return "طاولة غير معروفة"
+    sess_list = _restaurant_load("table_sessions", [])
+    tables_list = _restaurant_load("tables", [])
+    tbl_by_id = {}
+    for t in tables_list if isinstance(tables_list, list) else []:
+        if isinstance(t, dict) and t.get("id") is not None:
+            tbl_by_id[str(t.get("id")).strip()] = t
+    for s in sess_list if isinstance(sess_list, list) else []:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("id") or "").strip() != sid:
+            continue
+        tid = str(s.get("tableId") or "").strip()
+        if not tid:
+            return "طاولة غير مربوطة بالجلسة"
+        t = tbl_by_id.get(tid)
+        if t and isinstance(t, dict):
+            num = t.get("number")
+            nm = str(t.get("name") or "").strip()
+            if num is not None:
+                try:
+                    return f"طاولة رقم {int(num)}"
+                except (TypeError, ValueError):
+                    pass
+            if nm:
+                return nm
+        return f"طاولة ({tid})"
+    return "جلسة غير مسجّلة في المخطط"
+
+
+def _restaurant_enrich_invoice_with_table(inv: dict) -> dict:
+    """يضيف تسمية الطاولة ورقمها من جلسة الطاولة + مخطط الطاولات (ليُعرض للكاشير بدل لبس GUID بـ«جلسة»)."""
+    if not isinstance(inv, dict):
+        return inv
+    out = dict(inv)
+    sid = str(out.get("sessionId") or "").strip()
+    if not sid:
+        return out
+    sess_list = _restaurant_load("table_sessions", [])
+    tables_list = _restaurant_load("tables", [])
+    tbl_by_id = {}
+    for t in tables_list if isinstance(tables_list, list) else []:
+        if isinstance(t, dict) and t.get("id") is not None:
+            tbl_by_id[str(t.get("id")).strip()] = t
+    sess_row = None
+    for s in sess_list if isinstance(sess_list, list) else []:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            sess_row = s
+            break
+    if not sess_row:
+        return out
+    try:
+        gc = sess_row.get("guestCount")
+        if gc is not None:
+            try:
+                out["sessionGuestCount"] = int(float(gc))
+            except (TypeError, ValueError):
+                out["sessionGuestCount"] = gc
+    except Exception:
+        pass
+    tid = str(sess_row.get("tableId") or "").strip()
+    if tid:
+        out["tableIdResolved"] = tid
+        t = tbl_by_id.get(tid)
+        if t and isinstance(t, dict):
+            out["tableNumber"] = t.get("number")
+            nm = str(t.get("name") or "").strip()
+            out["tableName"] = nm or None
+            num = t.get("number")
+            if num is not None:
+                out["tableLabel"] = f"طاولة {num}"
+            elif nm:
+                out["tableLabel"] = nm
+            else:
+                out["tableLabel"] = tid
+        else:
+            out["tableLabel"] = tid
+    return out
+
+
+@app.get("/api/restaurant/invoices-local/by-id/{invoice_id}")
+def restaurant_invoices_local_by_id(invoice_id: str):
+    """فاتورة محلية واحدة (لنافذة التسديد من لوحة الشرائح أو من القائمة)."""
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    iid = str(invoice_id or "").strip()
+    for inv in raw:
+        if isinstance(inv, dict) and str(inv.get("invoiceId") or "") == iid:
+            return _restaurant_enrich_invoice_with_table(inv)
+    raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+
+
 @app.post("/api/restaurant/invoices-local/mark-paid")
 def restaurant_invoices_local_mark_paid(body: dict):
-    """تسديد فاتورة انتظار الكاشير — يحدّث الملف المحلي ويحاول تحديث TBL022.Paid."""
+    """تسديد فاتورة انتظار الكاشير — TBL022.Paid + سجل تسديد SQL + تحديث السجل المحلي بعد نجاح القاعدة."""
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
     invoice_id = str(body.get("invoiceId") or "").strip()
@@ -11037,33 +12588,128 @@ def restaurant_invoices_local_mark_paid(body: dict):
         raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
     if str(found.get("paidAt") or "").strip():
         raise HTTPException(status_code=409, detail="الفاتورة مُسدَّدة مسبقاً")
+
+    def _money2(v) -> float:
+        try:
+            return round(float(v if v is not None else 0), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
     amt = found.get("total")
-    try:
-        paid_amt = float(amt) if amt is not None else 0.0
-    except (TypeError, ValueError):
-        paid_amt = 0.0
+    paid_amt = _money2(amt)
+    tot_body = body.get("totals")
+    merged_totals: dict = dict(tot_body) if isinstance(tot_body, dict) else {}
+    sid = str(found.get("sessionId") or "").strip()
+
+    bd = body.get("paymentBreakdown")
+    parts: Optional[dict] = None
+    if isinstance(bd, dict) and bd:
+        parts = {}
+        for k in ("cash", "visa", "wallet", "instapay"):
+            try:
+                parts[k] = max(0.0, _money2(bd.get(k)))
+            except (TypeError, ValueError):
+                parts[k] = 0.0
+        split_sum = _money2(sum(float(parts.get(x) or 0) for x in ("cash", "visa", "wallet", "instapay")))
+        paid_amt = split_sum
+        merged_totals["grandTotal"] = split_sum
+        if split_sum <= 0.0001:
+            owe = _money2(amt)
+            if owe > 0.02:
+                raise HTTPException(status_code=400, detail="أدخل مبالغ التسديد.")
+        nz = [k for k in ("cash", "visa", "wallet", "instapay") if float(parts.get(k) or 0) > 0.0001]
+        if len(nz) == 1:
+            pm = nz[0]
+        elif len(nz) > 1:
+            pm = "mixed"
+        else:
+            pm = "cash"
+    else:
+        pm = str(body.get("paymentMethod") or "cash").strip()[:40] or "cash"
+        if merged_totals.get("grandTotal") is not None:
+            try:
+                paid_amt = _money2(merged_totals.get("grandTotal"))
+            except (TypeError, ValueError):
+                pass
+
     now_iso = datetime.now().isoformat()
-    found["awaitingPayment"] = False
-    found["paidAt"] = now_iso
-    found["paymentMethod"] = str(body.get("paymentMethod") or "cash")[:40]
-    _restaurant_save("invoices", raw)
+
+    def _apply_found_payment_state() -> None:
+        found["awaitingPayment"] = False
+        found["paidAt"] = now_iso
+        found["paymentMethod"] = pm[:40]
+        if merged_totals:
+            found["settledTotals"] = merged_totals
+            try:
+                found["total"] = float(paid_amt)
+            except (TypeError, ValueError):
+                pass
+        if parts is not None:
+            found["paymentBreakdown"] = parts
+        elif "paymentBreakdown" in found:
+            try:
+                del found["paymentBreakdown"]
+            except Exception:
+                found["paymentBreakdown"] = None
+
     conn = get_connection()
     if conn:
         try:
             cur = conn.cursor()
+            _ensure_payment_routing_schema(cur)
             cur.execute(
                 "UPDATE TBL022 SET Paid = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
                 (paid_amt, invoice_id),
             )
+            if parts:
+                for rk in ("cash", "visa", "wallet", "instapay"):
+                    val = float(parts.get(rk) or 0)
+                    if val <= 0.0001:
+                        continue
+                    ag = _payment_routing_account_for_key(cur, rk)
+                    cur.execute(
+                        """
+                        INSERT INTO dbo.MAT3AM_INV_PAYMENT_LINE
+                        (InvoiceGuid, SessionId, RouteKey, Amount, AccountGuide)
+                        VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?)
+                        """,
+                        (invoice_id, sid or None, rk, val, ag),
+                    )
+            else:
+                rk = pm if pm in ("cash", "visa", "wallet", "instapay") else "cash"
+                if pm != "mixed" and paid_amt > 0.0001:
+                    ag = _payment_routing_account_for_key(cur, rk)
+                    cur.execute(
+                        """
+                        INSERT INTO dbo.MAT3AM_INV_PAYMENT_LINE
+                        (InvoiceGuid, SessionId, RouteKey, Amount, AccountGuide)
+                        VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?)
+                        """,
+                        (invoice_id, sid or None, rk, paid_amt, ag),
+                    )
+            det = f"paid={paid_amt};method={pm};parts={parts}"
+            if len(det) > 990:
+                det = det[:990] + "…"
+            _audit_log(cur, "INV_PAID", "TBL022", invoice_id, None, det)
             conn.commit()
+            _apply_found_payment_state()
+            _restaurant_save("invoices", raw)
+        except HTTPException:
+            raise
         except Exception as ex:
-            print("[mat3am] mark-paid TBL022:", ex)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail=f"تعذر تسجيل التسديد في قاعدة البيانات: {ex}") from ex
         finally:
             try:
                 conn.close()
             except Exception:
                 pass
-    sid = str(found.get("sessionId") or "").strip()
+    else:
+        _apply_found_payment_state()
+        _restaurant_save("invoices", raw)
     if sid:
         # إغلاق تلقائي عند اكتمال التسديد لكل فواتير الجلسة في السجل المحلي.
         # closeSession=true يبقى إجبارياً، وإلا يغلق فقط عند عدم وجود أي فاتورة معلّقة.
@@ -11086,9 +12732,13 @@ def restaurant_invoices_local_mark_paid(body: dict):
                         table_id = str(s.get("tableId") or "").strip()
                         break
                 _restaurant_save("table_sessions", sess)
+                try:
+                    _restaurant_cancel_open_kitchen_orders_for_session(sid)
+                except Exception:
+                    pass
                 if table_id:
                     try:
-                        restaurant_update_table_status(table_id, {"status": "dirty"})
+                        _workflow_apply_cleaning_policy(table_id, event="payment_completed")
                     except Exception:
                         pass
     return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso}
@@ -11098,17 +12748,25 @@ def restaurant_invoices_local_mark_paid(body: dict):
 def restaurant_get_orders(
     session_id: Optional[str] = None,
     sessionId: Optional[str] = None,
+    tableId: Optional[str] = None,
     status: Optional[str] = None,
+    today_only: bool = False,
+    kdsStation: Optional[str] = None,
 ):
-    """الطلبات — session_id أو sessionId (نفس المعنى) أو status."""
+    """الطلبات — يدعم الفلترة حسب session_id/sessionId أو tableId أو status.
+    عند tableId + today_only=true تُحصى طلبات اليوم فقط (createdAt/updatedAt) لتفادي بقايا أيام سابقة.
+    kdsStation=kitchen|speed: يقتصر بنود الطلب على المطبخ أو الطابور السريع (مجموعة TBL006 «شيشة وطلبات سريعة»)."""
     data = _restaurant_load("orders", [])
+    if not isinstance(data, list):
+        data = []
     changed = False
     guid_re = re.compile(r"^[0-9a-fA-F-]{36}$")
+    wanted_status = str(status or "").strip().lower()
     sid = session_id or sessionId
-    if sid:
-        data = [o for o in data if str(o.get("sessionId") or "") == str(sid)]
-    if status:
-        data = [o for o in data if o.get("status") == status]
+    tid = str(tableId or "").strip()
+
+    # مهم: تحديث حالة الطلبات أولاً من سطور KDS (prepared/sent) ثم تطبيق الفلترة.
+    # بدون ذلك قد يبقى طلب "ready" فعليًا مخزنًا كـ "preparing" فلا يظهر في طابور التوصيل.
     for o in data:
         if not isinstance(o, dict):
             continue
@@ -11133,6 +12791,28 @@ def restaurant_get_orders(
         _kds_refresh_order_status(o)
         if str(o.get("status") or "").lower() != prev:
             changed = True
+
+    if sid:
+        data = [o for o in data if isinstance(o, dict) and str(o.get("sessionId") or "") == str(sid)]
+    if tid:
+        data = [
+            o
+            for o in data
+            if isinstance(o, dict)
+            and (
+                str(o.get("tableId") or "").strip() == tid
+                or str(o.get("tableGuid") or "").strip() == tid
+            )
+        ]
+    if today_only:
+        data = [
+            o
+            for o in data
+            if isinstance(o, dict)
+            and _is_today_iso(str((o or {}).get("createdAt") or o.get("updatedAt") or ""))
+        ]
+    if wanted_status:
+        data = [o for o in data if isinstance(o, dict) and str(o.get("status") or "").strip().lower() == wanted_status]
     # إثراء اسم/رقم الطاولة للمطبخ: إذا tableLabel غير موجود ويُرسل tableId كـ GUID
     # نحوله من TBL005.CostCenter (مثل T20) حتى لا يظهر GUID ليوزر المطبخ.
     try:
@@ -11218,7 +12898,31 @@ def restaurant_get_orders(
             _restaurant_save("orders", all_data)
         except Exception:
             pass
+    ks = str(kdsStation or "").strip().lower()
+    if ks in ("kitchen", "speed"):
+        data = _kds_filter_orders_by_kds_station(data, ks)
     return {"orders": data}
+
+
+@app.get("/api/restaurant/orders/delivery-queue")
+def restaurant_delivery_queue(role: Optional[str] = None):
+    """
+    طابور التسليم حسب الدور المحدد في workflow.deliverFromKitchenBy.
+    إن لم يطابق الدور المطلوب، يعيد قائمة فارغة + expectedRole.
+    """
+    asked = str(role or "").strip().lower()
+    expected = _workflow_delivery_receiver_role()
+    if expected == "none":
+        return {"orders": [], "expectedRole": "none", "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen")}
+    if asked and asked != expected:
+        return {"orders": [], "expectedRole": expected, "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen")}
+    payload = restaurant_get_orders(status="ready")
+    rows = payload.get("orders") if isinstance(payload, dict) else []
+    return {
+        "orders": rows if isinstance(rows, list) else [],
+        "expectedRole": expected,
+        "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
+    }
 
 
 def _kds_line_key(it: dict) -> str:
@@ -11232,13 +12936,18 @@ def _kds_line_key(it: dict) -> str:
 def _kds_normalize_item(it: dict) -> dict:
     if not isinstance(it, dict):
         it = {}
+    cancelled = bool(it.get("cancelled"))
     qty = float(it.get("quantity") or 0)
     if qty < 0:
         qty = 0
     prepared = bool(it.get("prepared") or False)
     sent = bool(it.get("sent") or False)
     line_status = str(it.get("lineStatus") or "").strip().lower()
-    if not line_status:
+    if cancelled:
+        line_status = "cancelled"
+        prepared = False
+        sent = False
+    elif not line_status:
         if sent:
             line_status = "sent"
         elif prepared:
@@ -11253,24 +12962,34 @@ def _kds_normalize_item(it: dict) -> dict:
         "productGuide": str(it.get("productGuide") or it.get("menuItemId") or ""),
         "seatNo": it.get("seatNo"),
         "lineStatus": line_status,
-        "prepared": prepared or line_status in ("ready", "sent"),
-        "sent": sent or line_status == "sent",
+        "prepared": prepared or (line_status in ("ready", "sent") and not cancelled),
+        "sent": sent or (line_status == "sent" and not cancelled),
         "preparedAt": it.get("preparedAt"),
+        "handoffAt": it.get("handoffAt"),
         "sentAt": it.get("sentAt"),
+        "cancelled": cancelled,
+        "cancelledAt": it.get("cancelledAt"),
     }
 
 
 def _kds_refresh_order_status(order: dict) -> None:
-    items = [x for x in (order.get("items") or []) if isinstance(x, dict)]
+    items = [_kds_normalize_item(x) for x in (order.get("items") or []) if isinstance(x, dict)]
+    order["items"] = items
+    active = [x for x in items if not bool(x.get("cancelled"))]
     if not items:
         order["status"] = "pending"
         return
+    if not active:
+        order["status"] = "cancelled"
+        if not str(order.get("cancelledAt") or "").strip():
+            order["cancelledAt"] = datetime.now().isoformat()
+        return
     if not str(order.get("prepStartTime") or "").strip():
-        if any(bool(x.get("prepared")) or bool(x.get("sent")) for x in items):
+        if any(bool(x.get("prepared")) or bool(x.get("sent")) for x in active):
             order["prepStartTime"] = datetime.now().isoformat()
-    all_sent = all(bool(x.get("sent")) for x in items)
-    all_ready = all(bool(x.get("prepared")) for x in items)
-    any_progress = any(bool(x.get("prepared")) or bool(x.get("sent")) for x in items)
+    all_sent = all(bool(x.get("sent")) for x in active)
+    all_ready = all(bool(x.get("prepared")) for x in active)
+    any_progress = any(bool(x.get("prepared")) or bool(x.get("sent")) for x in active)
     if all_sent:
         order["status"] = "served"
         if not str(order.get("completedAt") or "").strip():
@@ -11283,14 +13002,77 @@ def _kds_refresh_order_status(order: dict) -> None:
         except Exception:
             pass
     elif all_ready:
-        order["status"] = "ready"
-        order["completedAt"] = None
+        # توجيه التسليم حسب الإعدادات: server/waiter/manager/host = يبقى ready
+        # ليظهر في نافذة الدور المحدد. غير ذلك = تسليم مباشر تلقائي.
+        pickup_role = str(_workflow_role_for("pickup_kitchen") or "server").strip().lower()
+        if pickup_role in ("server", "waiter", "manager", "host"):
+            order["status"] = "ready"
+            order["completedAt"] = None
+        else:
+            now_iso = datetime.now().isoformat()
+            for x in items:
+                if bool(x.get("cancelled")):
+                    continue
+                if not bool(x.get("sent")):
+                    x["sent"] = True
+                    x["sentAt"] = now_iso
+                x["lineStatus"] = "sent"
+            order["items"] = items
+            order["status"] = "served"
+            if not str(order.get("completedAt") or "").strip():
+                order["completedAt"] = now_iso
     elif any_progress:
         order["status"] = "preparing"
         order["completedAt"] = None
     else:
         order["status"] = "pending"
         order["completedAt"] = None
+
+
+def _kds_filter_orders_by_kds_station(orders: list, station: str) -> list:
+    """يقتصر بنود KDS على المطبخ أو الطابور السريع حسب TBL007.GroupGuid مقابل مجموعة TBL006 الثابتة."""
+    st = str(station or "").strip().lower()
+    if st not in ("kitchen", "speed"):
+        return orders
+    conn = get_connection()
+    if not conn:
+        return orders
+    try:
+        cur = conn.cursor()
+        speed_guid = _kds_resolve_speed_group_guid_for_cursor(cur)
+        pgs: set = set()
+        for o in orders:
+            if not isinstance(o, dict):
+                continue
+            for it in o.get("items") or []:
+                if not isinstance(it, dict):
+                    continue
+                pg = str(it.get("productGuide") or "").strip()
+                if pg:
+                    pgs.add(pg)
+        gmap = _kds_batch_product_group_guids(cur, pgs)
+        out = []
+        for o in orders:
+            if not isinstance(o, dict):
+                continue
+            items = [x for x in (o.get("items") or []) if isinstance(x, dict)]
+            if st == "speed":
+                filt = [x for x in items if _kds_item_is_speed_line(x, gmap, speed_guid)]
+            else:
+                filt = [x for x in items if not _kds_item_is_speed_line(x, gmap, speed_guid)]
+            if not filt:
+                continue
+            oc = {**o, "items": [_kds_normalize_item(x) for x in filt]}
+            _kds_refresh_order_status(oc)
+            out.append(oc)
+        return out
+    except Exception:
+        return orders
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _kds_merge_items(target_items: list, incoming_items: list) -> list:
@@ -11300,7 +13082,15 @@ def _kds_merge_items(target_items: list, incoming_items: list) -> list:
         it = _kds_normalize_item(raw)
         key = _kds_line_key(it)
         ex = idx.get(key)
-        if ex and not bool(ex.get("sent")):
+        # دمج الكميات فقط قبل دخول السطر دورة المطبخ فعلياً (pending بالكامل).
+        # إذا السطر السابق بدأ التحضير/أصبح ready/أُرسل، نفتح سطرًا جديدًا مستقلًا.
+        can_merge = (
+            bool(ex)
+            and not bool(ex.get("prepared"))
+            and not bool(ex.get("sent"))
+            and str(ex.get("lineStatus") or "").strip().lower() == "pending"
+        )
+        if can_merge:
             ex["quantity"] = float(ex.get("quantity") or 0) + float(it.get("quantity") or 0)
         else:
             norm.append(it)
@@ -11324,7 +13114,7 @@ def _kds_upsert_table_order(ord_data: list, payload: dict) -> dict:
     """دمج الطلب الجديد على طلب مفتوح لنفس الطاولة/الجلسة إن وجد، وإلا إنشاء طلب جديد."""
     if not isinstance(ord_data, list):
         ord_data = []
-    session_id = str(payload.get("sessionId") or "")
+    session_id = str(payload.get("sessionId") or "").strip()
     table_id = str(payload.get("tableId") or "")
     incoming_items = [_kds_normalize_item(x) for x in (payload.get("items") or []) if isinstance(x, dict)]
     for ex in reversed(ord_data):
@@ -11332,10 +13122,19 @@ def _kds_upsert_table_order(ord_data: list, payload: dict) -> dict:
             continue
         if str(ex.get("status") or "").lower() in ("served", "paid", "cancelled"):
             continue
-        same_session = session_id and str(ex.get("sessionId") or "") == session_id
+        ex_sid = str(ex.get("sessionId") or "").strip()
+        same_session = bool(session_id) and ex_sid == session_id
         same_table = table_id and str(ex.get("tableId") or "") == table_id
-        if not (same_session or same_table):
+        # عند وجود sessionId: الدمج مع نفس الجلسة، أو مع تذكرة قديمة بلا sessionId على نفس الطاولة (يُرفَق بمعرف الجلسة الجديد).
+        legacy_open_no_session = bool(session_id) and same_table and not ex_sid
+        if session_id:
+            can_merge = same_session or legacy_open_no_session
+        else:
+            can_merge = bool(same_table)
+        if not can_merge:
             continue
+        if legacy_open_no_session and not same_session:
+            ex["sessionId"] = session_id or None
         ex["items"] = _kds_merge_items(ex.get("items") or [], incoming_items)
         if isinstance(payload.get("kitchenTotals"), dict):
             ex["kitchenTotals"] = payload.get("kitchenTotals")
@@ -11363,6 +13162,250 @@ def _kds_upsert_table_order(ord_data: list, payload: dict) -> dict:
     ord_data.append(rec)
     return rec
 
+
+@app.get("/api/restaurant/kids-area/settings")
+def restaurant_kids_area_settings_get():
+    return _kids_area_load_settings()
+
+
+@app.put("/api/restaurant/kids-area/settings")
+def restaurant_kids_area_settings_put(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    cur = _kids_area_load_settings()
+    if isinstance(body.get("packages"), list):
+        cur["packages"] = body["packages"]
+    if body.get("defaultPackageId") is not None:
+        cur["defaultPackageId"] = str(body.get("defaultPackageId") or "").strip() or cur.get("defaultPackageId")
+    _kids_area_save_settings(cur)
+    return cur
+
+
+@app.get("/api/restaurant/kids-area/profiles")
+def restaurant_kids_area_profiles_get(q: Optional[str] = None):
+    profs = _kids_area_load_profiles()
+    if not isinstance(profs, list):
+        profs = []
+    if q and str(q).strip():
+        qq = re.sub(r"\s+", "", str(q).strip())
+        profs = [p for p in profs if isinstance(p, dict) and qq in re.sub(r"\s+", "", str(p.get("phone") or ""))]
+    return {"profiles": profs[:80]}
+
+
+@app.get("/api/restaurant/kids-area/sessions")
+def restaurant_kids_area_sessions_get(status: Optional[str] = None):
+    data = _kids_area_load_sessions()
+    if not isinstance(data, list):
+        data = []
+    if status:
+        data = [x for x in data if isinstance(x, dict) and str(x.get("status") or "") == status]
+    data.sort(key=lambda x: str((x or {}).get("entryAt") or ""), reverse=True)
+    return {"sessions": data}
+
+
+@app.post("/api/restaurant/kids-area/sessions/start")
+def restaurant_kids_area_session_start(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    child = str(body.get("childName") or "").strip()
+    father = str(body.get("fatherName") or "").strip()
+    phone = str(body.get("phone") or "").strip()
+    if not child or not father or not phone:
+        raise HTTPException(status_code=400, detail="اسم الطفل واسم الوالد والهاتف مطلوبة")
+    settings = _kids_area_load_settings()
+    pkg = str(body.get("packageId") or settings.get("defaultPackageId") or "std")
+    companions = str(body.get("companionsNote") or "").strip()
+    link_ts = str(body.get("linkedTableSessionId") or "").strip() or None
+    link_tid = str(body.get("linkedTableId") or "").strip() or None
+    sid = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    rec = {
+        "id": sid,
+        "status": "active",
+        "childName": child,
+        "fatherName": father,
+        "phone": phone,
+        "packageId": pkg,
+        "companionsNote": companions,
+        "linkedTableSessionId": link_ts,
+        "linkedTableId": link_tid,
+        "entryAt": now,
+        "exitAt": None,
+        "salesLines": [],
+        "payments": [],
+    }
+    sessions = _kids_area_load_sessions()
+    if not isinstance(sessions, list):
+        sessions = []
+    sessions.insert(0, rec)
+    _kids_area_save_sessions(sessions)
+    _kids_area_upsert_profile(phone, father, child)
+    return rec
+
+
+@app.patch("/api/restaurant/kids-area/sessions/{session_id}")
+def restaurant_kids_area_session_patch(session_id: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    sessions = _kids_area_load_sessions()
+    if not isinstance(sessions, list):
+        sessions = []
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("id")) != session_id:
+            continue
+        if str(s.get("status") or "") != "active":
+            raise HTTPException(status_code=409, detail="الجلسة ليست نشطة")
+        if "companionsNote" in body:
+            s["companionsNote"] = str(body.get("companionsNote") or "")
+        if "linkedTableSessionId" in body:
+            s["linkedTableSessionId"] = str(body.get("linkedTableSessionId") or "").strip() or None
+        if "linkedTableId" in body:
+            s["linkedTableId"] = str(body.get("linkedTableId") or "").strip() or None
+        _kids_area_save_sessions(sessions)
+        return s
+    raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+
+
+@app.post("/api/restaurant/kids-area/sessions/{session_id}/sale-line")
+def restaurant_kids_area_sale_line(session_id: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    name = str(body.get("name") or "").strip()
+    qty = float(body.get("quantity") or 1)
+    unit = float(body.get("unitPrice") or 0)
+    pg = str(body.get("productGuide") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم الصنف مطلوب")
+    sessions = _kids_area_load_sessions()
+    if not isinstance(sessions, list):
+        sessions = []
+    for s in sessions:
+        if not isinstance(s, dict) or str(s.get("id")) != session_id:
+            continue
+        if str(s.get("status") or "") != "active":
+            raise HTTPException(status_code=409, detail="الجلسة ليست نشطة")
+        lines = s.get("salesLines")
+        if not isinstance(lines, list):
+            lines = []
+        lines.append(
+            {
+                "lineId": str(uuid.uuid4()),
+                "name": name,
+                "quantity": qty,
+                "unitPrice": unit,
+                "productGuide": pg,
+                "at": datetime.now().isoformat(),
+            }
+        )
+        s["salesLines"] = lines
+        _kids_area_save_sessions(sessions)
+        return s
+    raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+
+
+@app.post("/api/restaurant/kids-area/sessions/{session_id}/close")
+def restaurant_kids_area_session_close(session_id: str, body: dict):
+    if not isinstance(body, dict):
+        body = {}
+    mode = str(body.get("paymentMode") or "cash").strip().lower()
+    sessions = _kids_area_load_sessions()
+    if not isinstance(sessions, list):
+        sessions = []
+    settings = _kids_area_load_settings()
+    for s in sessions:
+        if not isinstance(s, dict) or str(s.get("id")) != session_id:
+            continue
+        if str(s.get("status") or "") != "active":
+            raise HTTPException(status_code=409, detail="الجلسة مغلقة مسبقاً")
+        exit_at = datetime.now().isoformat()
+        t0 = _kids_area_parse_iso(str(s.get("entryAt") or ""))
+        t1 = _kids_area_parse_iso(exit_at)
+        hours = 0.0
+        if t0 and t1:
+            hours = max(0.0, (t1 - t0).total_seconds() / 3600.0)
+        pph = _kids_area_package_price(settings, str(s.get("packageId") or ""))
+        area_fee = round(hours * pph, 2)
+        sales = s.get("salesLines") if isinstance(s.get("salesLines"), list) else []
+        sales_total = 0.0
+        for ln in sales:
+            if not isinstance(ln, dict):
+                continue
+            sales_total += float(ln.get("quantity") or 0) * float(ln.get("unitPrice") or 0)
+        sales_total = round(sales_total, 2)
+        grand = round(area_fee + sales_total, 2)
+        s["exitAt"] = exit_at
+        s["status"] = "closed"
+        s["areaFeeComputed"] = area_fee
+        s["hoursComputed"] = round(hours, 4)
+        s["salesTotal"] = sales_total
+        s["grandTotal"] = grand
+        pays = s.get("payments")
+        if not isinstance(pays, list):
+            pays = []
+            s["payments"] = pays
+        pay_note = ""
+        if mode == "table":
+            ts_id = str(body.get("tableSessionId") or s.get("linkedTableSessionId") or "").strip()
+            if not ts_id:
+                raise HTTPException(status_code=400, detail="tableSessionId مطلوب للتحويل للطاولة")
+            tdata = _restaurant_load("table_sessions", [])
+            if not isinstance(tdata, list):
+                tdata = []
+            ts = None
+            for t in tdata:
+                if isinstance(t, dict) and str(t.get("id")) == ts_id:
+                    ts = t
+                    break
+            if not ts:
+                raise HTTPException(status_code=404, detail="جلسة الطاولة غير موجودة")
+            if str(ts.get("status") or "") != "active":
+                raise HTTPException(status_code=409, detail="جلسة الطاولة ليست نشطة")
+            table_id = str(ts.get("tableId") or "")
+            ch = str(s.get("childName") or "")
+            items = [
+                {
+                    "name": f"[Kids Area] أجر منطقة الأطفال — {ch} ({hours:.2f} ساعة)",
+                    "quantity": 1,
+                    "unitPrice": area_fee,
+                    "productGuide": "",
+                }
+            ]
+            for ln in sales:
+                if not isinstance(ln, dict):
+                    continue
+                items.append(
+                    {
+                        "name": f"[Kids Area] {ln.get('name') or 'مبيعات'}",
+                        "quantity": float(ln.get("quantity") or 1),
+                        "unitPrice": float(ln.get("unitPrice") or 0),
+                        "productGuide": str(ln.get("productGuide") or ""),
+                    }
+                )
+            ord_data = _restaurant_load("orders", [])
+            if not isinstance(ord_data, list):
+                ord_data = []
+            payload = {
+                "sessionId": ts_id,
+                "tableId": table_id,
+                "tableGuid": table_id,
+                "tableLabel": table_id,
+                "items": items,
+            }
+            _kds_upsert_table_order(ord_data, payload)
+            _restaurant_save("orders", ord_data)
+            _mark_session_first_order_delay(ts_id)
+            pays.append({"kind": "table", "amount": grand, "tableSessionId": ts_id, "at": exit_at})
+            pay_note = "تم تحويل المبلغ إلى طلب الطاولة"
+        else:
+            pays.append({"kind": "cash", "amount": grand, "at": exit_at})
+            pay_note = "تم تسجيل إغلاق نقدي (لا يُدمج مع الطاولة)"
+        _kids_area_save_sessions(sessions)
+        return {"session": s, "message": pay_note}
+    raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+
+
 @app.post("/api/restaurant/orders")
 def restaurant_create_order(body: dict):
     """إنشاء طلب"""
@@ -11380,7 +13423,9 @@ def restaurant_create_order(body: dict):
             continue
         same_session = session_id and str(ex.get("sessionId") or "") == session_id
         same_table = table_id and str(ex.get("tableId") or "") == table_id
-        if not (same_session or same_table):
+        # عند توفر sessionId لا ندمج إلا على نفس الجلسة.
+        can_merge = bool(same_session) if session_id else bool(same_table)
+        if not can_merge:
             continue
         ex["items"] = _kds_merge_items(ex.get("items") or [], incoming_items)
         ex["updatedAt"] = datetime.now().isoformat()
@@ -11434,7 +13479,35 @@ def restaurant_update_order_status(order_id: str, body: dict):
             if status == "preparing":
                 o["prepStartTime"] = datetime.now().isoformat()
             elif status == "ready":
-                o["prepEndTime"] = datetime.now().isoformat()
+                now_iso = datetime.now().isoformat()
+                o["prepEndTime"] = now_iso
+                # تثبيت "جاهز للتسليم": نعلّم كل البنود كـ prepared/ready
+                # حتى لا تعيد _kds_refresh_order_status الطلب إلى pending في القراءة التالية.
+                items = [_kds_normalize_item(x) for x in (o.get("items") or []) if isinstance(x, dict)]
+                for it in items:
+                    if bool(it.get("sent")):
+                        continue
+                    it["prepared"] = True
+                    it["lineStatus"] = "ready"
+                    if not str(it.get("preparedAt") or "").strip():
+                        it["preparedAt"] = now_iso
+                o["items"] = items
+            elif status in ("served", "paid"):
+                # تثبيت "تم التسليم": نعلّم كل البنود sent حتى لا يعيد
+                # _kds_refresh_order_status الطلب إلى ready في القراءات اللاحقة.
+                now_iso = datetime.now().isoformat()
+                items = [_kds_normalize_item(x) for x in (o.get("items") or []) if isinstance(x, dict)]
+                for it in items:
+                    it["prepared"] = True
+                    it["sent"] = True
+                    it["lineStatus"] = "sent"
+                    if not str(it.get("preparedAt") or "").strip():
+                        it["preparedAt"] = now_iso
+                    if not str(it.get("sentAt") or "").strip():
+                        it["sentAt"] = now_iso
+                o["items"] = items
+                if not str(o.get("completedAt") or "").strip():
+                    o["completedAt"] = now_iso
             elif status == "cancelled":
                 o["cancelledAt"] = datetime.now().isoformat()
             _restaurant_save("orders", data)
@@ -11458,6 +13531,28 @@ def restaurant_update_order_line(order_id: str, line_id: str, body: dict):
                 break
         if not found:
             raise HTTPException(status_code=404, detail="سطر الطلب غير موجود")
+        if body and body.get("cancelled") in (True, "1", "true", 1, "yes"):
+            if bool(found.get("cancelled")):
+                o["items"] = items
+                _kds_refresh_order_status(o)
+                _restaurant_save("orders", data)
+                return {"ok": True, "order": o, "line": found}
+            if bool(found.get("prepared")) or bool(found.get("sent")):
+                raise HTTPException(
+                    status_code=409,
+                    detail="لا يمكن إلغاء السطر بعد بدء التحضير أو التسليم.",
+                )
+            if str(o.get("status") or "").lower() in ("served", "paid", "cancelled"):
+                raise HTTPException(status_code=409, detail="لا يمكن تعديل بنود هذا الطلب.")
+            found["cancelled"] = True
+            found["lineStatus"] = "cancelled"
+            found["cancelledAt"] = datetime.now().isoformat()
+            found["prepared"] = False
+            found["sent"] = False
+            o["items"] = items
+            _kds_refresh_order_status(o)
+            _restaurant_save("orders", data)
+            return {"ok": True, "order": o, "line": found}
         if "prepared" in (body or {}):
             prepared = bool(body.get("prepared"))
             found["prepared"] = prepared
@@ -11495,9 +13590,13 @@ def restaurant_send_order_line(order_id: str, line_id: str):
             raise HTTPException(status_code=404, detail="سطر الطلب غير موجود")
         if not bool(found.get("prepared")):
             raise HTTPException(status_code=409, detail="لا يمكن الإرسال قبل تأكيد التحضير")
-        found["sent"] = True
-        found["lineStatus"] = "sent"
-        found["sentAt"] = datetime.now().isoformat()
+        # في مسار المطاعم: زر "إرسال" بالمطبخ يعني "جاهز للتسليم لجرسون المناولة"
+        # وليس "تم تسليمه للطاولة". لذلك لا نعلّم السطر sent هنا.
+        now_iso = datetime.now().isoformat()
+        found["sent"] = False
+        found["lineStatus"] = "ready"
+        found["handoffAt"] = now_iso
+        found["sentAt"] = None
         o["items"] = items
         _kds_refresh_order_status(o)
         _restaurant_save("orders", data)
@@ -11860,16 +13959,34 @@ def restaurant_create_invoice(body: dict):
             "TaxValue": tax,
             "LocalAdministrativeTax": service_charge,
         }
+        if order_type in ("delivery", "bar_quick"):
+            cc_quick = _ensure_quick_kitchen_cost_center()
+            if cc_quick:
+                inv["CostCenter"] = cc_quick
         invoice_header = InvoiceHeader(**inv)
         result = save_invoice(invoice_header)
         inv_list = _restaurant_load("invoices", [])
         inv_list.append({"sessionId": session_id, "invoiceId": result.get("MainGuide"), "total": total, "paidAt": datetime.now().isoformat()})
         _restaurant_save("invoices", inv_list)
-        # طلب مطبخ (KDS) — مرتبط بجلسة الطاولة؛ يظهر في شاشة المطبخ ويُلغى من الجرسون إن بقي pending
-        if order_type == "table" and session_id and items_body:
+        # طلب مطبخ (KDS):
+        # - table: مرتبط بجلسة الطاولة المعتادة.
+        # - delivery/bar_quick: يدخل المطبخ أيضًا عبر قناة "سريع" بمركز تكلفة مخصص.
+        if order_type in ("table", "delivery", "bar_quick") and items_body:
             try:
-                table_guid_kds = str(body.get("tableGuid") or body.get("tableId") or "").strip() or str(session_id)
-                table_label_kds = str(body.get("tableName") or body.get("tableLabel") or "").strip() or table_guid_kds
+                if order_type == "table":
+                    session_id_kds = str(session_id or "").strip() or str(uuid.uuid4())
+                    table_guid_kds = str(body.get("tableGuid") or body.get("tableId") or "").strip() or session_id_kds
+                    table_label_kds = str(body.get("tableName") or body.get("tableLabel") or "").strip() or table_guid_kds
+                elif order_type == "delivery":
+                    sid_base = str(result.get("MainGuide") or uuid.uuid4()).strip()
+                    session_id_kds = f"delivery:{sid_base}"
+                    table_guid_kds = "DELIVERY"
+                    table_label_kds = "DELIVERY"
+                else:
+                    sid_base = str(result.get("MainGuide") or uuid.uuid4()).strip()
+                    session_id_kds = f"bar_quick:{sid_base}"
+                    table_guid_kds = "BAR_QUICK"
+                    table_label_kds = "BAR_QUICK"
                 kds_items = []
                 for x in items_body:
                     kds_items.append(
@@ -11884,7 +14001,7 @@ def restaurant_create_invoice(body: dict):
                 _kds_upsert_table_order(
                     ord_data,
                     {
-                        "sessionId": str(session_id),
+                        "sessionId": session_id_kds,
                         "tableId": table_guid_kds,
                         "tableGuid": table_guid_kds,
                         "tableLabel": table_label_kds,
@@ -11910,6 +14027,33 @@ def restaurant_create_invoice(body: dict):
             pass
 
 
+def _invoice_lines_aggregate_for_store(part_items: list) -> list:
+    """تجميع بنود الفاتورة لنفس الصنف وسعر الوحدة — للعرض والطباعة في invoices.json."""
+    out: dict[tuple[str, str], dict] = {}
+    for x in part_items or []:
+        if not isinstance(x, dict):
+            continue
+        nm = str(x.get("ProductName") or "").strip() or "صنف"
+        try:
+            up = float(x.get("UnitPrice") or 0)
+        except (TypeError, ValueError):
+            up = 0.0
+        try:
+            qty = float(x.get("Quantity") or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        try:
+            tv = float(x.get("TotalValue") if x.get("TotalValue") is not None else qty * up)
+        except (TypeError, ValueError):
+            tv = qty * up
+        key = (nm.lower(), f"{up:.6f}")
+        if key not in out:
+            out[key] = {"name": nm, "quantity": 0.0, "unitPrice": up, "lineTotal": 0.0}
+        out[key]["quantity"] += qty
+        out[key]["lineTotal"] += tv
+    return list(out.values())
+
+
 @app.post("/api/restaurant/sessions/request-bill")
 def restaurant_sessions_request_bill(body: dict):
     """طلب الحساب: تجميع طلبات الجلسة غير المفوترة → فاتورة SQL واحدة + انتظار تسديد الكاشير."""
@@ -11918,6 +14062,23 @@ def restaurant_sessions_request_bill(body: dict):
     session_id = str(body.get("sessionId") or "").strip()
     if not session_id:
         raise HTTPException(status_code=400, detail="sessionId مطلوب")
+    sess_rows = _restaurant_load("table_sessions", [])
+    if isinstance(sess_rows, list):
+        for s in sess_rows:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("id") or "").strip() != session_id:
+                continue
+            merged_to = str(s.get("mergedIntoSessionId") or "").strip()
+            if merged_to:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"هذه الطاولة مدموجة على جلسة أخرى. اطلب الحساب من الطاولة الهدف (sessionId={merged_to}).",
+                )
+            break
+    billing_session_ids = set(_restaurant_billing_session_ids(session_id))
+    if not billing_session_ids:
+        billing_session_ids = {session_id}
 
     all_o = _restaurant_load("orders", [])
     if not isinstance(all_o, list):
@@ -11926,7 +14087,9 @@ def restaurant_sessions_request_bill(body: dict):
     for o in all_o:
         if not isinstance(o, dict):
             continue
-        if str(o.get("sessionId") or "") != session_id:
+        sid = str(o.get("sessionId") or "").strip()
+        bsid = str(o.get("billingSessionId") or "").strip()
+        if sid not in billing_session_ids and bsid not in billing_session_ids:
             continue
         if str(o.get("status") or "").lower() == "cancelled":
             continue
@@ -11935,6 +14098,47 @@ def restaurant_sessions_request_bill(body: dict):
         if o.get("invoiceId"):
             continue
         pending.append(o)
+    # حزم طلب الحساب:
+    # - البنود التي لم تبدأ بالمطبخ تُلغى تلقائيًا (cancelled)
+    # - لا يُسمح بطلب الحساب إذا بقي بند بدأ التحضير ولم يُسلَّم للطاولة
+    blockers = []
+    for o in pending:
+        items = [_kds_normalize_item(x) for x in (o.get("items") or []) if isinstance(x, dict)]
+        changed_items = False
+        for it in items:
+            if bool(it.get("cancelled")):
+                continue
+            line_status = str(it.get("lineStatus") or "").strip().lower()
+            started = bool(it.get("prepared")) or bool(it.get("sent")) or line_status in ("ready", "sent", "preparing")
+            delivered = bool(it.get("sent")) or line_status == "sent"
+            if not started:
+                it["cancelled"] = True
+                it["lineStatus"] = "cancelled"
+                it["cancelledAt"] = datetime.now().isoformat()
+                it["prepared"] = False
+                it["sent"] = False
+                it["preparedAt"] = None
+                it["sentAt"] = None
+                it["handoffAt"] = None
+                changed_items = True
+                continue
+            if not delivered and str(o.get("status") or "").strip().lower() not in ("served", "paid"):
+                blockers.append(str(o.get("ticketNo") or str(o.get("id") or "")[:8]))
+        if changed_items:
+            o["items"] = items
+            _kds_refresh_order_status(o)
+    if blockers:
+        blockers = [x for x in blockers if x]
+        if blockers:
+            blockers_txt = "، ".join([f"#{x}" for x in blockers[:8]])
+            raise HTTPException(
+                status_code=409,
+                detail=f"لا يمكن طلب الحساب قبل تسليم الطلبات للطاولة. أكمل التسليم أولاً للتذاكر: {blockers_txt}",
+            )
+        raise HTTPException(status_code=409, detail="لا يمكن طلب الحساب قبل تسليم الطلبات للطاولة.")
+    pending = [x for x in pending if isinstance(x, dict) and str(x.get("status") or "").lower() != "cancelled"]
+    if pending:
+        _restaurant_save("orders", all_o)
     if not pending:
         raise HTTPException(
             status_code=400,
@@ -11983,6 +14187,8 @@ def restaurant_sessions_request_bill(body: dict):
             seat_num = _extract_seat_num(name)
             qty = float(it.get("quantity") or 0)
             price = float(it.get("unitPrice") or 0)
+            if bool(it.get("cancelled")):
+                continue
             if qty <= 0:
                 continue
             items_body.append(
@@ -12074,6 +14280,7 @@ def restaurant_sessions_request_bill(body: dict):
         share_tax = agg_tax / parts_count
         share_svc = agg_svc / parts_count
         share_tip = tip_amount / parts_count
+        table_phrase = _restaurant_table_phrase_for_bill_notes(session_id)
         for idx, part in enumerate(invoice_batches):
             part_items = part["items"]
             if not part_items:
@@ -12085,7 +14292,7 @@ def restaurant_sessions_request_bill(body: dict):
                 "DoneIn": bill_date,
                 "AgentGuide": agent_guide,
                 "InvoiceType": invoice_type_guid,
-                "Notes": f"مطعم — طلب حساب جلسة {session_id} — {part['name']}",
+                "Notes": f"مطعم — طلب حساب — {table_phrase} — {part['name']}",
                 "PaymentMethod": "نقدي",
                 "Discount": 0.0,
                 "TaxValue": share_tax if split_enabled else agg_tax,
@@ -12097,7 +14304,21 @@ def restaurant_sessions_request_bill(body: dict):
             main_g = str(result.get("MainGuide") or "")
             subtotal_p = float(part.get("subtotal") or 0)
             total_p = subtotal_p + (share_tax if split_enabled else agg_tax) + (share_svc if split_enabled else agg_svc) + (share_tip if split_enabled else tip_amount)
-            created_invoices.append({"invoiceId": main_g, "name": part["name"], "total": total_p, "tipAmount": (share_tip if split_enabled else tip_amount)})
+            lines_agg = _invoice_lines_aggregate_for_store(part_items)
+            created_invoices.append(
+                {
+                    "invoiceId": main_g,
+                    "name": part["name"],
+                    "total": total_p,
+                    "tipAmount": (share_tip if split_enabled else tip_amount),
+                    "billNumber": bill_num + idx,
+                    "subtotal": round(subtotal_p, 2),
+                    "tax": round(float(share_tax if split_enabled else agg_tax), 2),
+                    "serviceCharge": round(float(share_svc if split_enabled else agg_svc), 2),
+                    "discount": 0.0,
+                    "lines": lines_agg,
+                }
+            )
 
         if not created_invoices:
             raise HTTPException(status_code=500, detail="تعذر إنشاء فواتير للجلسة")
@@ -12109,6 +14330,7 @@ def restaurant_sessions_request_bill(body: dict):
             if str(o.get("id") or "") in pending_ids:
                 o["finalInvoiceId"] = ",".join([x["invoiceId"] for x in created_invoices])
                 o["billedAt"] = now_iso
+                o["billingSessionId"] = session_id
         _restaurant_save("orders", all_o)
         inv_list = _restaurant_load("invoices", [])
         for part in created_invoices:
@@ -12122,14 +14344,28 @@ def restaurant_sessions_request_bill(body: dict):
                     "paidAt": None,
                     "splitName": part["name"] if split_enabled else None,
                     "tipAmount": part.get("tipAmount") or 0.0,
+                    "billNumber": part.get("billNumber"),
+                    "subtotal": part.get("subtotal"),
+                    "tax": part.get("tax"),
+                    "serviceCharge": part.get("serviceCharge"),
+                    "discount": float(part.get("discount") or 0.0),
+                    "lines": part.get("lines") if isinstance(part.get("lines"), list) else [],
                 }
             )
         _restaurant_save("invoices", inv_list)
         sess = _restaurant_load("table_sessions", [])
+        table_id_for_policy = str(pending[0].get("tableId") or "").strip() if pending else ""
         for s in sess:
             if isinstance(s, dict) and str(s.get("id")) == session_id:
                 s["billingRequestedAt"] = now_iso
+                if not table_id_for_policy:
+                    table_id_for_policy = str(s.get("tableId") or "").strip()
         _restaurant_save("table_sessions", sess)
+        if table_id_for_policy:
+            try:
+                _workflow_apply_cleaning_policy(table_id_for_policy, event="request_check")
+            except Exception:
+                pass
         dispatch_mode = _workflow_role_for("dispatch_cashier")
         check_role = _workflow_role_for("request_check")
         try:
@@ -12348,7 +14584,9 @@ MAT3AM_BOOTSTRAP_DEFAULT_USERS = [
     ("host", "123", "host", "جارسون الاستقبال"),
     ("waiter", "123", "waiter", "جارسون الطلبات"),
     ("kitchen", "123", "kitchen", "المطبخ"),
+    ("speed", "123", "speed_order", "الطلبات السريعة"),
     ("server", "123", "server", "جارسون المناولة"),
+    ("kids", "123", "kids_guard", "كيدز إيريا"),
 ]
 
 
@@ -12380,7 +14618,10 @@ def _seed_mat3am_default_users_if_empty(cursor) -> int:
 
 
 def _ensure_mat3am_dev_schema(cursor) -> tuple:
-    """إنشاء جداول التطبيق المساندة إن لم تكن موجودة.
+    """إنشاء جداول MAT3AM المستخدمة في الواجهة والـ API إن لم تكن موجودة.
+
+    يشمل: مستخدمي التطبيق، السجلات، حالة المطعم المشتركة، ربط أنماط الفواتير/المخازن، الوصفات والمخزون،
+    سياسة POS والعروض، قوائم الأسعار، المحرك اليومي (عهدة/مسترد/مصاريف/إغلاق/نتيجة/وضع التكلفة)، ثم بذور TBL020/TBL008 عند الحاجة.
 
     يعيد (عدد مستخدمي التطبيق المُدرَجين, نتيجة تهيئة أنواع فواتير المطعم في TBL020, نتيجة تهيئة مخازن TBL008 وربطها).
     """
@@ -12462,6 +14703,29 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
         END
         """,
         """
+        IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_STATE', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_RESTAURANT_STATE (
+                StateKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+                PayloadJson NVARCHAR(MAX) NULL,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+            CREATE INDEX IX_MAT3AM_RESTAURANT_STATE_UpdatedAt ON dbo.MAT3AM_RESTAURANT_STATE(UpdatedAt DESC);
+        END
+        """,
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_WORKFLOW_SETTINGS', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_WORKFLOW_SETTINGS (
+                SettingsKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+                PayloadJson NVARCHAR(MAX) NULL,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                UpdatedBy NVARCHAR(100) NULL
+            );
+            CREATE INDEX IX_MAT3AM_WORKFLOW_SETTINGS_UpdatedAt ON dbo.MAT3AM_WORKFLOW_SETTINGS(UpdatedAt DESC);
+        END
+        """,
+        """
         IF OBJECT_ID(N'dbo.MAT3AM_RECIPE_HDR', N'U') IS NULL
         BEGIN
             CREATE TABLE dbo.MAT3AM_RECIPE_HDR (
@@ -12509,6 +14773,26 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
             pass
         print(f"[MAT3AM] تحذير: تعذر إكمال جداول التكلفة/المخزون (يتم الاستمرار لجدول المستخدمين): {e}")
 
+    try:
+        _ensure_price_list_schema(cursor)
+        cursor.connection.commit()
+    except Exception as e:
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+        print(f"[MAT3AM] تحذير: تعذر إنشاء جداول قوائم الأسعار MAT3AM_PRICE_LIST_*: {e}")
+
+    try:
+        _ensure_daily_engine_schema(cursor)
+        cursor.connection.commit()
+    except Exception as e:
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+        print(f"[MAT3AM] تحذير: تعذر إنشاء جداول المحرك اليومي MAT3AM_DAILY_* / COSTING_MODE: {e}")
+
     restaurant_invoice_seed: dict = {"ok": False, "note": "لم يُنفَّذ"}
     try:
         restaurant_invoice_seed = _seed_mat3am_restaurant_invoice_types(cursor)
@@ -12526,6 +14810,17 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
         cursor.connection.commit()
     except Exception as e:
         restaurant_store_seed = {"ok": False, "note": str(e), "errors": [{"detail": str(e)}]}
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+
+    try:
+        _ensure_menu_tables(cursor)
+        _ensure_speed_order_product_group(cursor)
+        cursor.connection.commit()
+    except Exception as e:
+        print(f"[MAT3AM] تجميعة الطلبات السريعة (TBL006): {e}", flush=True)
         try:
             cursor.connection.rollback()
         except Exception:
@@ -12549,6 +14844,15 @@ def developer_bootstrap():
         cursor = conn.cursor()
         default_users_inserted, restaurant_invoice_seed, restaurant_store_seed = _ensure_mat3am_dev_schema(cursor)
         conn.commit()
+        quick_kitchen_cost_center_guid = None
+        try:
+            quick_kitchen_cost_center_guid = _ensure_quick_kitchen_cost_center()
+        except Exception:
+            quick_kitchen_cost_center_guid = None
+        try:
+            _bootstrap_mat3am_runtime()
+        except Exception:
+            pass
         default_users_spec = [
             {"login": a, "pin": b, "role": c, "displayName": d}
             for a, b, c, d in MAT3AM_BOOTSTRAP_DEFAULT_USERS
@@ -12559,7 +14863,7 @@ def developer_bootstrap():
         st_ok = bool(st_seed.get("ok", True))
         return {
             "ok": True,
-            "bootstrapSchemaRevision": 3,
+            "bootstrapSchemaRevision": MAT3AM_VERIFY_SCHEMA_REVISION,
             "restaurantInvoiceTypesOk": inv_ok,
             "restaurantStoresOk": st_ok,
             "message": "تمت تهيئة جداول الدعم بنجاح"
@@ -12571,12 +14875,45 @@ def developer_bootstrap():
                 "MAT3AM_AUDIT_LOG",
                 "MAT3AM_RESTAURANT_INVOICE_TYPES",
                 "MAT3AM_RESTAURANT_STORES",
+                "MAT3AM_RESTAURANT_STATE",
+                "MAT3AM_WORKFLOW_SETTINGS",
                 "MAT3AM_RECIPE_HDR",
                 "MAT3AM_RECIPE_LINE",
                 "MAT3AM_STOCK_MOVEMENT",
                 "MAT3AM_POS_POLICY",
                 "MAT3AM_PROMOTION",
+                "MAT3AM_PAYMENT_ROUTING",
+                "MAT3AM_INV_PAYMENT_LINE",
+                "MAT3AM_PRICE_LIST_HDR",
+                "MAT3AM_PRICE_LIST_LINE",
+                "MAT3AM_DAILY_CUSTODY_LINE",
+                "MAT3AM_DAILY_RETURN_LINE",
+                "MAT3AM_DAILY_OVERHEAD_LINE",
+                "MAT3AM_DAILY_CLOSE",
+                "MAT3AM_DAILY_RESULT",
+                "MAT3AM_COSTING_MODE",
             ],
+            "kidsAreaModule": {
+                "sqlTablesAdded": [],
+                "storage": "ملفات JSON تحت config/restaurant/ (لا جداول SQL جديدة لموديول منطقة الأطفال)",
+                "templateFile": "config/restaurant/kids_area_defaults.json",
+                "runtimeFiles": [
+                    "kids_area_settings.json",
+                    "kids_area_sessions.json",
+                    "kids_area_profiles.json",
+                ],
+                "apis": [
+                    "GET /api/restaurant/kids-area/settings",
+                    "PUT /api/restaurant/kids-area/settings",
+                    "GET /api/restaurant/kids-area/profiles?q=",
+                    "GET /api/restaurant/kids-area/sessions",
+                    "POST /api/restaurant/kids-area/sessions/start",
+                    "PATCH /api/restaurant/kids-area/sessions/{session_id}",
+                    "POST /api/restaurant/kids-area/sessions/{session_id}/sale-line",
+                    "POST /api/restaurant/kids-area/sessions/{session_id}/close",
+                ],
+                "note": "تُنشأ/تُنسَخ عند إقلاع الخادم أو بعد POST /api/dev/bootstrap — مطابقة لـ _bootstrap_mat3am_runtime",
+            },
             "defaultAppUsersInserted": default_users_inserted,
             "defaultAppUsersSpec": default_users_spec,
             "defaultAppUsersNote": "يُدرَج هؤلاء فقط عندما يكون جدول MAT3AM_APP_USERS فارغاً تماماً.",
@@ -12584,6 +14921,11 @@ def developer_bootstrap():
             "restaurantInvoiceTypesNote": "زر التهيئة: 6 صفوف في TBL020 بـ CardGuide جديد لكل نوع وInvoiceName عربي؛ TBL022.MainGuide من MAT3AM أو من SELECT CardGuide FROM TBL020 WHERE InvoiceName = الاسم. قاعدة فارغة = إدراج مباشر؛ إن تعذّر قالب مؤقت أو نسخ من صف موجود.",
             "restaurantStoresSeed": restaurant_store_seed,
             "restaurantStoresNote": "تهيئة: 6 صفوف في TBL008 بنفس WarehouseName مثل InvoiceName في TBL020 (توحيد) + MAT3AM_RESTAURANT_STORES؛ الحفظ: StoreGuide = CardGuide من TBL008 WHERE WarehouseName = اسم النمط.",
+            "quickKitchenCostCenter": {
+                "name": MAT3AM_QUICK_KITCHEN_COST_CENTER_NAME,
+                "cardGuide": quick_kitchen_cost_center_guid,
+                "note": "يُستخدم تلقائياً لفواتير delivery/bar_quick التي تدخل المطبخ.",
+            },
         }
     except Exception as e:
         try:
@@ -12599,7 +14941,7 @@ def developer_bootstrap():
 
 
 def _load_tbl_seed_pack() -> dict:
-    p = BASE_DIR / "config" / "tbl_seed_pack_v1.json"
+    p = BUNDLE_DIR / "config" / "tbl_seed_pack_v1.json"
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"ملف seed غير موجود: {p}")
     with open(p, "r", encoding="utf-8") as f:
@@ -12691,9 +15033,118 @@ def _tbl_upsert(cursor, table_name: str, key_map: dict, data_map: dict, cols: se
     return "inserted"
 
 
+def _snapshot_master_data_from_database(cursor) -> dict:
+    """لقطة مراكز الكلفة TBL005، مجموعات الأصناف TBL006، وأصناف/تجميعات TBL007 — مصدر الحقيقة القاعدة."""
+    out: dict = {"TBL005": {}, "TBL006": {}, "TBL007": {}}
+    try:
+        cursor.execute(
+            """
+            SELECT CardGuide, CostCenter, LatinName, CardType, NotActive
+            FROM dbo.TBL005
+            ORDER BY CostCenter
+            """
+        )
+        rows5 = []
+        for r in cursor.fetchall() or []:
+            rows5.append(
+                {
+                    "CardGuide": str(r[0]) if r[0] is not None else None,
+                    "CostCenter": r[1],
+                    "LatinName": r[2],
+                    "CardType": r[3],
+                    "NotActive": r[4],
+                }
+            )
+        out["TBL005"] = {"rowCount": len(rows5), "rows": rows5}
+    except Exception as e:
+        out["TBL005"] = {"error": str(e), "rows": [], "rowCount": 0}
+
+    try:
+        cursor.execute(
+            """
+            SELECT CardGuide, GroupName, LatinName, MainGuide, NotActive
+            FROM dbo.TBL006
+            ORDER BY GroupName
+            """
+        )
+        rows6 = []
+        for r in cursor.fetchall() or []:
+            rows6.append(
+                {
+                    "CardGuide": str(r[0]) if r[0] is not None else None,
+                    "GroupName": r[1],
+                    "LatinName": r[2],
+                    "MainGuide": str(r[3]) if r[3] is not None else None,
+                    "NotActive": r[4],
+                }
+            )
+        out["TBL006"] = {"rowCount": len(rows6), "rows": rows6}
+    except Exception as e:
+        out["TBL006"] = {"error": str(e), "rows": [], "rowCount": 0}
+
+    try:
+        cursor.execute("SELECT COUNT(*) FROM dbo.TBL007")
+        total7 = int((cursor.fetchone() or [0])[0] or 0)
+    except Exception as e:
+        out["TBL007"] = {"error": str(e), "totalProducts": 0, "byGroup": [], "orphanProducts": 0}
+        return out
+
+    by_group: list = []
+    try:
+        cursor.execute(
+            """
+            SELECT g.CardGuide, g.GroupName, COUNT(*) AS Cnt
+            FROM dbo.TBL007 p
+            INNER JOIN dbo.TBL006 g ON p.GroupGuid = g.CardGuide
+            WHERE ISNULL(p.NotActive, 0) = 0
+            GROUP BY g.CardGuide, g.GroupName
+            ORDER BY g.GroupName
+            """
+        )
+        for r in cursor.fetchall() or []:
+            by_group.append(
+                {
+                    "groupGuid": str(r[0]) if r[0] is not None else None,
+                    "groupName": r[1],
+                    "activeProductCount": int(r[2] or 0),
+                }
+            )
+    except Exception:
+        by_group = []
+
+    orphan = 0
+    try:
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM dbo.TBL007 p
+            WHERE ISNULL(p.NotActive, 0) = 0
+              AND (p.GroupGuid IS NULL OR NOT EXISTS (
+                SELECT 1 FROM dbo.TBL006 g WHERE g.CardGuide = p.GroupGuid
+              ))
+            """
+        )
+        orphan = int((cursor.fetchone() or [0])[0] or 0)
+    except Exception:
+        pass
+
+    out["TBL007"] = {
+        "totalProducts": total7,
+        "activeProductsByGroup": by_group,
+        "distinctActiveGroups": len(by_group),
+        "orphanActiveProducts": orphan,
+        "note": "الأصناف الفعلية في TBL007؛ المجموعات المعروضة من ربط TBL007→TBL006",
+    }
+    return out
+
+
 @app.post("/api/dev/seed-default-data")
 def developer_seed_default_data():
-    """تعبئة بيانات تشغيل افتراضية في جداول TBL الموجودة مسبقاً (UPSERT فقط)."""
+    """تعبئة بيانات تشغيل افتراضية في جداول TBL (UPSERT من JSON حيث وُجدت صفوف).
+
+    masterDataFromDatabase (افتراضي true): إن كان الجدول **فارغاً** في القاعدة تُدمَج صفوف JSON؛
+    إن كان فيه بيانات **لا** نُعيد كتابته من الملف (نحترم بيانات ERP/الاستيراد) ونكتفي بلقطة في fromDatabase.
+    ضع false في meta لدمج JSON لـ TBL005/006/007 دائماً بغض النظر عن محتوى القاعدة.
+    """
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
@@ -12702,9 +15153,23 @@ def developer_seed_default_data():
         tables = seed.get("tables") if isinstance(seed, dict) else {}
         if not isinstance(tables, dict):
             raise HTTPException(status_code=400, detail="seed.tables غير صالح")
+        meta = seed.get("meta") if isinstance(seed.get("meta"), dict) else {}
+        master_smart = bool(meta.get("masterDataFromDatabase", True))
         order = ["TBL004", "TBL005", "TBL015", "TBL016", "TBL006", "TBL007", "TBL008", "TBL049", "TBL020"]
         cursor = conn.cursor()
         report: dict[str, dict] = {}
+        from_database = _snapshot_master_data_from_database(cursor)
+        skip_master_json: set[str] = set()
+        if master_smart:
+            d5 = from_database.get("TBL005") if isinstance(from_database, dict) else {}
+            d6 = from_database.get("TBL006") if isinstance(from_database, dict) else {}
+            d7 = from_database.get("TBL007") if isinstance(from_database, dict) else {}
+            if isinstance(d5, dict) and not d5.get("error") and int(d5.get("rowCount") or 0) > 0:
+                skip_master_json.add("TBL005")
+            if isinstance(d6, dict) and not d6.get("error") and int(d6.get("rowCount") or 0) > 0:
+                skip_master_json.add("TBL006")
+            if isinstance(d7, dict) and not d7.get("error") and int(d7.get("totalProducts") or 0) > 0:
+                skip_master_json.add("TBL007")
 
         def gid_by_group_name(name: str) -> Optional[str]:
             n = str(name or "").strip()
@@ -12731,6 +15196,15 @@ def developer_seed_default_data():
                 return None
 
         for tname in order:
+            if tname in skip_master_json:
+                snap = (from_database or {}).get(tname) if isinstance(from_database, dict) else {}
+                report[tname] = {
+                    "source": "database",
+                    "skippedStaticSeedRows": True,
+                    "skippedBecauseDatabaseHasRows": True,
+                    "snapshot": snap if isinstance(snap, dict) else {},
+                }
+                continue
             spec = tables.get(tname)
             if not isinstance(spec, dict):
                 continue
@@ -12794,7 +15268,18 @@ def developer_seed_default_data():
                     stat["errors"].append({"row": r, "detail": str(ex)})
             report[tname] = stat
         conn.commit()
-        return {"ok": True, "seedVersion": str((seed.get("meta") or {}).get("version") or ""), "tables": report}
+        return {
+            "ok": True,
+            "seedVersion": str((seed.get("meta") or {}).get("version") or ""),
+            "masterDataFromDatabase": master_smart,
+            "masterDataNote": (
+                "TBL005/006/007: إن كانت فارغة — دُمجت من JSON؛ إن وُجدت بيانات — تُركت ولم يُمس الملف"
+                if master_smart
+                else "TBL005/006/007: دُمج JSON دائماً (masterDataFromDatabase=false)"
+            ),
+            "fromDatabase": from_database,
+            "tables": report,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -12818,6 +15303,24 @@ def developer_verify_seed_default_data():
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     try:
         cursor = conn.cursor()
+        # إنشاء جداول MAT3AM الناقصة (قواعد قديمة أو لم تُنفَّذ POST /api/dev/bootstrap بعد)
+        try:
+            _ensure_mat3am_dev_schema(cursor)
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[verify] تحذير: تعذر _ensure_mat3am_dev_schema — محاولة جدول الحالة فقط: {e}", flush=True)
+        try:
+            _restaurant_sql_ensure_table(cursor)
+            conn.commit()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[verify] تحذير: تعذر إنشاء MAT3AM_RESTAURANT_STATE: {e}", flush=True)
         checks = [
             ("TBL004", "دليل الحسابات", "SELECT COUNT(*) FROM dbo.TBL004", 3),
             ("TBL005", "مراكز الكلفة", "SELECT COUNT(*) FROM dbo.TBL005", 1),
@@ -12828,6 +15331,29 @@ def developer_verify_seed_default_data():
             ("TBL016", "العملاء", "SELECT COUNT(*) FROM dbo.TBL016", 1),
             ("TBL020", "أنواع الفواتير", "SELECT COUNT(*) FROM dbo.TBL020", 1),
             ("TBL049", "المشاريع", "SELECT COUNT(*) FROM dbo.TBL049", 1),
+            # جداول MAT3AM (تهيئة التطبيق — يُنشأ مع زر «تنفيذ التهيئة»)
+            ("MAT3AM_APP_USERS", "مستخدمو واجهة المطعم", "SELECT COUNT(*) FROM dbo.MAT3AM_APP_USERS", 1),
+            ("MAT3AM_ERROR_LOG", "سجل أخطاء التطبيق", "SELECT COUNT(*) FROM dbo.MAT3AM_ERROR_LOG", 0),
+            ("MAT3AM_AUDIT_LOG", "سجل تدقيق التطبيق", "SELECT COUNT(*) FROM dbo.MAT3AM_AUDIT_LOG", 0),
+            ("MAT3AM_RESTAURANT_STATE", "حالة المطعم المشتركة (طلبات/منيو/جلسات)", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_STATE", 0),
+            ("MAT3AM_WORKFLOW_SETTINGS", "إعدادات مسار التشغيل المشتركة", "SELECT COUNT(*) FROM dbo.MAT3AM_WORKFLOW_SETTINGS", 0),
+            ("MAT3AM_RESTAURANT_INVOICE_TYPES", "ربط أنماط فواتير المطعم", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES", 0),
+            ("MAT3AM_RESTAURANT_STORES", "ربط مخازن المطعم", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_STORES", 0),
+            ("MAT3AM_RECIPE_HDR", "رؤوس وصفات التكلفة", "SELECT COUNT(*) FROM dbo.MAT3AM_RECIPE_HDR", 0),
+            ("MAT3AM_RECIPE_LINE", "بنود وصفات التكلفة", "SELECT COUNT(*) FROM dbo.MAT3AM_RECIPE_LINE", 0),
+            ("MAT3AM_STOCK_MOVEMENT", "حركة مخزون MAT3AM", "SELECT COUNT(*) FROM dbo.MAT3AM_STOCK_MOVEMENT", 0),
+            ("MAT3AM_POS_POLICY", "سياسة POS", "SELECT COUNT(*) FROM dbo.MAT3AM_POS_POLICY", 0),
+            ("MAT3AM_PROMOTION", "عروض MAT3AM", "SELECT COUNT(*) FROM dbo.MAT3AM_PROMOTION", 0),
+            ("MAT3AM_PAYMENT_ROUTING", "ربط طرق التحصيل بحسابات GL", "SELECT COUNT(*) FROM dbo.MAT3AM_PAYMENT_ROUTING", 0),
+            ("MAT3AM_INV_PAYMENT_LINE", "بنود تسديد فواتير الكاشير", "SELECT COUNT(*) FROM dbo.MAT3AM_INV_PAYMENT_LINE", 0),
+            ("MAT3AM_PRICE_LIST_HDR", "رؤوس قوائم الأسعار", "SELECT COUNT(*) FROM dbo.MAT3AM_PRICE_LIST_HDR", 0),
+            ("MAT3AM_PRICE_LIST_LINE", "بنود قوائم الأسعار", "SELECT COUNT(*) FROM dbo.MAT3AM_PRICE_LIST_LINE", 0),
+            ("MAT3AM_DAILY_CUSTODY_LINE", "عهدة أول اليوم (خام)", "SELECT COUNT(*) FROM dbo.MAT3AM_DAILY_CUSTODY_LINE", 0),
+            ("MAT3AM_DAILY_RETURN_LINE", "المسترد اليومي", "SELECT COUNT(*) FROM dbo.MAT3AM_DAILY_RETURN_LINE", 0),
+            ("MAT3AM_DAILY_OVERHEAD_LINE", "مصاريف التشغيل اليومية", "SELECT COUNT(*) FROM dbo.MAT3AM_DAILY_OVERHEAD_LINE", 0),
+            ("MAT3AM_DAILY_CLOSE", "إغلاق يوم التكلفة", "SELECT COUNT(*) FROM dbo.MAT3AM_DAILY_CLOSE", 0),
+            ("MAT3AM_DAILY_RESULT", "نتيجة اليومية", "SELECT COUNT(*) FROM dbo.MAT3AM_DAILY_RESULT", 0),
+            ("MAT3AM_COSTING_MODE", "وضع التكلفة", "SELECT COUNT(*) FROM dbo.MAT3AM_COSTING_MODE", 1),
         ]
         result_rows = []
         ok = 0
@@ -12897,6 +15423,9 @@ def developer_verify_seed_default_data():
             "summary": {"ok": ok, "warn": warn, "error": err},
             "tables": result_rows,
             "extraChecks": extras,
+            # يُستخدم في الواجهة للتمييز بين خادم قديم (مثلاً OK=11 فقط) وخادم حديث (~28 فحصاً + MAT3AM)
+            "verifySchemaRevision": MAT3AM_VERIFY_SCHEMA_REVISION,
+            "checksPlanned": len(checks),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"فشل تقرير التحقق: {e}")
@@ -12905,6 +15434,97 @@ def developer_verify_seed_default_data():
             conn.close()
         except Exception:
             pass
+
+
+def _mat3am_schema_probe_payload() -> dict:
+    """أين يعمل api_server فعلياً، وأي settings.json، وأي قاعدة DB_NAME()، وهل جداول MAT3AM موجودة."""
+    out: dict = {
+        "ok": False,
+        "verifySchemaRevision": MAT3AM_VERIFY_SCHEMA_REVISION,
+        "apiFile": os.path.abspath(__file__),
+        "cwd": os.getcwd(),
+        "pythonExecutable": sys.executable,
+        "dataDir": str(DATA_DIR),
+        "bundleDir": str(BUNDLE_DIR),
+        "settingsPath": _settings_path,
+        "settingsFileExists": os.path.isfile(_settings_path),
+        "connectionOk": False,
+        "databaseName": None,
+        "tables": [],
+        "hint": None,
+    }
+    conn = get_connection()
+    if not conn:
+        out["hint"] = (
+            "لا يوجد اتصال SQL — لن تُنشأ جداول. احفظ السيرفر/القاعدة من هذه الصفحة، أو شغّل run_api.bat من مجلد مطاعم، "
+            "وأوقف أي عملية قديمة على المنفذ 2288."
+        )
+        return out
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DB_NAME()")
+        out["databaseName"] = (cursor.fetchone() or [None])[0]
+        out["connectionOk"] = True
+        for name in MAT3AM_DDL_TABLE_NAMES:
+            row: dict = {"name": name, "exists": False, "count": None, "error": None}
+            try:
+                cursor.execute(f"SELECT OBJECT_ID(N'dbo.{name}', N'U')")
+                oid = cursor.fetchone()[0]
+                row["exists"] = oid is not None
+                if row["exists"]:
+                    cursor.execute(f"SELECT COUNT(*) FROM dbo.[{name}]")
+                    row["count"] = int((cursor.fetchone() or [0])[0] or 0)
+            except Exception as ex:
+                row["error"] = str(ex)
+            out["tables"].append(row)
+        missing = [t["name"] for t in out["tables"] if not t.get("exists")]
+        if missing:
+            out["ok"] = False
+            out["hint"] = (
+                f"جداول ناقصة ({len(missing)}): أولها {', '.join(missing[:6])}"
+                + (" …" if len(missing) > 6 else "")
+                + " — اضغط «إنشاء/تحديث جداول MAT3AM» أو «تنفيذ التهيئة»، ثم أعد التشخيص. "
+                "إن بقي الناقص: تأكد أن هذا الخادم هو الملف في apiFile وليس نسخة قديمة."
+            )
+        else:
+            out["ok"] = True
+            out["hint"] = "كل جداول MAT3AM المطلوبة موجودة على قاعدة الاتصال الحالية (انظر databaseName)."
+        return out
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.get("/api/dev/mat3am-schema-probe")
+def api_dev_mat3am_schema_probe():
+    """تشخيص صريح: مسار الملف، الإعدادات، DB_NAME()، ووجود كل جدول — لاكتشاف عملية API قديمة أو قاعدة خاطئة."""
+    return _mat3am_schema_probe_payload()
+
+
+@app.post("/api/dev/mat3am-schema-ensure")
+def api_dev_mat3am_schema_ensure():
+    """ينفّذ نفس DDL التهيئة ثم يعيد التشخيص — عندما تكون الجداول ناقصة رغم تشغيل خادم حديث."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="لا اتصال بقاعدة البيانات — احفظ الإعدادات أولاً")
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"فشل إنشاء الجداول: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return _mat3am_schema_probe_payload()
 
 
 @app.post("/api/dev/error-logs")

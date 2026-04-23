@@ -1241,11 +1241,11 @@
         "unitPrice": 0.0,
         "productGuide": "205A4BC0-5DB2-461B-A0C4-B7683CBCA839",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:35.401014",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "78f1279d-1ebf-409f-a4a6-16cb7078d112",
@@ -1254,11 +1254,11 @@
         "unitPrice": 0.0,
         "productGuide": "E408B0CB-52A2-4FD9-A46F-59F50FE28517",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:34.088774",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "f738c9b7-359c-4c8a-981f-566dc20b4cb7",
@@ -1267,11 +1267,11 @@
         "unitPrice": 0.0,
         "productGuide": "0958ABAE-2D2D-4AEF-BC71-9DE80A44635F",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:30.361846",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "1746d0b3-4a4a-41f3-b899-2e1ecae01cfe",
@@ -1280,11 +1280,11 @@
         "unitPrice": 0.0,
         "productGuide": "5A265FCE-AED8-4FF3-B1BA-34923EDAD02A",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:28.482656",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "9972985f-5e39-4cb4-ac20-64d709d081cf",
@@ -1293,11 +1293,11 @@
         "unitPrice": 0.0,
         "productGuide": "8A438221-C66E-41C0-B802-BA0AC79F0A93",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:27.672988",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "c028c1b4-8a50-4701-9c0d-432e73945cc7",
@@ -1306,11 +1306,11 @@
         "unitPrice": 0.0,
         "productGuide": "C662C5BF-68F6-4F91-895A-C80407DAC8C9",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:26.791276",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "65e2e5b2-ff2f-4782-a2a2-00c7c59b2c1f",
@@ -1319,11 +1319,11 @@
         "unitPrice": 0.0,
         "productGuide": "F65F67AB-B26A-4A53-8811-724350BF171B",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:03:37.721045",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       },
       {
         "lineId": "b2ac4430-b3f8-49bd-b2e9-8000751fcfe6",
@@ -1332,11 +1332,11 @@
         "unitPrice": 0.0,
         "productGuide": "B7D36066-C404-44F4-A095-07D98F705E3E",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:25.815051",
-        "sentAt": null
+        "sentAt": "2026-04-23T09:07:29.787691"
       }
     ],
     "kitchenTotals": {
@@ -1345,11 +1345,11 @@
       "serviceCharge": 0.0,
       "total": 0.0
     },
-    "status": "ready",
+    "status": "served",
     "generalOrder": false,
     "createdAt": "2026-04-17T21:59:32.569264",
     "ticketNo": 14,
-    "completedAt": null,
+    "completedAt": "2026-04-23T09:07:29.787691",
     "prepStartTime": "2026-04-17T22:03:37.721045"
   },
   {
@@ -1531,5 +1531,215 @@
     "completedAt": "2026-04-18T22:41:36.284438",
     "prepStartTime": "2026-04-18T22:21:50.294329",
     "kpiLeadMinutes": 22.03
+  },
+  {
+    "id": "3942f4b3-feb6-4174-8b2c-badc6b3c6a3d",
+    "sessionId": "5b753fa9-8ad8-4263-b6b2-6a1e39e8b535",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": "46528703-7155-4A47-9EBB-50C288917C64",
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "01d9440d-37bd-4b32-98c2-77417a1da7e5",
+        "name": "الشوربة Soup (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "01BB884E-2E6C-402C-973A-61E5C639EAC0",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-04-22T10:05:36.051287",
+        "handoffAt": "2026-04-22T10:05:38.664664",
+        "sentAt": null
+      },
+      {
+        "lineId": "f763881c-3c36-4114-84c8-ebe325d288d8",
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "productGuide": "A275B767-B03C-4445-9DF5-AF9BEEB34562",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "691532a9-6eaa-45e8-9be2-682fd0bd549e",
+        "name": "Chicken Cranchy (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "229849E5-FF52-4827-82F4-FDE1F1A29AC0",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null
+      },
+      {
+        "lineId": "6300c040-9c7f-44ff-b0e8-7679a2053f91",
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "A32D9F2C-4994-4B8A-8BA2-B24B3D8FDCF2",
+        "seatNo": null,
+        "lineStatus": "pending",
+        "prepared": false,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 600.0,
+      "tax": 94.08,
+      "serviceCharge": 72.0,
+      "total": 766.08
+    },
+    "status": "preparing",
+    "generalOrder": false,
+    "createdAt": "2026-04-19T16:02:34.239891",
+    "ticketNo": 17,
+    "completedAt": null,
+    "billedAt": "2026-04-19T16:02:36.937923",
+    "prepStartTime": "2026-04-22T10:05:36.051287",
+    "updatedAt": "2026-04-22T21:34:48.933358"
+  },
+  {
+    "id": "9af40cdb-045b-430d-8358-d4efcfd70249",
+    "sessionId": "4c5b13fb-c055-4580-9663-7f1c1b7404a8",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "a13d4b63-ad96-4c90-99cc-3e981f4a3a94",
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "productGuide": "A275B767-B03C-4445-9DF5-AF9BEEB34562",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-23T09:07:09.291514",
+        "sentAt": "2026-04-23T09:07:31.588414"
+      },
+      {
+        "lineId": "bead87c4-b459-418e-8dcc-73900f5f290f",
+        "name": "Chicken Cranchy (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "229849E5-FF52-4827-82F4-FDE1F1A29AC0",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-23T09:07:10.708148",
+        "sentAt": "2026-04-23T09:07:31.588414"
+      },
+      {
+        "lineId": "a8d7a9ac-de93-4d0a-a8bf-1c78a75a7ba3",
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "A32D9F2C-4994-4B8A-8BA2-B24B3D8FDCF2",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-23T09:07:11.671927",
+        "sentAt": "2026-04-23T09:07:31.588414"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 200.0,
+      "tax": 31.36,
+      "serviceCharge": 24.0,
+      "total": 255.36
+    },
+    "status": "served",
+    "generalOrder": false,
+    "createdAt": "2026-04-22T23:46:09.340541",
+    "ticketNo": 18,
+    "completedAt": "2026-04-23T09:07:31.588414",
+    "prepStartTime": "2026-04-23T09:07:09.291514"
+  },
+  {
+    "id": "a1c797d0-f262-4acb-a7db-5e6a4a493719",
+    "sessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": "DD8E75CC-55EA-4B2B-B7EC-09DF6B256702",
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "f76a31dd-0877-4eed-b40c-701d9457f369",
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "productGuide": "A275B767-B03C-4445-9DF5-AF9BEEB34562",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-23T01:29:56.139598",
+        "sentAt": "2026-04-23T09:07:33.331052"
+      },
+      {
+        "lineId": "059cc833-52e4-4c43-950a-77d0af861472",
+        "name": "Chicken Cranchy (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "229849E5-FF52-4827-82F4-FDE1F1A29AC0",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-23T01:30:14.485547",
+        "sentAt": "2026-04-23T09:07:33.331052"
+      },
+      {
+        "lineId": "0464a51d-5e6c-46ce-b276-c203fa5bea8d",
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "A32D9F2C-4994-4B8A-8BA2-B24B3D8FDCF2",
+        "seatNo": null,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-04-23T01:50:15.675262",
+        "sentAt": "2026-04-23T09:07:33.331052"
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 200.0,
+      "tax": 31.36,
+      "serviceCharge": 24.0,
+      "total": 255.36
+    },
+    "status": "served",
+    "generalOrder": false,
+    "createdAt": "2026-04-23T01:27:28.202266",
+    "ticketNo": 19,
+    "completedAt": "2026-04-23T09:07:33.331052",
+    "prepStartTime": "2026-04-23T01:29:20.214068",
+    "billedAt": "2026-04-23T11:07:09.748883",
+    "billingSessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc"
   }
 ]

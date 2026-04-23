@@ -121,9 +121,6 @@ export default function PriceListSettingsPage() {
   return (
     <div className="page" style={{ direction: "rtl" }}>
       <h2 style={{ marginTop: 0 }}>إعدادات التكاليف - قائمة الأسعار</h2>
-      <p style={{ color: "var(--muted)" }}>
-        تحديث <strong>سعر المستهلك</strong> للمنتجات التامة حسب المجموعة. عند الزيادة النسبية، الأصناف ذات السعر السابق صفر يتم تخطيها تلقائياً.
-      </p>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>

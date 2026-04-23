@@ -1,0 +1,12 @@
+{
+  "receiveGuestBy": "host",
+  "takeOrderBy": "waiter",
+  "deliverFromKitchenBy": "server",
+  "cleanTableBy": "server",
+  "checkRequestBy": "waiter",
+  "cashierDispatchMode": "both",
+  "cleaningStartTrigger": "payment_completed",
+  "cleaningExecutionBy": "server",
+  "cleaningReviewBy": "none",
+  "cleaningStartStatus": "dirty"
+}

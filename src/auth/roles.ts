@@ -6,7 +6,9 @@ export type RoleId =
   | "host"
   | "waiter"
   | "kitchen"
-  | "server";
+  | "speed_order"
+  | "server"
+  | "kids_guard";
 
 export const ROLE_LABELS: Record<RoleId, string> = {
   cashier: "كاشير",
@@ -16,7 +18,9 @@ export const ROLE_LABELS: Record<RoleId, string> = {
   host: "جارسون الاستقبال",
   waiter: "جارسون الطلبات",
   kitchen: "مطبخ",
+  speed_order: "الطلبات السريعة",
   server: "جارسون المناولة",
+  kids_guard: "كيدز إيريا",
 };
 
 export const ROLE_ROUTES: Record<RoleId, string> = {
@@ -27,5 +31,7 @@ export const ROLE_ROUTES: Record<RoleId, string> = {
   host: "/app/host",
   waiter: "/app/waiter",
   kitchen: "/app/kitchen",
+  speed_order: "/app/speed_order",
   server: "/app/server",
+  kids_guard: "/app/kids-guard",
 };

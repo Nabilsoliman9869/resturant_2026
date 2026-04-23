@@ -4,5 +4,182 @@
     "invoiceId": "54D481BE-B4CE-41BB-9F8D-E980BAA23386",
     "total": 0.0,
     "paidAt": "2026-04-04T03:47:24.439122"
+  },
+  {
+    "sessionId": "5b753fa9-8ad8-4263-b6b2-6a1e39e8b535",
+    "invoiceId": "46528703-7155-4A47-9EBB-50C288917C64",
+    "total": 0.0,
+    "requestedAt": "2026-04-19T16:02:36.937923",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-19T16:07:39.643103",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "72499CA6-F801-4777-B551-4BC173B5DAF8",
+    "total": 0.0,
+    "paidAt": "2026-04-20T13:27:26.054903"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "8B57B6D9-B05B-4945-B15E-21EE362C78AA",
+    "total": 0.0,
+    "paidAt": "2026-04-20T13:27:49.888460"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "4B373BB9-1C0F-4DDF-A67D-751C6140254A",
+    "total": 0.0,
+    "paidAt": "2026-04-20T13:40:43.035883"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "B95FEB94-CC91-48C7-9852-FCF839C2C354",
+    "total": 0.0,
+    "paidAt": "2026-04-20T15:13:41.255887"
+  },
+  {
+    "sessionId": "4891b34a-050d-440d-ba97-6ff7fd007919",
+    "invoiceId": "7D4E34A9-8D1F-4980-91F4-B974B49E8018",
+    "total": 0.0,
+    "requestedAt": "2026-04-20T15:56:34.266911",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-20T15:57:20.551161",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": "986952ff-113c-47ed-9ca7-bbb8ede89360",
+    "invoiceId": "0C56E025-D579-4AE8-8142-EFD00D1FF793",
+    "total": 0.0,
+    "requestedAt": "2026-04-21T12:12:41.688167",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-21T12:23:33.276477",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": "c8a35ca5-fda0-46a9-8294-a6392e350d6f",
+    "invoiceId": "A5503C71-EB5D-4A05-8FD2-6AF648683A3E",
+    "total": 0.0,
+    "requestedAt": "2026-04-21T12:12:50.353585",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-21T12:23:32.315715",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": "42ac5123-aade-483a-8b46-eacc84ae58da",
+    "invoiceId": "54C05D26-D32F-478D-B7C1-A96AD1E3C6E4",
+    "total": 0.0,
+    "requestedAt": "2026-04-21T14:37:50.527514",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-21T14:38:22.821026",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": "e342324e-1b95-4397-b95c-d10ca5392012",
+    "invoiceId": "FF1B849D-F991-401F-B99B-A8DD05C72D8F",
+    "total": 0.0,
+    "requestedAt": "2026-04-21T14:42:39.288137",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0
+  },
+  {
+    "sessionId": "7f92d311-2d64-471c-a080-a9df96a93e0e",
+    "invoiceId": "27EF5730-83F3-43B2-9DC2-A95361BE81D8",
+    "total": 0.0,
+    "requestedAt": "2026-04-21T14:47:18.890000",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-21T15:37:40.388808",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "split"
+  },
+  {
+    "sessionId": "2430dbb0-ce48-4cef-893e-5e46329399a6",
+    "invoiceId": "20E75C2B-95EA-45C6-9205-2F6294CA57B9",
+    "total": 2200.0,
+    "requestedAt": "2026-04-21T15:09:17.327093",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-22T21:22:56.363260",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": "e1eee516-95a1-455d-8cb3-84732401d6bc",
+    "invoiceId": "84FAC652-08D0-4B9B-BCD5-3EF3948FF5B9",
+    "total": 800.0,
+    "requestedAt": "2026-04-21T16:13:11.945831",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-22T21:22:41.189982",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "paymentMethod": "cash"
+  },
+  {
+    "sessionId": "fbbb882d-48f6-4eb5-aea1-669a9af712bc",
+    "invoiceId": "DD8E75CC-55EA-4B2B-B7EC-09DF6B256702",
+    "total": 255.36,
+    "requestedAt": "2026-04-23T11:07:09.748883",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T11:08:44.221973",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 13,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      },
+      {
+        "name": "Chicken Cranchy (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "split_by_order",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 255.36,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
   }
 ]
