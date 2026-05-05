@@ -1,7 +1,10 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
+import { useAuth } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
+import { buildMat3amActor } from "../lib/mat3amActor";
+import { tryParseJson } from "../lib/tryParseJson";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 
@@ -12,7 +15,12 @@ type TableSession = {
   startTime?: string;
   status?: string;
   billingRequestedAt?: string;
+  captainUserId?: string;
+  captainLogin?: string;
+  captainName?: string;
+  captainClaimedAt?: string;
 };
+type StaffUser = { id: string; login: string; name: string; role: string; isActive?: boolean };
 type OrderItem = { name?: string; quantity?: number; unitPrice?: number };
 type OrderRow = {
   id?: string;
@@ -40,6 +48,8 @@ type TableReport = {
 export default function WaiterTablesPage() {
   const base = getApiBase();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
   const [tables, setTables] = useState<RestTable[]>([]);
   const [sessionByTable, setSessionByTable] = useState<Map<string, string>>(() => new Map());
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
@@ -49,6 +59,12 @@ export default function WaiterTablesPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [report, setReport] = useState<TableReport | null>(null);
   const [reportPos, setReportPos] = useState({ x: 0, y: 0 });
+  const [exclusiveOn, setExclusiveOn] = useState(false);
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
+  const [reassignSid, setReassignSid] = useState<string | null>(null);
+  const [reassignPickId, setReassignPickId] = useState("");
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [reassignBusy, setReassignBusy] = useState(false);
 
   function isTodayIso(iso?: string): boolean {
     if (!iso) return false;
@@ -75,74 +91,176 @@ export default function WaiterTablesPage() {
     return "ready";
   }
 
+  const loadTables = useCallback(async () => {
+    try {
+      const [fp, rt, rs, ro, wf] = await Promise.all([
+        fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
+        fetch(`${base}/api/restaurant/tables`),
+        fetch(`${base}/api/restaurant/table-sessions?status=active`),
+        fetch(`${base}/api/restaurant/orders`),
+        fetch(`${base}/api/restaurant/workflow-settings`),
+      ]);
+      const fpj = await fp.json().catch(() => ({}));
+      const jt = await rt.json();
+      const js = await rs.json();
+      const oj = await ro.json().catch(() => ({}));
+      const wfj = await wf.json().catch(() => ({}));
+      const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
+      setExclusiveOn(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
+
+      const apiTables: RestTable[] = Array.isArray(jt.tables) ? jt.tables : [];
+      const planRaw = fpj?.plan;
+      const statusById = new Map<string, string>();
+      for (const t of apiTables as any[]) statusById.set(String(t?.id || ""), normalizeTableStatus(String(t?.status || "")));
+      setTables(
+        buildSegmentedTablesFromFloorPlan(planRaw, apiTables).map((t: any) => ({
+          ...t,
+          status: statusById.get(String(t?.id || "")) || normalizeTableStatus(String(t?.status || "")),
+          noOrderOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderOverdue),
+          noOrderMinutes: Number((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderMinutes || 0),
+          cleanupOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.cleanupOverdue),
+        })),
+      );
+      const m = new Map<string, string>();
+      const sessions = (Array.isArray(js.sessions) ? js.sessions : []).filter((s: any) => isTodayIso(String(s?.startTime || "")));
+      setSessions(sessions);
+      for (const s of sessions) {
+        const tid = s?.tableId != null ? String(s.tableId) : "";
+        const sid = s?.id != null ? String(s.id) : "";
+        if (tid && sid) m.set(tid, sid);
+      }
+      setSessionByTable(m);
+
+      const busy = new Set<string>();
+      const billreq = new Set<string>();
+      for (const s of sessions) {
+        const tid = String(s?.tableId || "");
+        const st = String(s?.status || "").toLowerCase();
+        if (tid && st === "active") busy.add(tid);
+        if (tid && s?.billingRequestedAt) billreq.add(tid);
+      }
+      const orders = (Array.isArray(oj.orders) ? oj.orders : []).filter((o: any) => isTodayIso(String(o?.createdAt || "")));
+      setOrders(orders);
+      for (const o of orders) {
+        const tid = String(o?.tableId || "");
+        const st = String(o?.status || "").toLowerCase();
+        if (tid && ["pending", "preparing"].includes(st)) busy.add(tid);
+      }
+      setBusyIds(busy);
+      setBillReqIds(billreq);
+    } catch (e) {
+      setMsg(String(e));
+    }
+  }, [base]);
+
   useEffect(() => {
     let stop = false;
-    const load = async () => {
-      try {
-        const [fp, rt, rs, ro] = await Promise.all([
-          fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
-          fetch(`${base}/api/restaurant/tables`),
-          fetch(`${base}/api/restaurant/table-sessions?status=active`),
-          fetch(`${base}/api/restaurant/orders`),
-        ]);
-        const fpj = await fp.json().catch(() => ({}));
-        const jt = await rt.json();
-        const js = await rs.json();
-        const oj = await ro.json().catch(() => ({}));
-
-        const apiTables: RestTable[] = Array.isArray(jt.tables) ? jt.tables : [];
-        const planRaw = fpj?.plan;
-        const statusById = new Map<string, string>();
-        for (const t of apiTables as any[]) statusById.set(String(t?.id || ""), normalizeTableStatus(String(t?.status || "")));
-        if (stop) return;
-        setTables(
-          buildSegmentedTablesFromFloorPlan(planRaw, apiTables).map((t: any) => ({
-            ...t,
-            status: statusById.get(String(t?.id || "")) || normalizeTableStatus(String(t?.status || "")),
-            noOrderOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderOverdue),
-            noOrderMinutes: Number((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderMinutes || 0),
-            cleanupOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.cleanupOverdue),
-          })),
-        );
-        const m = new Map<string, string>();
-        const sessions = (Array.isArray(js.sessions) ? js.sessions : []).filter((s: any) => isTodayIso(String(s?.startTime || "")));
-        setSessions(sessions);
-        for (const s of sessions) {
-          const tid = s?.tableId != null ? String(s.tableId) : "";
-          const sid = s?.id != null ? String(s.id) : "";
-          if (tid && sid) m.set(tid, sid);
-        }
-        setSessionByTable(m);
-
-        // انشغال/طلب حساب
-        const busy = new Set<string>();
-        const billreq = new Set<string>();
-        for (const s of sessions) {
-          const tid = String(s?.tableId || "");
-          const st = String(s?.status || "").toLowerCase();
-          if (tid && st === "active") busy.add(tid);
-          if (tid && s?.billingRequestedAt) billreq.add(tid);
-        }
-        const orders = (Array.isArray(oj.orders) ? oj.orders : []).filter((o: any) => isTodayIso(String(o?.createdAt || "")));
-        setOrders(orders);
-        for (const o of orders) {
-          const tid = String(o?.tableId || "");
-          const st = String(o?.status || "").toLowerCase();
-          if (tid && ["pending", "preparing"].includes(st)) busy.add(tid);
-        }
-        setBusyIds(busy);
-        setBillReqIds(billreq);
-      } catch (e) {
-        if (!stop) setMsg(String(e));
-      }
+    const tick = async () => {
+      if (stop) return;
+      await loadTables();
     };
-    void load();
-    const id = window.setInterval(() => void load(), 7000);
+    void tick();
+    const id = window.setInterval(() => void tick(), 7000);
     return () => {
       stop = true;
       window.clearInterval(id);
     };
-  }, [base]);
+  }, [loadTables]);
+
+  useEffect(() => {
+    const r = user?.role;
+    if (r !== "manager" && r !== "developer") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`${base}/api/auth/users`);
+        const j = tryParseJson<{ users?: StaffUser[] }>(await res.text()) ?? {};
+        if (cancelled || !res.ok) return;
+        const u = Array.isArray(j.users) ? j.users : [];
+        setStaffUsers(
+          u.filter((x) => ["waiter", "host"].includes(String(x.role || "").toLowerCase()) && x.isActive !== false),
+        );
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [base, user?.role]);
+
+  async function claimCaptain(sessionId: string) {
+    setMsg("");
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
+    setClaimBusy(true);
+    try {
+      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/claim-order-taker`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mat3amActor: actor }),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم تسكينك كابتن على هذه الجلسة.");
+      await loadTables();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+
+  async function submitReassignCaptain() {
+    if (!reassignSid || !reassignPickId) return;
+    setMsg("");
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
+    const pick = staffUsers.find((u) => String(u.id) === String(reassignPickId));
+    if (!pick) {
+      setMsg("اختر المستخدم الهدف.");
+      return;
+    }
+    setReassignBusy(true);
+    try {
+      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(reassignSid)}/reassign-order-taker`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mat3amActor: actor,
+          targetUserId: pick.id,
+          targetLogin: pick.login,
+          targetName: pick.name || pick.login,
+        }),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم تحويل الكابتن.");
+      setReassignSid(null);
+      setReassignPickId("");
+      await loadTables();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setReassignBusy(false);
+    }
+  }
 
   async function changeTableStatus(tableId: string, status: "dirty" | "cleaning" | "ready") {
     try {
@@ -213,9 +331,22 @@ export default function WaiterTablesPage() {
     setReportPos({ x: ev.clientX, y: ev.clientY });
   };
 
+  const orderTakerBase = location.pathname.startsWith("/app/manager")
+    ? "/app/manager"
+    : location.pathname.startsWith("/app/developer")
+      ? "/app/developer"
+      : "/app/waiter";
+
+  const headerTitle =
+    user?.role === "manager"
+      ? "شريحات الطاولات — المدير"
+      : user?.role === "developer"
+        ? "شريحات الطاولات — مطوّر"
+        : "جارسون الطلبات";
+
   return (
     <div className="role-op waiter-pos" onClick={() => setReport(null)}>
-      <OperationalRoleHeader roleTitle="جارسون الطلبات" hideBack />
+      <OperationalRoleHeader roleTitle={headerTitle} hideBack />
 
       <div className="role-op__main" style={{ maxWidth: 720 }}>
         <h2 className="role-op__section-title">اختر الطاولة</h2>
@@ -246,9 +377,18 @@ export default function WaiterTablesPage() {
             const noOrderMinutes = Number((t as any).noOrderMinutes || 0);
             const isBusy = busyIds.has(String(t.id));
             const billReq = billReqIds.has(String(t.id));
+            const sidStr = sessionByTable.get(String(t.id)) || "";
+            const sessRow = sessions.find(
+              (s) => String(s?.tableId || "") === String(t.id) && String(s?.status || "").toLowerCase() === "active",
+            );
+            const captainLabel = sessRow
+              ? String(sessRow.captainName || sessRow.captainLogin || "").trim() || ""
+              : "";
+            const capId = sessRow ? String(sessRow.captainUserId || "").trim() : "";
+            const isVipTable = Boolean(t.features?.vipSection);
             return (
+              <div key={t.id} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <button
-                key={t.id}
                 type="button"
                 className="role-op__pick-card"
                 style={{
@@ -260,21 +400,55 @@ export default function WaiterTablesPage() {
                     setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
                     return;
                   }
-                  const sid = sessionByTable.get(String(t.id));
+                  if (
+                    exclusiveOn &&
+                    capId &&
+                    user?.id &&
+                    String(capId) !== String(user.id) &&
+                    user.role !== "manager" &&
+                    user.role !== "developer"
+                  ) {
+                    const nm = captainLabel || "كابتن آخر";
+                    setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
+                    return;
+                  }
                   const q =
                     `tableId=${encodeURIComponent(t.id)}` +
-                    (sid ? `&sessionId=${encodeURIComponent(sid)}` : "");
-                  navigate(`/app/waiter/order-taker?${q}`);
+                    (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
+                  navigate(`${orderTakerBase}/order-taker?${q}`);
                 }}
                 onContextMenu={(ev) => showTableReport(t, ev)}
               >
-                <div className="role-op__pick-num">{num}</div>
+                <div className="role-op__pick-num" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                  <span>{num}</span>
+                  {isVipTable ? (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 900,
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        background: "linear-gradient(180deg,#fde68a,#fbbf24)",
+                        color: "#78350f",
+                        border: "1px solid #d97706",
+                      }}
+                      title="فوترة VIP من إعدادات التشغيل عند فتح الجلسة"
+                    >
+                      VIP
+                    </span>
+                  ) : null}
+                </div>
                 {noOrderOverdue ? (
                   <div style={{ position: "absolute", top: 8, left: 8, width: 24, height: 24, borderRadius: 999, background: "#7c3aed", color: "#fff", display: "grid", placeItems: "center", fontSize: 14, fontWeight: 900 }}>
                     ⏱
                   </div>
                 ) : null}
                 <div className="role-op__pick-sub">🪑 مقاعد {t.seats ?? "—"}</div>
+                {captainLabel ? (
+                  <div style={{ marginTop: 6, fontSize: "0.8rem", fontWeight: 900, color: "#0369a1" }}>كابتن: {captainLabel}</div>
+                ) : sidStr ? (
+                  <div style={{ marginTop: 6, fontSize: "0.74rem", color: "#64748b" }}>لم يُسكَّن كابتن بعد</div>
+                ) : null}
                 <div style={{ marginTop: 8, fontSize: "0.82rem", color: isBusy ? "#b91c1c" : "#166534" }}>
                   {notReady ? (tStatus === "dirty" ? "متسخة" : "قيد التنظيف") : isBusy ? "مشغولة" : "جاهزة"}
                   {billReq ? " · طلب حساب" : ""}
@@ -316,10 +490,79 @@ export default function WaiterTablesPage() {
                   )}
                 </div>
               </button>
+              {sidStr ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ fontSize: 12, padding: "4px 10px" }}
+                    disabled={claimBusy || notReady}
+                    onClick={() => void claimCaptain(sidStr)}
+                  >
+                    {capId && user?.id && String(capId) === String(user.id) ? "أنت الكابتن ✓" : "تسكين كابتن"}
+                  </button>
+                  {(user?.role === "manager" || user?.role === "developer") && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12, padding: "4px 10px" }}
+                      disabled={notReady}
+                      onClick={() => {
+                        setReassignSid(sidStr);
+                        setReassignPickId("");
+                      }}
+                    >
+                      تحويل كابتن
+                    </button>
+                  )}
+                </div>
+              ) : null}
+              </div>
             );
           })}
         </div>
       </div>
+      {reassignSid ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            zIndex: 1100,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onClick={() => !reassignBusy && setReassignSid(null)}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 420, width: "100%", padding: "1rem 1.1rem", direction: "rtl" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>تحويل الكابتن (مدير)</div>
+            <label style={{ display: "block", fontSize: "0.85rem", marginBottom: 4 }}>اختر جرسون الطلبات / الاستقبال</label>
+            <select className="waiter-pos__select" style={{ width: "100%", marginBottom: 12 }} value={reassignPickId} onChange={(e) => setReassignPickId(e.target.value)}>
+              <option value="">— اختر —</option>
+              {staffUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name || u.login} ({u.login})
+                </option>
+              ))}
+            </select>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn-ghost" disabled={reassignBusy} onClick={() => setReassignSid(null)}>
+                إلغاء
+              </button>
+              <button type="button" className="btn btn-primary" disabled={reassignBusy || !reassignPickId} onClick={() => void submitReassignCaptain()}>
+                {reassignBusy ? "…" : "تأكيد"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {report ? (
         <div
           onClick={(e) => e.stopPropagation()}

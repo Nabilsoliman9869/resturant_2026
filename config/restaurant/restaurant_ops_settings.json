@@ -1,0 +1,14 @@
+{
+  "kitchenOutputMode": "screens",
+  "kitchenPrepBoardLayout": "per_station",
+  "kitchenPrintTicketMode": "batch_only",
+  "kitchenPrintShowTableChip": "on",
+  "kitchenPrinterDeviceHint": "",
+  "specialTableDefaultNoService": "off",
+  "specialTableDefaultNoVat": "off",
+  "specialTableDefaultDiscountPct": "0",
+  "kidsAreaSeparateTickets": "on",
+  "auditRetentionDays": "365",
+  "auditLogClientActions": "on",
+  "deliveryChannelStrictFinancialModes": "on"
+}

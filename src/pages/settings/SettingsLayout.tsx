@@ -43,7 +43,11 @@ const OPERATIONAL_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
   },
   {
     title: "التشغيل",
-    items: [{ path: "workflow", label: "دورة العمل والأدوار" }],
+    items: [
+      { path: "workflow", label: "دورة العمل والأدوار" },
+      { path: "role-schedule", label: "جدولة أدوار المستخدمين" },
+      { path: "restaurant-ops", label: "إعدادات التشغيل الشاملة" },
+    ],
   },
 ];
 

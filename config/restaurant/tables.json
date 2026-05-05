@@ -102,5 +102,91 @@
     "dirtyAt": "2026-04-23T11:08:44.413050",
     "cleaningStartedAt": null,
     "readyAt": null
+  },
+  {
+    "id": "76DC1ED4-80E4-4AEF-82F4-F80E29C0B9B7",
+    "status": "occupied",
+    "name": "دليفيري _خليل بكر",
+    "statusUpdatedAt": "2026-05-05T01:31:27.342160"
+  },
+  {
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d401",
+    "number": 101,
+    "name": "VIP 1",
+    "seats": 6,
+    "status": "available",
+    "position": { "x": 80, "y": 820 },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": true,
+      "zone": "VIP"
+    }
+  },
+  {
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d402",
+    "number": 102,
+    "name": "VIP 2",
+    "seats": 6,
+    "status": "available",
+    "position": { "x": 195, "y": 820 },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": true,
+      "zone": "VIP"
+    }
+  },
+  {
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d403",
+    "number": 103,
+    "name": "VIP 3",
+    "seats": 6,
+    "status": "available",
+    "position": { "x": 310, "y": 820 },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": true,
+      "zone": "VIP"
+    }
+  },
+  {
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d404",
+    "number": 104,
+    "name": "VIP 4",
+    "seats": 6,
+    "status": "available",
+    "position": { "x": 425, "y": 820 },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": true,
+      "zone": "VIP"
+    }
+  },
+  {
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d405",
+    "number": 105,
+    "name": "VIP 5",
+    "seats": 6,
+    "status": "available",
+    "position": { "x": 540, "y": 820 },
+    "features": {
+      "canAddChildSeat": true,
+      "nearBalcony": false,
+      "nearBathroom": false,
+      "smokingArea": false,
+      "vipSection": true,
+      "zone": "VIP"
+    }
   }
 ]

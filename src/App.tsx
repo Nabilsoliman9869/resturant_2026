@@ -39,6 +39,8 @@ import KitchenItemStopPage from "./pages/settings/KitchenItemStopPage";
 import CashierTableSessionsPage from "./pages/CashierTableSessionsPage";
 import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
 import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
+import RoleScheduleSettingsPage from "./pages/settings/RoleScheduleSettingsPage";
+import RestaurantOpsSettingsPage from "./pages/settings/RestaurantOpsSettingsPage";
 import PosVenueSettingsPage from "./pages/settings/PosVenueSettingsPage";
 import PosKdsSettingsPage from "./pages/settings/PosKdsSettingsPage";
 import KdsPrepTimesSettingsPage from "./pages/settings/KdsPrepTimesSettingsPage";
@@ -47,6 +49,7 @@ import PaymentRoutingSettingsPage from "./pages/settings/PaymentRoutingSettingsP
 import PosPromotionsSettingsPage from "./pages/settings/PosPromotionsSettingsPage";
 import KidsAreaPage from "./pages/KidsAreaPage";
 import PosAdminPage from "./pages/PosAdminPage";
+import CallCenterPage from "./pages/CallCenterPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
   const { user } = useAuth();
@@ -71,6 +74,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="call-center" element={<CallCenterPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -101,6 +105,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="call-center" element={<CallCenterPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="reports" element={<ReportsPage />} />
@@ -118,6 +123,9 @@ export default function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="captain-tables" element={<WaiterTablesPage />} />
+        <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="call-center" element={<CallCenterPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -147,6 +155,8 @@ export default function App() {
           <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
+          <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
+          <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<Navigate to="venue" replace />} />
           <Route path="init-db" element={<Navigate to="venue" replace />} />
@@ -239,6 +249,9 @@ export default function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="captain-tables" element={<WaiterTablesPage />} />
+        <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="call-center" element={<CallCenterPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -269,6 +282,8 @@ export default function App() {
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
           <Route path="pos-admin-legacy" element={<PosAdminPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
+          <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
+          <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />

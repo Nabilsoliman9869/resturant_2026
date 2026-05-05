@@ -23,7 +23,7 @@ echo تشغيل: %CD%\api_server.py
 echo بعد ظهور «MAT3AM_API» في الأسطر أعلاه، افتح المتصفح:
 echo   http://127.0.0.1:2288/__whoami__
 echo   http://127.0.0.1:2288/api/dev/mat3am-schema-probe
-echo يجب أن ترى في whoami: VERIFY_SCHEMA_REVISION=6 و API_FILE_PATH=مسار هذا المشروع
+echo يجب أن ترى في whoami: VERIFY_SCHEMA_REVISION=9 (أو أحدث) و API_FILE_PATH=مسار هذا المشروع
 echo.
 echo إيقاف الخادم: Ctrl+C
 echo ========================================

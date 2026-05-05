@@ -1,11 +1,5 @@
 [
   {
-    "sessionId": "afb2cda5-582f-4669-85e5-9c5fd28922b0",
-    "invoiceId": "54D481BE-B4CE-41BB-9F8D-E980BAA23386",
-    "total": 0.0,
-    "paidAt": "2026-04-04T03:47:24.439122"
-  },
-  {
     "sessionId": "5b753fa9-8ad8-4263-b6b2-6a1e39e8b535",
     "invoiceId": "46528703-7155-4A47-9EBB-50C288917C64",
     "total": 0.0,
@@ -181,5 +175,2363 @@
       "wallet": 0.0,
       "instapay": 0.0
     }
+  },
+  {
+    "sessionId": "c40209a0-084a-4a10-beec-e5161899bdfc",
+    "invoiceId": "F82259AE-59E9-4777-983F-44516825B5C6",
+    "total": 455.36,
+    "requestedAt": "2026-04-23T11:54:44.229020",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T11:57:21.868567",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 14,
+    "subtotal": 400.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 200.0,
+        "lineTotal": 400.0
+      },
+      {
+        "name": "Chicken Cranchy (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ],
+    "paymentMethod": "mixed",
+    "settledTotals": {
+      "subtotal": 400,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tip": 0,
+      "grandTotal": 455.36,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 55.0,
+      "visa": 400.36,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "42b13d0d-429d-49b4-bff0-c1cd309fc570",
+    "invoiceId": "3EAD7418-A326-4BD2-9AE3-725D1E19BED9",
+    "total": 255.36,
+    "requestedAt": "2026-04-23T11:59:27.234599",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T12:15:54.692291",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 15,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      },
+      {
+        "name": "Chicken Cranchy (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 255.36,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "f41dbce8-4f54-42d0-a356-000ccbe3966d",
+    "invoiceId": "85042811-583C-463A-8862-0E81D3A4E004",
+    "total": 510.72,
+    "requestedAt": "2026-04-23T12:19:27.792574",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T13:05:37.206037",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 16,
+    "subtotal": 400.0,
+    "tax": 62.72,
+    "serviceCharge": 48.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      },
+      {
+        "name": "Chicken Cranchy (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 4)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      },
+      {
+        "name": "Chicken Cranchy (كرسي 5)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 400,
+      "discount": 0,
+      "serviceCharge": 48,
+      "tax": 62.72,
+      "tip": 0,
+      "grandTotal": 510.72,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 510.72,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "4A0537EF-E1C0-4078-937F-D9C218467049",
+    "total": 684.0,
+    "paidAt": "2026-04-23T12:37:14.226817"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "E98607EC-690C-4914-B0B3-EEB3ED82F611",
+    "total": 456.0,
+    "paidAt": "2026-04-23T12:41:07.061409"
+  },
+  {
+    "sessionId": "82924d5b-e5c0-4000-90bf-f7a44ec9934c",
+    "invoiceId": "4F301400-2DF9-4769-AB9C-9D7445C4AA64",
+    "total": 255.36,
+    "requestedAt": "2026-04-23T13:10:03.584859",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T13:11:28.863691",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 19,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "wallet",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 0.0,
+      "visa": 0.0,
+      "wallet": 255.36,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "b34f4964-afa1-4c57-bcd1-ebe3336fd331",
+    "invoiceId": "1FD12E40-A253-4206-9C1B-5B7C327445A7",
+    "total": 255.36,
+    "requestedAt": "2026-04-23T13:10:08.650465",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T13:11:18.496699",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 20,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Chicken Cranchy (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Coffe With Milk (EXTRA..EX.EX ) (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "instapay",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 0.0,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 255.36
+    }
+  },
+  {
+    "sessionId": "db4880d7-273b-4fdd-b5b8-6c3ef56b600f",
+    "invoiceId": "170E265C-EC61-454F-A6DE-FEA38A501394",
+    "total": 766.08,
+    "requestedAt": "2026-04-23T13:10:16.550668",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T13:11:06.398155",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 21,
+    "subtotal": 600.0,
+    "tax": 94.08,
+    "serviceCharge": 72.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 600,
+      "discount": 0,
+      "serviceCharge": 72,
+      "tax": 94.08,
+      "tip": 0,
+      "grandTotal": 766.08,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 766.08,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "7a1876c0-c95f-4c62-b0e3-ac2c62c57e54",
+    "invoiceId": "F48CF375-3E3F-48A1-B7FB-EF30E7BCBCA4",
+    "total": 255.36,
+    "requestedAt": "2026-04-23T13:10:25.052735",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-23T13:10:55.268023",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 22,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 255.36,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "d5af549c-a0b2-4c11-816e-d2c2d25ff424",
+    "invoiceId": "09C337AF-C62E-427D-8327-66ADDE6E23A4",
+    "total": 766.08,
+    "requestedAt": "2026-04-23T13:39:28.451925",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 23,
+    "subtotal": 600.0,
+    "tax": 94.08,
+    "serviceCharge": 72.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (CRA ) (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      }
+    ]
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "70F2C646-EF2C-4BF0-9286-55B296A993CD",
+    "total": 684.0,
+    "paidAt": "2026-04-23T15:02:09.334154"
+  },
+  {
+    "sessionId": "43d81a2f-b67f-4093-ab4b-3493db409bf8",
+    "invoiceId": "1F0891D9-33B1-4C1B-9FD8-C29D4BFF7B3A",
+    "total": 0.0,
+    "requestedAt": "2026-04-26T09:30:55.231913",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 25,
+    "subtotal": 0.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Alexandarian Liver",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ]
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "F3599775-D92C-4060-91A1-70E1318ED8E8",
+    "total": 0.0,
+    "paidAt": "2026-04-26T09:53:12.876609"
+  },
+  {
+    "sessionId": "f8543b36-28ed-4536-a7be-c8c5f094ac1c",
+    "invoiceId": "DBF2CAA9-109F-4B6D-A401-8CD831F63AE1",
+    "total": 0.0,
+    "requestedAt": "2026-04-26T12:47:38.615384",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 26,
+    "subtotal": 0.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Alexandarian Liver (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ]
+  },
+  {
+    "sessionId": "c909f8bf-04f7-436c-ac7c-31867ee8cb81",
+    "invoiceId": "20E9D682-367D-4418-A1F4-B5649AC7068D",
+    "total": 766.08,
+    "requestedAt": "2026-04-26T12:55:29.734366",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-26T13:06:29.078666",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 27,
+    "subtotal": 600.0,
+    "tax": 94.08,
+    "serviceCharge": 72.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 600,
+      "discount": 0,
+      "serviceCharge": 72,
+      "tax": 94.08,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 766.08,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 766.08,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "09bbee9b-2bd4-439b-b181-7cf99fd556a3",
+    "invoiceId": "94EF3A4A-CBBF-4776-9700-FD7E52B5FA97",
+    "total": 1276.8,
+    "requestedAt": "2026-04-26T13:29:14.902656",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-26T14:05:27.070117",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 28,
+    "subtotal": 1000.0,
+    "tax": 156.8,
+    "serviceCharge": 120.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 5.0,
+        "unitPrice": 200.0,
+        "lineTotal": 1000.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 1000,
+      "discount": 0,
+      "serviceCharge": 120,
+      "tax": 156.8,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1276.8,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 1276.8,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "1e65a223-9ca6-4cd0-ba51-6fb686a63a34",
+    "invoiceId": "0544D8A5-0FA1-4564-BC52-B1E5624CCDB9",
+    "total": 1366.08,
+    "requestedAt": "2026-04-26T14:07:26.423707",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-26T14:09:25.563709",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 29,
+    "subtotal": 1200.0,
+    "tax": 94.08,
+    "serviceCharge": 72.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      },
+      {
+        "name": "Cheese Cake",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 1200,
+      "discount": 0,
+      "serviceCharge": 72,
+      "tax": 94.08,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1366.08,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 1366.08,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "2ea5639f-87d5-4303-8670-f4a3bfe8a201",
+    "invoiceId": "A14208A4-3766-4E7A-92E6-6B5D4687AFA6",
+    "total": 0.0,
+    "requestedAt": "2026-04-26T14:07:32.777835",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 30,
+    "subtotal": 0.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Amercian Coffee (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Amercian Coffee (B ) (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Alexandarian Liver (DONE ) (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ]
+  },
+  {
+    "sessionId": "925f6052-8e19-46c8-b048-626dd635eed8",
+    "invoiceId": "8619F571-61D6-441D-9BDE-D41FB01E6C4D",
+    "total": 1621.44,
+    "requestedAt": "2026-04-26T14:08:02.370442",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-26T14:09:43.137995",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 31,
+    "subtotal": 1400.0,
+    "tax": 125.44,
+    "serviceCharge": 96.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      },
+      {
+        "name": "Cheese Cake (B,B ) (كرسي 1)",
+        "quantity": 4.0,
+        "unitPrice": 200.0,
+        "lineTotal": 800.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 1400,
+      "discount": 0,
+      "serviceCharge": 96,
+      "tax": 125.44,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1621.44,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 1621.44,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "29813b3f-921f-4691-9baa-236752b59cf3",
+    "invoiceId": "073F7ED4-6D8F-4BAC-86AC-2A79CEC8CD00",
+    "total": 0.0,
+    "requestedAt": "2026-04-26T14:08:10.553455",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 32,
+    "subtotal": 0.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Alexandarian Liver (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Alexandarian Liver (DONE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Amercian Coffee (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Amercian Coffee (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Amercian Coffee (B ) (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Amercian Coffee (WITH MILK ) (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ]
+  },
+  {
+    "sessionId": "09c07be8-344d-4e83-aae6-a46110e2eb5d",
+    "invoiceId": "EB890018-9A11-4A3E-954E-BDE7457D4095",
+    "total": 255.36,
+    "requestedAt": "2026-04-26T14:46:37.752586",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-26T14:47:02.375890",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 33,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 255.36,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "a67e7582-3ec8-4b7d-9b41-76f9c3b2d422",
+    "invoiceId": "CEED9FF7-078D-4D2C-B92E-AD9DF96875D6",
+    "total": 0.0,
+    "requestedAt": "2026-04-26T15:11:15.528275",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 34,
+    "subtotal": 0.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Mini Hot Dog (PIZZA ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Mini Margarita Pizza (KIDS. RAMADAN ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Mini Margarita Pizza (RAMDAN ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "Mini Mix Shawerma (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      },
+      {
+        "name": "mini pizza (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ]
+  },
+  {
+    "sessionId": "46e94465-b189-4988-84be-7133d92a0eef",
+    "invoiceId": "80B5D822-546C-46FA-B4E0-CDC517587EA2",
+    "total": 2042.88,
+    "requestedAt": "2026-04-26T15:32:43.484491",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 35,
+    "subtotal": 1600.0,
+    "tax": 250.88,
+    "serviceCharge": 192.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Mini Hot Dog (PIZZA ) (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 800.0,
+        "lineTotal": 1600.0
+      }
+    ]
+  },
+  {
+    "sessionId": "3a460462-eb94-4e31-987b-5965355303e8",
+    "invoiceId": "FB5FE1A9-45AE-4B1A-8912-08B581B6F0ED",
+    "total": 414.96,
+    "requestedAt": "2026-04-27T09:38:02.486303",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-27T09:38:23.703718",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 36,
+    "subtotal": 325.0,
+    "tax": 50.96,
+    "serviceCharge": 39.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Continental Breakfast (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 325.0,
+        "lineTotal": 325.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 325,
+      "discount": 0,
+      "serviceCharge": 39,
+      "tax": 50.96,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 414.96,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 414.96,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "8c61d2b9-5b23-426c-9045-3aea742443d5",
+    "invoiceId": "428BE81C-06E6-4C98-A319-CEB61E919ED6",
+    "total": 561.79,
+    "requestedAt": "2026-04-27T09:44:23.185388",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-27T09:45:04.391953",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 37,
+    "subtotal": 440.0,
+    "tax": 68.99,
+    "serviceCharge": 52.8,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfour Soup CHicken (ALL KIDS ) (كرسي 2)",
+        "quantity": 2.0,
+        "unitPrice": 130.0,
+        "lineTotal": 260.0
+      },
+      {
+        "name": "Asfourl Soup Meat (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 90.0,
+        "lineTotal": 180.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 440,
+      "discount": 0,
+      "serviceCharge": 52.8,
+      "tax": 68.99,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 561.79,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 561.79,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "252c1928-5280-4d5a-901e-181d9d92fbbd",
+    "invoiceId": "D28C5041-9ECD-4CAB-AE9E-5F9BBA2FCD65",
+    "total": 655.36,
+    "requestedAt": "2026-04-27T11:08:53.342111",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-27T11:09:26.715914",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 38,
+    "subtotal": 600.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 200.0,
+        "lineTotal": 600.0
+      }
+    ],
+    "paymentMethod": "mixed",
+    "settledTotals": {
+      "subtotal": 600,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 655.36,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 650.0,
+      "visa": 5.36,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "46827ec9-0fb2-45de-86fe-27585bea7d55",
+    "invoiceId": "1FBD4EF1-D3DC-4907-885B-8C147DE6D022",
+    "total": 657.55,
+    "requestedAt": "2026-04-27T11:36:16.256581",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-27T11:37:18.595890",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 39,
+    "subtotal": 515.0,
+    "tax": 80.75,
+    "serviceCharge": 61.8,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      },
+      {
+        "name": "F . F (DONE ) (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 160.0,
+        "lineTotal": 160.0
+      },
+      {
+        "name": "Fajita Beef (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 155.0,
+        "lineTotal": 155.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 515,
+      "discount": 0,
+      "serviceCharge": 61.8,
+      "tax": 80.75,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 657.55,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "split_by_order",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 657.55,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "a969aec4-b9f2-41cc-b257-48e2f9402b73",
+    "invoiceId": "8E554624-7364-4270-9D4A-4D6CAC235412",
+    "total": 0.0,
+    "requestedAt": "2026-04-27T12:25:37.275226",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 40,
+    "subtotal": 0.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Alex Liver Sandwich (FRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "lineTotal": 0.0
+      }
+    ]
+  },
+  {
+    "sessionId": "d37f9080-193b-41ca-ba94-bb54b6dd93bf",
+    "invoiceId": "EE751633-A4B3-4F00-97E4-D9646EF6BD9F",
+    "total": 766.08,
+    "requestedAt": "2026-04-27T12:34:28.759303",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-27T12:46:08.130170",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 41,
+    "subtotal": 600.0,
+    "tax": 94.08,
+    "serviceCharge": 72.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Fajita Beef (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 150.0,
+        "lineTotal": 150.0
+      },
+      {
+        "name": "chicken 7 pice (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "Cheese Cake (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 600,
+      "discount": 0,
+      "serviceCharge": 72,
+      "tax": 94.08,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 766.08,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 766.08,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "434254e2-7022-4486-845b-39ec8deb0213",
+    "invoiceId": "E0DE66E0-CF6D-48B6-8811-1A000B0037A8",
+    "total": 1021.44,
+    "requestedAt": "2026-04-27T14:35:53.718460",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-27T14:36:47.563375",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 42,
+    "subtotal": 800.0,
+    "tax": 125.44,
+    "serviceCharge": 96.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "anchoves (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 500.0,
+        "lineTotal": 500.0
+      },
+      {
+        "name": "beef fillet 200 g (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 300.0,
+        "lineTotal": 300.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 800,
+      "discount": 0,
+      "serviceCharge": 96,
+      "tax": 125.44,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1021.44,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 1021.44,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "c5bc84ff-1154-471c-a4d6-b81659bbd2e0",
+    "invoiceId": "E578B0CA-90A8-40A4-9C2B-F3D07B1AB334",
+    "total": 383.66400000000004,
+    "requestedAt": "2026-04-28T10:36:53.157117",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 43,
+    "subtotal": 320.0,
+    "tax": 36.06,
+    "serviceCharge": 27.6,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfour Soup CHicken (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 90.0,
+        "lineTotal": 90.0
+      },
+      {
+        "name": "Asfour Soup (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 90.0,
+        "lineTotal": 90.0
+      },
+      {
+        "name": "Asfor With Meat Tagine (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 90.0,
+        "lineTotal": 90.0
+      },
+      {
+        "name": "Basket Bread (DONE ,,7OOSSOO ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 50.0,
+        "lineTotal": 50.0
+      }
+    ]
+  },
+  {
+    "sessionId": "ef02fb4c-02e0-49dc-9c3b-e43dbdbb5e58",
+    "invoiceId": "F79439F1-2972-4E9C-B3CE-7A2F460500F5",
+    "total": 1468.32,
+    "requestedAt": "2026-04-28T11:40:59.511967",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-28T11:42:52.889498",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 44,
+    "subtotal": 1150.0,
+    "tax": 180.32,
+    "serviceCharge": 138.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "chicken +++ (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "chicken 7 pice (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "Chicken Al Olia (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 200.0,
+        "lineTotal": 400.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 1150,
+      "discount": 0,
+      "serviceCharge": 138,
+      "tax": 180.32,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1468.32,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 1468.32,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "8377C26C-E730-4A19-A936-507166CE5087",
+    "total": 102.6,
+    "paidAt": "2026-04-28T11:47:02.237571"
+  },
+  {
+    "sessionId": "27050432-e753-426d-99e4-c49da61dd5e5",
+    "invoiceId": "F198CCFB-BB68-4EB0-A9F1-109AC986D092",
+    "total": 255.36,
+    "requestedAt": "2026-04-28T11:52:33.271914",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 46,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ]
+  },
+  {
+    "sessionId": "21be18c8-dc55-4e31-88f7-5523d07337b8",
+    "invoiceId": "0D91C066-166B-46EB-A80A-97FB88C0F1F0",
+    "total": 1468.32,
+    "requestedAt": "2026-04-28T12:05:25.103690",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-28T12:08:15.194548",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 47,
+    "subtotal": 1150.0,
+    "tax": 180.32,
+    "serviceCharge": 138.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 200.0,
+        "lineTotal": 400.0
+      },
+      {
+        "name": "Chicken Balls (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 250.0,
+        "lineTotal": 750.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 1150,
+      "discount": 0,
+      "serviceCharge": 138,
+      "tax": 180.32,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1468.32,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 1468.32,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "D0622F7D-7868-42BF-AB66-C04AF7EF0102",
+    "total": 684.0,
+    "paidAt": "2026-04-28T12:12:28.506691"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "84212259-DDE2-4627-9E1C-E5D5B6F92ABF",
+    "total": 1140.0,
+    "paidAt": "2026-04-28T12:22:11.460279"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "2CB74C20-415A-4871-A4A7-2DEC037790F0",
+    "total": 285.0,
+    "paidAt": "2026-04-28T12:22:24.859600"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "A7526DAD-4DB8-4B0F-B43A-F1A518482FE9",
+    "total": 570.0,
+    "paidAt": "2026-04-28T12:25:38.804732"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "CF8A495B-BBF8-4448-81E7-509B83E98B74",
+    "total": 855.0,
+    "paidAt": "2026-04-28T12:26:12.442675"
+  },
+  {
+    "sessionId": "cf8713ff-03c6-4a3a-927f-fc64c094dcfb",
+    "invoiceId": "CDD36F36-42C5-4D69-923A-21DAE35C5F7D",
+    "total": 255.36,
+    "requestedAt": "2026-04-29T10:29:05.904024",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T10:30:23.836066",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 49,
+    "subtotal": 200.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "mixed",
+    "settledTotals": {
+      "subtotal": 200,
+      "discount": 0,
+      "serviceCharge": 24,
+      "tax": 31.36,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 255.36,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 100.0,
+      "visa": 100.0,
+      "wallet": 0.0,
+      "instapay": 55.36
+    }
+  },
+  {
+    "sessionId": "d867ac34-6d7f-4b36-a793-45aea1feb531",
+    "invoiceId": "ED00BD40-EB4F-473D-93FD-3B4D8C487A91",
+    "total": 421.34,
+    "requestedAt": "2026-04-29T10:43:00.304757",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T10:43:27.850737",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 50,
+    "subtotal": 330.0,
+    "tax": 51.74,
+    "serviceCharge": 39.6,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "beef fillet 200 g (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 330.0,
+        "lineTotal": 330.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 330,
+      "discount": 0,
+      "serviceCharge": 39.6,
+      "tax": 51.74,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 421.34,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 421.34,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "b094da3c-6386-4ca1-af05-0223e12590a3",
+    "invoiceId": "25A9355C-8944-40DD-9B49-B41AA10FA0A4",
+    "total": 274.51,
+    "requestedAt": "2026-04-29T10:46:23.956782",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T10:46:45.500272",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 51,
+    "subtotal": 215.0,
+    "tax": 33.71,
+    "serviceCharge": 25.8,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfour Soup CHicken (ALL KIDS ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 120.0,
+        "lineTotal": 120.0
+      },
+      {
+        "name": "Asfourl Soup Meat (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 95.0,
+        "lineTotal": 95.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 215,
+      "discount": 0,
+      "serviceCharge": 25.8,
+      "tax": 33.71,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 274.51,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "split_equal",
+      "pricingMode": "header",
+      "splitEqualPersons": 2,
+      "perPersonShare": 137.26
+    },
+    "paymentBreakdown": {
+      "cash": 274.51,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "5b839a9c-5a43-4044-9e6f-141e853c2e3b",
+    "invoiceId": "A10A6E35-B61D-4595-8A5B-686E098B12B5",
+    "total": 957.6,
+    "requestedAt": "2026-04-29T11:01:36.920874",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T11:02:33.379768",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 52,
+    "subtotal": 750.0,
+    "tax": 117.6,
+    "serviceCharge": 90.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Chicken Balls (كرسي 1)",
+        "quantity": 3.0,
+        "unitPrice": 250.0,
+        "lineTotal": 750.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 750,
+      "discount": 0,
+      "serviceCharge": 90,
+      "tax": 117.6,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 957.6,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 957.6,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "3d5d6f33-cbd8-40df-8891-98ec8c897662",
+    "invoiceId": "BAB8915A-5240-4103-9FA4-5604AEC31635",
+    "total": 1723.68,
+    "requestedAt": "2026-04-29T11:07:46.783658",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T11:20:51.997210",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 53,
+    "subtotal": 1350.0,
+    "tax": 211.68,
+    "serviceCharge": 162.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Cheese Cake (1,B,B,,1,STRE ) (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 200.0,
+        "lineTotal": 400.0
+      },
+      {
+        "name": "Chicken Balls (كرسي 2)",
+        "quantity": 2.0,
+        "unitPrice": 250.0,
+        "lineTotal": 500.0
+      },
+      {
+        "name": "Chicken Al Olia (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "Cheese Cake (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ],
+    "paymentMethod": "mixed",
+    "settledTotals": {
+      "subtotal": 1350,
+      "discount": 0,
+      "serviceCharge": 162,
+      "tax": 211.68,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1723.68,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 861.84,
+      "visa": 861.84,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "d3e86f6e-b611-4938-8999-8b01c14d6db5",
+    "invoiceId": "AF4481A7-7E6A-4E6D-82A6-39411521FA93",
+    "total": 114.91,
+    "requestedAt": "2026-04-29T11:06:58.096703",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T15:53:26.412507",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 54,
+    "subtotal": 90.0,
+    "tax": 14.11,
+    "serviceCharge": 10.8,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfour Soup CHicken (ALL KIDS ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 90.0,
+        "lineTotal": 90.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 90,
+      "discount": 0,
+      "serviceCharge": 10.8,
+      "tax": 14.11,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 114.91,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 114.91,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "2861D4F4-3EBC-4191-8A5D-C0E261F06A28",
+    "total": 228.0,
+    "requestedAt": "2026-04-29T11:26:24.681894",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": "طلب سريع"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "F6993717-5057-4DAB-AAB0-C273367A2E64",
+    "total": 570.0,
+    "requestedAt": "2026-04-29T11:35:20.292801",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T11:36:13.167428",
+    "splitName": "طلب سريع",
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 500,
+      "discount": 0,
+      "serviceCharge": 0,
+      "tax": 70,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 570.0,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 570.0,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "e6fc3cf6-e628-403f-b192-8c0110221e25",
+    "invoiceId": "1852DF2A-52D8-4BC1-A2EC-59F50A8C7858",
+    "total": 408.58,
+    "requestedAt": "2026-04-29T11:35:30.730453",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T15:53:30.884525",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 55,
+    "subtotal": 320.0,
+    "tax": 50.18,
+    "serviceCharge": 38.4,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfour Soup (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 160.0,
+        "lineTotal": 320.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 320,
+      "discount": 0,
+      "serviceCharge": 38.4,
+      "tax": 50.18,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 408.58,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 408.58,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "9d6588a8-235f-4bfb-a969-ac8f9071feee",
+    "invoiceId": "C7628D6A-2CDE-4A33-9862-0ECA5E41D3A3",
+    "total": 114.91,
+    "requestedAt": "2026-04-29T11:37:53.751578",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T15:53:36.668377",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 56,
+    "subtotal": 90.0,
+    "tax": 14.11,
+    "serviceCharge": 10.8,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "B .B .Q (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 90.0,
+        "lineTotal": 90.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 90,
+      "discount": 0,
+      "serviceCharge": 10.8,
+      "tax": 14.11,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 114.91,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 114.91,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "6fb17538-fffd-4df0-a872-9e8630c86b78",
+    "invoiceId": "5B16A10D-BFE1-40C0-B298-2ED32AC6393E",
+    "total": 638.4,
+    "requestedAt": "2026-04-29T11:48:25.761137",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T11:48:46.707781",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 57,
+    "subtotal": 500.0,
+    "tax": 78.4,
+    "serviceCharge": 60.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Chicken Balls (كرسي 1)",
+        "quantity": 2.0,
+        "unitPrice": 250.0,
+        "lineTotal": 500.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 500,
+      "discount": 0,
+      "serviceCharge": 60,
+      "tax": 78.4,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 638.4,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 638.4,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "9cfe7813-6d71-4b85-b548-70f3f176edd2",
+    "invoiceId": "9C045BF0-CD16-42E5-BFE1-93182BCC75F8",
+    "total": 127.68,
+    "requestedAt": "2026-04-29T11:50:59.313782",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 58,
+    "subtotal": 100.0,
+    "tax": 15.68,
+    "serviceCharge": 12.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfourl Soup Meat (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 100.0,
+        "lineTotal": 100.0
+      }
+    ]
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "83E8EE99-651E-4AAD-987E-A2F7776EA9A9",
+    "total": 0.0,
+    "requestedAt": "2026-04-29T11:53:00.963628",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": "طلب سريع"
+  },
+  {
+    "sessionId": "ad89546d-d530-4ffb-8c6d-a2a139b2f4ed",
+    "invoiceId": "77B6D416-4C20-4766-9E63-1DB2B0A8AC27",
+    "total": 1659.84,
+    "requestedAt": "2026-04-29T11:57:24.130923",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T12:52:28.888416",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 59,
+    "subtotal": 1300.0,
+    "tax": 203.84,
+    "serviceCharge": 156.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Mini Margarita Pizza (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 800.0,
+        "lineTotal": 800.0
+      },
+      {
+        "name": "Cheese Cake (1,B,B,,1,STRE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      },
+      {
+        "name": "beef fillet 200 g (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 300.0,
+        "lineTotal": 300.0
+      }
+    ],
+    "paymentMethod": "mixed",
+    "settledTotals": {
+      "subtotal": 1300,
+      "discount": 0,
+      "serviceCharge": 156,
+      "tax": 203.84,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 1659.84,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 829.92,
+      "visa": 829.92,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "C8161417-9063-4A80-AC69-3EF3B6FFCEE9",
+    "total": 102.6,
+    "requestedAt": "2026-04-29T12:47:47.202360",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": "طلب سريع"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "EE848B6F-3CD8-45A6-9515-7748AA36BC59",
+    "total": 113.0,
+    "requestedAt": "2026-04-29T12:49:25.908687",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T13:57:20.017323",
+    "splitName": "طلب سريع",
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "grandTotal": 113.0
+    },
+    "paymentBreakdown": {
+      "cash": 113.0,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "B220701B-D9CB-4E1B-8758-18A5E9922C25",
+    "total": 102.6,
+    "requestedAt": "2026-04-29T12:49:33.176318",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T12:53:06.783531",
+    "splitName": "طلب سريع",
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 90,
+      "discount": 0,
+      "serviceCharge": 0,
+      "tax": 12.6,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 102.6,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 102.6,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "DCC5EF09-8770-49A8-BEBB-B4116E850D05",
+    "total": 410.4,
+    "requestedAt": "2026-04-29T12:53:33.182574",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T12:53:50.072802",
+    "splitName": "طلب سريع",
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 360,
+      "discount": 0,
+      "serviceCharge": 0,
+      "tax": 50.4,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 410.4,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 410.4,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "94F59569-F981-442D-ABC3-EE024C679A26",
+    "total": 1.0,
+    "requestedAt": "2026-04-29T13:57:22.329561",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": "طلب سريع"
+  },
+  {
+    "sessionId": null,
+    "invoiceId": "DD7FFE9D-89E6-48B0-87A1-715383C8379B",
+    "total": 1.0,
+    "requestedAt": "2026-04-29T13:58:20.707822",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": "طلب سريع"
+  },
+  {
+    "sessionId": "7254c8ca-3aa2-4afc-9807-f73bf0a04834",
+    "invoiceId": "62A85E6A-9B03-42B4-9EDB-2C89C335CF4B",
+    "total": 40.0,
+    "requestedAt": "2026-04-29T14:02:09.810968",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T14:02:10.130322",
+    "splitName": "شيك 1",
+    "tipAmount": 0.0,
+    "billNumber": 60,
+    "subtotal": 40.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "12% Service (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 40.0,
+        "lineTotal": 40.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "grandTotal": 40.0
+    },
+    "paymentBreakdown": {
+      "cash": 40.0,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "7254c8ca-3aa2-4afc-9807-f73bf0a04834",
+    "invoiceId": "49FCA98B-A683-4DC5-AB5B-F5AFBC53E636",
+    "total": 60.0,
+    "requestedAt": "2026-04-29T14:02:09.810968",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": "شيك 2",
+    "tipAmount": 0.0,
+    "billNumber": 61,
+    "subtotal": 60.0,
+    "tax": 0.0,
+    "serviceCharge": 0.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "127-مشروبات ساخنة Hot Drinks (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 60.0,
+        "lineTotal": 60.0
+      }
+    ]
+  },
+  {
+    "sessionId": "74cd2780-9931-4130-83f8-9bc18b55e863",
+    "invoiceId": "83BB5DBD-F745-4819-BEB5-C0C260417019",
+    "total": 191.52,
+    "requestedAt": "2026-04-29T16:17:30.335622",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-29T16:17:42.828763",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 62,
+    "subtotal": 150.0,
+    "tax": 23.52,
+    "serviceCharge": 18.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Fajita Beef (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 150.0,
+        "lineTotal": 150.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 150,
+      "discount": 0,
+      "serviceCharge": 18,
+      "tax": 23.52,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 191.52,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 191.52,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "ceb94668-6d38-4fd0-b5c2-e40b09e0f8c1",
+    "invoiceId": "A7C1248A-E976-4F2B-8CDF-53BF258379B4",
+    "total": 755.36,
+    "requestedAt": "2026-04-29T16:27:56.117923",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 63,
+    "subtotal": 700.0,
+    "tax": 31.36,
+    "serviceCharge": 24.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Chicken Al Olia (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "Chicken Balls (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      },
+      {
+        "name": "Cheese Cake (كرسي 3)",
+        "quantity": 1.0,
+        "unitPrice": 200.0,
+        "lineTotal": 200.0
+      }
+    ]
+  },
+  {
+    "sessionId": "8bd779ff-fb0f-49fa-8fa9-e02fcb53cab0",
+    "invoiceId": "649D8394-0820-46CF-A6B9-B09FF1BF5B6B",
+    "total": 38.3,
+    "requestedAt": "2026-04-30T03:55:17.213477",
+    "awaitingPayment": false,
+    "paidAt": "2026-04-30T13:41:12.134387",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 64,
+    "subtotal": 30.0,
+    "tax": 4.7,
+    "serviceCharge": 3.6,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Alexandarian Liver (DONE ) (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 30.0,
+        "lineTotal": 30.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 30,
+      "discount": 0,
+      "serviceCharge": 3.6,
+      "tax": 4.7,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 38.3,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 38.3,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "75226cac-e324-45e5-957f-f687ae4d7161",
+    "invoiceId": "7602F2F3-7E3C-400B-9FC8-7281AF70F191",
+    "total": 153.22,
+    "requestedAt": "2026-05-02T12:55:14.980100",
+    "awaitingPayment": false,
+    "paidAt": "2026-05-02T12:55:44.969275",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 65,
+    "subtotal": 120.0,
+    "tax": 18.82,
+    "serviceCharge": 14.4,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Asfour Soup CHicken (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 120.0,
+        "lineTotal": 120.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 120,
+      "discount": 0,
+      "serviceCharge": 14.4,
+      "tax": 18.82,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 153.22,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 153.22,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "ba96db33-e3f5-4f4b-a652-098545337f71",
+    "invoiceId": "89EB6634-A550-43B2-82FA-76B3A3AF4064",
+    "total": 849.2,
+    "requestedAt": "2026-05-02T14:01:40.762027",
+    "awaitingPayment": false,
+    "paidAt": "2026-05-02T14:03:53.405736",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 66,
+    "subtotal": 780.0,
+    "tax": 39.2,
+    "serviceCharge": 30.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "anchoves (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 530.0,
+        "lineTotal": 530.0
+      },
+      {
+        "name": "chicken 7 pice (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 250.0,
+        "lineTotal": 250.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 780,
+      "discount": 0,
+      "serviceCharge": 30,
+      "tax": 39.2,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 849.2,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 849.2,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "dfdbfe12-02e0-41a9-8502-b370b45eaa47",
+    "invoiceId": "ED1B18DD-FFCC-4F3A-B9CC-899407E23DB4",
+    "total": 331.97,
+    "requestedAt": "2026-05-04T15:53:18.554984",
+    "awaitingPayment": false,
+    "paidAt": "2026-05-04T15:57:06.122989",
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 67,
+    "subtotal": 260.0,
+    "tax": 40.77,
+    "serviceCharge": 31.2,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "chicken 7 pice (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 260.0,
+        "lineTotal": 260.0
+      }
+    ],
+    "paymentMethod": "cash",
+    "settledTotals": {
+      "subtotal": 260,
+      "discount": 0,
+      "serviceCharge": 31.2,
+      "tax": 40.77,
+      "tableTip": 0,
+      "extraTip": 0,
+      "grandTotal": 331.97,
+      "applyServiceCharge": true,
+      "applyVatCharge": true,
+      "billingMode": "full_table",
+      "pricingMode": "header"
+    },
+    "paymentBreakdown": {
+      "cash": 331.97,
+      "visa": 0.0,
+      "wallet": 0.0,
+      "instapay": 0.0
+    }
+  },
+  {
+    "sessionId": "fa388064-9613-4707-a6f8-3e4dd5cf4f17",
+    "invoiceId": "C9BAF408-8024-4CD9-8633-994945B8687F",
+    "total": 2842.88,
+    "requestedAt": "2026-05-04T16:22:08.367546",
+    "awaitingPayment": true,
+    "paidAt": null,
+    "splitName": null,
+    "tipAmount": 0.0,
+    "billNumber": 68,
+    "subtotal": 2400.0,
+    "tax": 250.88,
+    "serviceCharge": 192.0,
+    "discount": 0.0,
+    "lines": [
+      {
+        "name": "Green Salad (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 800.0,
+        "lineTotal": 800.0
+      },
+      {
+        "name": "Greek salad (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 800.0,
+        "lineTotal": 800.0
+      },
+      {
+        "name": "Green Salad (كرسي 2)",
+        "quantity": 1.0,
+        "unitPrice": 800.0,
+        "lineTotal": 800.0
+      }
+    ]
+  },
+  {
+    "sessionId": "ac622f9f-3f7b-4244-84f2-3df41024d323",
+    "invoiceId": "420F75D5-B3D3-48EF-AAC8-33C4A8C15CD7",
+    "total": 0.0,
+    "paidAt": "2026-05-05T01:31:29.274337"
   }
 ]

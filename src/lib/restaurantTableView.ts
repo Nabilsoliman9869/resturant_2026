@@ -17,6 +17,8 @@ export type SegmentedTableRow = {
   isSeparator?: boolean;
   floorId?: string;
   floorName?: string;
+  /** يمرّ من `/api/restaurant/tables` عند وجوده — للتمييز مثل vipSection */
+  features?: { vipSection?: boolean; zone?: string };
 };
 
 function floorPrefix(name: string, floorIndex: number) {
@@ -97,6 +99,7 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
       seats: table.seats,
       number: table.number,
       status: table.status,
+      features: (table as { features?: SegmentedTableRow["features"] }).features,
     }));
   }
 
@@ -131,6 +134,7 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
         status: apiMatch?.status,
         floorId: floor.id,
         floorName: floor.name,
+        features: apiMatch && "features" in apiMatch ? (apiMatch as { features?: SegmentedTableRow["features"] }).features : undefined,
       });
     });
   });

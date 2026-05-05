@@ -3,16 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
-import {
-  fetchDailyMenuFromApi,
-  fetchDailyMenuSchedule,
-  isProductOnDailyMenu,
-  loadDailyMenuState,
-  scheduleRestrictionForDate,
-  todayYmd,
-  type DailyMenuScheduleEntry,
-  type DailyMenuState,
-} from "../lib/dailyMenuSettings";
+import { fetchDailyMenuFromApi, isProductOnDailyMenu, loadDailyMenuState, type DailyMenuState } from "../lib/dailyMenuSettings";
 import { applyPromotions, type Promotion } from "../lib/posPromotions";
 import { buildSegmentedTablesFromFloorPlan } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
@@ -50,23 +41,12 @@ type CartLine = {
   seatLabel: string | null;
 };
 
-type ServerOrderItem = {
-  lineId?: string;
-  name?: string;
-  quantity?: number;
-  unitPrice?: number;
-  cancelled?: boolean;
-  prepared?: boolean;
-  sent?: boolean;
-  lineStatus?: string;
-};
-
 type ServerOrder = {
   id: string;
   sessionId?: string;
   tableId?: string;
   status?: string;
-  items?: ServerOrderItem[];
+  items?: { name?: string; quantity?: number }[];
   generalOrder?: boolean;
   createdAt?: string;
 };
@@ -76,12 +56,6 @@ type PosPolicy = {
   vatPercent: number;
   applyDiscountBeforeTax: boolean;
   serviceBeforeVat: boolean;
-};
-
-type WorkflowSettings = {
-  receiveGuestBy?: string;
-  takeOrderBy?: string;
-  deliverFromKitchenBy?: string;
 };
 
 function lineId() {
@@ -161,11 +135,9 @@ export default function WaiterOrderPage() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [dailyMenuState, setDailyMenuState] = useState<DailyMenuState | null>(null);
-  const [dailyMenuSchedule, setDailyMenuSchedule] = useState<DailyMenuScheduleEntry[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [sessionOrders, setSessionOrders] = useState<ServerOrder[]>([]);
-  const [workflowSettings, setWorkflowSettings] = useState<WorkflowSettings>({});
   const [ordersBusy, setOrdersBusy] = useState(false);
   const [billingRequestedAt, setBillingRequestedAt] = useState<string | null>(null);
   const [requestBillBusy, setRequestBillBusy] = useState(false);
@@ -203,7 +175,7 @@ export default function WaiterOrderPage() {
   const loadAll = useCallback(async () => {
     setMsg("");
     try {
-      const [pr, gr, fp, tb, pol, promo, dmRemote, sched, ar, ks, wf] = await Promise.all([
+      const [pr, gr, fp, tb, pol, promo, dmRemote, ar, ks] = await Promise.all([
         fetch(`${base}/api/products`),
         fetch(`${base}/api/product-groups`),
         fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
@@ -211,10 +183,8 @@ export default function WaiterOrderPage() {
         fetch(`${base}/api/pos/policy`),
         fetch(`${base}/api/pos/promotions?active_only=true`),
         fetchDailyMenuFromApi(),
-        fetchDailyMenuSchedule(),
         fetch(`${base}/api/agents`),
         fetch(`${base}/api/restaurant/kitchen/item-stops?active_only=true`),
-        fetch(`${base}/api/restaurant/workflow-settings`),
       ]);
       const pj = tryParseJson<{ products?: unknown }>(await pr.text()) ?? {};
       const gj = tryParseJson<{ groups?: unknown }>(await gr.text()) ?? {};
@@ -224,7 +194,6 @@ export default function WaiterOrderPage() {
       const promoj = tryParseJson<{ promotions?: unknown }>(await promo.text()) ?? {};
       const aj = tryParseJson<{ agents?: unknown }>(await ar.text()) ?? {};
       const ksj = tryParseJson<{ items?: unknown }>(await ks.text()) ?? {};
-      const wj = tryParseJson<WorkflowSettings>(await wf.text()) ?? {};
 
       setProducts(Array.isArray(pj.products) ? (pj.products as Product[]) : []);
       const rawGroups = Array.isArray(gj.groups) ? (gj.groups as ProductGroup[]) : [];
@@ -270,7 +239,6 @@ export default function WaiterOrderPage() {
       }
       setKitchenStoppedMap(sm);
       setAgents(alist);
-      setWorkflowSettings(wj || {});
       setSelectedAgentGuid((prev) => {
         if (prev && alist.some((a) => a.CardGuide === prev)) return prev;
         const pick = alist.find((a) => {
@@ -280,7 +248,6 @@ export default function WaiterOrderPage() {
         return pick?.CardGuide || alist[0]?.CardGuide || "";
       });
       setDailyMenuState(dmRemote ?? loadDailyMenuState());
-      setDailyMenuSchedule(Array.isArray(sched) ? sched : []);
     } catch (e) {
       setMsg(`تعذر تحميل البيانات: ${String(e)}`);
     }
@@ -355,25 +322,16 @@ export default function WaiterOrderPage() {
       }
       const existing = sessions.find((x: { tableId?: string }) => String(x.tableId) === String(tableId));
       if (existing?.id) return String(existing.id);
-      const receiveBy = String(workflowSettings.receiveGuestBy || "host").toLowerCase();
-      if (receiveBy === "customer_self") {
-        return null;
-      }
       const cr = await fetch(`${base}/api/restaurant/table-sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableId,
-          guestCount: 2,
-          startedByRole: receiveBy || "host",
-          startReason: "seat_assignment",
-        }),
+        body: JSON.stringify({ tableId, guestCount: 2 }),
       });
       if (!cr.ok) return null;
       const rec = tryParseJson<{ id?: string }>(await cr.text());
       return rec?.id ? String(rec.id) : null;
     },
-    [base, urlSessionId, workflowSettings.receiveGuestBy]
+    [base, urlSessionId]
   );
 
   useEffect(() => {
@@ -452,37 +410,12 @@ export default function WaiterOrderPage() {
     if (categoryKey !== "all") {
       list = list.filter((p) => (p.GroupGuid || "") === categoryKey);
     }
-    const day = todayYmd();
-    const sch = scheduleRestrictionForDate(dailyMenuSchedule, day);
-    if (sch.limited && sch.allowedGuides.size > 0) {
-      list = list.filter((p) => sch.allowedGuides.has(String(p.CardGuide || "").toUpperCase()));
-    } else {
-      const dm = dailyMenuState;
-      if (dm && dm.allowedTokens.map((t) => t.trim()).filter(Boolean).length > 0) {
-        list = list.filter((p) => isProductOnDailyMenu(p.CardGuide, p.ProductName, dm));
-      }
-    }
-    return list;
-  }, [products, categoryKey, dailyMenuState, dailyMenuSchedule]);
-
-  const menuAllowedGuides = useMemo(() => {
-    const day = todayYmd();
-    const sch = scheduleRestrictionForDate(dailyMenuSchedule, day);
-    if (sch.limited && sch.allowedGuides.size > 0) {
-      return new Set(Array.from(sch.allowedGuides).map((x) => String(x).toUpperCase()));
-    }
     const dm = dailyMenuState;
     if (dm && dm.allowedTokens.map((t) => t.trim()).filter(Boolean).length > 0) {
-      const set = new Set<string>();
-      for (const p of products) {
-        if (isProductOnDailyMenu(p.CardGuide, p.ProductName, dm)) {
-          set.add(String(p.CardGuide || "").toUpperCase());
-        }
-      }
-      return set;
+      list = list.filter((p) => isProductOnDailyMenu(p.CardGuide, p.ProductName, dm));
     }
-    return null;
-  }, [dailyMenuSchedule, dailyMenuState, products]);
+    return list;
+  }, [products, categoryKey, dailyMenuState]);
 
   const cartForPromo = useMemo(
     () => cart.map((l) => ({ id: l.id, productGuide: l.productGuide, name: l.name, qty: l.qty, unitPrice: l.unitPrice })),
@@ -514,46 +447,6 @@ export default function WaiterOrderPage() {
   const total = Math.max(0, netBeforeTax + serviceCharge + vatValue + Math.max(0, tipAmount || 0));
   const itemCount = cart.reduce((a, l) => a + l.qty, 0);
   const billingLocked = Boolean(billingRequestedAt);
-  const visibleTableOrders = useMemo(
-    () =>
-      sessionOrders
-        .filter((o) => {
-          const st = String(o.status || "").toLowerCase();
-          return st !== "cancelled" && st !== "paid" && st !== "served";
-        })
-        .slice()
-        .reverse(),
-    [sessionOrders]
-  );
-  const provisionalTableTotal = useMemo(
-    () =>
-      visibleTableOrders.reduce((sum, o) => {
-        const orderSum = (o.items || []).reduce(
-          (a, it) =>
-            (it as ServerOrderItem).cancelled
-              ? a
-              : a + Number(it.quantity || 0) * Number(it.unitPrice || 0),
-          0
-        );
-        return sum + orderSum;
-      }, 0),
-    [visibleTableOrders]
-  );
-
-  /** نفس مصدر «طلبات مُرسلة» — جلسة التسكين الحالية فقط (sessionId). */
-  const sessionKitchenStats = useMemo(() => {
-    let pending = 0;
-    let preparing = 0;
-    let ready = 0;
-    for (const o of sessionOrders) {
-      const st = String(o.status || "").toLowerCase();
-      if (st === "cancelled" || st === "paid" || st === "served") continue;
-      if (st === "pending") pending += 1;
-      else if (st === "preparing") preparing += 1;
-      else if (st === "ready") ready += 1;
-    }
-    return { pending, preparing, ready };
-  }, [sessionOrders]);
 
   function addProduct(p: Product) {
     if (selectedTableBlocked) {
@@ -611,28 +504,21 @@ export default function WaiterOrderPage() {
     setCart((prev) => prev.filter((l) => l.seatLabel !== label));
   }
 
-  async function cancelServerLine(orderId: string, lineIdStr: string) {
+  async function cancelServerOrder(orderId: string) {
     setMsg("");
     if (billingLocked) {
-      setMsg("بعد طلب الحساب لا يمكن إلغاء البنود من هنا.");
-      return;
-    }
-    if (!String(lineIdStr || "").trim()) {
-      setMsg("تعذر تحديد رقم السطر — أعد التحميل.");
+      setMsg("بعد طلب الحساب لا يمكن إلغاء الطلبات من هنا.");
       return;
     }
     try {
-      const r = await fetch(
-        `${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineIdStr)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cancelled: true }),
-        }
-      );
+      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
+      });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
-      setMsg("تم إلغاء السطر (قبل التحضير).");
+      setMsg("تم إلغاء الطلب (لم يبدأ المطبخ بعد).");
       void loadSessionOrders();
     } catch (e) {
       setMsg(String(e));
@@ -653,33 +539,9 @@ export default function WaiterOrderPage() {
       setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
       return;
     }
-    let sessionIdForSave = activeSessionId;
-    if (!sessionIdForSave) {
-      if (sessionBusy) {
-        setMsg("جاري تجهيز الجلسة…");
-        return;
-      }
-      const receiveBy = String(workflowSettings.receiveGuestBy || "host").toLowerCase();
-      const takeBy = String(workflowSettings.takeOrderBy || "waiter").toLowerCase();
-      try {
-        const cr = await fetch(`${base}/api/restaurant/table-sessions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tableId: selectedTableId,
-            guestCount: 2,
-            startedByRole: receiveBy === "customer_self" ? takeBy || "waiter" : receiveBy || "host",
-            startReason: receiveBy === "customer_self" ? "first_order_auto_session" : "seat_assignment",
-          }),
-        });
-        const rec = tryParseJson<{ id?: string }>(await cr.text()) ?? {};
-        if (!cr.ok || !rec.id) throw new Error("تعذر إنشاء جلسة جديدة للطاولة.");
-        sessionIdForSave = String(rec.id);
-        setActiveSessionId(sessionIdForSave);
-      } catch (e) {
-        setMsg(`تعذر ربط جلسة نشطة بالطاولة: ${String(e)}`);
-        return;
-      }
+    if (!activeSessionId) {
+      setMsg(sessionBusy ? "جاري تجهيز الجلسة…" : "تعذر ربط جلسة نشطة بالطاولة. حدّث الصفحة أو تحقق من الاتصال.");
+      return;
     }
     setLoading(true);
     try {
@@ -693,7 +555,7 @@ export default function WaiterOrderPage() {
 
       const body = {
         orderType: "table",
-        sessionId: sessionIdForSave,
+        sessionId: activeSessionId,
         tableId: selectedTableId,
         tableGuid: selectedTableId,
         tableName: selectedTable?.name || "",
@@ -805,7 +667,7 @@ export default function WaiterOrderPage() {
       const t = await r.text();
       if (!r.ok) throw new Error(t);
       setSelectedTableId(transferTargetTableId);
-      setMsg("تم تغيير الطاولة: العميل انتقل للطاولة الجديدة (القديمة أصبحت جاهزة).");
+      setMsg("تم تحويل الجلسة إلى الطاولة الجديدة.");
       void loadSessionOrders();
     } catch (e) {
       setMsg(String(e));
@@ -830,7 +692,8 @@ export default function WaiterOrderPage() {
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
-      setMsg("تم الدمج: حساب هذه الطاولة أصبح يُفوَّتر على الطاولة الهدف، مع بقاء الطاولتين مشغولتين.");
+      setSelectedTableId(mergeTargetTableId);
+      setMsg("تم دمج الطاولة الحالية مع الطاولة الهدف ونقل الطلبات للجلسة الهدف.");
       void loadSessionOrders();
     } catch (e) {
       setMsg(String(e));
@@ -875,46 +738,6 @@ export default function WaiterOrderPage() {
       <OperationalRoleHeader
         roleTitle="✦ OYA Resturant ✦"
         hideUser
-        subToolbar={
-          <div className="waiter-pos__header-tools" dir="rtl">
-            <span className="waiter-pos__header-tools__label">المجموعات</span>
-            <button
-              type="button"
-              className={`waiter-pos__cat-text ${categoryKey === "all" ? "waiter-pos__cat-text--active" : ""}`}
-              onClick={() => setCategoryKey("all")}
-              title="كل المجموعات"
-            >
-              الكل
-            </button>
-            {normalizedGroups.map((g) => (
-              <button
-                key={`hdr-cat-${g.CardGuide}`}
-                type="button"
-                className={`waiter-pos__cat-text ${categoryKey === g.CardGuide ? "waiter-pos__cat-text--active" : ""}`}
-                onClick={() => setCategoryKey(g.CardGuide)}
-                title={g.GroupName}
-              >
-                {g.GroupName}
-              </button>
-            ))}
-            <span className="waiter-pos__tool-sep" aria-hidden>
-              |
-            </span>
-            <span className="waiter-pos__header-tools__label">انتقل</span>
-            <button type="button" className="waiter-pos__nav-text" onClick={() => navigate("/app/waiter/dashboard")}>
-              لوحة الصالة
-            </button>
-            <button type="button" className="waiter-pos__nav-text" onClick={() => navigate("/app/waiter/tables")}>
-              الطاولات
-            </button>
-            <button type="button" className="waiter-pos__nav-text" onClick={() => navigate("/app/waiter/order-taker")}>
-              طلب للطاولة
-            </button>
-            <button type="button" className="waiter-pos__nav-text" onClick={() => navigate("/app/waiter/pos")}>
-              طلب سريع (بار)
-            </button>
-          </div>
-        }
         titleStyle={{
           fontSize: "2rem",
           fontWeight: 900,
@@ -1010,25 +833,29 @@ export default function WaiterOrderPage() {
               عناصر السلة: {cart.reduce((a, l) => a + l.qty, 0)}
             </span>
             <span style={{ padding: "6px 11px", borderRadius: 999, background: "#dbeafe", color: "#1e3a8a", fontWeight: 700 }}>
-              طلبات الجلسة الحالية: {visibleTableOrders.length}
+              طلبات الجلسة: {sessionOrders.length}
             </span>
             <span style={{ padding: "6px 11px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontWeight: 700 }}>
-              مطبخ قيد التجهيز: {visibleTableOrders.filter((o: any) => ["pending", "preparing"].includes(String(o?.status || "").toLowerCase())).length}
+              مطبخ قيد التجهيز: {sessionOrders.filter((o: any) => ["pending", "preparing"].includes(String(o?.status || "").toLowerCase())).length}
             </span>
             <span style={{ padding: "6px 11px", borderRadius: 999, background: "#ffe4e6", color: "#9f1239", fontWeight: 700 }}>
               طلب حساب: {billingLocked ? "نعم" : "لا"}
             </span>
             <span style={{ padding: "6px 11px", borderRadius: 999, background: "#e2e8f0", color: "#1e293b", fontWeight: 700 }}>
-              فاتورة مرحلية للجلسة الحالية: {provisionalTableTotal.toFixed(2)} ج.م
+              إجمالي السلة التقريبي: {cart.reduce((a, l) => a + l.qty * l.unitPrice, 0).toFixed(2)} ج.م
             </span>
           </div>
           <div style={{ marginTop: "0.6rem" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6, fontSize: "0.88rem" }}>طلبات الجلسة الحالية</div>
-            {visibleTableOrders.length === 0 ? (
+            <div style={{ fontWeight: 700, marginBottom: 6, fontSize: "0.88rem" }}>طلبات الطاولة</div>
+            {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
               <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>لا توجد طلبات مرسلة بعد.</div>
             ) : (
               <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-                {visibleTableOrders.map((o) => {
+                {sessionOrders
+                  .filter((o) => (o.status || "").toLowerCase() !== "cancelled")
+                  .slice()
+                  .reverse()
+                  .map((o) => {
                     const st = String(o.status || "").toLowerCase();
                     const items = (o.items || []).map((i) => `${i.name || "صنف"} ×${i.quantity ?? 1}`).slice(0, 3);
                     return (
@@ -1061,8 +888,54 @@ export default function WaiterOrderPage() {
       <div className="waiter-pos__body">
         <main className="waiter-pos__main">
           <div className="waiter-pos__topbar">
+            <div className="waiter-pos__top-card" style={{ gridColumn: "span 3" }}>
+              <h3 style={{ marginTop: 0 }}>التصنيف - الفئة</h3>
+              <div className="waiter-pos__cats waiter-pos__cats-inbar" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}>
+                <button
+                  type="button"
+                  className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
+                  onClick={() => setCategoryKey("all")}
+                  title="كل المجموعات"
+                >
+                  <div className="waiter-pos__cat-wrap">
+                    <span className="waiter-pos__cat-noimg" />
+                    <span className="waiter-pos__cat-label">الكل</span>
+                  </div>
+                </button>
+                {normalizedGroups.map((g) => (
+                  <button
+                    key={`side-${g.CardGuide}`}
+                    type="button"
+                    className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                    onClick={() => setCategoryKey(g.CardGuide)}
+                    title={g.GroupName}
+                  >
+                    <div className="waiter-pos__cat-wrap">
+                      <span className="waiter-pos__cat-noimg" />
+                      <span className="waiter-pos__cat-label">{g.GroupName}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="waiter-pos__top-card" style={{ gridColumn: "span 2" }}>
-              <h3 style={{ marginTop: 0 }}>خيارات الطاولات</h3>
+              <h3 style={{ marginTop: 0 }}>انتقل إلى</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/dashboard")}>
+                  لوحة الصالة
+                </button>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/tables")}>
+                  الطاولات
+                </button>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--primary" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/order-taker")}>
+                  طلب للطاولة
+                </button>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/pos")}>
+                  طلب سريع (بار)
+                </button>
+              </div>
+              <h3 style={{ marginTop: 6, marginBottom: 0 }}>خيارات الطاولات</h3>
               <div className="waiter-pos__split-box">
                 <div className="waiter-pos__dropdown-wrap" style={{ display: "grid", gap: 6 }}>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -1072,7 +945,7 @@ export default function WaiterOrderPage() {
                       ))}
                     </select>
                     <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTable()}>
-                      تغيير الطاولة
+                      تحويل
                     </button>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -1142,21 +1015,10 @@ export default function WaiterOrderPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ fontWeight: 900 }}>{selectedTable?.name ?? "طاولة"}</div>
               </div>
-              <div style={{ color: "var(--wp-muted)", marginTop: 2, fontSize: "0.78rem", lineHeight: 1.25 }}>عنصر {itemCount}</div>
+              <div style={{ color: "var(--wp-muted)", marginTop: 4, fontSize: "0.8rem" }}>عنصر {itemCount}</div>
               {activeSessionId ? (
-                <div style={{ color: "var(--wp-muted)", marginTop: 0, fontSize: "0.72rem", lineHeight: 1.25 }} title={activeSessionId}>
+                <div style={{ color: "var(--wp-muted)", marginTop: 2, fontSize: "0.76rem" }} title={activeSessionId}>
                   جلسة: {activeSessionId.slice(0, 8)}…
-                </div>
-              ) : null}
-              {activeSessionId ? (
-                <div className="waiter-pos__table-kitchen-strip">
-                  <div className="waiter-pos__table-kitchen-strip__title">موقف الطلبات بالمطبخ (جلسة التسكين الحالية)</div>
-                  <div
-                    className="waiter-pos__table-kitchen-strip__counts"
-                    title="نفس طلبات الجلسة الحالية المرسلة للمطبخ — حسب حالة التذكرة"
-                  >
-                    انتظار {sessionKitchenStats.pending} · تحضير {sessionKitchenStats.preparing} · جاهز {sessionKitchenStats.ready}
-                  </div>
                 </div>
               ) : null}
             </div>
@@ -1232,163 +1094,54 @@ export default function WaiterOrderPage() {
 
             <div className="waiter-pos__top-card">
               <div className="waiter-pos__sent">
-                <h4
-                  style={{ margin: 0, fontSize: "0.88rem", fontWeight: 800, flexShrink: 0, lineHeight: 1.3 }}
-                  title="ما أُرسل فعليًا للمطبخ في هذه الجلسة — مرّر للأعلى/للأسفل عند كثرة الأصناف"
-                >
-                  طلبات مُرسلة <span style={{ fontWeight: 600, color: "var(--wp-muted, #94a3b8)", fontSize: "0.8rem" }}>(فاتورة مرحلية — الجلسة الحالية)</span>
-                </h4>
+                <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>طلبات مُرسلة (هذه الجلسة)</h4>
                 {ordersBusy && !sessionOrders.length ? (
                   <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>جاري التحميل…</div>
-                ) : visibleTableOrders.length === 0 ? (
+                ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
                   <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>لا توجد بعد.</div>
                 ) : (
-                  <div className="waiter-pos__sent-scroll">
-                    <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                      {visibleTableOrders.map((o) => {
-                        const st = (o.status || "").toLowerCase();
-                        const orderTotal = (o.items || []).reduce(
-                          (a, it) => ((it as ServerOrderItem).cancelled ? a : a + Number(it.quantity || 0) * Number(it.unitPrice || 0)),
-                          0
-                        );
-                        const lines = (o.items || []).filter(
-                          (it) => it && (String(it.name || "").trim() || (it.quantity ?? 0) > 0)
-                        );
-                        return (
-                          <li
-                            key={`sent-top-${o.id}`}
-                            style={{
-                              borderBottom: "1px solid rgba(15,23,42,0.12)",
-                              padding: "6px 0 8px",
-                              fontSize: "0.82rem",
-                              color: "#cbd5e1",
-                            }}
-                          >
-                            <div style={{ minWidth: 0 }}>
-                                <div>
-                                  <strong style={{ color: "#fff" }}>{o.id.slice(0, 8)}</strong> · {st} · {orderTotal.toFixed(2)} ج.م
-                                </div>
-                                {lines.length > 0 ? (
-                                  <ul className="waiter-pos__sent-lineitems">
-                                    {lines.map((it, idx) => {
-                                      const row = it as ServerOrderItem;
-                                      const isCancelled = Boolean(row.cancelled);
-                                      const canLineCancel =
-                                        !billingLocked && !isCancelled && !row.prepared && !row.sent && String(row.lineId || "").trim() !== "";
-                                      const nm = String(row.name || "صنف").trim() || "صنف";
-                                      const q = Number(row.quantity || 0);
-                                      const up = Number(row.unitPrice || 0);
-                                      const sub = q * up;
-                                      const qStr = q % 1 === 0 ? String(q) : String(parseFloat(q.toFixed(2)));
-                                      const hasUnit = up > 0;
-                                      const amtLabel = hasUnit
-                                        ? `${(Math.abs(sub - Math.round(sub)) < 0.01 ? Math.round(sub) : parseFloat(sub.toFixed(2)))} ج.م`
-                                        : "—";
-                                      return (
-                                        <li key={row.lineId || `${o.id}-ln-${idx}`} className="waiter-pos__sent-line">
-                                          <div className="waiter-pos__sent-line__row">
-                                            <div className="waiter-pos__sent-line__main" style={isCancelled ? { opacity: 0.6, textDecoration: "line-through" } : undefined}>
-                                              <span className="waiter-pos__sent-line__name">
-                                                <span style={{ color: "#e2e8f0" }}>{nm}{isCancelled ? " (مُلغى)" : ""}</span>
-                                                <span style={{ color: "#64748b" }}> ×{qStr}</span>
-                                              </span>
-                                              <span
-                                                className="waiter-pos__sent-line__amt"
-                                                title={up > 0 ? `سعر ${up.toFixed(2)}` : "سعر غير مُسجّل في التذكرة"}
-                                              >
-                                                {amtLabel}
-                                              </span>
-                                            </div>
-                                            {!isCancelled ? (
-                                              <label
-                                                className="waiter-pos__sent-line__cancel"
-                                                style={{
-                                                  display: "inline-flex",
-                                                  alignItems: "center",
-                                                  gap: 4,
-                                                  opacity: canLineCancel ? 1 : 0.55,
-                                                  flex: "0 0 auto",
-                                                  marginTop: 2,
-                                                }}
-                                              >
-                                                <input
-                                                  type="checkbox"
-                                                  checked={false}
-                                                  disabled={!canLineCancel}
-                                                  onChange={() => void cancelServerLine(o.id, String(row.lineId))}
-                                                />
-                                                <span
-                                                  style={{
-                                                    fontSize: "0.7rem",
-                                                    color: canLineCancel ? "#fca5a5" : "#94a3b8",
-                                                    lineHeight: 1.2,
-                                                    maxWidth: 120,
-                                                  }}
-                                                >
-                                                  {canLineCancel ? "إلغاء قبل التحضير" : "لا إلغاء بعد بدء التحضير"}
-                                                </span>
-                                              </label>
-                                            ) : null}
-                                          </div>
-                                        </li>
-                                      );
-                                    })}
-                                  </ul>
-                                ) : (
-                                  <div style={{ fontSize: "0.74rem", color: "var(--wp-muted)", marginTop: 4 }}>— تفاصيل الأصناف غير مُحفوظة على التذكرة</div>
-                                )}
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                    {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
+                      const st = (o.status || "").toLowerCase();
+                      const canCancel = st === "pending";
+                      return (
+                        <li key={`sent-top-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "6px 0", fontSize: "0.82rem", display: "flex", justifyContent: "space-between", gap: 8, color: "#cbd5e1" }}>
+                          <span><strong style={{ color: "#fff" }}>{o.id.slice(0, 8)}</strong> · {st}</span>
+                          {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
               </div>
-              <div className="waiter-pos__footer-totals waiter-pos__footer-totals--tight">
-                <div className="waiter-pos__footer-totals__stack">
-                  <div style={{ color: "#0f172a", fontSize: "0.86rem", fontWeight: 700, lineHeight: 1.2, margin: 0 }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
-                  <div style={{ color: "#0f172a", fontSize: "0.86rem", fontWeight: 700, lineHeight: 1.2, margin: 0 }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      marginTop: 0,
-                      color: "#0f172a",
-                      fontSize: "0.86rem",
-                      fontWeight: 700,
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    <span>بقشيش:</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.5"
-                      value={tipAmount}
-                      onChange={(e) => setTipAmount(Math.max(0, Number(e.target.value) || 0))}
-                      style={{ width: 80, padding: "4px 6px", borderRadius: 6, border: "1px solid #94a3b8", background: "#ffffff", color: "#0f172a", fontSize: "0.85rem", fontWeight: 800 }}
-                    />
-                  </div>
-                  <div style={{ fontWeight: 900, marginTop: 0, color: "#0b3b2e", fontSize: "0.9rem", lineHeight: 1.2 }}>الإجمالي: {total.toFixed(2)} ج.م</div>
+              <div className="waiter-pos__footer-totals">
+                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
+                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>
+                  <span>بقشيش:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    value={tipAmount}
+                    onChange={(e) => setTipAmount(Math.max(0, Number(e.target.value) || 0))}
+                    style={{ width: 86, padding: "6px 8px", borderRadius: 8, border: "1px solid #94a3b8", background: "#ffffff", color: "#0f172a", fontSize: "0.95rem", fontWeight: 800 }}
+                  />
                 </div>
-                <div className="waiter-pos__actions" style={{ flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                <div style={{ fontWeight: 900, marginTop: 6, color: "#0b3b2e", fontSize: "1rem" }}>الإجمالي: {total.toFixed(2)} ج.م</div>
+                <div className="waiter-pos__actions" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                   <button
                     type="button"
                     className="waiter-pos__btn"
                     style={{
-                      padding: "6px 12px",
-                      fontSize: "0.9rem",
+                      padding: "8px 16px",
+                      fontSize: "1rem",
                       fontWeight: 900,
                       background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
                       color: "#fff",
                       border: "1px solid #15803d",
                     }}
-                    onClick={() => {
-                      void loadAll();
-                      void loadSessionOrders();
-                    }}
+                    onClick={() => void loadAll()}
                   >
                     تحديث
                   </button>
@@ -1399,40 +1152,13 @@ export default function WaiterOrderPage() {
           </div>
           <div className="waiter-pos__search-wrap" style={{ marginBottom: "0.5rem" }}>
             <SmartProductSearch
-              onSelect={(hit) => {
-                const p = products.find((x) => String(x.CardGuide) === String(hit.CardGuide));
-                if (!p) {
-                  setMsg("الصنف غير متاح في قائمة الأصناف الحالية.");
-                  return;
-                }
-                const allowedInMenu = menuAllowedGuides ? menuAllowedGuides.has(String(p.CardGuide || "").toUpperCase()) : true;
-                if (!allowedInMenu) {
-                  setMsg(`الصنف "${p.ProductName}" ظاهر في البحث لكنه خارج المنيو الحالي، لذلك لن يضاف للطلب.`);
-                  return;
-                }
+              onSelect={(hit) =>
                 addProduct({
-                  CardGuide: p.CardGuide,
-                  ProductName: p.ProductName,
-                  Price: Number(p.Price || 0),
-                });
-              }}
-              getContext={(hit) => {
-                const p = products.find((x) => String(x.CardGuide) === String(hit.CardGuide));
-                if (!p) return null;
-                const groupName = p.GroupGuid ? groupNameById.get(p.GroupGuid) || "غير مصنّف" : "غير مصنّف";
-                const inMenu = menuAllowedGuides ? menuAllowedGuides.has(String(p.CardGuide || "").toUpperCase()) : true;
-                const stopNote = kitchenStoppedMap.get(p.CardGuide);
-                return {
-                  title: `تقرير صنف: ${p.ProductName}`,
-                  lines: [
-                    `المجموعة: ${groupName}`,
-                    `داخل المنيو الحالي: ${inMenu ? "نعم" : "لا"}`,
-                    `حالة المطبخ: ${stopNote ? `موقوف الآن (${stopNote})` : "متاح"}`,
-                    `سعر البيع: ${Number(p.Price || 0).toFixed(2)} ج.م`,
-                    `الدليل: ${p.CardGuide}`,
-                  ],
-                };
-              }}
+                  CardGuide: hit.CardGuide,
+                  ProductName: hit.ProductName,
+                  Price: Number(products.find((p) => String(p.CardGuide) === String(hit.CardGuide))?.Price || 0),
+                })
+              }
               placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
             />
           </div>

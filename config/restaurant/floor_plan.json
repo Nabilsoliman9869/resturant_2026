@@ -398,9 +398,73 @@
       "h": 62,
       "seats": 5,
       "linkedTableId": "7E35F125-84E6-4003-8CAC-0D17BDDAC922"
+    },
+    {
+      "id": "VIP1",
+      "label": "VIP 1",
+      "shape": "rect",
+      "x": 90,
+      "y": 812,
+      "w": 88,
+      "h": 58,
+      "seats": 6,
+      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d401"
+    },
+    {
+      "id": "VIP2",
+      "label": "VIP 2",
+      "shape": "rect",
+      "x": 205,
+      "y": 812,
+      "w": 88,
+      "h": 58,
+      "seats": 6,
+      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d402"
+    },
+    {
+      "id": "VIP3",
+      "label": "VIP 3",
+      "shape": "rect",
+      "x": 320,
+      "y": 812,
+      "w": 88,
+      "h": 58,
+      "seats": 6,
+      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d403"
+    },
+    {
+      "id": "VIP4",
+      "label": "VIP 4",
+      "shape": "rect",
+      "x": 435,
+      "y": 812,
+      "w": 88,
+      "h": 58,
+      "seats": 6,
+      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d404"
+    },
+    {
+      "id": "VIP5",
+      "label": "VIP 5",
+      "shape": "rect",
+      "x": 550,
+      "y": 812,
+      "w": 88,
+      "h": 58,
+      "seats": 6,
+      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d405"
     }
   ],
   "textAnnotations": [
+    {
+      "id": "txt-vip-strip",
+      "text": "VIP — قرب الكاشير",
+      "x": 90,
+      "y": 792,
+      "color": "#b45309",
+      "fontSize": 22,
+      "fontWeight": 900
+    },
     {
       "id": "txt-shisha",
       "text": "Shisha Area",

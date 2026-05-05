@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "agentGroupNames": {
+    "cash_individual": "عملاء السفاري",
+    "delivery_riders": "مندوبين توصيل",
+    "delivery_customers": "عملاء الدليفري",
+    "hall_patrons": "عملاء الصالة",
+    "sites": "عملاء المواقع"
+  },
+  "channels": {
+    "sites": {
+      "pseudoTableAliases": ["مواقع", "نقاط بيع المواقع", "SITES", "sites"]
+    }
+  }
+}

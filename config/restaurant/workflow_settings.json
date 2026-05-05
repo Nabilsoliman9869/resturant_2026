@@ -1,5 +1,6 @@
 {
   "receiveGuestBy": "host",
+  "orderTakerExclusiveTable": "off",
   "takeOrderBy": "waiter",
   "deliverFromKitchenBy": "server",
   "cleanTableBy": "server",

@@ -17,6 +17,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "dashboard", label: "لوحة الصالة" },
     { to: "table-sessions", label: "جلسات الطاولات" },
     { to: "invoices-local", label: "تسديد فواتير الطاولات" },
+    { to: "call-center", label: "Call Center (دليفري)" },
     { to: "kids-area", label: "منطقة الأطفال" },
     { to: "pos", label: "نقطة البيع (بار / سفري)" },
     { to: "purchases", label: "مشتريات" },
@@ -32,6 +33,9 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
   ],
   manager: [
     { to: "dashboard", label: "داشبورد" },
+    { to: "captain-tables", label: "شريحات الطاولات" },
+    { to: "order-taker", label: "طلب للطاولة" },
+    { to: "call-center", label: "Call Center (دليفري)" },
     { to: "settings", label: "إعدادات التشغيل" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
@@ -42,6 +46,9 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
   ],
   developer: [
     { to: "dashboard", label: "داشبورد" },
+    { to: "captain-tables", label: "شريحات الطاولات" },
+    { to: "order-taker", label: "طلب للطاولة" },
+    { to: "call-center", label: "Call Center (دليفري)" },
     { to: "settings", label: "إعدادات" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
@@ -77,7 +84,9 @@ export function AppShell({ role }: { role: RoleId }) {
   const dbEpoch = useDbEpoch();
   const location = useLocation();
   const base = `/app/${role}`;
-  const isWaiterOrderTaker = role === "waiter" && location.pathname.startsWith(`${base}/order-taker`);
+  const isWaiterOrderTaker =
+    (role === "waiter" || role === "manager" || role === "developer") &&
+    location.pathname.startsWith(`${base}/order-taker`);
   const items = useMemo(() => {
     const raw = NAV_BY_ROLE[role];
     if (venueType !== "coffee_shop") return raw;

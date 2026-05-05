@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from pydantic import BaseModel, model_validator
 from typing import Any, List, Optional, Tuple
 import pyodbc
+from datetime import date as date_cls
 from datetime import datetime
 import uuid
 import subprocess
@@ -28,17 +29,19 @@ except ValueError:
     XTRA_API_PORT = 2288
 
 # يزيد عند تغيير قائمة فحوص GET /api/dev/seed-default-data/verify أو جداول التهيئة — للتمييز عن عمليات api_server قديمة
-MAT3AM_VERIFY_SCHEMA_REVISION = 8
+MAT3AM_VERIFY_SCHEMA_REVISION = 10
 
 # جداول MAT3AM التي يفترض أن تنشئها _ensure_mat3am_dev_schema — للتشخيص فقط (OBJECT_ID + COUNT)
 MAT3AM_DDL_TABLE_NAMES: Tuple[str, ...] = (
     "MAT3AM_APP_USERS",
+    "MAT3AM_USER_ROLE_SCHEDULE",
     "MAT3AM_ERROR_LOG",
     "MAT3AM_AUDIT_LOG",
     "MAT3AM_RESTAURANT_INVOICE_TYPES",
     "MAT3AM_RESTAURANT_STORES",
     "MAT3AM_RESTAURANT_STATE",
     "MAT3AM_WORKFLOW_SETTINGS",
+    "MAT3AM_RESTAURANT_OPS_SETTINGS",
     "MAT3AM_RECIPE_HDR",
     "MAT3AM_RECIPE_LINE",
     "MAT3AM_STOCK_MOVEMENT",
@@ -852,6 +855,32 @@ ALLOWED_ROLE_CODES = {
 }
 
 
+def _resolve_effective_role_code(cursor, user_id: str, base_role: str) -> str:
+    """دور الدخول الفعّال: إن وُجدت جدولة تغطي «اليوم» على السيرفر تُستخدم، وإلا RoleCode الأساسي من MAT3AM_APP_USERS."""
+    uid = (user_id or "").strip()
+    base = (base_role or "").strip().lower()
+    if not uid:
+        return base
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 RoleCode FROM dbo.MAT3AM_USER_ROLE_SCHEDULE
+            WHERE UserId = CAST(? AS uniqueidentifier)
+              AND CAST(SYSUTCDATETIME() AS DATE) >= ValidFrom
+              AND CAST(SYSUTCDATETIME() AS DATE) <= ValidTo
+            ORDER BY CreatedAt DESC, Id DESC
+            """,
+            (uid,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return base
+        r = str(row[0] or "").strip().lower()
+        return r if r in ALLOWED_ROLE_CODES else base
+    except Exception:
+        return base
+
+
 def _audit_log(cursor, action: str, entity: str, entity_id: Optional[str], actor: Optional[str], details: Optional[str]):
     """تسجيل تدقيق لعمليات الإدارة والدخول."""
     try:
@@ -1352,7 +1381,15 @@ async def api_auth_login(request: Request):
         role_code = str(row[3] or "").strip().lower()
         if role_code not in ALLOWED_ROLE_CODES:
             raise HTTPException(status_code=403, detail=f"الدور غير مدعوم: {role_code}")
-        _audit_log(cursor, "LOGIN_OK", "MAT3AM_APP_USERS", str(row[0]), login_name, f"role={role_code}")
+        effective_role = _resolve_effective_role_code(cursor, str(row[0]), role_code)
+        _audit_log(
+            cursor,
+            "LOGIN_OK",
+            "MAT3AM_APP_USERS",
+            str(row[0]),
+            login_name,
+            f"role={effective_role}" + (f" (base={role_code})" if effective_role != role_code else ""),
+        )
         conn.commit()
         display = row[2]
         login_nm = row[1]
@@ -1370,7 +1407,7 @@ async def api_auth_login(request: Request):
                 "id": str(row[0]),
                 "name": name_out,
                 "login": str(login_nm or "").strip(),
-                "role": role_code,
+                "role": effective_role,
             },
         }
     except HTTPException:
@@ -1384,9 +1421,44 @@ async def api_auth_login(request: Request):
             pass
 
 
+def _mat3am_role_schedule_entries_list(cursor) -> List[Any]:
+    """صفوف جدولة الدور مع أسماء المستخدمين (للإعدادات وGET users الموسّع)."""
+    cursor.execute(
+        """
+        SELECT s.Id, s.UserId, s.RoleCode, s.ValidFrom, s.ValidTo, s.CreatedAt,
+               u.LoginName, u.DisplayName, u.RoleCode
+        FROM dbo.MAT3AM_USER_ROLE_SCHEDULE s
+        INNER JOIN dbo.MAT3AM_APP_USERS u ON u.Id = s.UserId
+        ORDER BY s.ValidFrom DESC, u.LoginName, s.Id DESC
+        """
+    )
+    out: List[Any] = []
+    for r in cursor.fetchall():
+        vf = r[3]
+        vt = r[4]
+        ca = r[5]
+        out.append(
+            {
+                "id": int(r[0]),
+                "userId": str(r[1]),
+                "role": str(r[2] or "").lower(),
+                "validFrom": vf.isoformat()[:10] if hasattr(vf, "isoformat") else str(vf)[:10],
+                "validTo": vt.isoformat()[:10] if hasattr(vt, "isoformat") else str(vt)[:10],
+                "createdAt": str(ca) if ca else "",
+                "login": str(r[6] or ""),
+                "displayName": str(r[7] or r[6] or ""),
+                "baseRole": str(r[8] or "").lower(),
+            }
+        )
+    return out
+
+
 @app.get("/api/auth/users")
-def api_auth_users():
-    """قائمة مستخدمي النظام من MAT3AM_APP_USERS."""
+def api_auth_users(include_role_schedule: bool = Query(False, alias="includeRoleSchedule")):
+    """قائمة مستخدمي النظام من MAT3AM_APP_USERS.
+
+    عند includeRoleSchedule=1 تُعاد أيضاً roleSchedule من نفس الاستعلام (بدون مسار إضافي) لتفادي 404 مع خادم قديم لا يعرّف /api/auth/role-schedule.
+    """
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
@@ -1413,7 +1485,13 @@ def api_auth_users():
                     "createdAt": str(r[5]) if r[5] else "",
                 }
             )
-        return {"users": users}
+        out: dict = {"users": users}
+        if include_role_schedule:
+            try:
+                out["roleSchedule"] = _mat3am_role_schedule_entries_list(cursor)
+            except Exception:
+                out["roleSchedule"] = []
+        return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"تعذر قراءة المستخدمين: {str(e)}")
     finally:
@@ -1471,16 +1549,148 @@ def api_auth_user_create(body: dict):
 
 
 @app.patch("/api/auth/users/{user_id}")
-def api_auth_user_update(user_id: str, body: dict):
-    """تحديث مستخدم: تفعيل/تعطيل، تغيير الدور، تغيير الرمز."""
+async def api_auth_user_update(user_id: str, request: Request):
+    """تحديث مستخدم: تفعيل/تعطيل، تغيير الدور، تغيير الرمز.
+
+    كما يدعم جدولة الدور عبر نفس المسار (للتوافق مع خادم لا يعرّف /api/auth/role-schedule):
+    - addRoleSchedule: { role, validFrom, validTo }
+    - removeRoleScheduleId: رقم
+    - updateRoleSchedule: { id, role?, validFrom?, validTo? }
+
+    يُقرأ الجسم عبر request.json() صراحةً — مع مسار {user_id} في FastAPI 0.104 قد لا يُحقَن dict تلقائياً فيُرسل جسم فارغ ويُرجع «لا تغييرات» دون تطبيق الجدولة.
+    """
+    try:
+        raw = await request.json()
+        body = raw if isinstance(raw, dict) else {}
+    except Exception:
+        body = {}
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     try:
         cursor = conn.cursor()
         _ensure_mat3am_dev_schema(cursor)
+        cursor.execute(
+            "SELECT TOP 1 Id FROM dbo.MAT3AM_APP_USERS WHERE Id = CAST(? AS uniqueidentifier)",
+            (user_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+
+        schedule_touched = False
+        if isinstance(body.get("addRoleSchedule"), dict):
+            blk = body["addRoleSchedule"]
+            role = str(blk.get("role") or "").strip().lower()
+            if role not in ALLOWED_ROLE_CODES:
+                raise HTTPException(status_code=400, detail=f"الدور غير مدعوم: {role}")
+            d_from = _parse_schedule_date(str(blk.get("validFrom") or ""), "البداية")
+            d_to = _parse_schedule_date(str(blk.get("validTo") or ""), "النهاية")
+            if d_from > d_to:
+                raise HTTPException(status_code=400, detail="تاريخ البداية يجب ألا يكون بعد تاريخ النهاية")
+            cursor.execute(
+                """
+                INSERT INTO dbo.MAT3AM_USER_ROLE_SCHEDULE (UserId, RoleCode, ValidFrom, ValidTo)
+                OUTPUT INSERTED.Id
+                VALUES (CAST(? AS uniqueidentifier), ?, ?, ?)
+                """,
+                (user_id, role, d_from, d_to),
+            )
+            ins = cursor.fetchone()
+            new_sid = int(ins[0]) if ins and ins[0] is not None else 0
+            _audit_log(
+                cursor,
+                "ROLE_SCHEDULE_CREATE",
+                "MAT3AM_USER_ROLE_SCHEDULE",
+                user_id,
+                str(body.get("actor") or ""),
+                f"{role} {d_from}..{d_to} id={new_sid}",
+            )
+            schedule_touched = True
+
+        if body.get("removeRoleScheduleId") is not None:
+            try:
+                sid = int(body.get("removeRoleScheduleId"))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="removeRoleScheduleId غير صالح")
+            cursor.execute(
+                "DELETE FROM dbo.MAT3AM_USER_ROLE_SCHEDULE WHERE Id = ? AND UserId = CAST(? AS uniqueidentifier)",
+                (sid, user_id),
+            )
+            if cursor.rowcount <= 0:
+                raise HTTPException(status_code=404, detail="سجل الجدولة غير موجود أو لا يخص هذا المستخدم")
+            _audit_log(cursor, "ROLE_SCHEDULE_DELETE", "MAT3AM_USER_ROLE_SCHEDULE", str(sid), "", "")
+            schedule_touched = True
+
+        upd_sched = body.get("updateRoleSchedule")
+        if isinstance(upd_sched, dict) and upd_sched.get("id") is not None:
+            try:
+                sid = int(upd_sched["id"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="معرّف الجدولة غير صالح")
+            cursor.execute(
+                """
+                SELECT UserId, RoleCode, ValidFrom, ValidTo
+                FROM dbo.MAT3AM_USER_ROLE_SCHEDULE
+                WHERE Id = ? AND UserId = CAST(? AS uniqueidentifier)
+                """,
+                (sid, user_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="سجل الجدولة غير موجود")
+            cur_vf = _coerce_sql_date(row[2])
+            cur_vt = _coerce_sql_date(row[3])
+            new_vf = (
+                _parse_schedule_date(str(upd_sched.get("validFrom")), "البداية")
+                if "validFrom" in upd_sched
+                else cur_vf
+            )
+            new_vt = (
+                _parse_schedule_date(str(upd_sched.get("validTo")), "النهاية")
+                if "validTo" in upd_sched
+                else cur_vt
+            )
+            if new_vf > new_vt:
+                raise HTTPException(status_code=400, detail="تاريخ البداية يجب ألا يكون بعد تاريخ النهاية")
+            updates_sc: List[str] = []
+            params_sc: List[Any] = []
+            if "role" in upd_sched:
+                role = str(upd_sched.get("role") or "").strip().lower()
+                if role not in ALLOWED_ROLE_CODES:
+                    raise HTTPException(status_code=400, detail=f"الدور غير مدعوم: {role}")
+                updates_sc.append("RoleCode = ?")
+                params_sc.append(role)
+            if "validFrom" in upd_sched:
+                updates_sc.append("ValidFrom = ?")
+                params_sc.append(new_vf)
+            if "validTo" in upd_sched:
+                updates_sc.append("ValidTo = ?")
+                params_sc.append(new_vt)
+            if updates_sc:
+                params_sc.extend([sid, user_id])
+                sql_sc = (
+                    "UPDATE dbo.MAT3AM_USER_ROLE_SCHEDULE SET "
+                    + ", ".join(updates_sc)
+                    + " WHERE Id = ? AND UserId = CAST(? AS uniqueidentifier)"
+                )
+                cursor.execute(sql_sc, tuple(params_sc))
+                _audit_log(
+                    cursor,
+                    "ROLE_SCHEDULE_UPDATE",
+                    "MAT3AM_USER_ROLE_SCHEDULE",
+                    str(sid),
+                    str(body.get("actor") or ""),
+                    f"user={user_id}",
+                )
+                schedule_touched = True
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="لم يُرسل أي حقل لتحديث الجدولة (role أو validFrom أو validTo)",
+                )
+
         updates = []
-        params = []
+        params: List[Any] = []
         if "name" in body:
             updates.append("DisplayName = ?")
             params.append((body.get("name") or "").strip() or None)
@@ -1499,16 +1709,17 @@ def api_auth_user_update(user_id: str, body: dict):
         if "isActive" in body:
             updates.append("IsActive = ?")
             params.append(1 if bool(body.get("isActive")) else 0)
-        if not updates:
-            return {"ok": True, "message": "لا تغييرات"}
-        sql = "UPDATE dbo.MAT3AM_APP_USERS SET " + ", ".join(updates) + " WHERE Id = CAST(? AS uniqueidentifier)"
-        params.append(user_id)
-        cursor.execute(sql, tuple(params))
-        if cursor.rowcount <= 0:
-            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
-        _audit_log(cursor, "UPDATE_USER", "MAT3AM_APP_USERS", user_id, str(body.get("actor") or ""), "patch update")
+        if not updates and not schedule_touched:
+            return {"ok": True, "message": "لا تغييرات", "scheduleChanged": False, "userFieldsChanged": False}
+        if updates:
+            sql = "UPDATE dbo.MAT3AM_APP_USERS SET " + ", ".join(updates) + " WHERE Id = CAST(? AS uniqueidentifier)"
+            params.append(user_id)
+            cursor.execute(sql, tuple(params))
+            if cursor.rowcount <= 0:
+                raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+            _audit_log(cursor, "UPDATE_USER", "MAT3AM_APP_USERS", user_id, str(body.get("actor") or ""), "patch update")
         conn.commit()
-        return {"ok": True}
+        return {"ok": True, "scheduleChanged": schedule_touched, "userFieldsChanged": bool(updates)}
     except HTTPException:
         raise
     except Exception as e:
@@ -1517,6 +1728,167 @@ def api_auth_user_update(user_id: str, body: dict):
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"تعذر تحديث المستخدم: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/auth/user-role-schedule-mutate")
+async def api_auth_user_role_schedule_mutate(request: Request):
+    """إضافة/تعديل/حذف جدولة الدور — POST بجسم JSON فقط (بدون معاملات في المسار).
+
+    يُستخدم من الواجهة بدل PATCH على `/api/auth/users/{id}` لأن بعض التراكيب (FastAPI/بروكسي) تُفقد جسم PATCH مع المسار فيصل جسم فارغ و«لا تغييرات».
+    """
+    try:
+        raw = await request.json()
+        body = raw if isinstance(raw, dict) else {}
+    except Exception:
+        body = {}
+    action = str(body.get("action") or "").strip().lower()
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+
+        if action == "add":
+            user_id = str(body.get("userId") or "").strip()
+            if not user_id:
+                raise HTTPException(status_code=400, detail="userId مطلوب")
+            cursor.execute(
+                "SELECT 1 FROM dbo.MAT3AM_APP_USERS WHERE Id = CAST(? AS uniqueidentifier)",
+                (user_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+            role = str(body.get("role") or "").strip().lower()
+            if role not in ALLOWED_ROLE_CODES:
+                raise HTTPException(status_code=400, detail=f"الدور غير مدعوم: {role}")
+            d_from = _parse_schedule_date(str(body.get("validFrom") or ""), "البداية")
+            d_to = _parse_schedule_date(str(body.get("validTo") or ""), "النهاية")
+            if d_from > d_to:
+                raise HTTPException(status_code=400, detail="تاريخ البداية يجب ألا يكون بعد تاريخ النهاية")
+            cursor.execute(
+                """
+                INSERT INTO dbo.MAT3AM_USER_ROLE_SCHEDULE (UserId, RoleCode, ValidFrom, ValidTo)
+                OUTPUT INSERTED.Id
+                VALUES (CAST(? AS uniqueidentifier), ?, ?, ?)
+                """,
+                (user_id, role, d_from, d_to),
+            )
+            ins = cursor.fetchone()
+            new_sid = int(ins[0]) if ins and ins[0] is not None else 0
+            _audit_log(
+                cursor,
+                "ROLE_SCHEDULE_CREATE",
+                "MAT3AM_USER_ROLE_SCHEDULE",
+                user_id,
+                str(body.get("actor") or ""),
+                f"mutate-post id={new_sid}",
+            )
+            conn.commit()
+            return {"ok": True, "scheduleChanged": True, "newScheduleId": new_sid}
+
+        if action == "remove":
+            user_id = str(body.get("userId") or "").strip()
+            try:
+                sid = int(body.get("scheduleId") or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="scheduleId غير صالح")
+            if not user_id or not sid:
+                raise HTTPException(status_code=400, detail="userId و scheduleId مطلوبان")
+            cursor.execute(
+                "DELETE FROM dbo.MAT3AM_USER_ROLE_SCHEDULE WHERE Id = ? AND UserId = CAST(? AS uniqueidentifier)",
+                (sid, user_id),
+            )
+            if cursor.rowcount <= 0:
+                raise HTTPException(status_code=404, detail="سجل الجدولة غير موجود أو لا يخص هذا المستخدم")
+            _audit_log(cursor, "ROLE_SCHEDULE_DELETE", "MAT3AM_USER_ROLE_SCHEDULE", str(sid), "", "")
+            conn.commit()
+            return {"ok": True, "scheduleChanged": True}
+
+        if action == "update":
+            user_id = str(body.get("userId") or "").strip()
+            try:
+                sid = int(body.get("scheduleId") or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="scheduleId غير صالح")
+            if not user_id or not sid:
+                raise HTTPException(status_code=400, detail="userId و scheduleId مطلوبان")
+            cursor.execute(
+                """
+                SELECT UserId, RoleCode, ValidFrom, ValidTo
+                FROM dbo.MAT3AM_USER_ROLE_SCHEDULE
+                WHERE Id = ? AND UserId = CAST(? AS uniqueidentifier)
+                """,
+                (sid, user_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="سجل الجدولة غير موجود")
+            cur_vf = _coerce_sql_date(row[2])
+            cur_vt = _coerce_sql_date(row[3])
+            new_vf = (
+                _parse_schedule_date(str(body.get("validFrom")), "البداية")
+                if "validFrom" in body
+                else cur_vf
+            )
+            new_vt = (
+                _parse_schedule_date(str(body.get("validTo")), "النهاية")
+                if "validTo" in body
+                else cur_vt
+            )
+            if new_vf > new_vt:
+                raise HTTPException(status_code=400, detail="تاريخ البداية يجب ألا يكون بعد تاريخ النهاية")
+            updates_sc: List[str] = []
+            params_sc: List[Any] = []
+            if "role" in body:
+                role = str(body.get("role") or "").strip().lower()
+                if role not in ALLOWED_ROLE_CODES:
+                    raise HTTPException(status_code=400, detail=f"الدور غير مدعوم: {role}")
+                updates_sc.append("RoleCode = ?")
+                params_sc.append(role)
+            if "validFrom" in body:
+                updates_sc.append("ValidFrom = ?")
+                params_sc.append(new_vf)
+            if "validTo" in body:
+                updates_sc.append("ValidTo = ?")
+                params_sc.append(new_vt)
+            if not updates_sc:
+                raise HTTPException(
+                    status_code=400,
+                    detail="أرسل role أو validFrom أو validTo للتحديث",
+                )
+            params_sc.extend([sid, user_id])
+            sql_sc = (
+                "UPDATE dbo.MAT3AM_USER_ROLE_SCHEDULE SET "
+                + ", ".join(updates_sc)
+                + " WHERE Id = ? AND UserId = CAST(? AS uniqueidentifier)"
+            )
+            cursor.execute(sql_sc, tuple(params_sc))
+            _audit_log(
+                cursor,
+                "ROLE_SCHEDULE_UPDATE",
+                "MAT3AM_USER_ROLE_SCHEDULE",
+                str(sid),
+                str(body.get("actor") or ""),
+                f"mutate-post user={user_id}",
+            )
+            conn.commit()
+            return {"ok": True, "scheduleChanged": True}
+
+        raise HTTPException(status_code=400, detail="action مطلوب: add أو update أو remove")
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر تنفيذ الجدولة: {str(e)}")
     finally:
         try:
             conn.close()
@@ -1542,6 +1914,13 @@ def api_auth_user_delete(user_id: str):
             raise HTTPException(status_code=404, detail="المستخدم غير موجود")
         login_name = str(row[0] or "")
         role = str(row[1] or "")
+        try:
+            cursor.execute(
+                "DELETE FROM dbo.MAT3AM_USER_ROLE_SCHEDULE WHERE UserId = CAST(? AS uniqueidentifier)",
+                (user_id,),
+            )
+        except Exception:
+            pass
         cursor.execute("DELETE FROM dbo.MAT3AM_APP_USERS WHERE Id = CAST(? AS uniqueidentifier)", (user_id,))
         if cursor.rowcount <= 0:
             raise HTTPException(status_code=404, detail="المستخدم غير موجود")
@@ -1556,6 +1935,196 @@ def api_auth_user_delete(user_id: str):
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"تعذر حذف المستخدم: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _parse_schedule_date(s: str, label: str):
+    raw = (s or "").strip()[:10]
+    if len(raw) < 10:
+        raise HTTPException(status_code=400, detail=f"تاريخ {label} مطلوب بصيغة YYYY-MM-DD")
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"تاريخ {label} غير صالح: {raw}")
+
+
+def _coerce_sql_date(val) -> date_cls:
+    if val is None:
+        return datetime(1970, 1, 1).date()
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date_cls):
+        return val
+    return datetime.strptime(str(val)[:10], "%Y-%m-%d").date()
+
+
+@app.get("/api/auth/role-schedule")
+def api_auth_role_schedule_list():
+    """فترات جدولة الدور لكل مستخدم (من تاريخ إلى تاريخ) — للإعدادات."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+        return {"entries": _mat3am_role_schedule_entries_list(cursor)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر قراءة الجدولة: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/auth/role-schedule")
+def api_auth_role_schedule_create(body: dict):
+    """إضافة فترة: مستخدم + دور + من تاريخ إلى تاريخ."""
+    user_id = str(body.get("userId") or "").strip()
+    role = str(body.get("role") or "").strip().lower()
+    d_from = _parse_schedule_date(str(body.get("validFrom") or ""), "البداية")
+    d_to = _parse_schedule_date(str(body.get("validTo") or ""), "النهاية")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="userId مطلوب")
+    if role not in ALLOWED_ROLE_CODES:
+        raise HTTPException(status_code=400, detail=f"الدور غير مدعوم: {role}")
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="تاريخ البداية يجب ألا يكون بعد تاريخ النهاية")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+        cursor.execute(
+            "SELECT TOP 1 LoginName FROM dbo.MAT3AM_APP_USERS WHERE Id = CAST(? AS uniqueidentifier)",
+            (user_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+        cursor.execute(
+            """
+            INSERT INTO dbo.MAT3AM_USER_ROLE_SCHEDULE (UserId, RoleCode, ValidFrom, ValidTo)
+            OUTPUT INSERTED.Id
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, ?)
+            """,
+            (user_id, role, d_from, d_to),
+        )
+        ins = cursor.fetchone()
+        new_id = int(ins[0]) if ins and ins[0] is not None else 0
+        _audit_log(cursor, "ROLE_SCHEDULE_CREATE", "MAT3AM_USER_ROLE_SCHEDULE", user_id, str(body.get("actor") or ""), f"{role} {d_from}..{d_to}")
+        conn.commit()
+        return {"ok": True, "id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ الجدولة: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.patch("/api/auth/role-schedule/{schedule_id}")
+def api_auth_role_schedule_update(schedule_id: str, body: dict):
+    try:
+        sid = int(str(schedule_id).strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="معرّف الجدولة غير صالح")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+        cursor.execute(
+            "SELECT UserId, RoleCode, ValidFrom, ValidTo FROM dbo.MAT3AM_USER_ROLE_SCHEDULE WHERE Id = ?",
+            (sid,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="سجل الجدولة غير موجود")
+        uid = str(row[0])
+        cur_vf = _coerce_sql_date(row[2])
+        cur_vt = _coerce_sql_date(row[3])
+        new_vf = _parse_schedule_date(str(body.get("validFrom")), "البداية") if "validFrom" in body else cur_vf
+        new_vt = _parse_schedule_date(str(body.get("validTo")), "النهاية") if "validTo" in body else cur_vt
+        if new_vf > new_vt:
+            raise HTTPException(status_code=400, detail="تاريخ البداية يجب ألا يكون بعد تاريخ النهاية")
+        updates = []
+        params: List[Any] = []
+        if "role" in body:
+            role = str(body.get("role") or "").strip().lower()
+            if role not in ALLOWED_ROLE_CODES:
+                raise HTTPException(status_code=400, detail=f"الدور غير مدعوم: {role}")
+            updates.append("RoleCode = ?")
+            params.append(role)
+        if "validFrom" in body:
+            updates.append("ValidFrom = ?")
+            params.append(new_vf)
+        if "validTo" in body:
+            updates.append("ValidTo = ?")
+            params.append(new_vt)
+        if not updates:
+            return {"ok": True, "message": "لا تغييرات"}
+        sql = "UPDATE dbo.MAT3AM_USER_ROLE_SCHEDULE SET " + ", ".join(updates) + " WHERE Id = ?"
+        params.append(sid)
+        cursor.execute(sql, tuple(params))
+        _audit_log(cursor, "ROLE_SCHEDULE_UPDATE", "MAT3AM_USER_ROLE_SCHEDULE", str(sid), str(body.get("actor") or ""), f"user={uid}")
+        conn.commit()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر تحديث الجدولة: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.delete("/api/auth/role-schedule/{schedule_id}")
+def api_auth_role_schedule_delete(schedule_id: str):
+    try:
+        sid = int(str(schedule_id).strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="معرّف الجدولة غير صالح")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_mat3am_dev_schema(cursor)
+        cursor.execute("DELETE FROM dbo.MAT3AM_USER_ROLE_SCHEDULE WHERE Id = ?", (sid,))
+        if cursor.rowcount <= 0:
+            raise HTTPException(status_code=404, detail="سجل الجدولة غير موجود")
+        _audit_log(cursor, "ROLE_SCHEDULE_DELETE", "MAT3AM_USER_ROLE_SCHEDULE", str(sid), "", "")
+        conn.commit()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر حذف الجدولة: {str(e)}")
     finally:
         try:
             conn.close()
@@ -9886,6 +10455,16 @@ def _bootstrap_mat3am_runtime() -> None:
             with open(prof_path, "w", encoding="utf-8") as f:
                 json.dump([], f, ensure_ascii=False, indent=2)
             print("[mat3am] bootstrap: kids_area_profiles.json فارغ")
+        rop = _restaurant_ops_settings_path()
+        if not os.path.exists(rop):
+            tmpl = os.path.join(str(BUNDLE_DIR), "config", "restaurant", "restaurant_ops_settings.json")
+            if os.path.isfile(tmpl):
+                shutil.copy2(tmpl, rop)
+                print("[mat3am] bootstrap: تم نسخ restaurant_ops_settings.json الافتراضي")
+            else:
+                with open(rop, "w", encoding="utf-8") as f:
+                    json.dump(_restaurant_normalize_ops(_restaurant_ops_default()), f, ensure_ascii=False, indent=2)
+                print("[mat3am] bootstrap: تم إنشاء restaurant_ops_settings.json أولي")
     except Exception as e:
         print("[mat3am] bootstrap warning:", e)
 
@@ -10269,6 +10848,8 @@ def _restaurant_workflow_default() -> dict:
         "cleaningExecutionBy": "server",              # server | waiter | manager | cleaner
         "cleaningReviewBy": "none",                   # none | manager | waiter | cleaner
         "cleaningStartStatus": "dirty",               # dirty | cleaning
+        # جرسون الطلبات (كابتن): إن فُعّل، لا يُقبل إرسال طلبات/طلب حساب إلا من مستخدم التسكين أو المدير/المطوّر.
+        "orderTakerExclusiveTable": "off",            # off | on
     }
 
 
@@ -10432,10 +11013,81 @@ def _restaurant_normalize_workflow_settings(raw: dict) -> dict:
         cur["cleaningReviewBy"] = "none"
     if cur["cleaningStartStatus"] not in clean_start_status_allowed:
         cur["cleaningStartStatus"] = "dirty"
+    ox = str(cur.get("orderTakerExclusiveTable") or "").strip().lower()
+    if ox in ("on", "1", "true", "yes"):
+        cur["orderTakerExclusiveTable"] = "on"
+    else:
+        cur["orderTakerExclusiveTable"] = "off"
     # منع تضارب المفتاحين legacy/new:
     # cleanTableBy (قديم) و cleaningExecutionBy (الحالي) يجب أن يكونا نفس القيمة دائمًا.
     cur["cleanTableBy"] = cur["cleaningExecutionBy"]
     return cur
+
+
+def _workflow_order_taker_exclusive_on() -> bool:
+    w = _restaurant_read_workflow()
+    v = str(w.get("orderTakerExclusiveTable") or "").strip().lower()
+    return v in ("on", "1", "true", "yes")
+
+
+def _mat3am_actor_from_body(body: object) -> dict:
+    if not isinstance(body, dict):
+        return {}
+    a = body.get("mat3amActor")
+    if not isinstance(a, dict):
+        return {}
+    return {
+        "id": str(a.get("id") or "").strip(),
+        "login": str(a.get("login") or "").strip(),
+        "name": str(a.get("name") or "").strip(),
+        "role": str(a.get("role") or "").strip().lower(),
+    }
+
+
+def _restaurant_session_by_id(session_id: str) -> Optional[dict]:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        return None
+    for s in data:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            return s
+    return None
+
+
+def _order_taker_exclusive_violation(session: dict, body: dict) -> Optional[str]:
+    """إن وُجدت رسالة فالمستخدم الحالي لا يجوز له العمل على جلسة الكابتن."""
+    if not _workflow_order_taker_exclusive_on():
+        return None
+    if not isinstance(session, dict):
+        return None
+    if str(session.get("status") or "").lower() != "active":
+        return None
+    actor = _mat3am_actor_from_body(body)
+    aid = str(actor.get("id") or "").strip()
+    role = str(actor.get("role") or "").strip().lower()
+    if role in ("manager", "developer"):
+        return None
+    if not aid:
+        return "أرسل مع الطلب mat3amActor (المستخدم الحالي) لتفعيل قفل الكابتن."
+    cap = str(session.get("captainUserId") or "").strip()
+    if not cap:
+        return None
+    if cap == aid:
+        return None
+    cname = str(session.get("captainName") or session.get("captainLogin") or "").strip() or "كابتن آخر"
+    return f"الطاولة مسندة إلى {cname}. اضغط «تسكين كابتن» إن كنت المسؤول أو يتدخل المدير."
+
+
+def _restaurant_assert_order_taker_may_use_session(session_id: str, body: dict) -> None:
+    sess = _restaurant_session_by_id(session_id)
+    if not isinstance(sess, dict):
+        return
+    err = _order_taker_exclusive_violation(sess, body)
+    if err:
+        raise HTTPException(status_code=403, detail=err)
 
 
 def _restaurant_write_workflow(body: dict) -> dict:
@@ -10515,6 +11167,252 @@ def restaurant_workflow_settings_get():
 @app.put("/api/restaurant/workflow-settings")
 def restaurant_workflow_settings_put(body: dict):
     return _restaurant_write_workflow(body if isinstance(body, dict) else {})
+
+
+# ----- إعدادات تشغيل المطعم (مطبخ / طباعة / VIP / كيدز / تدقيق) — JSON + SQL MAT3AM_RESTAURANT_OPS_SETTINGS -----
+
+
+def _restaurant_ops_settings_path() -> str:
+    os.makedirs(_restaurant_dir, exist_ok=True)
+    return os.path.join(_restaurant_dir, "restaurant_ops_settings.json")
+
+
+def _restaurant_ops_default() -> dict:
+    """قيم افتراضية آمنة — تُدمج مع الملف/SQL عند القراءة."""
+    return {
+        # مطبخ: مخرجات العرض/الطباعة
+        "kitchenOutputMode": "screens",  # screens | printers | both
+        "kitchenPrepBoardLayout": "per_station",  # per_station | expeditor_single
+        # طباعة المطبخ (عند printers أو both)
+        "kitchenPrintTicketMode": "batch_only",  # batch_only | aggregated_summary | delta_net
+        "kitchenPrintShowTableChip": "on",  # on | off — طباعة بديل عن شريحة الطاولة
+        "kitchenPrinterDeviceHint": "",  # اسم/مسار اختياري — ربط المحرك لاحقاً
+        # طاولة المالك/VIP — افتراضيات عند تفعيل المدير (الجلسة قد تعيد تعريفاً لاحقاً)
+        "specialTableDefaultNoService": "off",  # on | off
+        "specialTableDefaultNoVat": "off",  # on | off
+        "specialTableDefaultDiscountPct": "0",  # 0..100
+        # كيدز
+        "kidsAreaSeparateTickets": "on",  # on | off
+        # تدقيق
+        "auditRetentionDays": "365",
+        "auditLogClientActions": "on",  # on | off — تشجيع الواجهة على إرسال أحداث
+        # قنوات بيع (تذكير سياسة — التنفيذ المالي لاحقاً)
+        "deliveryChannelStrictFinancialModes": "on",  # on | off
+    }
+
+
+def _restaurant_normalize_ops(raw: dict) -> dict:
+    cur = _restaurant_ops_default()
+    if not isinstance(raw, dict):
+        return cur
+    for k in list(cur.keys()):
+        v = str(raw.get(k) or "").strip()
+        if not v:
+            continue
+        cur[k] = v
+    km = str(cur.get("kitchenOutputMode") or "").strip().lower()
+    if km not in ("screens", "printers", "both"):
+        cur["kitchenOutputMode"] = "screens"
+    else:
+        cur["kitchenOutputMode"] = km
+    kpl = str(cur.get("kitchenPrepBoardLayout") or "").strip().lower()
+    if kpl not in ("per_station", "expeditor_single"):
+        cur["kitchenPrepBoardLayout"] = "per_station"
+    else:
+        cur["kitchenPrepBoardLayout"] = kpl
+    kpm = str(cur.get("kitchenPrintTicketMode") or "").strip().lower()
+    if kpm not in ("batch_only", "aggregated_summary", "delta_net"):
+        cur["kitchenPrintTicketMode"] = "batch_only"
+    else:
+        cur["kitchenPrintTicketMode"] = kpm
+    for bkey in ("kitchenPrintShowTableChip", "specialTableDefaultNoService", "specialTableDefaultNoVat", "kidsAreaSeparateTickets", "auditLogClientActions", "deliveryChannelStrictFinancialModes"):
+        bv = str(cur.get(bkey) or "").strip().lower()
+        cur[bkey] = "on" if bv in ("on", "1", "true", "yes") else "off"
+    try:
+        d = int(float(str(cur.get("auditRetentionDays") or "365").replace(",", ".")))
+        cur["auditRetentionDays"] = str(max(7, min(3650, d)))
+    except (TypeError, ValueError):
+        cur["auditRetentionDays"] = "365"
+    try:
+        p = float(str(cur.get("specialTableDefaultDiscountPct") or "0").replace(",", "."))
+        cur["specialTableDefaultDiscountPct"] = str(max(0.0, min(100.0, p)))
+    except (TypeError, ValueError):
+        cur["specialTableDefaultDiscountPct"] = "0"
+    hint = str(cur.get("kitchenPrinterDeviceHint") or "").strip()
+    cur["kitchenPrinterDeviceHint"] = hint[:240]
+    return cur
+
+
+def _ops_sql_ensure_table(cursor) -> None:
+    cursor.execute(
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_OPS_SETTINGS', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_RESTAURANT_OPS_SETTINGS (
+                SettingsKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+                PayloadJson NVARCHAR(MAX) NULL,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                UpdatedBy NVARCHAR(100) NULL
+            );
+            CREATE INDEX IX_MAT3AM_RESTAURANT_OPS_SETTINGS_UpdatedAt ON dbo.MAT3AM_RESTAURANT_OPS_SETTINGS(UpdatedAt DESC);
+        END
+        """
+    )
+
+
+def _ops_sql_read() -> Optional[dict]:
+    conn = get_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        _ops_sql_ensure_table(cursor)
+        conn.commit()
+        cursor.execute("SELECT TOP 1 PayloadJson FROM dbo.MAT3AM_RESTAURANT_OPS_SETTINGS WHERE SettingsKey = N'default'")
+        row = cursor.fetchone()
+        if not row or row[0] is None:
+            return None
+        try:
+            raw = json.loads(str(row[0]))
+            return raw if isinstance(raw, dict) else None
+        except Exception:
+            return None
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _ops_sql_write(payload: dict, updated_by: str = "system") -> None:
+    conn = get_connection()
+    if not conn:
+        return
+    try:
+        cursor = conn.cursor()
+        _ops_sql_ensure_table(cursor)
+        pj = json.dumps(payload, ensure_ascii=False)
+        cursor.execute(
+            """
+            MERGE dbo.MAT3AM_RESTAURANT_OPS_SETTINGS AS T
+            USING (SELECT CAST(? AS NVARCHAR(80)) AS SettingsKey) AS S
+            ON T.SettingsKey = S.SettingsKey
+            WHEN MATCHED THEN
+                UPDATE SET PayloadJson = ?, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = ?
+            WHEN NOT MATCHED THEN
+                INSERT (SettingsKey, PayloadJson, UpdatedBy) VALUES (S.SettingsKey, ?, ?);
+            """,
+            ("default", pj, str(updated_by or "system"), pj, str(updated_by or "system")),
+        )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _workflow_settings_key_set() -> frozenset:
+    return frozenset(_restaurant_workflow_default().keys())
+
+
+def _restaurant_read_ops_storage() -> dict:
+    """إعدادات تشغيل المطعم فقط — MAT3AM_RESTAURANT_OPS_SETTINGS + restaurant_ops_settings.json (بدون دمج workflow)."""
+    d = _restaurant_ops_default()
+    sql_obj = _ops_sql_read()
+    if isinstance(sql_obj, dict):
+        return _restaurant_normalize_ops({**d, **sql_obj})
+    p = _restaurant_ops_settings_path()
+    if not os.path.exists(p):
+        return _restaurant_normalize_ops(d)
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            j = json.load(f)
+        if isinstance(j, dict):
+            for k in d.keys():
+                if k in j and str(j.get(k) or "").strip():
+                    d[k] = str(j.get(k)).strip()
+            _ops_sql_write(_restaurant_normalize_ops(d), updated_by="json_migration")
+    except Exception:
+        pass
+    return _restaurant_normalize_ops(d)
+
+
+def _restaurant_read_ops() -> dict:
+    """واجهة موحّدة: إعدادات التشغيل + مفاتيح دورة العمل (MAT3AM_WORKFLOW_SETTINGS) لاستهلاك خطوات لاحقة من مسار واحد."""
+    core = _restaurant_read_ops_storage()
+    wf = _restaurant_read_workflow()
+    return {**core, **wf}
+
+
+def _restaurant_write_ops(body: dict) -> dict:
+    raw = body if isinstance(body, dict) else {}
+    wf_keys = _workflow_settings_key_set()
+    wf_part = {k: raw[k] for k in wf_keys if k in raw}
+    ops_part = {k: v for k, v in raw.items() if k not in wf_keys}
+    if wf_part:
+        _restaurant_write_workflow(wf_part)
+    cur = _restaurant_read_ops_storage()
+    merged = dict(cur)
+    for k in list(merged.keys()):
+        if k in ops_part and str(ops_part.get(k) or "").strip() != "":
+            merged[k] = str(ops_part.get(k)).strip()
+    cur = _restaurant_normalize_ops(merged)
+    try:
+        with open(_restaurant_ops_settings_path(), "w", encoding="utf-8") as f:
+            json.dump(cur, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    _ops_sql_write(cur, updated_by="ops_settings_ui")
+    return _restaurant_read_ops()
+
+
+def _seed_mat3am_restaurant_ops_settings(cursor) -> dict:
+    """إدراج صف default في MAT3AM_RESTAURANT_OPS_SETTINGS إن كان فارغاً."""
+    try:
+        _ops_sql_ensure_table(cursor)
+        cursor.execute("SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_OPS_SETTINGS WHERE SettingsKey = N'default'")
+        n = int((cursor.fetchone() or [0])[0] or 0)
+        if n > 0:
+            return {"ok": True, "inserted": False}
+        payload = _restaurant_normalize_ops(_restaurant_ops_default())
+        pj = json.dumps(payload, ensure_ascii=False)
+        cursor.execute(
+            "INSERT INTO dbo.MAT3AM_RESTAURANT_OPS_SETTINGS (SettingsKey, PayloadJson, UpdatedBy) VALUES (N'default', ?, N'seed')",
+            (pj,),
+        )
+        return {"ok": True, "inserted": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/restaurant/ops-settings")
+def restaurant_ops_settings_get():
+    """إعدادات تشغيل المطعم + دمج مفاتيح دورة العمل (نفس مفاتيح workflow-settings) لمسار API واحد؛ التخزين: MAT3AM_RESTAURANT_OPS_SETTINGS + MAT3AM_WORKFLOW_SETTINGS."""
+    return _restaurant_read_ops()
+
+
+@app.put("/api/restaurant/ops-settings")
+def restaurant_ops_settings_put(body: dict):
+    """يحدّث إعدادات التشغيل و/أو أي مفتاح من workflow (يُفرّع تلقائياً إلى الجدول/الملف المناسب)."""
+    return _restaurant_write_ops(body if isinstance(body, dict) else {})
+
+
+@app.post("/api/restaurant/ops-settings/printer-test")
+def restaurant_ops_settings_printer_test():
+    """مكان تمهيدي لاختبار الطابعة — يُربط بمحرك الطباعة لاحقاً."""
+    return {"ok": True, "message": "لم يُربط محرك طباعة بعد — الإعدادات جاهزة للربط.", "hint": "kitchenPrinterDeviceHint"}
 
 
 @app.get("/api/restaurant/settings/payment-routing")
@@ -11067,15 +11965,64 @@ def _restaurant_table_display_names_for_ids(table_ids: set) -> dict:
     return result
 
 
+def _restaurant_default_vip_tables() -> list:
+    """خمس طاولات VIP بمعرفات ثابتة — فوترة خاصة من إعدادات التشغيل عند جلسة على أي منها."""
+    base_feat = {
+        "canAddChildSeat": True,
+        "nearBalcony": False,
+        "nearBathroom": False,
+        "smokingArea": False,
+        "vipSection": True,
+        "zone": "VIP",
+    }
+    ids = [
+        "f47ac10b-58cc-4372-a567-0e02b2c3d401",
+        "f47ac10b-58cc-4372-a567-0e02b2c3d402",
+        "f47ac10b-58cc-4372-a567-0e02b2c3d403",
+        "f47ac10b-58cc-4372-a567-0e02b2c3d404",
+        "f47ac10b-58cc-4372-a567-0e02b2c3d405",
+    ]
+    out = []
+    for i, vid in enumerate(ids, 1):
+        out.append(
+            {
+                "id": vid,
+                "number": 100 + i,
+                "name": f"VIP {i}",
+                "seats": 6,
+                "status": "available",
+                "position": {"x": 80 + (i - 1) * 115, "y": 820},
+                "features": dict(base_feat),
+            }
+        )
+    return out
+
+
 def _restaurant_default_tables():
     """طاولات افتراضية حتى تظهر القائمة حتى بدون قاعدة أو ملف"""
-    return [
+    base = [
         {"id": "t1", "number": 1, "name": "طاولة 1", "seats": 4, "status": "available", "position": {"x": 100, "y": 100}, "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False}},
         {"id": "t2", "number": 2, "name": "طاولة 2", "seats": 2, "status": "available", "position": {"x": 300, "y": 100}, "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False}},
         {"id": "t3", "number": 3, "name": "طاولة 3", "seats": 6, "status": "available", "position": {"x": 100, "y": 300}, "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False}},
         {"id": "t4", "number": 4, "name": "طاولة 4", "seats": 4, "status": "available", "position": {"x": 300, "y": 300}, "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False}},
         {"id": "t5", "number": 5, "name": "طاولة 5", "seats": 8, "status": "available", "position": {"x": 500, "y": 200}, "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False}},
     ]
+    return base + _restaurant_default_vip_tables()
+
+
+def _merge_mat3am_vip_tables_into(tables: list) -> list:
+    """يضيف طاولات VIP الافتراضية إن غابت (مثلاً عند جلب الطاولات من TBL005)."""
+    if not isinstance(tables, list):
+        return tables
+    have = {str((x or {}).get("id") or "").strip().upper() for x in tables if isinstance(x, dict)}
+    for vt in _restaurant_default_vip_tables():
+        if not isinstance(vt, dict):
+            continue
+        vid = str(vt.get("id") or "").strip().upper()
+        if vid and vid not in have:
+            tables.append(vt)
+            have.add(vid)
+    return tables
 
 
 def _iso_to_local_dt(iso_s: str) -> Optional[datetime]:
@@ -11343,6 +12290,7 @@ def restaurant_get_tables():
                         "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False},
                     })
             if tables:
+                _merge_mat3am_vip_tables_into(tables)
                 return {"tables": tables}
         except Exception:
             pass
@@ -11373,6 +12321,7 @@ def restaurant_get_tables():
             row["noOrderOverdue"] = bool(no_order_info.get("noOrderOverdue"))
             row["noOrderMinutes"] = int(no_order_info.get("noOrderMinutes") or 0)
             out.append(row)
+        _merge_mat3am_vip_tables_into(out)
         return {"tables": out}
 
     # 3) افتراضي
@@ -11386,6 +12335,115 @@ def restaurant_get_tables():
         row["noOrderMinutes"] = int(no_order_info.get("noOrderMinutes") or 0)
         out.append(row)
     return {"tables": out}
+
+
+def _restaurant_pos_channels_default_doc() -> dict:
+    return {
+        "version": 1,
+        "agentGroupNames": {
+            "cash_individual": "عملاء السفاري",
+            "delivery_riders": "مندوبين توصيل",
+            "delivery_customers": "عملاء الدليفري",
+            "hall_patrons": "عملاء الصالة",
+            "sites": "عملاء المواقع",
+        },
+        "channels": {"sites": {"pseudoTableAliases": ["مواقع", "SITES", "sites"]}},
+    }
+
+
+@app.get("/api/restaurant/pos-channels")
+def restaurant_get_pos_channels():
+    """إعدادات قنوات نقاط البيع (دليفري / مواقع / …) — من `config/restaurant/pos_channels.json` مع افتراضي."""
+    doc = _restaurant_load("pos_channels", {})
+    if not isinstance(doc, dict):
+        doc = {}
+    base = _restaurant_pos_channels_default_doc()
+    merged = {**base, **doc}
+    ag = doc.get("agentGroupNames") if isinstance(doc.get("agentGroupNames"), dict) else {}
+    if isinstance(ag, dict):
+        merged["agentGroupNames"] = {**(base.get("agentGroupNames") or {}), **ag}
+    ch = doc.get("channels") if isinstance(doc.get("channels"), dict) else {}
+    if isinstance(ch, dict):
+        merged["channels"] = {**(base.get("channels") or {}), **ch}
+    return merged
+
+
+@app.get("/api/restaurant/pos-paired-cost-centers")
+def restaurant_pos_paired_cost_centers(
+    channel: str = Query("delivery", description="delivery أو sites — مجموعة عملاء القناة من pos_channels / TBL015"),
+):
+    """
+    مراكز تكلفة مقترنة بعملاء القناة: TBL005 ↔ TBL016 على نفس CardGuide
+    (مع UNION لمطابقة AgentName مع CostCenter)، ضمن MainGroupGuide لمجموعة القناة.
+    """
+    ch = str(channel or "").strip().lower()
+    if ch not in ("delivery", "sites"):
+        raise HTTPException(status_code=400, detail="channel يجب أن يكون delivery أو sites")
+    doc = restaurant_get_pos_channels()
+    agn = doc.get("agentGroupNames") if isinstance(doc.get("agentGroupNames"), dict) else {}
+    gname = ""
+    if ch == "delivery":
+        gname = str(agn.get("delivery_customers") or "").strip()
+    else:
+        gname = str(agn.get("sites") or "").strip()
+    if not gname:
+        return {"tables": [], "groupName": None, "warning": "group_not_configured"}
+
+    conn = get_connection()
+    if not conn:
+        return {"tables": [], "groupName": gname, "warning": "no_db"}
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide
+            FROM dbo.TBL015
+            WHERE RTRIM(LTRIM(ISNULL(GroupName, N''))) = RTRIM(LTRIM(?))
+            """,
+            (gname,),
+        )
+        row = cursor.fetchone()
+        if not row or row[0] is None:
+            return {"tables": [], "groupName": gname, "warning": "group_not_found_in_TBL015"}
+        mg = str(row[0]).strip()
+        sql = """
+            SELECT DISTINCT x.CardGuide, x.CostCenter
+            FROM (
+              SELECT t5.CardGuide AS CardGuide, t5.CostCenter AS CostCenter
+              FROM dbo.TBL005 AS t5
+              INNER JOIN dbo.TBL016 AS t16 ON t16.CardGuide = t5.CardGuide
+              WHERE t16.MainGroupGuide = CAST(? AS uniqueidentifier)
+                AND RTRIM(LTRIM(ISNULL(t5.CostCenter, N''))) <> N''
+                AND ISNULL(t16.NotActive, 0) = 0
+              UNION
+              SELECT t5.CardGuide AS CardGuide, t5.CostCenter AS CostCenter
+              FROM dbo.TBL005 AS t5
+              INNER JOIN dbo.TBL016 AS t16
+                ON RTRIM(LTRIM(ISNULL(t16.AgentName, N''))) = RTRIM(LTRIM(ISNULL(t5.CostCenter, N'')))
+              WHERE t16.MainGroupGuide = CAST(? AS uniqueidentifier)
+                AND RTRIM(LTRIM(ISNULL(t5.CostCenter, N''))) <> N''
+                AND ISNULL(t16.NotActive, 0) = 0
+            ) AS x
+            ORDER BY x.CostCenter
+        """
+        cursor.execute(sql, (mg, mg))
+        tables = []
+        for r in cursor.fetchall():
+            gid = str(r[0] or "").strip()
+            nm = str(r[1] or "").strip() or gid
+            if not gid:
+                continue
+            tables.append({"id": gid, "name": nm, "number": 0, "status": "ready", "seats": 2})
+        return {"tables": tables, "groupName": gname}
+    except Exception as e:
+        return {"tables": [], "groupName": gname, "warning": str(e)[:400]}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 @app.post("/api/restaurant/tables")
 def restaurant_save_table(body: dict):
@@ -11758,6 +12816,51 @@ def _pick_default_cash_agent_guid(cursor) -> Optional[str]:
         return None
 
 
+def _billing_profile_from_ops_special_defaults() -> dict:
+    """من MAT3AM_RESTAURANT_OPS_SETTINGS — بدون خدمة / بدون ضريبة / خصم % لطاولة VIP أو طاولة خاصة."""
+    o = _restaurant_read_ops_storage()
+    ns = str(o.get("specialTableDefaultNoService") or "off").strip().lower()
+    nv = str(o.get("specialTableDefaultNoVat") or "off").strip().lower()
+    try:
+        dp = float(str(o.get("specialTableDefaultDiscountPct") or "0").replace(",", "."))
+    except (TypeError, ValueError):
+        dp = 0.0
+    dp = max(0.0, min(100.0, dp))
+    return {
+        "active": True,
+        "source": "ops_defaults",
+        "noService": ns in ("on", "1", "true", "yes"),
+        "noVat": nv in ("on", "1", "true", "yes"),
+        "discountPct": dp,
+    }
+
+
+def _restaurant_table_has_vip_section(table_id: str) -> bool:
+    tid = str(table_id or "").strip()
+    if not tid:
+        return False
+    data = _restaurant_load("tables", [])
+    if not isinstance(data, list):
+        return False
+    for t in data:
+        if not isinstance(t, dict):
+            continue
+        if str(t.get("id") or "").strip() != tid:
+            continue
+        feats = t.get("features") if isinstance(t.get("features"), dict) else {}
+        return bool(feats.get("vipSection"))
+    return False
+
+
+def _body_wants_special_table(body: dict) -> bool:
+    if not isinstance(body, dict):
+        return False
+    for k in ("specialTable", "vipSession", "applyOpsSpecialBilling"):
+        if body.get(k) in (True, "1", "true", "yes", "on", 1):
+            return True
+    return False
+
+
 @app.get("/api/restaurant/table-sessions")
 def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = True):
     """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير."""
@@ -11835,6 +12938,8 @@ def restaurant_create_session(body: dict):
                 base = s.get("preferences") if isinstance(s.get("preferences"), dict) else {}
                 merged = {**base, **pref}
                 s["preferences"] = merged
+            if _body_wants_special_table(body) and isinstance(s, dict) and not s.get("billingProfile"):
+                s["billingProfile"] = _billing_profile_from_ops_special_defaults()
             _restaurant_save("table_sessions", data)
             try:
                 restaurant_update_table_status(table_id, {"status": "occupied"})
@@ -11864,6 +12969,8 @@ def restaurant_create_session(body: dict):
         "startedByRole": started_by_role or None,
         "startReason": start_reason or None,
     }
+    if _body_wants_special_table(body) or _restaurant_table_has_vip_section(table_id):
+        rec["billingProfile"] = _billing_profile_from_ops_special_defaults()
     data.append(rec)
     _restaurant_save("table_sessions", data)
     try:
@@ -11876,6 +12983,138 @@ def restaurant_create_session(body: dict):
         "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
     }
     return rec
+
+
+@app.patch("/api/restaurant/table-sessions/{session_id}/billing-profile")
+def restaurant_patch_session_billing_profile(session_id: str, body: dict):
+    """تطبيق/إلغاء سياسة الفوترة الخاصة (VIP) من إعدادات ops أو يدوياً."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="sessionId مطلوب")
+    clear = body.get("clear") in (True, "1", "true", "yes", "on", 1)
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    for s in data:
+        if not isinstance(s, dict) or str(s.get("id") or "").strip() != sid:
+            continue
+        if str(s.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=400, detail="لا يمكن تعديل جلسة غير نشطة")
+        if clear:
+            s.pop("billingProfile", None)
+        elif body.get("applyOpsDefaults") in (True, "1", "true", "yes", "on", 1):
+            s["billingProfile"] = _billing_profile_from_ops_special_defaults()
+        elif isinstance(body.get("billingProfile"), dict):
+            s["billingProfile"] = body["billingProfile"]
+        else:
+            raise HTTPException(status_code=400, detail="مرّر clear=true أو applyOpsDefaults=true أو billingProfile={...}")
+        _restaurant_save("table_sessions", data)
+        return {"ok": True, "session": s}
+    raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/claim-order-taker")
+def restaurant_claim_order_taker(session_id: str, body: dict):
+    """تسكين جرسون الطلبات (كابتن) على جلسة نشطة — يُعرض اسمه على شريحة الطاولة. مسجّل في session_audit."""
+    if not isinstance(body, dict):
+        body = {}
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="sessionId مطلوب")
+    actor = _mat3am_actor_from_body(body)
+    rid = str(actor.get("id") or "").strip()
+    rrole = str(actor.get("role") or "").strip().lower()
+    if not rid:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    if rrole not in ("waiter", "host", "manager", "developer"):
+        raise HTTPException(status_code=403, detail="التسكين متاح لجرسون الطلبات أو الاستقبال أو المدير.")
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    found = None
+    for s in data:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(found.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="لا يمكن التسكين على جلسة غير نشطة")
+    existing = str(found.get("captainUserId") or "").strip()
+    if existing and existing != rid:
+        if rrole in ("manager", "developer") and body.get("forceManagerTake") in (True, "1", "true", "yes"):
+            pass
+        else:
+            cname = str(found.get("captainName") or found.get("captainLogin") or "").strip() or "كابتن آخر"
+            raise HTTPException(status_code=409, detail=f"الطاولة مسندة إلى {cname}. يتدخل المدير لتحويل الكابتن.")
+    found["captainUserId"] = rid
+    found["captainLogin"] = str(actor.get("login") or "")[:120]
+    found["captainName"] = str(actor.get("name") or actor.get("login") or "")[:200]
+    found["captainClaimedAt"] = datetime.now().isoformat()
+    _restaurant_save("table_sessions", data)
+    _append_session_audit_entry(
+        {
+            "at": datetime.now().isoformat(),
+            "action": "claim_order_taker",
+            "sessionId": sid,
+            "tableId": str(found.get("tableId") or ""),
+            "captainUserId": rid,
+            "captainLogin": found.get("captainLogin"),
+            "actorRole": rrole,
+        }
+    )
+    return {"ok": True, "session": found}
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/reassign-order-taker")
+def restaurant_reassign_order_taker(session_id: str, body: dict):
+    """تحويل الكابتن — للمدير/المطوّر فقط."""
+    if not isinstance(body, dict):
+        body = {}
+    actor = _mat3am_actor_from_body(body)
+    if str(actor.get("role") or "").strip().lower() not in ("manager", "developer"):
+        raise HTTPException(status_code=403, detail="تحويل الكابتن للمدير أو المطوّر فقط.")
+    sid = str(session_id or "").strip()
+    tid = str(body.get("targetUserId") or "").strip()
+    if not sid or not tid:
+        raise HTTPException(status_code=400, detail="targetUserId مطلوب")
+    tlogin = str(body.get("targetLogin") or "").strip()[:120]
+    tname = str(body.get("targetName") or tlogin or "").strip()[:200]
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    found = None
+    for s in data:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(found.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="لا يمكن التحويل على جلسة غير نشطة")
+    prev = str(found.get("captainUserId") or "")
+    found["captainUserId"] = tid
+    found["captainLogin"] = tlogin
+    found["captainName"] = tname
+    found["captainClaimedAt"] = datetime.now().isoformat()
+    found["captainReassignedBy"] = str(actor.get("id") or "")
+    found["captainReassignedAt"] = datetime.now().isoformat()
+    _restaurant_save("table_sessions", data)
+    _append_session_audit_entry(
+        {
+            "at": datetime.now().isoformat(),
+            "action": "reassign_order_taker",
+            "sessionId": sid,
+            "tableId": str(found.get("tableId") or ""),
+            "fromCaptainUserId": prev,
+            "toCaptainUserId": tid,
+            "toCaptainLogin": tlogin,
+            "actorId": str(actor.get("id") or ""),
+        }
+    )
+    return {"ok": True, "session": found}
 
 
 @app.post("/api/restaurant/table-sessions/cleanup-duplicate-empties")
@@ -13783,6 +15022,8 @@ def restaurant_create_invoice(body: dict):
     total = float(body.get("total", 0))
     payment_method = body.get("paymentMethod") or "cash"
     order_type = _normalize_restaurant_order_kind(str(body.get("orderType") or "table"))
+    if str(order_type) == "table" and session_id:
+        _restaurant_assert_order_taker_may_use_session(str(session_id), body if isinstance(body, dict) else {})
     delivery = body.get("delivery") or {}
     agent_guide = body.get("agentGuide")
     conn = get_connection()
@@ -14062,6 +15303,7 @@ def restaurant_sessions_request_bill(body: dict):
     session_id = str(body.get("sessionId") or "").strip()
     if not session_id:
         raise HTTPException(status_code=400, detail="sessionId مطلوب")
+    _restaurant_assert_order_taker_may_use_session(session_id, body if isinstance(body, dict) else {})
     sess_rows = _restaurant_load("table_sessions", [])
     if isinstance(sess_rows, list):
         for s in sess_rows:
@@ -14647,6 +15889,20 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
 
     ddl = [
         """
+        IF OBJECT_ID(N'dbo.MAT3AM_USER_ROLE_SCHEDULE', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_USER_ROLE_SCHEDULE (
+                Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                UserId UNIQUEIDENTIFIER NOT NULL,
+                RoleCode NVARCHAR(20) NOT NULL,
+                ValidFrom DATE NOT NULL,
+                ValidTo DATE NOT NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+            CREATE INDEX IX_MAT3AM_URS_User_Dates ON dbo.MAT3AM_USER_ROLE_SCHEDULE(UserId, ValidFrom, ValidTo);
+        END
+        """,
+        """
         IF OBJECT_ID(N'dbo.MAT3AM_ERROR_LOG', N'U') IS NULL
         BEGIN
             CREATE TABLE dbo.MAT3AM_ERROR_LOG (
@@ -14723,6 +15979,18 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
                 UpdatedBy NVARCHAR(100) NULL
             );
             CREATE INDEX IX_MAT3AM_WORKFLOW_SETTINGS_UpdatedAt ON dbo.MAT3AM_WORKFLOW_SETTINGS(UpdatedAt DESC);
+        END
+        """,
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_RESTAURANT_OPS_SETTINGS', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_RESTAURANT_OPS_SETTINGS (
+                SettingsKey NVARCHAR(80) NOT NULL PRIMARY KEY,
+                PayloadJson NVARCHAR(MAX) NULL,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                UpdatedBy NVARCHAR(100) NULL
+            );
+            CREATE INDEX IX_MAT3AM_RESTAURANT_OPS_SETTINGS_UpdatedAt ON dbo.MAT3AM_RESTAURANT_OPS_SETTINGS(UpdatedAt DESC);
         END
         """,
         """
@@ -14843,6 +16111,10 @@ def developer_bootstrap():
     try:
         cursor = conn.cursor()
         default_users_inserted, restaurant_invoice_seed, restaurant_store_seed = _ensure_mat3am_dev_schema(cursor)
+        try:
+            _seed_mat3am_restaurant_ops_settings(cursor)
+        except Exception:
+            pass
         conn.commit()
         quick_kitchen_cost_center_guid = None
         try:
@@ -14877,6 +16149,7 @@ def developer_bootstrap():
                 "MAT3AM_RESTAURANT_STORES",
                 "MAT3AM_RESTAURANT_STATE",
                 "MAT3AM_WORKFLOW_SETTINGS",
+                "MAT3AM_RESTAURANT_OPS_SETTINGS",
                 "MAT3AM_RECIPE_HDR",
                 "MAT3AM_RECIPE_LINE",
                 "MAT3AM_STOCK_MOVEMENT",
@@ -15267,6 +16540,12 @@ def developer_seed_default_data():
                 except Exception as ex:
                     stat["errors"].append({"row": r, "detail": str(ex)})
             report[tname] = stat
+        ops_seed_report: dict = {"ok": True, "skipped": True}
+        try:
+            _ensure_mat3am_dev_schema(cursor)
+            ops_seed_report = _seed_mat3am_restaurant_ops_settings(cursor)
+        except Exception as ex:
+            ops_seed_report = {"ok": False, "error": str(ex)}
         conn.commit()
         return {
             "ok": True,
@@ -15279,6 +16558,7 @@ def developer_seed_default_data():
             ),
             "fromDatabase": from_database,
             "tables": report,
+            "restaurantOpsSettings": ops_seed_report,
         }
     except HTTPException:
         raise
@@ -15337,6 +16617,7 @@ def developer_verify_seed_default_data():
             ("MAT3AM_AUDIT_LOG", "سجل تدقيق التطبيق", "SELECT COUNT(*) FROM dbo.MAT3AM_AUDIT_LOG", 0),
             ("MAT3AM_RESTAURANT_STATE", "حالة المطعم المشتركة (طلبات/منيو/جلسات)", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_STATE", 0),
             ("MAT3AM_WORKFLOW_SETTINGS", "إعدادات مسار التشغيل المشتركة", "SELECT COUNT(*) FROM dbo.MAT3AM_WORKFLOW_SETTINGS", 0),
+            ("MAT3AM_RESTAURANT_OPS_SETTINGS", "إعدادات تشغيل المطعم (مطبخ/طباعة/VIP/كيدز)", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_OPS_SETTINGS", 0),
             ("MAT3AM_RESTAURANT_INVOICE_TYPES", "ربط أنماط فواتير المطعم", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES", 0),
             ("MAT3AM_RESTAURANT_STORES", "ربط مخازن المطعم", "SELECT COUNT(*) FROM dbo.MAT3AM_RESTAURANT_STORES", 0),
             ("MAT3AM_RECIPE_HDR", "رؤوس وصفات التكلفة", "SELECT COUNT(*) FROM dbo.MAT3AM_RECIPE_HDR", 0),

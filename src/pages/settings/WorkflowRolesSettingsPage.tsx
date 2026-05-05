@@ -1,43 +1,16 @@
 import { useEffect, useState } from "react";
 import { getApiBase } from "../../lib/apiBase";
+import {
+  WORKFLOW_ROLE_OPTIONS,
+  WORKFLOW_SETTINGS_DEFAULTS,
+  type WorkflowSettings,
+} from "../../lib/workflowSettingsModel";
 
-type WorkflowSettings = {
-  receiveGuestBy: string;
-  takeOrderBy: string;
-  deliverFromKitchenBy: string;
-  cleanTableBy: string;
-  checkRequestBy: string;
-  cashierDispatchMode: string;
-  cleaningStartTrigger: string;
-  cleaningExecutionBy: string;
-  cleaningReviewBy: string;
-  cleaningStartStatus: string;
-};
-
-const DEFAULTS: WorkflowSettings = {
-  receiveGuestBy: "host",
-  takeOrderBy: "waiter",
-  deliverFromKitchenBy: "server",
-  cleanTableBy: "server",
-  checkRequestBy: "waiter",
-  cashierDispatchMode: "both",
-  cleaningStartTrigger: "payment_completed",
-  cleaningExecutionBy: "server",
-  cleaningReviewBy: "none",
-  cleaningStartStatus: "dirty",
-};
-
-const ROLE_OPTIONS = [
-  { value: "host", label: "جرسون الاستقبال" },
-  { value: "manager", label: "مدير المطعم" },
-  { value: "waiter", label: "جرسون الطلبات" },
-  { value: "customer_self", label: "العميل نفسه" },
-  { value: "server", label: "جرسون المناولة" },
-] as const;
+const DEFAULTS = WORKFLOW_SETTINGS_DEFAULTS;
 
 export default function WorkflowRolesSettingsPage() {
   const base = getApiBase();
-  const [s, setS] = useState<WorkflowSettings>(DEFAULTS);
+  const [s, setS] = useState<WorkflowSettings>({ ...WORKFLOW_SETTINGS_DEFAULTS });
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -85,12 +58,15 @@ export default function WorkflowRolesSettingsPage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>دورة العمل ومسارات الأدوار</h2>
+      <p style={{ color: "var(--muted)", fontSize: "0.88rem", maxWidth: 720 }}>
+        نفس المفاتيح تُعاد في <code>GET /api/restaurant/ops-settings</code> مع إعدادات المطبخ؛ الحفظ هنا يحدّث <code>workflow-settings</code> فقط.
+      </p>
 
       <div className="grid-2">
         <div className="card">
           <h3 style={{ marginTop: 0 }}>من يستقبل العميل عند الدخول</h3>
           <select value={s.receiveGuestBy} onChange={(e) => setS((x) => ({ ...x, receiveGuestBy: e.target.value }))} style={{ width: "100%" }}>
-            {ROLE_OPTIONS.map((opt) => (
+            {WORKFLOW_ROLE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -101,11 +77,26 @@ export default function WorkflowRolesSettingsPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>من يأخذ طلبات العميل</h3>
           <select value={s.takeOrderBy} onChange={(e) => setS((x) => ({ ...x, takeOrderBy: e.target.value }))} style={{ width: "100%" }}>
-            {ROLE_OPTIONS.map((opt) => (
+            {WORKFLOW_ROLE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
             ))}
+          </select>
+        </div>
+
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>قفل الطاولة على كابتن واحد (جرسون الطلبات)</h3>
+          <p style={{ marginTop: 0, fontSize: "0.88rem", color: "var(--muted)" }}>
+            عند التفعيل: يُقبل إرسال الطلبات وطلب الحساب فقط من المستخدم الذي ضغط «تسكين كابتن» على شريحة الطاولة، أو من المدير بعد التحويل. الافتراضي off لمطاعم لا تريد القفل.
+          </p>
+          <select
+            value={s.orderTakerExclusiveTable}
+            onChange={(e) => setS((x) => ({ ...x, orderTakerExclusiveTable: e.target.value }))}
+            style={{ width: "100%" }}
+          >
+            <option value="off">لا — أي جرسون طلبات يعمل على الطاولة</option>
+            <option value="on">نعم — قفل حتى تقفيل الحساب (مع استثناء المدير)</option>
           </select>
         </div>
 
