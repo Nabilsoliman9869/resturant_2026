@@ -2,6 +2,19 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
+set "MAT3AM_PY="
+where python >nul 2>&1 && set "MAT3AM_PY=python"
+if not defined MAT3AM_PY where py >nul 2>&1 && set "MAT3AM_PY=py"
+if not defined MAT3AM_PY (
+  echo ========================================
+  echo [خطأ] لم يُعثر على Python في PATH.
+  echo ثبّت Python 3 من https://www.python.org/downloads/
+  echo وفعّل الخيار «Add python.exe to PATH» ثم أعد فتح الطرفية.
+  echo ========================================
+  pause
+  exit /b 1
+)
+
 echo ========================================
 echo  مطاعم — تشغيل API من هذا المجلد فقط
 echo  إيقاف أي عملية تستمع على المنفذ 2288
@@ -19,7 +32,7 @@ if not exist "api_server.py" (
 )
 
 echo.
-echo تشغيل: %CD%\api_server.py
+echo تشغيل بواسطة: %MAT3AM_PY% — %CD%\api_server.py
 echo بعد ظهور «MAT3AM_API» في الأسطر أعلاه، افتح المتصفح:
 echo   http://127.0.0.1:2288/__whoami__
 echo   http://127.0.0.1:2288/api/dev/mat3am-schema-probe
@@ -27,6 +40,10 @@ echo يجب أن ترى في whoami: VERIFY_SCHEMA_REVISION=9 (أو أحدث) و
 echo.
 echo إيقاف الخادم: Ctrl+C
 echo ========================================
-python api_server.py
+"%MAT3AM_PY%" api_server.py
+if errorlevel 1 (
+  echo.
+  echo [تنبيه] انتهى api_server.py برمز خطأ. راجع الرسائل أعلاه.
+)
 
 pause

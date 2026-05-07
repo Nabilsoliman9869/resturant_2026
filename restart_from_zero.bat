@@ -14,10 +14,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\mat3am_kill_po
 timeout /t 2 /nobreak >nul
 
 set "HERE=%~dp0"
+set "MAT3AM_PY="
+where python >nul 2>&1 && set "MAT3AM_PY=python"
+if not defined MAT3AM_PY where py >nul 2>&1 && set "MAT3AM_PY=py"
+if not defined MAT3AM_PY (
+  echo [خطأ] لم يُعثر على Python في PATH. ثبّت Python 3 مع «Add to PATH».
+  pause
+  exit /b 1
+)
 
 echo.
 echo تشغيل API جديد...
-start "MAT3AM-API" cmd /k "cd /d \"%HERE%backend\" && echo API: http://127.0.0.1:2288 && python api_server.py"
+start "MAT3AM-API" cmd /k "cd /d \"%HERE%backend\" && echo API: http://127.0.0.1:2288 && %MAT3AM_PY% api_server.py"
 
 timeout /t 3 /nobreak >nul
 

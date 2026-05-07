@@ -100,16 +100,33 @@ export default function WaiterTablesPage() {
         fetch(`${base}/api/restaurant/orders`),
         fetch(`${base}/api/restaurant/workflow-settings`),
       ]);
-      const fpj = await fp.json().catch(() => ({}));
-      const jt = await rt.json();
-      const js = await rs.json();
-      const oj = await ro.json().catch(() => ({}));
-      const wfj = await wf.json().catch(() => ({}));
+      const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const js = (tryParseJson(await rs.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const oj = (tryParseJson(await ro.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const bad: string[] = [];
+      if (!fp.ok) bad.push(`floor-plan ${fp.status}`);
+      if (!rt.ok) bad.push(`tables ${rt.status}`);
+      if (!rs.ok) bad.push(`sessions ${rs.status}`);
+      if (!ro.ok) bad.push(`orders ${ro.status}`);
+      if (!wf.ok) bad.push(`workflow ${wf.status}`);
+      if (bad.length) {
+        setMsg(
+          `تعذّر الاتصال بالـ API (${bad.join(", ")}). شغّل «run_api.bat» أو «run_full_stack.bat» ثم تأكد من http://127.0.0.1:2288/api/ready`,
+        );
+        setTables([]);
+        setSessionByTable(new Map());
+        setSessions([]);
+        setOrders([]);
+        return;
+      }
+      setMsg("");
       const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
       setExclusiveOn(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
 
-      const apiTables: RestTable[] = Array.isArray(jt.tables) ? jt.tables : [];
-      const planRaw = fpj?.plan;
+      const apiTables: RestTable[] = Array.isArray(jt["tables"]) ? (jt["tables"] as RestTable[]) : [];
+      const planRaw = fpj["plan"];
       const statusById = new Map<string, string>();
       for (const t of apiTables as any[]) statusById.set(String(t?.id || ""), normalizeTableStatus(String(t?.status || "")));
       setTables(
@@ -122,7 +139,9 @@ export default function WaiterTablesPage() {
         })),
       );
       const m = new Map<string, string>();
-      const sessions = (Array.isArray(js.sessions) ? js.sessions : []).filter((s: any) => isTodayIso(String(s?.startTime || "")));
+      const sessions = (Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
+        isTodayIso(String((s as TableSession)?.startTime || "")),
+      ) as TableSession[];
       setSessions(sessions);
       for (const s of sessions) {
         const tid = s?.tableId != null ? String(s.tableId) : "";
@@ -139,7 +158,9 @@ export default function WaiterTablesPage() {
         if (tid && st === "active") busy.add(tid);
         if (tid && s?.billingRequestedAt) billreq.add(tid);
       }
-      const orders = (Array.isArray(oj.orders) ? oj.orders : []).filter((o: any) => isTodayIso(String(o?.createdAt || "")));
+      const orders = (Array.isArray(oj["orders"]) ? oj["orders"] : []).filter((o: unknown) =>
+        isTodayIso(String((o as OrderRow)?.createdAt || "")),
+      ) as OrderRow[];
       setOrders(orders);
       for (const o of orders) {
         const tid = String(o?.tableId || "");
