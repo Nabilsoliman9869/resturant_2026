@@ -1,9 +1,25 @@
-/** fetch لا يرمي عند قطع الشبكة/رفض الاتصال — يُرجَع Response بـ status 0 للتشخيص في الواجهة */
+/** fetch لا يرمي عند قطع الشبكة/رفض الاتصال — يُرجَع كائن يحاكي Response بـ status 0 للتشخيص في الواجهة.
+ *
+ * ملاحظة مهمة: لا يُسمح في معيار Web بإنشاء `new Response("", { status: 0 })` (النطاق المسموح 200–599)،
+ * لذا نُرجع كائناً duck-typed يطابق الواجهة المستخدمة في المشروع (`ok`, `status`, `statusText`, `text`, `json`).
+ */
+
+export function networkErrorResponse(statusText: string = "NETWORK"): Response {
+  const fake = {
+    ok: false as const,
+    status: 0 as const,
+    statusText,
+    text: async () => "",
+    json: async () => ({}),
+  };
+  return fake as unknown as Response;
+}
+
 export async function safeFetch(input: string | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, { cache: "no-store", ...(init || {}) });
   } catch {
-    return new Response("", { status: 0, statusText: "NETWORK" });
+    return networkErrorResponse();
   }
 }
 

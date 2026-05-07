@@ -6,9 +6,14 @@
   "kitchenPrinterDeviceHint": "",
   "specialTableDefaultNoService": "off",
   "specialTableDefaultNoVat": "off",
-  "specialTableDefaultDiscountPct": "0",
+  "specialTableDefaultDiscountPct": "0.0",
+  "specialTableDefaultPriceMode": "menu",
+  "specialTableDefaultCostMarkupPct": "0.0",
+  "tableDefaultMinimumCharge": "0.0",
+  "tableCashierAlertPresetsJson": "[{\"id\":\"kitchen_rush\",\"type\":\"kitchen_urgent\",\"label\":\"استعجال المطبخ\"},{\"id\":\"tbl_quick_clean\",\"type\":\"quick_clean\",\"label\":\"نظافة سريعة\"},{\"id\":\"tbl_call_manager\",\"type\":\"call_manager\",\"label\":\"استدعاء مدير\"}]",
   "kidsAreaSeparateTickets": "on",
   "auditRetentionDays": "365",
   "auditLogClientActions": "on",
-  "deliveryChannelStrictFinancialModes": "on"
+  "deliveryChannelStrictFinancialModes": "on",
+  "vipOwnerTemplatesJson": "[{\"id\":\"72d688e1-48e2-4016-9510-bdd5f8410efd\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":true,\"noVat\":true,\"discountEnabled\":false,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0}]"
 }

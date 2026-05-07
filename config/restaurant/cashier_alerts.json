@@ -118,5 +118,17 @@
     "sourceKey": null,
     "createdAt": "2026-04-23T11:07:10.078745",
     "dismissedAt": null
+  },
+  {
+    "id": "96b9ffa4-d379-46a3-996a-45556b72ee5e",
+    "type": "quick_clean",
+    "title": "نظافة سريعة",
+    "body": null,
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "sessionId": "9f4938fc-13af-4729-b44f-66630538ef04",
+    "orderId": null,
+    "sourceKey": "tbl:CBECE9B1-8D01-427E-894F-5780E6F4D40D:tbl_quick_clean:1778193339253",
+    "createdAt": "2026-05-08T01:35:42.620658",
+    "dismissedAt": null
   }
 ]

@@ -4,6 +4,8 @@ import { tryParseJson } from "../lib/tryParseJson";
 import { playInterDeptInboxBeep } from "../lib/kdsBeep";
 import type { RoleId } from "../auth/roles";
 
+type Mat3amActorPayload = { id: string; login: string; name: string; role: string };
+
 /** استطلاع أسرع حتى تصل الرسائل بين الأقسام بلا انتظار طويل (كان 8 ث). */
 const POLL_MS = 3500;
 
@@ -13,6 +15,8 @@ type InboxItem = {
   title?: string;
   body?: string | null;
   createdAt?: string;
+  transferRequestId?: string;
+  sessionId?: string;
 };
 
 /** أدوار يمكن إرسال تنبيه عام إليها (معرّف API = RoleId) */
@@ -33,7 +37,15 @@ const SEND_TARGET_OPTIONS: { id: RoleId; label: string }[] = [
  *
  * تنبيهات الطاولة تظهر على بطاقة الطاولة وعلى خريطة الصالة فقط — لا جرس ثالث هنا.
  */
-export function RestaurantDualBells({ role }: { role: RoleId }) {
+export function RestaurantDualBells({
+  role,
+  userId,
+  mat3amActor,
+}: {
+  role: RoleId;
+  userId?: string;
+  mat3amActor?: Mat3amActorPayload | null;
+}) {
   return (
     <div
       style={{
@@ -47,17 +59,27 @@ export function RestaurantDualBells({ role }: { role: RoleId }) {
         gap: 10,
       }}
     >
-      <RedInboxBell role={role} />
+      <RedInboxBell role={role} userId={userId} mat3amActor={mat3amActor} />
       <GreenSendBell currentRole={role} />
     </div>
   );
 }
 
-function RedInboxBell({ role }: { role: RoleId }) {
+function RedInboxBell({
+  role,
+  userId,
+  mat3amActor,
+}: {
+  role: RoleId;
+  userId?: string;
+  mat3amActor?: Mat3amActorPayload | null;
+}) {
   const base = getApiBase();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyTransferId, setBusyTransferId] = useState<string | null>(null);
+  const [transferMsg, setTransferMsg] = useState("");
   const [loadErr, setLoadErr] = useState("");
   const inboxBases = ["/api/restaurant/cashier/role-inbox", "/api/restaurant/role-inbox"];
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -67,8 +89,12 @@ function RedInboxBell({ role }: { role: RoleId }) {
     try {
       setLoadErr("");
       let lastErr = "";
+      const uidQ =
+        userId && String(userId).trim()
+          ? `&userId=${encodeURIComponent(String(userId).trim())}`
+          : "";
       for (const p of inboxBases) {
-        const r = await fetch(`${base}${p}?forRole=${encodeURIComponent(role)}`, {
+        const r = await fetch(`${base}${p}?forRole=${encodeURIComponent(role)}${uidQ}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache" },
         });
@@ -106,12 +132,12 @@ function RedInboxBell({ role }: { role: RoleId }) {
     } catch (e) {
       setLoadErr(String(e));
     }
-  }, [base, role, inboxBases]);
+  }, [base, role, inboxBases, userId]);
 
   useEffect(() => {
     skipBeepRef.current = true;
     seenIdsRef.current = new Set();
-  }, [role]);
+  }, [role, userId]);
 
   useEffect(() => {
     void load();
@@ -130,6 +156,38 @@ function RedInboxBell({ role }: { role: RoleId }) {
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
+
+  const acceptCaptainTransfer = async (transferRequestId: string) => {
+    setTransferMsg("");
+    if (!mat3amActor?.id) {
+      setTransferMsg("تعذّر تحديد المستخدم للقبول.");
+      return;
+    }
+    setBusyTransferId(transferRequestId);
+    try {
+      const r = await fetch(
+        `${base}/api/restaurant/captain-transfer-requests/${encodeURIComponent(transferRequestId)}/accept`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mat3amActor }),
+        },
+      );
+      const txt = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(txt);
+        const d = j?.detail;
+        setTransferMsg(typeof d === "string" ? d : txt.slice(0, 160) || `HTTP ${r.status}`);
+        return;
+      }
+      setTransferMsg("تم قبول التحويل — أصبحت مسند هذه الطاولة.");
+      await load();
+    } catch (e) {
+      setTransferMsg(String(e));
+    } finally {
+      setBusyTransferId(null);
+    }
+  };
 
   const dismiss = async (id: string) => {
     setBusyId(id);
@@ -221,7 +279,24 @@ function RedInboxBell({ role }: { role: RoleId }) {
           </div>
           <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: 10, lineHeight: 1.45 }}>
             ضع علامة ✓ بجانب الرسالة لتخفيها. تنبيهات الطاولة تظهر على <strong>بطاقة الطاولة</strong> و<strong>خريطة الصالة</strong>.
+            {userId ? null : (
+              <span style={{ display: "block", marginTop: 6, color: "#fbbf24" }}>
+                لتلقي طلبات تحويل الكابتن يجب أن يكون معرّف المستخدم متاحاً من تسجيل الدخول.
+              </span>
+            )}
           </div>
+          {transferMsg ? (
+            <div
+              style={{
+                fontSize: "0.78rem",
+                marginBottom: 8,
+                color: transferMsg.startsWith("تم") ? "#86efac" : "#fca5a5",
+                lineHeight: 1.4,
+              }}
+            >
+              {transferMsg}
+            </div>
+          ) : null}
           {items.length === 0 ? (
             <div style={{ color: "var(--muted)" }}>لا توجد إشعارات موجّهة لك الآن.</div>
           ) : (
@@ -262,6 +337,21 @@ function RedInboxBell({ role }: { role: RoleId }) {
                       <div style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: 4 }}>
                         {(it.createdAt || "").replace("T", " ").slice(0, 19)}
                       </div>
+                      {it.type === "captain_transfer_request" && it.transferRequestId && mat3amActor?.id ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ marginTop: 8, width: "100%", fontWeight: 800 }}
+                          disabled={busyTransferId === it.transferRequestId || busyId === it.id}
+                          onClick={(ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            void acceptCaptainTransfer(it.transferRequestId!);
+                          }}
+                        >
+                          {busyTransferId === it.transferRequestId ? "جاري القبول…" : "قبول التحويل"}
+                        </button>
+                      ) : null}
                     </span>
                   </label>
                 </li>

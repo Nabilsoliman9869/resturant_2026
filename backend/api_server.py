@@ -3802,7 +3802,7 @@ def get_agents_by_group_name(group_name: str):
         supplier_guide = '26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500'
         cursor.execute(
             """
-            SELECT TOP 200 CardGuide, AgentName
+            SELECT CardGuide, AgentName
             FROM dbo.TBL016
             WHERE AgentName IS NOT NULL
               AND (NotActive IS NULL OR NotActive = 0)
@@ -3815,7 +3815,7 @@ def get_agents_by_group_name(group_name: str):
         out = []
         for r in cursor.fetchall() or []:
             out.append({"CardGuide": str(r[0]), "AgentName": r[1] or ""})
-        return {"agents": out, "groupGuide": gid}
+        return {"agents": out, "groupGuide": gid, "count": len(out)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
     finally:
@@ -4066,6 +4066,83 @@ def create_agent(agent: dict):
         try:
             if conn:
                 conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/agents/owners-vip/create")
+def owners_vip_create_agent(body: dict):
+    """إضافة عميل جديد ضمن مجموعة owners&vip (TBL015 + TBL016) لتغذية دروب داون Owner/VIP."""
+    if not isinstance(body, dict):
+        body = {}
+    name = (body.get("AgentName") or body.get("name") or "").strip()
+    phone = (body.get("Phone") or body.get("phone") or "").strip()
+    mobile = (body.get("Mobile") or body.get("mobile") or "").strip()
+    address = (body.get("FullAdress") or body.get("address") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم العميل مطلوب")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
+        main_group = _ensure_tbl015_group_by_name(cursor, conn, OWNERS_VIP_AGENT_GROUP_NAME)
+        acct_guid = _pick_default_account_guid_tbl004(cursor)
+        if not acct_guid:
+            raise HTTPException(
+                status_code=400,
+                detail="لا يوجد حساب في TBL004 لربط العميل (حقل AccountID إلزامي). أضف حساباً في دليل الحسابات.",
+            )
+        try:
+            acct_guid = str(uuid.UUID(str(acct_guid))).upper()
+        except Exception:
+            raise HTTPException(status_code=400, detail="AccountID الافتراضي غير صالح (GUID) — راجع بيانات TBL004.")
+
+        # لا تُكرر نفس الاسم داخل نفس المجموعة — عُد الموجود إن وُجد.
+        try:
+            cursor.execute(
+                """
+                SELECT TOP 1 CardGuide, AgentName
+                FROM dbo.TBL016
+                WHERE AgentName IS NOT NULL
+                  AND (NotActive IS NULL OR NotActive = 0)
+                  AND LOWER(LTRIM(RTRIM(AgentName))) = LOWER(LTRIM(RTRIM(?)))
+                  AND MainGroupGuide = CAST(? AS uniqueidentifier)
+                ORDER BY ID DESC
+                """,
+                (name, main_group),
+            )
+            ex = cursor.fetchone()
+        except Exception:
+            ex = None
+        if ex and ex[0]:
+            return {"success": True, "deduped": True, "CardGuide": str(ex[0]), "AgentName": ex[1] or name, "MainGroupGuide": main_group}
+
+        card_guide = str(uuid.uuid4()).upper()
+        cursor.execute(
+            """
+            INSERT INTO dbo.TBL016 (
+                CardGuide, AgentName, Phone, Mobile, FullAdress, NotActive,
+                MainGroupGuide, AccountID
+            )
+            VALUES (?, ?, ?, ?, ?, 0, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier))
+            """,
+            (card_guide, name, phone or None, mobile or None, address or None, main_group, acct_guid),
+        )
+        conn.commit()
+        return {"success": True, "deduped": False, "CardGuide": card_guide, "AgentName": name, "MainGroupGuide": main_group}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"خطأ في إنشاء عميل owners&vip: {str(e)}")
+    finally:
+        try:
+            conn.close()
         except Exception:
             pass
 
@@ -11615,6 +11692,9 @@ def _restaurant_ops_default() -> dict:
         "specialTableDefaultNoService": "off",  # on | off
         "specialTableDefaultNoVat": "off",  # on | off
         "specialTableDefaultDiscountPct": "0",  # 0..100
+        # تسعير المالك/VIP الافتراضي: menu (أسعار المنيو) أو cost_plus (التكلفة + نسبة)
+        "specialTableDefaultPriceMode": "menu",  # menu | cost_plus
+        "specialTableDefaultCostMarkupPct": "0",  # 0..400
         "tableDefaultMinimumCharge": "0",  # قيمة الحد الأدنى الافتراضية للطاولة
         # قوالب تنبيهات شريحة الطاولة للكاشير — JSON مصفوفة {id,type,label}
         "tableCashierAlertPresetsJson": _default_table_cashier_alert_presets_json(),
@@ -11662,6 +11742,10 @@ def _restaurant_normalize_ops(raw: dict) -> dict:
     for bkey in ("kitchenPrintShowTableChip", "specialTableDefaultNoService", "specialTableDefaultNoVat", "kidsAreaSeparateTickets", "auditLogClientActions", "deliveryChannelStrictFinancialModes"):
         bv = str(cur.get(bkey) or "").strip().lower()
         cur[bkey] = "on" if bv in ("on", "1", "true", "yes") else "off"
+    spm = str(cur.get("specialTableDefaultPriceMode") or "").strip().lower()
+    if spm not in ("menu", "cost_plus"):
+        spm = "menu"
+    cur["specialTableDefaultPriceMode"] = spm
     try:
         d = int(float(str(cur.get("auditRetentionDays") or "365").replace(",", ".")))
         cur["auditRetentionDays"] = str(max(7, min(3650, d)))
@@ -11672,6 +11756,11 @@ def _restaurant_normalize_ops(raw: dict) -> dict:
         cur["specialTableDefaultDiscountPct"] = str(max(0.0, min(100.0, p)))
     except (TypeError, ValueError):
         cur["specialTableDefaultDiscountPct"] = "0"
+    try:
+        mk = float(str(cur.get("specialTableDefaultCostMarkupPct") or "0").replace(",", "."))
+        cur["specialTableDefaultCostMarkupPct"] = str(max(0.0, min(400.0, mk)))
+    except (TypeError, ValueError):
+        cur["specialTableDefaultCostMarkupPct"] = "0"
     try:
         mc = float(str(cur.get("tableDefaultMinimumCharge") or "0").replace(",", "."))
         cur["tableDefaultMinimumCharge"] = str(max(0.0, mc))
@@ -13308,19 +13397,29 @@ def _billing_profile_from_ops_special_defaults() -> dict:
     o = _restaurant_read_ops_storage()
     ns = str(o.get("specialTableDefaultNoService") or "off").strip().lower()
     nv = str(o.get("specialTableDefaultNoVat") or "off").strip().lower()
+    pm = str(o.get("specialTableDefaultPriceMode") or "menu").strip().lower()
+    if pm not in ("menu", "cost_plus"):
+        pm = "menu"
     try:
         dp = float(str(o.get("specialTableDefaultDiscountPct") or "0").replace(",", "."))
     except (TypeError, ValueError):
         dp = 0.0
     dp = max(0.0, min(100.0, dp))
+    try:
+        mk = float(str(o.get("specialTableDefaultCostMarkupPct") or "0").replace(",", "."))
+    except (TypeError, ValueError):
+        mk = 0.0
+    mk = max(0.0, min(400.0, mk))
+    if pm != "cost_plus":
+        mk = 0.0
     return {
         "active": True,
         "source": "ops_defaults",
         "noService": ns in ("on", "1", "true", "yes"),
         "noVat": nv in ("on", "1", "true", "yes"),
         "discountPct": dp,
-        "priceMode": "menu",
-        "costMarkupPct": 0.0,
+        "priceMode": pm,
+        "costMarkupPct": mk,
     }
 
 
@@ -13331,6 +13430,53 @@ def _vip_owner_templates_loaded() -> list:
         return arr if isinstance(arr, list) else []
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+def _resolve_owners_vip_agent_label(conn, agent_guid: str) -> Optional[str]:
+    """يعيد AgentName إن كان العميل نشطاً ومربوطاً بمجموعة owners&vip (TBL015/TBL016)."""
+    ag = str(agent_guid or "").strip().upper()
+    if not ag:
+        return None
+    try:
+        uuid.UUID(ag)
+    except Exception:
+        return None
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT TOP 1 CardGuide
+        FROM dbo.TBL015
+        WHERE GroupName IS NOT NULL
+          AND LOWER(LTRIM(RTRIM(CAST(GroupName AS NVARCHAR(400))))) = LOWER(LTRIM(RTRIM(?)))
+        """,
+        (OWNERS_VIP_AGENT_GROUP_NAME,),
+    )
+    gr = cursor.fetchone()
+    if not gr or not gr[0]:
+        return None
+    gid = str(gr[0]).strip().upper()
+    cursor.execute(
+        """
+        SELECT TOP 1 AgentName
+        FROM dbo.TBL016
+        WHERE CardGuide = CAST(? AS uniqueidentifier)
+          AND AgentName IS NOT NULL
+          AND (NotActive IS NULL OR NotActive = 0)
+          AND MainGroupGuide = CAST(? AS uniqueidentifier)
+        """,
+        (ag, gid),
+    )
+    row = cursor.fetchone()
+    return str(row[0]).strip() if row and row[0] else None
+
+
+def _billing_profile_from_owners_vip_agent(agent_guid: str, agent_label: str) -> dict:
+    """ربط جلسة بعميل ملاك مباشرة: افتراضيات الإعدادات + معرف العميل من TBL016."""
+    base = _billing_profile_from_ops_special_defaults()
+    base["source"] = "vip_owner_agent"
+    base["vipAgentGuid"] = str(agent_guid).strip().upper()
+    base["vipOwnerLabel"] = str(agent_label or "").strip()[:200]
+    return base
 
 
 def _billing_profile_from_vip_template(template: dict) -> dict:
@@ -13580,7 +13726,7 @@ def restaurant_create_session(body: dict):
 
 @app.patch("/api/restaurant/table-sessions/{session_id}/billing-profile")
 def restaurant_patch_session_billing_profile(session_id: str, body: dict):
-    """تطبيق/إلغاء سياسة الفوترة الخاصة (VIP/مالك من قوالب ops، أو افتراضيات الطاولة الخاصة)."""
+    """تطبيق/إلغاء سياسة الفوترة الخاصة (قالب VIP، أو عميل ملاك بـ vipAgentGuid، أو افتراضيات الإعدادات)."""
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
     sid = str(session_id or "").strip()
@@ -13588,6 +13734,8 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
         raise HTTPException(status_code=400, detail="sessionId مطلوب")
     clear = body.get("clear") in (True, "1", "true", "yes", "on", 1)
     vip_tid = str(body.get("vipTemplateId") or "").strip()
+    vip_ag_raw = body.get("vipAgentGuid") if body.get("vipAgentGuid") is not None else body.get("vipOwnerAgentGuid")
+    vip_ag = str(vip_ag_raw or "").strip().upper()
     data = _restaurant_load("table_sessions", [])
     if not isinstance(data, list):
         data = []
@@ -13599,6 +13747,23 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
         _assert_actor_may_manage_session_billing(s, body)
         if clear:
             s.pop("billingProfile", None)
+        elif vip_ag:
+            conn = get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+            try:
+                label = _resolve_owners_vip_agent_label(conn, vip_ag)
+                if not label:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="العميل غير موجود أو غير ضمن مجموعة owners&vip أو غير نشط.",
+                    )
+                s["billingProfile"] = _billing_profile_from_owners_vip_agent(vip_ag, label)
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         elif vip_tid:
             found = None
             for item in _vip_owner_templates_loaded():
@@ -13620,7 +13785,7 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
         else:
             raise HTTPException(
                 status_code=400,
-                detail="مرّر clear=true أو vipTemplateId أو applyOpsDefaults=true أو billingProfile={...}",
+                detail="مرّر clear=true أو vipAgentGuid أو vipTemplateId أو applyOpsDefaults=true أو billingProfile={...}",
             )
         _restaurant_save("table_sessions", data)
         return {"ok": True, "session": s}
@@ -13683,6 +13848,343 @@ def restaurant_claim_order_taker(session_id: str, body: dict):
         }
     )
     return {"ok": True, "session": found}
+
+
+_CAPTAIN_PEER_ROLES = frozenset({"waiter", "host", "manager", "developer"})
+
+
+def _mat3am_guid_norm(s: Optional[str]) -> str:
+    return str(s or "").strip().replace("{", "").replace("}", "").upper()
+
+
+def _captain_transfer_requests_load() -> List[dict]:
+    raw = _restaurant_load("captain_transfer_requests", [])
+    return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+
+def _captain_transfer_requests_save(rows: List[dict]) -> None:
+    cap = 400
+    if len(rows) > cap:
+        rows = rows[-cap:]
+    _restaurant_save("captain_transfer_requests", rows)
+
+
+def _peer_user_ids_same_effective_role_today(conn, requester_id: str) -> Tuple[str, List[str], List[str]]:
+    """الزملاء الذين لهم نفس RoleCode الفعّال لليوم (جدولة + أساسي) ويمكنهم التسكين ككابتن."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT Id, RoleCode FROM dbo.MAT3AM_APP_USERS")
+    rows = cursor.fetchall() or []
+    rid = _mat3am_guid_norm(requester_id)
+    by_uid: dict = {}
+    for r in rows:
+        uid_raw = str(r[0])
+        by_uid[_mat3am_guid_norm(uid_raw)] = str(r[1] or "").strip().lower()
+    req_base = by_uid.get(rid, "") or "waiter"
+    eff_req = _resolve_effective_role_code(cursor, requester_id, req_base)
+    if eff_req not in _CAPTAIN_PEER_ROLES:
+        return eff_req, [], []
+    peers: List[str] = []
+    roles_union: List[str] = []
+    for r in rows:
+        uid_raw = str(r[0])
+        if _mat3am_guid_norm(uid_raw) == rid:
+            continue
+        base = str(r[1] or "").strip().lower()
+        eff = _resolve_effective_role_code(cursor, uid_raw, base)
+        if eff != eff_req:
+            continue
+        if eff not in _CAPTAIN_PEER_ROLES:
+            continue
+        peers.append(uid_raw)
+        if base and base not in roles_union:
+            roles_union.append(base)
+    return eff_req, peers, roles_union
+
+
+def _role_inbox_set_dismissed(item_id: str) -> bool:
+    rows = _role_inbox_load_rows()
+    now_iso = datetime.now().isoformat()
+    hit = False
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("id") or "") == str(item_id):
+            r["dismissedAt"] = now_iso
+            hit = True
+            break
+    if hit:
+        _role_inbox_save_rows(rows)
+    return hit
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/request-captain-transfer")
+def restaurant_request_captain_transfer(session_id: str, body: dict):
+    """الكابتن الحالي يطلب تحويل مسند الطاولة — تنبيه للزملاء بنفس الدور الفعّال اليوم."""
+    if not isinstance(body, dict):
+        body = {}
+    actor = _mat3am_actor_from_body(body)
+    aid = str(actor.get("id") or "").strip()
+    arole = str(actor.get("role") or "").strip().lower()
+    if not aid:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    if arole not in _CAPTAIN_PEER_ROLES:
+        raise HTTPException(status_code=403, detail="غير مصرح بهذا الدور.")
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="sessionId مطلوب")
+
+    ts_data = _restaurant_load("table_sessions", [])
+    if not isinstance(ts_data, list):
+        ts_data = []
+    found = None
+    for s in ts_data:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(found.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="لا يمكن طلب التحويل على جلسة غير نشطة")
+    cap_id = str(found.get("captainUserId") or "").strip()
+    if not cap_id or _mat3am_guid_norm(cap_id) != _mat3am_guid_norm(aid):
+        raise HTTPException(status_code=403, detail="طلب التحويل للمسند الحالي فقط.")
+
+    pending = _captain_transfer_requests_load()
+    for pr in pending:
+        if not isinstance(pr, dict):
+            continue
+        if str(pr.get("status") or "") != "pending":
+            continue
+        if str(pr.get("sessionId") or "").strip() == sid:
+            raise HTTPException(status_code=409, detail="يوجد طلب تحويل قيد الانتظار لهذه الجلسة.")
+
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=503,
+            detail="يتطلب طلب التحويل اتصالاً بقاعدة البيانات لتحديد الزملاء بنفس الجدولة.",
+        )
+    try:
+        eff, peers, peer_roles = _peer_user_ids_same_effective_role_today(conn, aid)
+        if eff not in _CAPTAIN_PEER_ROLES:
+            raise HTTPException(
+                status_code=403,
+                detail="دورك الفعّال اليوم لا يسمح بطلب تحويل الكابتن بهذه الطريقة.",
+            )
+        if not peers:
+            raise HTTPException(
+                status_code=400,
+                detail="لا يوجد زميل آخر بنفس الدور الفعّال لهذا اليوم لاستلام التحويل.",
+            )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    tid = str(found.get("tableId") or "").strip()
+    tids = {tid} if tid else set()
+    name_map = _restaurant_table_display_names_for_ids(tids)
+    disp = (name_map.get(tid) or "").strip() if tid else ""
+    if not disp or disp == "—":
+        fm = _restaurant_file_tables_id_to_name()
+        disp = (fm.get(tid) or "").strip() if tid else ""
+    if not disp or disp == "—":
+        disp = _session_table_display_fallback(tid) if tid else "طاولة"
+
+    req_id = str(uuid.uuid4())
+    inbox_id = str(uuid.uuid4())
+    now_iso = datetime.now().isoformat()
+    from_name = str(actor.get("name") or actor.get("login") or "").strip() or "كابتن"
+    title = f"طلب تحويل كابتن — {disp}"
+    body_txt = (
+        f"{from_name} يطلب تسليم مسند الطاولة لزميل بنفس الدور الفعّال اليوم. "
+        f"افتح الوارد واضغط «قبول التحويل» إن كنت متاحاً."
+    )
+
+    norm_peers = peers
+    role_targets = _role_inbox_normalize_targets(peer_roles) if peer_roles else ["waiter"]
+    if not role_targets:
+        role_targets = ["waiter"]
+
+    rows = _role_inbox_load_rows()
+    rows.append(
+        {
+            "id": inbox_id,
+            "type": "captain_transfer_request",
+            "title": title,
+            "body": body_txt,
+            "targetRoles": role_targets,
+            "targetUserIds": norm_peers,
+            "transferRequestId": req_id,
+            "sessionId": sid,
+            "createdAt": now_iso,
+            "dismissedAt": None,
+        }
+    )
+    _role_inbox_save_rows(rows)
+
+    rec = {
+        "id": req_id,
+        "sessionId": sid,
+        "tableId": tid,
+        "tableDisplayName": disp,
+        "fromCaptainUserId": aid,
+        "fromCaptainName": from_name,
+        "effectiveRoleCode": eff,
+        "eligibleUserIds": norm_peers,
+        "inboxItemId": inbox_id,
+        "status": "pending",
+        "createdAt": now_iso,
+    }
+    pending.append(rec)
+    _captain_transfer_requests_save(pending)
+
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "request_captain_transfer",
+            "sessionId": sid,
+            "tableId": tid,
+            "fromCaptainUserId": aid,
+            "eligibleCount": len(norm_peers),
+        }
+    )
+    return {"ok": True, "request": rec}
+
+
+@app.post("/api/restaurant/captain-transfer-requests/{request_id}/accept")
+def restaurant_accept_captain_transfer(request_id: str, body: dict):
+    """قبول زميل لمسند الطاولة — يُطبّق كـ claim-order-taker بعد التحقق من القائمة المخزنة."""
+    if not isinstance(body, dict):
+        body = {}
+    actor = _mat3am_actor_from_body(body)
+    aid = str(actor.get("id") or "").strip()
+    arole = str(actor.get("role") or "").strip().lower()
+    if not aid:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    if arole not in _CAPTAIN_PEER_ROLES:
+        raise HTTPException(status_code=403, detail="لا يمكن قبول التحويل بهذا الدور.")
+    rid = str(request_id or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="request_id مطلوب")
+
+    data = _captain_transfer_requests_load()
+    req_obj: Optional[dict] = None
+    idx = -1
+    for i, x in enumerate(data):
+        if isinstance(x, dict) and str(x.get("id") or "") == rid:
+            req_obj = x
+            idx = i
+            break
+    if not req_obj:
+        raise HTTPException(status_code=404, detail="طلب التحويل غير موجود")
+    if str(req_obj.get("status") or "") != "pending":
+        raise HTTPException(status_code=400, detail="طلب التحويل لم يعد قائماً")
+
+    elig = req_obj.get("eligibleUserIds") or []
+    elig_n = {_mat3am_guid_norm(str(x)) for x in elig if x}
+    if _mat3am_guid_norm(aid) not in elig_n:
+        raise HTTPException(status_code=403, detail="غير مصرح لك بقبول هذا التحويل.")
+
+    sid = str(req_obj.get("sessionId") or "").strip()
+    from_cap = str(req_obj.get("fromCaptainUserId") or "").strip()
+
+    ts_data = _restaurant_load("table_sessions", [])
+    if not isinstance(ts_data, list):
+        ts_data = []
+    found = None
+    for s in ts_data:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(found.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="الجلسة غير نشطة")
+    cur_cap = str(found.get("captainUserId") or "").strip()
+    if _mat3am_guid_norm(cur_cap) != _mat3am_guid_norm(from_cap):
+        raise HTTPException(
+            status_code=409,
+            detail="تغيّر مسند الطاولة — لا يمكن إتمام التحويل. ألغِ الطلب أو أعد المحاولة.",
+        )
+
+    now_iso = datetime.now().isoformat()
+    found["captainUserId"] = aid
+    found["captainLogin"] = str(actor.get("login") or "")[:120]
+    found["captainName"] = str(actor.get("name") or actor.get("login") or "")[:200]
+    found["captainClaimedAt"] = now_iso
+    found["captainTransferAcceptedFrom"] = from_cap
+    found["captainTransferAcceptedAt"] = now_iso
+
+    _restaurant_save("table_sessions", ts_data)
+
+    req_obj["status"] = "accepted"
+    req_obj["acceptedByUserId"] = aid
+    req_obj["acceptedAt"] = now_iso
+    if idx >= 0:
+        data[idx] = req_obj
+    _captain_transfer_requests_save(data)
+
+    inbox_id = str(req_obj.get("inboxItemId") or "").strip()
+    if inbox_id:
+        _role_inbox_set_dismissed(inbox_id)
+
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "accept_captain_transfer",
+            "sessionId": sid,
+            "tableId": str(found.get("tableId") or ""),
+            "fromCaptainUserId": from_cap,
+            "toCaptainUserId": aid,
+        }
+    )
+    return {"ok": True, "session": found}
+
+
+@app.post("/api/restaurant/captain-transfer-requests/{request_id}/cancel")
+def restaurant_cancel_captain_transfer(request_id: str, body: dict):
+    """إلغاء طلب التحويل — من الكابتن الطالب أو المدير/المطوّر."""
+    if not isinstance(body, dict):
+        body = {}
+    actor = _mat3am_actor_from_body(body)
+    aid = str(actor.get("id") or "").strip()
+    arole = str(actor.get("role") or "").strip().lower()
+    if not aid:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    rid = str(request_id or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="request_id مطلوب")
+
+    data = _captain_transfer_requests_load()
+    req_obj: Optional[dict] = None
+    idx = -1
+    for i, x in enumerate(data):
+        if isinstance(x, dict) and str(x.get("id") or "") == rid:
+            req_obj = x
+            idx = i
+            break
+    if not req_obj:
+        raise HTTPException(status_code=404, detail="طلب التحويل غير موجود")
+    if str(req_obj.get("status") or "") != "pending":
+        raise HTTPException(status_code=400, detail="طلب التحويل لم يعد قائماً")
+
+    from_cap = str(req_obj.get("fromCaptainUserId") or "").strip()
+    is_mgr = arole in ("manager", "developer")
+    if _mat3am_guid_norm(from_cap) != _mat3am_guid_norm(aid) and not is_mgr:
+        raise HTTPException(status_code=403, detail="الإلغاء للكابتن الطالب أو المدير فقط.")
+
+    now_iso = datetime.now().isoformat()
+    req_obj["status"] = "cancelled"
+    req_obj["cancelledAt"] = now_iso
+    if idx >= 0:
+        data[idx] = req_obj
+    _captain_transfer_requests_save(data)
+
+    inbox_id = str(req_obj.get("inboxItemId") or "").strip()
+    if inbox_id:
+        _role_inbox_set_dismissed(inbox_id)
+
+    return {"ok": True}
 
 
 @app.post("/api/restaurant/table-sessions/{session_id}/reassign-order-taker")
@@ -13946,9 +14448,12 @@ def _role_inbox_append_for_alert(rec_id: str, typ: str, title: str, body_text: O
 
 @app.get("/api/restaurant/cashier/role-inbox")
 @app.get("/api/restaurant/role-inbox")
-def restaurant_role_inbox_list(forRole: str = Query(default="")):
-    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells."""
+def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Query(default="")):
+    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.
+
+    إن وُجد targetUserIds على عنصر (تحويل كابتن)، يُعرض فقط لمستخدم userId المطابق."""
     role = str(forRole or "").strip().lower()
+    uid_filter = _mat3am_guid_norm(userId)
     rows = _role_inbox_load_rows()
     out: List[dict] = []
     for r in rows:
@@ -13960,15 +14465,27 @@ def restaurant_role_inbox_list(forRole: str = Query(default="")):
             continue
         if role and role not in targets:
             continue
-        out.append(
-            {
-                "id": str(r.get("id") or ""),
-                "type": r.get("type"),
-                "title": r.get("title"),
-                "body": r.get("body"),
-                "createdAt": r.get("createdAt"),
-            }
-        )
+        tuids = r.get("targetUserIds")
+        if isinstance(tuids, list) and len(tuids) > 0:
+            if not uid_filter:
+                continue
+            allowed = {_mat3am_guid_norm(str(x)) for x in tuids if x}
+            if uid_filter not in allowed:
+                continue
+        item = {
+            "id": str(r.get("id") or ""),
+            "type": r.get("type"),
+            "title": r.get("title"),
+            "body": r.get("body"),
+            "createdAt": r.get("createdAt"),
+        }
+        trq = str(r.get("transferRequestId") or "").strip()
+        if trq:
+            item["transferRequestId"] = trq
+        sid = str(r.get("sessionId") or "").strip()
+        if sid:
+            item["sessionId"] = sid
+        out.append(item)
     out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
     return {"ok": True, "items": out[:80], "count": len(out)}
 

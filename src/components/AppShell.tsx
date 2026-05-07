@@ -9,6 +9,7 @@ import { useVenue } from "../context/VenueContext";
 import { useDbEpoch } from "../context/DbSettingsRefreshContext";
 import { venueBrandTitle } from "../lib/venueType";
 import type { RoleId } from "../auth/roles";
+import { buildMat3amActor } from "../lib/mat3amActor";
 
 type NavItem = { to: string; label: string };
 
@@ -116,7 +117,9 @@ export function AppShell({ role }: { role: RoleId }) {
 
   return (
     <div style={{ display: "flex", minHeight: "100%" }}>
-      {interDeptBells ? <RestaurantDualBells role={role} /> : null}
+      {interDeptBells ? (
+        <RestaurantDualBells role={role} userId={user?.id} mat3amActor={buildMat3amActor(user)} />
+      ) : null}
       {!isWaiterOrderTaker && (
         <aside
           style={{

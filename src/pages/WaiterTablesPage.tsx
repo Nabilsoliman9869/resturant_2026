@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
@@ -25,11 +25,13 @@ type TableSession = {
     active?: boolean;
     source?: string;
     vipTemplateId?: string;
+    vipAgentGuid?: string;
     vipOwnerLabel?: string;
   };
 };
 type StaffUser = { id: string; login: string; name: string; role: string; isActive?: boolean };
-type VipTemplate = { id: string; label: string; active: boolean };
+type VipTemplate = { id: string; label: string; active: boolean; agentGuid: string };
+type OwnersVipAgent = { CardGuide: string; AgentName: string };
 type OrderItem = { name?: string; quantity?: number; unitPrice?: number };
 type OrderRow = {
   id?: string;
@@ -80,8 +82,38 @@ export default function WaiterTablesPage() {
   const [minChargeDraftByTable, setMinChargeDraftByTable] = useState<Record<string, string>>({});
   const [minChargeBusyByTable, setMinChargeBusyByTable] = useState<Record<string, boolean>>({});
   const [vipTemplates, setVipTemplates] = useState<VipTemplate[]>([]);
+  const [ownersVipAgents, setOwnersVipAgents] = useState<OwnersVipAgent[]>([]);
   const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
   const [vipBusySessionId, setVipBusySessionId] = useState<string>("");
+  const [captainTransferBusySessionId, setCaptainTransferBusySessionId] = useState<string>("");
+
+  /**
+   * قالب صالح للعرض = مفعّل **و** عنده ما يميّزه (اسم محدد أو عميل مربوط).
+   * صفوف بلا اسم وبلا agentGuid هي مسودات إعدادات لم تُكمَل، ولن يقبلها الخادم؛
+   * لذا نُسقطها من الدروب داون لتفادي بنود مكرّرة بنص «Owner/VIP» العام.
+   */
+  const activeVipTemplates = useMemo(
+    () =>
+      vipTemplates.filter(
+        (x) => x.active && (String(x.label || "").trim() !== "" || String(x.agentGuid || "").trim() !== ""),
+      ),
+    [vipTemplates],
+  );
+
+  /** أي عميل مربوط بقالب نشط لا يُعرَض ثانية تحت «عملاء ملاك» لتجنّب التكرار */
+  const templateLinkedAgentGuids = useMemo(() => {
+    const s = new Set<string>();
+    for (const t of activeVipTemplates) {
+      const g = String(t.agentGuid || "").trim().toUpperCase();
+      if (g) s.add(g);
+    }
+    return s;
+  }, [activeVipTemplates]);
+
+  const ownersVipAgentsDeduped = useMemo(
+    () => ownersVipAgents.filter((a) => !templateLinkedAgentGuids.has(a.CardGuide)),
+    [ownersVipAgents, templateLinkedAgentGuids],
+  );
 
   function isTodayIso(iso?: string): boolean {
     if (!iso) return false;
@@ -146,6 +178,7 @@ export default function WaiterTablesPage() {
       setMsg("");
       const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
       setExclusiveOn(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
+
       try {
         const raw = String((opsj as { vipOwnerTemplatesJson?: unknown })?.vipOwnerTemplatesJson || "").trim();
         const arr = raw ? (JSON.parse(raw) as unknown[]) : [];
@@ -154,9 +187,10 @@ export default function WaiterTablesPage() {
           .map((x) => {
             const row = x as Record<string, unknown>;
             const id = String(row.id || "").trim();
-            const label = String(row.label || "").trim() || "Owner/VIP";
+            const agentGuid = String(row.agentGuid || "").trim().toUpperCase();
+            const label = String(row.label || "").trim();
             const active = row.isActive !== false;
-            return { id, label, active };
+            return { id, label, active, agentGuid };
           })
           .filter((x) => x.id);
         setVipTemplates(rows);
@@ -280,7 +314,39 @@ export default function WaiterTablesPage() {
     };
   }, [base, user?.role]);
 
-  async function claimCaptain(sessionId: string) {
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await safeFetch(`${base}/api/agents/by-group-name?group_name=${encodeURIComponent("owners&vip")}`);
+        const j = tryParseJson<{ agents?: OwnersVipAgent[] }>(await res.text()) ?? {};
+        if (cancelled || !res.ok) return;
+        const list = (Array.isArray(j.agents) ? j.agents : [])
+          .filter((x) => x && typeof x === "object")
+          .map((a) => ({
+            CardGuide: String((a as OwnersVipAgent).CardGuide || "").trim().toUpperCase(),
+            AgentName: String((a as OwnersVipAgent).AgentName || "").trim(),
+          }))
+          .filter((a) => a.CardGuide);
+        setOwnersVipAgents(list);
+      } catch {
+        /* ignore — قائمة العملاء لا تعطّل تحميل الطاولات */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [base]);
+
+  /**
+   * تسكين كابتن من شريحة الطاولة:
+   * - بدون جلسة نشطة → ننشئها بـ POST؛ الخادم يُسكِّن المُرسِل تلقائياً (waiter/host/manager/developer)
+   *   عبر `_restaurant_assign_captain_from_actor_if_needed` (api_server.py).
+   * - بجلسة نشطة بلا كابتن (أو لتأكيد الكابتن) → نستخدم مسار `/claim-order-taker` كما كان.
+   * بهذا السلوك يصبح زر «تسكين» في الشريحة هو الفعل الأول الذي يحجز الطاولة على المُسكِّن.
+   */
+  async function claimCaptain(args: { tableId: string; sessionId?: string | null }) {
+    const { tableId, sessionId } = args;
     setMsg("");
     const actor = buildMat3amActor(user);
     if (!actor?.id) {
@@ -289,11 +355,32 @@ export default function WaiterTablesPage() {
     }
     setClaimBusy(true);
     try {
-      const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/claim-order-taker`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mat3amActor: actor }),
-      });
+      let r: Response;
+      let okMessage = "";
+      if (sessionId && String(sessionId).trim()) {
+        r = await safeFetch(
+          `${base}/api/restaurant/table-sessions/${encodeURIComponent(String(sessionId))}/claim-order-taker`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mat3amActor: actor }),
+          },
+        );
+        okMessage = "تم تسكينك كابتن على هذه الجلسة.";
+      } else {
+        r = await safeFetch(`${base}/api/restaurant/table-sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tableId,
+            mat3amActor: actor,
+            assignOrderTaker: true,
+            startedByRole: actor.role,
+            startReason: "captain_seat_from_table_card",
+          }),
+        });
+        okMessage = "تم فتح جلسة وتسكينك كابتن على الطاولة.";
+      }
       const t = await r.text();
       if (!r.ok) {
         if (r.status === 0) {
@@ -305,12 +392,49 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      setMsg("تم تسكينك كابتن على هذه الجلسة.");
+      setMsg(okMessage);
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
     } finally {
       setClaimBusy(false);
+    }
+  }
+
+  async function requestCaptainTransfer(sessionId: string) {
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
+    setCaptainTransferBusySessionId(sessionId);
+    setMsg("");
+    try {
+      const r = await safeFetch(
+        `${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/request-captain-transfer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mat3amActor: actor }),
+        },
+      );
+      const t = await r.text();
+      if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم إرسال طلب تحويل الكابتن — سيصل للزملاء بنفس الدور الفعّال اليوم في الجرس الأحمر.");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setCaptainTransferBusySessionId("");
     }
   }
 
@@ -403,6 +527,8 @@ export default function WaiterTablesPage() {
         body.clear = true;
       } else if (mode === "__ops_defaults__") {
         body.applyOpsDefaults = true;
+      } else if (mode.startsWith("__agent__:")) {
+        body.vipAgentGuid = mode.slice("__agent__:".length).trim();
       } else {
         body.vipTemplateId = mode;
       }
@@ -422,7 +548,15 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      setMsg(!mode ? "تم إلغاء Owner/VIP للجلسة." : mode === "__ops_defaults__" ? "تم تطبيق افتراضيات Owner/VIP." : "تم تطبيق قالب Owner/VIP.");
+      setMsg(
+        !mode
+          ? "تم إلغاء Owner/VIP للجلسة."
+          : mode === "__ops_defaults__"
+            ? "تم تطبيق افتراضيات Owner/VIP."
+            : mode.startsWith("__agent__:")
+              ? "تم ربط الجلسة بعميل الملاك من القاعدة."
+              : "تم تطبيق قالب Owner/VIP.",
+      );
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
@@ -706,15 +840,52 @@ export default function WaiterTablesPage() {
                     <button
                       type="button"
                       className="waiter-tblcard__pill waiter-tblcard__pill--assign"
-                      disabled={claimBusy || notReady || !sidStr}
-                      onClick={() => {
-                        if (!sidStr) return;
-                        void claimCaptain(sidStr);
-                      }}
-                      title={sidStr ? "تسكين كابتن (ربط الطاولة على المسند)" : "لا توجد جلسة نشطة"}
+                      disabled={
+                        claimBusy ||
+                        notReady ||
+                        Boolean(
+                          exclusiveOn &&
+                            capId &&
+                            user?.id &&
+                            String(capId) !== String(user.id) &&
+                            user.role !== "manager" &&
+                            user.role !== "developer",
+                        )
+                      }
+                      onClick={() => void claimCaptain({ tableId: String(t.id), sessionId: sidStr || null })}
+                      title={
+                        capId && user?.id && String(capId) === String(user.id)
+                          ? "أنت الكابتن على هذه الجلسة"
+                          : sidStr
+                            ? "تسكين كابتن (ربط الطاولة على المسند)"
+                            : "بدء جلسة وتسكين نفسك على الطاولة"
+                      }
                     >
-                      {capId && user?.id && String(capId) === String(user.id) ? "أنت الكابتن ✓" : "تسكين كابتن"}
+                      {capId && user?.id && String(capId) === String(user.id)
+                        ? "أنت الكابتن ✓"
+                        : sidStr
+                          ? "تسكين كابتن"
+                          : "ابدأ التسكين"}
                     </button>
+
+                    {sidStr &&
+                    capId &&
+                    user?.id &&
+                    String(capId) === String(user.id) &&
+                    (user.role === "waiter" || user.role === "host") ? (
+                      <button
+                        type="button"
+                        className="waiter-tblcard__pill"
+                        disabled={notReady || captainTransferBusySessionId === sidStr}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void requestCaptainTransfer(sidStr);
+                        }}
+                        title="إرسال تنبيه للزملاء بنفس الدور الفعّال اليوم — قبول من الجرس الأحمر"
+                      >
+                        {captainTransferBusySessionId === sidStr ? "…" : "طلب تحويل"}
+                      </button>
+                    ) : null}
 
                     {(user?.role === "manager" || user?.role === "developer") && sidStr ? (
                       <button
@@ -742,21 +913,25 @@ export default function WaiterTablesPage() {
 
                 {sidStr ? (
                   <div
-                    style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, width: "100%" }}
+                    style={{ marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr) 86px", gap: 8, width: "100%", alignItems: "center" }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <select
                       className="waiter-pos__select"
+                      style={{ minWidth: 0, width: "100%" }}
                       value={(() => {
                         const bp = sessRow?.billingProfile;
+                        const src = String(bp?.source || "").toLowerCase();
                         const currentMode =
                           bp?.active === false
                             ? ""
-                            : String(bp?.source || "").toLowerCase() === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
-                              ? String(bp?.vipTemplateId || "").trim()
-                              : bp && String(bp?.source || "").trim()
-                                ? "__ops_defaults__"
-                                : "";
+                            : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
+                              ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
+                              : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                                ? String(bp?.vipTemplateId || "").trim()
+                                : bp && String(bp?.source || "").trim()
+                                  ? "__ops_defaults__"
+                                  : "";
                         return vipChoiceBySession[sidStr] ?? currentMode;
                       })()}
                       onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
@@ -764,23 +939,43 @@ export default function WaiterTablesPage() {
                     >
                       <option value="">عادي (بدون Owner/VIP)</option>
                       <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
-                      {vipTemplates.filter((x) => x.active).map((tpl) => (
-                        <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
-                          {tpl.label}
-                        </option>
-                      ))}
+                      {activeVipTemplates.length ? (
+                        <optgroup label="قوالب">
+                          {activeVipTemplates.map((tpl) => {
+                            const ownerName = tpl.agentGuid
+                              ? (ownersVipAgents.find((a) => a.CardGuide === tpl.agentGuid)?.AgentName || "")
+                              : "";
+                            const display = tpl.label || ownerName || "Owner/VIP";
+                            return (
+                              <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
+                                {display}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      ) : null}
+                      {ownersVipAgentsDeduped.length ? (
+                        <optgroup label="عملاء ملاك (غير مكرّرين في القوالب)">
+                          {ownersVipAgentsDeduped.map((a) => (
+                            <option key={`vip-ag-${a.CardGuide}`} value={`__agent__:${a.CardGuide}`}>
+                              {a.AgentName || a.CardGuide}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null}
                     </select>
                     <button
                       type="button"
                       className="btn btn-ghost"
-                      style={{ fontWeight: 900, whiteSpace: "nowrap" }}
+                      style={{ fontWeight: 900, whiteSpace: "nowrap", padding: "0.35rem 0.5rem", width: "100%", minWidth: 0 }}
                       disabled={vipBusySessionId === sidStr}
                       onClick={() => {
                         const chosen = vipChoiceBySession[sidStr] ?? "";
                         void applyVipBilling(sidStr, chosen);
                       }}
+                      title="تطبيق Owner/VIP على الجلسة"
                     >
-                      {vipBusySessionId === sidStr ? "..." : "تطبيق Owner/VIP"}
+                      {vipBusySessionId === sidStr ? "…" : "تطبيق"}
                     </button>
                   </div>
                 ) : null}
@@ -874,7 +1069,7 @@ export default function WaiterTablesPage() {
                     value={alertPick}
                     onChange={(e) => setAlertPickByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
                     disabled={alertBusy || alertPresets.length === 0}
-                    title="تنبيه سريع"
+                    title="تنبيه كاشير سريع من إعدادات التشغيل — ليست قائمة عملاء الملاك"
                   >
                     <option value="">— اختر —</option>
                     {alertPresets.map((x) => (

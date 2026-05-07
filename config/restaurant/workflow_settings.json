@@ -1,6 +1,5 @@
 {
-  "receiveGuestBy": "host",
-  "orderTakerExclusiveTable": "off",
+  "receiveGuestBy": "waiter",
   "takeOrderBy": "waiter",
   "deliverFromKitchenBy": "server",
   "cleanTableBy": "server",
@@ -8,6 +7,7 @@
   "cashierDispatchMode": "both",
   "cleaningStartTrigger": "payment_completed",
   "cleaningExecutionBy": "server",
-  "cleaningReviewBy": "none",
-  "cleaningStartStatus": "dirty"
+  "cleaningReviewBy": "manager",
+  "cleaningStartStatus": "dirty",
+  "orderTakerExclusiveTable": "on"
 }

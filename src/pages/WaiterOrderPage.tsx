@@ -28,6 +28,7 @@ type SessionBillingProfile = {
   active?: boolean;
   source?: string;
   vipTemplateId?: string;
+  vipAgentGuid?: string;
   vipOwnerLabel?: string;
   noService?: boolean;
   noVat?: boolean;
@@ -494,6 +495,21 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     if (!user?.id) return false;
     return String(user.id) !== String(captainGate.id);
   }, [orderTakerExclusiveTable, captainGate, user?.id, user?.role]);
+
+  /**
+   * عند تطبيق Owner/VIP على الجلسة (vip_owner_agent أو vip_owner_template):
+   * نُجبر دروب داون «اسم العميل» في POS على عميل المالك بدل الافتراضي «عميل نقدي».
+   * عند إلغاء VIP يعود الاختيار للعميل النقدي تلقائياً عبر منطق loadAll.
+   */
+  useEffect(() => {
+    const bp = sessionBillingProfile;
+    if (!bp || bp.active === false) return;
+    const vipGuid = String(bp.vipAgentGuid || "").trim().toUpperCase();
+    if (!vipGuid) return;
+    const exists = agents.some((a) => String(a.CardGuide || "").toUpperCase() === vipGuid);
+    if (!exists) return;
+    setSelectedAgentGuid((prev) => (prev && String(prev).toUpperCase() === vipGuid ? prev : vipGuid));
+  }, [sessionBillingProfile, agents]);
 
   /** إحصاء حالات طلبات الجلسة الحالية للمطبخ — شريط معلومات بالشريط العلوي */
   const sessionKitchenStats = useMemo(() => {

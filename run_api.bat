@@ -1,15 +1,34 @@
 @echo off
+setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
 
 set "MAT3AM_PY="
 where python >nul 2>&1 && set "MAT3AM_PY=python"
 if not defined MAT3AM_PY where py >nul 2>&1 && set "MAT3AM_PY=py"
+rem محاولات مباشرة لمسارات Python الشائعة (بدون for لتجنب parsing edge-cases)
+if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
+if not defined MAT3AM_PY if exist "%ProgramFiles%\Python313\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python313\python.exe"
+if not defined MAT3AM_PY if exist "%ProgramFiles%\Python312\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python312\python.exe"
+if not defined MAT3AM_PY if exist "%ProgramFiles%\Python311\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python311\python.exe"
+if not defined MAT3AM_PY if exist "%ProgramFiles%\Python310\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python310\python.exe"
+if not defined MAT3AM_PY if exist "C:\Python313\python.exe" set "MAT3AM_PY=C:\Python313\python.exe"
+if not defined MAT3AM_PY if exist "C:\Python312\python.exe" set "MAT3AM_PY=C:\Python312\python.exe"
+if not defined MAT3AM_PY if exist "C:\Python311\python.exe" set "MAT3AM_PY=C:\Python311\python.exe"
+if not defined MAT3AM_PY if exist "C:\Python310\python.exe" set "MAT3AM_PY=C:\Python310\python.exe"
 if not defined MAT3AM_PY (
   echo ========================================
   echo [خطأ] لم يُعثر على Python في PATH.
   echo ثبّت Python 3 من https://www.python.org/downloads/
   echo وفعّل الخيار «Add python.exe to PATH» ثم أعد فتح الطرفية.
+  echo.
+  echo جرّب أيضاً (في CMD):
+  echo   where python
+  echo   where py
+  echo أو ثبّت Python في المسار الافتراضي داخل LocalAppData.
   echo ========================================
   pause
   exit /b 1
@@ -40,7 +59,13 @@ echo يجب أن ترى في whoami: VERIFY_SCHEMA_REVISION=9 (أو أحدث) و
 echo.
 echo إيقاف الخادم: Ctrl+C
 echo ========================================
-"%MAT3AM_PY%" api_server.py
+if "%MAT3AM_PY%"=="python" (
+  python api_server.py
+) else if "%MAT3AM_PY%"=="py" (
+  py api_server.py
+) else (
+  "%MAT3AM_PY%" api_server.py
+)
 if errorlevel 1 (
   echo.
   echo [تنبيه] انتهى api_server.py برمز خطأ. راجع الرسائل أعلاه.
