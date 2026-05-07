@@ -10684,6 +10684,8 @@ _RESTAURANT_SQL_KEYS = frozenset(
         "kitchen_notifications",
         "daily_menu",
         "daily_menu_schedule",
+        # كتالوج إضافات الأصناف — صفحة الإعدادات والجرسون (يُجرِّب SQL ثم احتياطي JSON)
+        "catalog_addons",
     }
 )
 _restaurant_sql_table_ready = False
@@ -11633,7 +11635,12 @@ def _restaurant_normalize_ops(raw: dict) -> dict:
     if not isinstance(raw, dict):
         return cur
     for k in list(cur.keys()):
-        v = str(raw.get(k) or "").strip()
+        if k not in raw:
+            continue
+        vr = raw.get(k)
+        if vr is None:
+            continue
+        v = str(vr).strip()
         if not v:
             continue
         cur[k] = v
@@ -11800,8 +11807,12 @@ def _restaurant_write_ops(body: dict) -> dict:
     cur = _restaurant_read_ops_storage()
     merged = dict(cur)
     for k in list(merged.keys()):
-        if k in ops_part and str(ops_part.get(k) or "").strip() != "":
-            merged[k] = str(ops_part.get(k)).strip()
+        if k not in ops_part:
+            continue
+        vr = ops_part.get(k)
+        if vr is None:
+            continue
+        merged[k] = str(vr).strip()
     # تحسين: لو سطور VIP فيها اسم بدون GUID، حاول استكماله من TBL016 قبل التطبيع والحفظ.
     if "vipOwnerTemplatesJson" in merged:
         merged["vipOwnerTemplatesJson"] = _vip_owner_templates_fill_missing_agent_guid(str(merged.get("vipOwnerTemplatesJson") or ""))
@@ -13881,6 +13892,104 @@ def _cashier_save_alerts(data: list) -> None:
     _restaurant_save("cashier_alerts", data)
 
 
+def _role_inbox_load_rows() -> List[dict]:
+    raw = _restaurant_load("role_inbox", [])
+    return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+
+def _role_inbox_save_rows(rows: List[dict]) -> None:
+    cap = 600
+    if len(rows) > cap:
+        rows = rows[-cap:]
+    _restaurant_save("role_inbox", rows)
+
+
+def _role_inbox_normalize_targets(tr: Any) -> List[str]:
+    if not isinstance(tr, list):
+        return []
+    out: List[str] = []
+    for x in tr:
+        s = str(x or "").strip().lower()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def _cashier_alert_role_inbox_targets(typ: str, body: dict) -> List[str]:
+    out = _role_inbox_normalize_targets(body.get("targetRoles"))
+    if out:
+        return out
+    if typ in ("kitchen_urgent", "speed_order_urgent", "quick_clean", "call_manager", "no_order_overdue", "request_bill_help", "service_issue"):
+        return ["cashier"]
+    if typ == "waiter_summon":
+        return ["cashier"]
+    return []
+
+
+def _role_inbox_append_for_alert(rec_id: str, typ: str, title: str, body_text: Optional[str], target_roles: List[str], created_iso: str) -> None:
+    if not target_roles:
+        return
+    rows = _role_inbox_load_rows()
+    rows.append(
+        {
+            "id": str(rec_id),
+            "type": typ,
+            "title": title,
+            "body": body_text,
+            "targetRoles": target_roles,
+            "createdAt": created_iso,
+            "dismissedAt": None,
+        }
+    )
+    _role_inbox_save_rows(rows)
+
+
+@app.get("/api/restaurant/cashier/role-inbox")
+@app.get("/api/restaurant/role-inbox")
+def restaurant_role_inbox_list(forRole: str = Query(default="")):
+    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells."""
+    role = str(forRole or "").strip().lower()
+    rows = _role_inbox_load_rows()
+    out: List[dict] = []
+    for r in rows:
+        if str(r.get("dismissedAt") or "").strip():
+            continue
+        tr = r.get("targetRoles")
+        targets = _role_inbox_normalize_targets(tr) if tr is not None else []
+        if not targets:
+            continue
+        if role and role not in targets:
+            continue
+        out.append(
+            {
+                "id": str(r.get("id") or ""),
+                "type": r.get("type"),
+                "title": r.get("title"),
+                "body": r.get("body"),
+                "createdAt": r.get("createdAt"),
+            }
+        )
+    out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
+    return {"ok": True, "items": out[:80], "count": len(out)}
+
+
+@app.patch("/api/restaurant/cashier/role-inbox/{item_id}/dismiss")
+@app.patch("/api/restaurant/role-inbox/{item_id}/dismiss")
+def restaurant_role_inbox_dismiss(item_id: str):
+    rows = _role_inbox_load_rows()
+    now_iso = datetime.now().isoformat()
+    hit = False
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("id") or "") == str(item_id):
+            r["dismissedAt"] = now_iso
+            hit = True
+            break
+    if not hit:
+        raise HTTPException(status_code=404, detail="العنصر غير موجود")
+    _role_inbox_save_rows(rows)
+    return {"ok": True, "id": item_id}
+
+
 @app.get("/api/restaurant/cashier/table-overview")
 def restaurant_cashier_table_overview():
     """جلسات نشطة + ملخص بنود وطلب حساب/انتظار تسديد — استدعاء واحد للكاشير (شرائح الطاولات)."""
@@ -14040,6 +14149,15 @@ def restaurant_cashier_alerts_create(body: dict):
     if len(raw) > 500:
         raw = raw[-500:]
     _cashier_save_alerts(raw)
+    body_d = body if isinstance(body, dict) else {}
+    _role_inbox_append_for_alert(
+        str(rec["id"]),
+        typ,
+        title,
+        body_text,
+        _cashier_alert_role_inbox_targets(typ, body_d),
+        now_iso,
+    )
     return {"ok": True, "deduped": False, "id": rec["id"], "alert": rec}
 
 
@@ -14051,6 +14169,18 @@ def restaurant_cashier_alerts_dismiss(alert_id: str):
         if isinstance(a, dict) and str(a.get("id") or "") == str(alert_id):
             a["dismissedAt"] = now_iso
             _cashier_save_alerts(raw)
+            # نفس المعرف غالباً موجود في وارد الأدوار (جرس أحمر). كمَّه أيضاً لتجنّب بقاء مزدوج.
+            try:
+                rin = _role_inbox_load_rows()
+                hid = False
+                for rr in rin:
+                    if isinstance(rr, dict) and str(rr.get("id") or "") == str(alert_id):
+                        rr["dismissedAt"] = now_iso
+                        hid = True
+                if hid:
+                    _role_inbox_save_rows(rin)
+            except Exception:
+                pass
             return {"ok": True, "id": alert_id}
     raise HTTPException(status_code=404, detail="التنبيه غير موجود")
 
@@ -14359,6 +14489,71 @@ def restaurant_daily_menu_schedule_put(body: dict):
     payload = {"entries": out_entries}
     _restaurant_save("daily_menu_schedule", payload)
     return {"ok": True, "entries": out_entries}
+
+
+@app.get("/api/restaurant/catalog-addons")
+def restaurant_catalog_addons_get():
+    """كتالوج إضافات الأصناف — يستخدمه الجرسون (مودال) وصفحة الإعدادات."""
+    d = _restaurant_load("catalog_addons", {"items": []})
+    raw = d.get("items") if isinstance(d.get("items"), list) else []
+    items_out: List[dict] = []
+    for i, it in enumerate(raw):
+        if not isinstance(it, dict):
+            continue
+        label = str(it.get("label") or "").strip() or "إضافة"
+        try:
+            oid = int(it.get("id"))
+        except (TypeError, ValueError):
+            oid = 0
+        if oid <= 0:
+            oid = i + 1
+        try:
+            so = int(it.get("sortOrder"))
+        except (TypeError, ValueError):
+            so = i
+        items_out.append(
+            {
+                "id": oid,
+                "label": label[:200],
+                "price": max(0.0, float(it.get("price") or 0)),
+                "sortOrder": so,
+                "isActive": it.get("isActive") is not False,
+            }
+        )
+    items_out.sort(key=lambda x: (int(x.get("sortOrder") or 0), int(x.get("id") or 0)))
+    active_count = sum(1 for x in items_out if x.get("isActive"))
+    return {"ok": True, "items": items_out, "activeCount": active_count, "totalCount": len(items_out)}
+
+
+@app.put("/api/restaurant/catalog-addons")
+def restaurant_catalog_addons_put(body: dict):
+    """حفظ الكتالوج كاملاً (نفس شكل صفحة الإعدادات)."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    raw = body.get("items") if isinstance(body.get("items"), list) else []
+    norm: List[dict] = []
+    for i, it in enumerate(raw):
+        if not isinstance(it, dict):
+            continue
+        label = str(it.get("label") or "").strip()
+        if not label:
+            continue
+        try:
+            so = int(it.get("sortOrder"))
+        except (TypeError, ValueError):
+            so = i
+        norm.append(
+            {
+                "label": label[:200],
+                "price": max(0.0, float(it.get("price") or 0)),
+                "sortOrder": so,
+                "isActive": it.get("isActive") is not False,
+            }
+        )
+    items = [{**row, "id": idx + 1} for idx, row in enumerate(norm)]
+    _restaurant_save("catalog_addons", {"items": items})
+    active_count = sum(1 for x in items if x.get("isActive"))
+    return {"ok": True, "items": items, "activeCount": active_count, "totalCount": len(items)}
 
 
 @app.get("/api/restaurant/invoices-local")

@@ -46,6 +46,8 @@ type RestTable = {
   status?: string;
   seats?: number;
   number?: number;
+  /** حدّ أدنى للطاولة من الخادم — 0 يعني استخدام الافتراضي العام من ops-settings */
+  minimumCharge?: number;
 };
 
 type CartLine = {
@@ -239,6 +241,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [sessionMoveBusy, setSessionMoveBusy] = useState(false);
   /** اسم للعرض/الطباعة على الشيك — نصّي على الجلسة وليس عميلاً منفصلاً في TBL016 */
   const [seatGuestLabels, setSeatGuestLabels] = useState<Record<number, string>>({});
+  /** حدّ أدنى افتراضي من `/api/restaurant/ops-settings` عندما لا يُحدَّد على الطاولة */
+  const [tableMinDefaultOps, setTableMinDefaultOps] = useState(0);
   const seatGuestLabelsRef = useRef<Record<number, string>>({});
   const patchSeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** مقعد واحد له حقل اسم مفتوح (بعد ضغط الزر)، أو الكتابة مباشرة في الحقل بعد الفتح */
@@ -263,6 +267,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     () => tables.find((t) => t.id === selectedTableId) || null,
     [tables, selectedTableId]
   );
+  const isDeliveryEmbedded = String(embeddedChannel || "").trim().toLowerCase() === "delivery";
   const selectedTableStatus = normalizeTableStatus(String((selectedTable as any)?.status || ""));
   const selectedTableBlocked = selectedTableStatus === "dirty" || selectedTableStatus === "cleaning";
 
@@ -383,6 +388,20 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
       setKitchenStoppedMap(sm);
       setAgents(alist);
+      try {
+        const opResp = await fetch(`${base}/api/restaurant/ops-settings?t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        });
+        const opTxt = await opResp.text();
+        const opJson = tryParseJson<Record<string, unknown>>(opTxt) ?? {};
+        if (opResp.ok) {
+          const mcRaw = Number(opJson.tableDefaultMinimumCharge ?? 0);
+          setTableMinDefaultOps(Number.isFinite(mcRaw) ? Math.max(0, mcRaw) : 0);
+        }
+      } catch {
+        /* ignore ops minimum */
+      }
       setSelectedAgentGuid((prev) => {
         if (prev && alist.some((a) => a.CardGuide === prev)) return prev;
         const pick = alist.find((a) => {
@@ -751,21 +770,37 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const discountValue = promoResult.invoiceDiscount + lineDiscountTotal;
   const netBeforeTax = Math.max(0, gross - discountValue);
 
+  const effectiveTableMinimum = useMemo(() => {
+    if (isDeliveryEmbedded) return 0;
+    if (!selectedTable) return 0;
+    const tmc = toNum(selectedTable.minimumCharge, 0);
+    if (tmc > 0) return tmc;
+    return Math.max(0, tableMinDefaultOps);
+  }, [selectedTable, isDeliveryEmbedded, tableMinDefaultOps]);
+
+  const netAfterMinimum =
+    effectiveTableMinimum > 0 && !isDeliveryEmbedded ? Math.max(netBeforeTax, effectiveTableMinimum) : netBeforeTax;
+
+  const minimumChargeDelta =
+    effectiveTableMinimum > 0 && !isDeliveryEmbedded && netBeforeTax < effectiveTableMinimum
+      ? effectiveTableMinimum - netBeforeTax
+      : 0;
+
   const billingTotals = useMemo(() => {
     const sbp = sessionBillingProfile;
     const billActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
     const vipPct = billActive ? Math.max(0, Math.min(100, toNum(sbp?.discountPct, 0))) : 0;
-    const netAfterOwner = billActive ? Math.max(0, netBeforeTax * (1 - vipPct / 100)) : netBeforeTax;
+    const netAfterOwner = billActive ? Math.max(0, netAfterMinimum * (1 - vipPct / 100)) : netAfterMinimum;
     const ownerTpl = billActive && String(sbp?.source || "") === "vip_owner_template";
     if (!billActive) {
-      const baseAmount = policy.applyDiscountBeforeTax ? netBeforeTax : gross;
+      const baseAmount = policy.applyDiscountBeforeTax ? netAfterMinimum : gross;
       const svc = (baseAmount * policy.servicePercent) / 100;
       const vat =
         policy.serviceBeforeVat
-          ? ((netBeforeTax + svc) * policy.vatPercent) / 100
-          : (netBeforeTax * policy.vatPercent) / 100;
+          ? ((netAfterMinimum + svc) * policy.vatPercent) / 100
+          : (netAfterMinimum * policy.vatPercent) / 100;
       return {
-        netPortion: netBeforeTax,
+        netPortion: netAfterMinimum,
         serviceCharge: svc,
         vatValue: vat,
         ownerDiscountPct: 0,
@@ -793,7 +828,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     };
   }, [
     sessionBillingProfile,
-    netBeforeTax,
+    netAfterMinimum,
     gross,
     policy.applyDiscountBeforeTax,
     policy.servicePercent,
@@ -1766,9 +1801,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     تسعير تكلفة + هامش على الأصناف الجديدة — التقديم يعتمد على AgentPrice المحفوظ.
                   </div>
                 ) : null}
+                {effectiveTableMinimum > 0 && minimumChargeDelta > 0 ? (
+                  <div style={{ color: "#92400e", fontSize: "0.85rem", fontWeight: 800, lineHeight: 1.35 }}>
+                    الحدّ الأدنى {effectiveTableMinimum.toFixed(2)} ج.م — فرق مطبَّق على الصافي {minimumChargeDelta.toFixed(2)} ج.م (بدون فرق كان{" "}
+                    {netBeforeTax.toFixed(2)}).
+                  </div>
+                ) : null}
                 {billingTotals.ownerDiscountPct > 0 ? (
                   <div style={{ color: "#0f172a", fontSize: "0.88rem", fontWeight: 700 }}>
-                    خصم مالك بعد العروض {billingTotals.ownerDiscountPct}%: صافي قبل الضرائب {netBeforeTax.toFixed(2)} ←{" "}
+                    خصم مالك بعد العروض {billingTotals.ownerDiscountPct}%: صافي قبل الضرائب {netAfterMinimum.toFixed(2)} ←{" "}
                     {billingTotals.netPortion.toFixed(2)}
                   </div>
                 ) : null}
