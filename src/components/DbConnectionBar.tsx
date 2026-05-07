@@ -42,12 +42,24 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
     async function poll() {
       const base = getApiBase();
       try {
-        const [rReady, rCfg] = await Promise.all([
-          fetch(`${base}/api/ready?check_db=1`, { cache: "no-store" }),
-          fetch(`${base}/api/settings/connection`, { cache: "no-store" }),
+        /** أولاً: ping خفيف — يثبت أن FastAPI يعمل حتى لو فحص ODBC في /ready بطيء أو فاشل */
+        const [rPing, rCfg] = await Promise.all([
+          fetch(`${base}/api/ping`, { cache: "no-store" }),
+          fetch(`${base}/api/settings/connection`, { cache: "no-store" }).catch(() => new Response("", { status: 0 })),
         ]);
-        const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg);
-        if (!rReady.ok) {
+        const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : new Response("", { status: 0 }));
+
+        let apiAlive = false;
+        if (rPing.ok) {
+          try {
+            const pj = (await rPing.json()) as { ok?: boolean };
+            apiAlive = pj?.ok === true;
+          } catch {
+            apiAlive = false;
+          }
+        }
+
+        if (!apiAlive) {
           if (!cancelled) {
             setApiDown(true);
             setOk(false);
@@ -56,9 +68,18 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
           }
           return;
         }
-        const j = (await rReady.json()) as { database?: ReadyDb };
+
+        if (!cancelled) setApiDown(false);
+
+        const rReady = await fetch(`${base}/api/ready?check_db=1`, { cache: "no-store" });
         if (cancelled) return;
-        setApiDown(false);
+        if (!rReady.ok) {
+          setOk(false);
+          setDbName(cfgDb);
+          setServerLabel(cfgServer);
+          return;
+        }
+        const j = (await rReady.json()) as { database?: ReadyDb };
         const db = j.database;
         const st = db?.status;
         setOk(st === "ok");
@@ -68,7 +89,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
       } catch {
         try {
           const rCfg = await fetch(`${base}/api/settings/connection`, { cache: "no-store" });
-          const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg);
+          const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : new Response("", { status: 0 }));
           if (!cancelled) {
             setDbName(cfgDb);
             setServerLabel(cfgServer);
@@ -106,7 +127,11 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
 
   return (
     <div
-      title={apiDown ? "تحقق من تشغيل API والشبكة" : sub || undefined}
+      title={
+        apiDown
+          ? "شغّل run_api.bat أو run_full_stack — ثم http://127.0.0.1:2288/api/ping | الواجهة من Vite: المنفذ 9999"
+          : sub || undefined
+      }
       style={{
         display: "flex",
         alignItems: "center",
