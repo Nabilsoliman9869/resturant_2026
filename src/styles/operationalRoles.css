@@ -629,6 +629,12 @@
   min-height: 0;
 }
 
+/* هامش من حافة النافذة (بداية السطر في RTL) حتى لا يلصق عمود التصنيف — span 3 في TS بدون تقييد عرض الشبكة */
+.waiter-pos__topbar > .waiter-pos__top-card--categories {
+  margin-inline-start: clamp(18px, 2.8vw, 36px);
+  box-sizing: border-box;
+}
+
 .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar {
   flex: 1 1 0;
   min-height: 0;
@@ -1524,6 +1530,210 @@
   .waiter-tables-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* صف طاولات الجرسون — شكل حديث ومضغوط (لا تطابق «الكروت» الضخمة القديمة) */
+.waiter-tables-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.waiter-tables-toolbar h2 {
+  margin: 0;
+}
+
+.waiter-tables-floor-band {
+  grid-column: 1 / -1;
+  margin-top: 0.65rem;
+  margin-bottom: 0.2rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 12px;
+  background: linear-gradient(105deg, rgba(99, 102, 241, 0.07) 0%, rgba(148, 163, 184, 0.14) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  font-weight: 850;
+  font-size: 0.95rem;
+  color: var(--wp-fg, #0f172a);
+  letter-spacing: 0.01em;
+}
+
+.waiter-tables-floor-band:first-of-type {
+  margin-top: 0;
+}
+
+.waiter-tables-card-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.waiter-tables-card {
+  position: relative;
+  width: 100%;
+  border: none;
+  outline: none;
+  font: inherit;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.98) 0%, var(--wp-card) 55%, #f8fafc 100%);
+  border-radius: 16px;
+  padding: 0.85rem 0.75rem 0.65rem;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  border: 2px solid transparent;
+}
+
+.waiter-tables-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.09);
+}
+
+.waiter-tables-card--ready {
+  border-color: rgba(34, 197, 94, 0.85);
+}
+
+.waiter-tables-card--busy {
+  border-color: rgba(239, 68, 68, 0.9);
+}
+
+.waiter-tables-card--blocked {
+  border-color: rgba(245, 158, 11, 0.95);
+}
+
+.waiter-tables-card--bill {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.35), 0 4px 14px rgba(37, 99, 235, 0.08);
+}
+
+.waiter-tables-card-num {
+  font-size: 1.28rem;
+  font-weight: 950;
+  color: #0f172a;
+  line-height: 1.15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.waiter-tables-card-meta {
+  font-size: 0.78rem;
+  color: var(--wp-muted, #64748b);
+  font-weight: 600;
+}
+
+.waiter-tables-card-captain {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #0369a1;
+}
+
+.waiter-tables-card-captain--muted {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.waiter-tables-card-status {
+  margin-top: auto;
+  font-size: 0.8rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.waiter-tables-card-status--ok {
+  color: #166534;
+}
+
+.waiter-tables-card-status--busy {
+  color: #b91c1c;
+}
+
+.waiter-tables-card-status--hold {
+  color: #b45309;
+}
+
+.waiter-tables-card-alert {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.waiter-tables-card-alert--danger {
+  color: #b91c1c;
+}
+
+.waiter-tables-card-alert--delay {
+  color: #6d28d9;
+}
+
+.waiter-tables-card-flag {
+  position: absolute;
+  top: 8px;
+  inset-inline-start: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #7c3aed;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.waiter-tables-vip-pill {
+  font-size: 10px;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fde68a, #fbbf24);
+  color: #78350f;
+  border: 1px solid #d97706;
+}
+
+.waiter-tables-inline-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.waiter-tables-pill-btn {
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: inherit;
+}
+
+.waiter-tables-pill-btn--warm {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.waiter-tables-pill-btn--ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.waiter-tables-wrap-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
 }
 
 .role-op__map-card {

@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { tryParseJson } from "../lib/tryParseJson";
+import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 
@@ -94,26 +95,28 @@ export default function WaiterTablesPage() {
   const loadTables = useCallback(async () => {
     try {
       const [fp, rt, rs, ro, wf] = await Promise.all([
-        fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
-        fetch(`${base}/api/restaurant/tables`),
-        fetch(`${base}/api/restaurant/table-sessions?status=active`),
-        fetch(`${base}/api/restaurant/orders`),
-        fetch(`${base}/api/restaurant/workflow-settings`),
+        safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
+        safeFetch(`${base}/api/restaurant/tables`),
+        safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
+        safeFetch(`${base}/api/restaurant/orders`),
+        safeFetch(`${base}/api/restaurant/workflow-settings`),
       ]);
       const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const js = (tryParseJson(await rs.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const oj = (tryParseJson(await ro.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const httpLabel = (r: Response, nameAr: string) =>
+        `${nameAr} (${r.status === 0 ? "لا اتصال — شغّل API 2288" : `HTTP ${r.status}`})`;
       const bad: string[] = [];
-      if (!fp.ok) bad.push(`floor-plan ${fp.status}`);
-      if (!rt.ok) bad.push(`tables ${rt.status}`);
-      if (!rs.ok) bad.push(`sessions ${rs.status}`);
-      if (!ro.ok) bad.push(`orders ${ro.status}`);
-      if (!wf.ok) bad.push(`workflow ${wf.status}`);
+      if (!fp.ok) bad.push(httpLabel(fp, "خريطة الصالة"));
+      if (!rt.ok) bad.push(httpLabel(rt, "الطاولات"));
+      if (!rs.ok) bad.push(httpLabel(rs, "الجلسات"));
+      if (!ro.ok) bad.push(httpLabel(ro, "الطلبات"));
+      if (!wf.ok) bad.push(httpLabel(wf, "إعداد المسند"));
       if (bad.length) {
         setMsg(
-          `تعذّر الاتصال بالـ API (${bad.join(", ")}). شغّل «run_api.bat» أو «run_full_stack.bat» ثم تأكد من http://127.0.0.1:2288/api/ready`,
+          `تعذّر تحميل البيانات: ${bad.join(" · ")}. إن ظهر «لا اتصال» فشغّل run_api.bat ثم افتح http://127.0.0.1:2288/api/ping`,
         );
         setTables([]);
         setSessionByTable(new Map());
@@ -170,7 +173,7 @@ export default function WaiterTablesPage() {
       setBusyIds(busy);
       setBillReqIds(billreq);
     } catch (e) {
-      setMsg(String(e));
+      setMsg(briefNetworkHint(e));
     }
   }, [base]);
 
@@ -194,7 +197,7 @@ export default function WaiterTablesPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`${base}/api/auth/users`);
+        const res = await safeFetch(`${base}/api/auth/users`);
         const j = tryParseJson<{ users?: StaffUser[] }>(await res.text()) ?? {};
         if (cancelled || !res.ok) return;
         const u = Array.isArray(j.users) ? j.users : [];
@@ -219,13 +222,17 @@ export default function WaiterTablesPage() {
     }
     setClaimBusy(true);
     try {
-      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/claim-order-taker`, {
+      const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/claim-order-taker`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mat3amActor: actor }),
       });
       const t = await r.text();
       if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
         const j = tryParseJson<{ detail?: unknown }>(t);
         const d = j?.detail;
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
@@ -234,7 +241,7 @@ export default function WaiterTablesPage() {
       setMsg("تم تسكينك كابتن على هذه الجلسة.");
       await loadTables();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(briefNetworkHint(e));
     } finally {
       setClaimBusy(false);
     }
@@ -255,7 +262,7 @@ export default function WaiterTablesPage() {
     }
     setReassignBusy(true);
     try {
-      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(reassignSid)}/reassign-order-taker`, {
+      const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(reassignSid)}/reassign-order-taker`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -267,6 +274,10 @@ export default function WaiterTablesPage() {
       });
       const t = await r.text();
       if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
         const j = tryParseJson<{ detail?: unknown }>(t);
         const d = j?.detail;
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
@@ -277,7 +288,7 @@ export default function WaiterTablesPage() {
       setReassignPickId("");
       await loadTables();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(briefNetworkHint(e));
     } finally {
       setReassignBusy(false);
     }
@@ -285,15 +296,28 @@ export default function WaiterTablesPage() {
 
   async function changeTableStatus(tableId: string, status: "dirty" | "cleaning" | "ready") {
     try {
-      await fetch(`${base}/api/restaurant/tables/${encodeURIComponent(tableId)}/status`, {
+      const r = await safeFetch(`${base}/api/restaurant/tables/${encodeURIComponent(tableId)}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      const updated = tables.map((t: any) => (String(t.id) === String(tableId) ? { ...t, status } : t));
+      const t = await r.text();
+      if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t.slice(0, 280) || `HTTP ${r.status}`);
+        return;
+      }
+      const updated = tables.map((tRow: RestTable) =>
+        String(tRow.id) === String(tableId) ? { ...tRow, status } : tRow,
+      );
       setTables(updated);
     } catch (e) {
-      setMsg(String(e));
+      setMsg(briefNetworkHint(e));
     }
   }
 
@@ -369,24 +393,21 @@ export default function WaiterTablesPage() {
     <div className="role-op waiter-pos" onClick={() => setReport(null)}>
       <OperationalRoleHeader roleTitle={headerTitle} hideBack />
 
-      <div className="role-op__main" style={{ maxWidth: 720 }}>
-        <h2 className="role-op__section-title">اختر الطاولة</h2>
+      <div className="role-op__main">
+        <div className="waiter-tables-toolbar">
+          <h2 className="role-op__section-title">اختر الطاولة</h2>
+          <button type="button" className="btn btn-ghost" onClick={() => void loadTables()} style={{ fontWeight: 800 }}>
+            تحديث القائمة
+          </button>
+        </div>
         {msg && <p className="waiter-pos__msg">{msg}</p>}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-            gap: "1rem",
-            marginTop: "1rem",
-          }}
-        >
+        <div className="waiter-tables-grid">
           {tables.map((t) => {
             if (t.isSeparator) {
               return (
-                <div key={t.id} style={{ gridColumn: "1 / -1" }}>
-                  <div style={{ fontWeight: 700, marginBottom: "0.25rem" }}>{t.name}</div>
-                  <hr style={{ border: 0, borderTop: "1px dashed var(--border, #cbd5e1)" }} />
+                <div key={t.id} className="waiter-tables-floor-band" role="group" aria-label={t.name}>
+                  {t.name}
                 </div>
               );
             }
@@ -407,15 +428,12 @@ export default function WaiterTablesPage() {
               : "";
             const capId = sessRow ? String(sessRow.captainUserId || "").trim() : "";
             const isVipTable = Boolean(t.features?.vipSection);
+            const cardTone = notReady ? "blocked" : isBusy ? "busy" : "ready";
             return (
-              <div key={t.id} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div key={t.id} className="waiter-tables-card-wrap">
               <button
                 type="button"
-                className="role-op__pick-card"
-                style={{
-                  border: notReady ? "2px solid #f59e0b" : isBusy ? "2px solid #ef4444" : "2px solid #22c55e",
-                  boxShadow: billReq ? "0 0 0 3px rgba(59,130,246,0.35)" : undefined,
-                }}
+                className={`waiter-tables-card waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}`}
                 onClick={() => {
                   if (notReady) {
                     setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
@@ -440,79 +458,64 @@ export default function WaiterTablesPage() {
                 }}
                 onContextMenu={(ev) => showTableReport(t, ev)}
               >
-                <div className="role-op__pick-num" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {noOrderOverdue ? <span className="waiter-tables-card-flag" title="تأخر طلب على الطاولة">⏱</span> : null}
+                <div className="waiter-tables-card-num">
                   <span>{num}</span>
                   {isVipTable ? (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 900,
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        background: "linear-gradient(180deg,#fde68a,#fbbf24)",
-                        color: "#78350f",
-                        border: "1px solid #d97706",
-                      }}
-                      title="فوترة VIP من إعدادات التشغيل عند فتح الجلسة"
-                    >
+                    <span className="waiter-tables-vip-pill" title="فوترة VIP من إعدادات التشغيل عند فتح الجلسة">
                       VIP
                     </span>
                   ) : null}
                 </div>
-                {noOrderOverdue ? (
-                  <div style={{ position: "absolute", top: 8, left: 8, width: 24, height: 24, borderRadius: 999, background: "#7c3aed", color: "#fff", display: "grid", placeItems: "center", fontSize: 14, fontWeight: 900 }}>
-                    ⏱
-                  </div>
-                ) : null}
-                <div className="role-op__pick-sub">🪑 مقاعد {t.seats ?? "—"}</div>
+                <div className="waiter-tables-card-meta">المقاعد: {t.seats ?? "—"}</div>
                 {captainLabel ? (
-                  <div style={{ marginTop: 6, fontSize: "0.8rem", fontWeight: 900, color: "#0369a1" }}>كابتن: {captainLabel}</div>
+                  <div className="waiter-tables-card-captain">كابتن: {captainLabel}</div>
                 ) : sidStr ? (
-                  <div style={{ marginTop: 6, fontSize: "0.74rem", color: "#64748b" }}>لم يُسكَّن كابتن بعد</div>
+                  <div className="waiter-tables-card-captain waiter-tables-card-captain--muted">لم يُسكَّن كابتن بعد</div>
                 ) : null}
-                <div style={{ marginTop: 8, fontSize: "0.82rem", color: isBusy ? "#b91c1c" : "#166534" }}>
+                <div
+                  className={`waiter-tables-card-status ${notReady ? "waiter-tables-card-status--hold" : isBusy ? "waiter-tables-card-status--busy" : "waiter-tables-card-status--ok"}`}
+                >
                   {notReady ? (tStatus === "dirty" ? "متسخة" : "قيد التنظيف") : isBusy ? "مشغولة" : "جاهزة"}
                   {billReq ? " · طلب حساب" : ""}
                 </div>
                 {cleanupOverdue ? (
-                  <div style={{ marginTop: 6, fontSize: "0.78rem", color: "#b91c1c", fontWeight: 800 }}>
-                    تنبيه: تأخر تنظيف أكثر من 10 دقائق
-                  </div>
+                  <div className="waiter-tables-card-alert waiter-tables-card-alert--danger">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div>
                 ) : null}
                 {noOrderOverdue ? (
-                  <div style={{ marginTop: 4, fontSize: "0.78rem", color: "#7c3aed", fontWeight: 800 }}>
+                  <div className="waiter-tables-card-alert waiter-tables-card-alert--delay">
                     تنبيه: تأخر أخذ الطلب {noOrderMinutes} د
                   </div>
                 ) : null}
-                <div style={{ marginTop: 8, display: "flex", gap: 6, justifyContent: "center" }}>
+                <div className="waiter-tables-inline-actions">
                   {tStatus === "dirty" && (
-                    <span
-                      role="button"
+                    <button
+                      type="button"
+                      className="waiter-tables-pill-btn waiter-tables-pill-btn--warm"
                       onClick={(e) => {
                         e.stopPropagation();
                         void changeTableStatus(String(t.id), "cleaning");
                       }}
-                      style={{ fontSize: 11, padding: "2px 6px", borderRadius: 999, background: "#fef3c7", color: "#92400e", cursor: "pointer" }}
                     >
                       بدء تنظيف
-                    </span>
+                    </button>
                   )}
                   {tStatus === "cleaning" && (
-                    <span
-                      role="button"
+                    <button
+                      type="button"
+                      className="waiter-tables-pill-btn waiter-tables-pill-btn--ok"
                       onClick={(e) => {
                         e.stopPropagation();
                         void changeTableStatus(String(t.id), "ready");
                       }}
-                      style={{ fontSize: 11, padding: "2px 6px", borderRadius: 999, background: "#dcfce7", color: "#166534", cursor: "pointer" }}
                     >
                       تم التنظيف
-                    </span>
+                    </button>
                   )}
                 </div>
               </button>
               {sidStr ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+                <div className="waiter-tables-wrap-btns" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     className="btn btn-primary"
