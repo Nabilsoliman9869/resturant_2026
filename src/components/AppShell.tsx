@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { CashierAlertsBar } from "./CashierAlertsBar";
+import { RestaurantDualBells } from "./RestaurantDualBells";
 import { DbConnectionBar } from "./DbConnectionBar";
 import { sessionDisplayName } from "../auth/displayUser";
 import { useAuth } from "../auth/AuthContext";
@@ -36,26 +37,26 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "captain-tables", label: "شريحات الطاولات" },
     { to: "order-taker", label: "طلب للطاولة" },
     { to: "call-center", label: "Call Center (دليفري)" },
+    { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "settings", label: "إعدادات التشغيل" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
     { to: "cash-expense", label: "صرف مصروفات" },
     { to: "reports", label: "تقارير" },
     { to: "cashflow", label: "التدفق النقدي" },
-    { to: "settings", label: "إعدادات النظام" },
   ],
   developer: [
     { to: "dashboard", label: "داشبورد" },
     { to: "captain-tables", label: "شريحات الطاولات" },
     { to: "order-taker", label: "طلب للطاولة" },
     { to: "call-center", label: "Call Center (دليفري)" },
+    { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "settings", label: "إعدادات" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
     { to: "cash-expense", label: "صرف مصروفات" },
     { to: "reports", label: "تقارير الحسابات" },
     { to: "cashflow", label: "التدفق النقدي" },
-    { to: "settings", label: "إعدادات النظام" },
   ],
   host: [{ to: "reception", label: "استقبال العملاء" }],
   waiter: [
@@ -111,8 +112,11 @@ export function AppShell({ role }: { role: RoleId }) {
     return mapped;
   }, [role, venueType]);
 
+  const interDeptBells = role !== "kids_guard";
+
   return (
     <div style={{ display: "flex", minHeight: "100%" }}>
+      {interDeptBells ? <RestaurantDualBells role={role} /> : null}
       {!isWaiterOrderTaker && (
         <aside
           style={{

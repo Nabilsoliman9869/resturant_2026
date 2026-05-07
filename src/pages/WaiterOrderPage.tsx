@@ -57,7 +57,13 @@ type CartLine = {
   /** عرض فقط / ترجمة قديمة؛ التوزيع الحقيقي على seatNo */
   seatLabel: string | null;
   seatNo: number | null;
+  /** معرّفات الإضافات مرتبة (|) — للتمييز عند الدمج مع نفس الصنف والمقعد */
+  addonIdsKey?: string;
+  /** ملاحظة للمطبخ/التذكرة — تُدمج مع اسم البند عند الإرسال */
+  kitchenNotes?: string;
 };
+
+type CatalogAddonRow = { id: number; label: string; price: number; sortOrder: number; isActive: boolean };
 
 type ServerOrder = {
   id: string;
@@ -78,6 +84,15 @@ type PosPolicy = {
 
 function lineId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function addonRowsKey(rows: CatalogAddonRow[]): string {
+  if (!rows.length) return "";
+  return rows
+    .map((r) => r.id)
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b)
+    .join("|");
 }
 
 function toNum(v: unknown, d = 0) {
@@ -157,7 +172,15 @@ function extractSeatFromOrderItem(it: { name?: string; seatNo?: number }): numbe
   return null;
 }
 
-export default function WaiterOrderPage() {
+export type WaiterOrderPageProps = {
+  /** عند تضمين الصفحة (مثلاً كول سنتر) — يُمرَّر كـ orderType للفاتورة عند الإرسال */
+  embeddedChannel?: string;
+  pageTitle?: string;
+  backTo?: string;
+};
+
+export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
+  const { embeddedChannel, pageTitle, backTo } = props;
   const base = getApiBase();
   const resolveMediaUrl = (u?: string) => {
     const raw = String(u || "").trim();
@@ -199,6 +222,12 @@ export default function WaiterOrderPage() {
   const [sessionBusy, setSessionBusy] = useState(false);
   const [sessionOrders, setSessionOrders] = useState<ServerOrder[]>([]);
   const [ordersBusy, setOrdersBusy] = useState(false);
+  const [catalogAddons, setCatalogAddons] = useState<CatalogAddonRow[]>([]);
+  /** بعد أول محاولة جلب — يُمنع ضغطة سريقة قبل اكتمال التحميل (كانت تتخطّى المودال) */
+  const [catalogAddonsReady, setCatalogAddonsReady] = useState(false);
+  const [addonPickerProduct, setAddonPickerProduct] = useState<Product | null>(null);
+  const [addonPickerSel, setAddonPickerSel] = useState<Record<number, boolean>>({});
+  const [addonPickerNotes, setAddonPickerNotes] = useState("");
   const [billingRequestedAt, setBillingRequestedAt] = useState<string | null>(null);
   const [sessionBillingProfile, setSessionBillingProfile] = useState<SessionBillingProfile | null>(null);
   const [requestBillBusy, setRequestBillBusy] = useState(false);
@@ -445,6 +474,79 @@ export default function WaiterOrderPage() {
     if (!user?.id) return false;
     return String(user.id) !== String(captainGate.id);
   }, [orderTakerExclusiveTable, captainGate, user?.id, user?.role]);
+
+  /** إحصاء حالات طلبات الجلسة الحالية للمطبخ — شريط معلومات بالشريط العلوي */
+  const sessionKitchenStats = useMemo(() => {
+    let pending = 0;
+    let preparing = 0;
+    let ready = 0;
+    for (const o of sessionOrders) {
+      const st = String(o.status || "").toLowerCase();
+      if (st === "cancelled" || st === "paid" || st === "served") continue;
+      if (st === "pending") pending += 1;
+      else if (st === "preparing") preparing += 1;
+      else if (st === "ready") ready += 1;
+    }
+    return { pending, preparing, ready };
+  }, [sessionOrders]);
+
+  const activeCatalogAddons = useMemo(
+    () =>
+      catalogAddons
+        .filter((r) => r.isActive !== false && String(r.label || "").trim() !== "")
+        .slice()
+        .sort((a, b) => (a.sortOrder !== b.sortOrder ? a.sortOrder - b.sortOrder : a.id - b.id)),
+    [catalogAddons],
+  );
+
+  const loadCatalogAddons = useCallback(async () => {
+    try {
+      const r = await fetch(`${base}/api/restaurant/catalog-addons?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      const t = await r.text();
+      if (r.ok) {
+        const j = tryParseJson<{ items?: unknown }>(t) ?? {};
+        const it = Array.isArray(j.items) ? j.items : [];
+        setCatalogAddons(
+          it.map((x: unknown) => {
+            const row = x && typeof x === "object" ? (x as Record<string, unknown>) : {};
+            return {
+              id: Number(row.id) || 0,
+              label: String(row.label || "").trim() || "إضافة",
+              price: Math.max(0, Number(row.price) || 0),
+              sortOrder: Number(row.sortOrder) || 0,
+              isActive: row.isActive !== false,
+            };
+          }),
+        );
+      }
+    } catch {
+      /* لا نعطل الشاشة إن تعذّر الكتالوج */
+    } finally {
+      setCatalogAddonsReady(true);
+    }
+  }, [base]);
+
+  useEffect(() => {
+    void loadCatalogAddons();
+  }, [loadCatalogAddons]);
+
+  /** عند فتح المودال نحدّث الكتالوج من الخادم */
+  useEffect(() => {
+    if (!addonPickerProduct) return;
+    void loadCatalogAddons();
+  }, [addonPickerProduct, loadCatalogAddons]);
+
+  useEffect(() => {
+    if (!addonPickerProduct) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAddonPickerProduct(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [addonPickerProduct]);
 
   useEffect(() => {
     const applyToday = () => setBillDate(new Date().toISOString().slice(0, 10));
@@ -708,7 +810,7 @@ export default function WaiterOrderPage() {
   const itemCount = cart.reduce((a, l) => a + l.qty, 0);
   const billingLocked = Boolean(billingRequestedAt);
 
-  function addProduct(p: Product) {
+  function pushCartLineForProduct(p: Product, addons: CatalogAddonRow[], kitchenNotesRaw = "") {
     if (orderTakingLocked && captainGate?.name) {
       setMsg(`الطاولة مسندة إلى جرسون الطلبات: ${captainGate.name}. لا يمكن إضافة بنود إلا من حساب المسند أو عبر المدير (قفل الطاولة مفعّل).`);
       return;
@@ -726,16 +828,28 @@ export default function WaiterOrderPage() {
       setMsg("تم طلب الحساب — لا يمكن إضافة بنود حتى يُسدّد الكاشير.");
       return;
     }
+    const notesForLine = String(kitchenNotesRaw || "").trim().slice(0, 300);
+    const addonKey = addonRowsKey(addons);
+    const basePrice = resolveGuestUnitPrice(p, sessionBillingProfile);
+    const addonSum = addons.reduce((s, a) => s + Math.max(0, a.price), 0);
+    const unitPrice = basePrice + addonSum;
+    const bits = addons.map((a) => String(a.label || "").trim()).filter(Boolean);
+    const lineName = bits.length ? `${p.ProductName} (+ ${bits.join("، ")})` : p.ProductName;
     const sn = assignmentMode === "general" ? null : selectedSeat;
     setCart((prev) => {
       const ex = prev.find((x) => {
         const xn = seatNoFromLine(x);
-        return x.productGuide === p.CardGuide && (sn == null ? xn == null : xn === sn);
+        const ak = x.addonIdsKey ?? "";
+        const nk = String(x.kitchenNotes || "").trim();
+        return x.productGuide === p.CardGuide && (sn == null ? xn == null : xn === sn) && ak === addonKey && nk === notesForLine;
       });
       if (ex) {
         return prev.map((x) => {
           const xn = seatNoFromLine(x);
-          const match = x.productGuide === p.CardGuide && (sn == null ? xn == null : xn === sn);
+          const ak = x.addonIdsKey ?? "";
+          const nk = String(x.kitchenNotes || "").trim();
+          const match =
+            x.productGuide === p.CardGuide && (sn == null ? xn == null : xn === sn) && ak === addonKey && nk === notesForLine;
           return match ? { ...x, qty: x.qty + 1 } : x;
         });
       }
@@ -744,14 +858,51 @@ export default function WaiterOrderPage() {
         {
           id: lineId(),
           productGuide: p.CardGuide,
-          name: p.ProductName,
+          name: lineName,
           qty: 1,
-          unitPrice: resolveGuestUnitPrice(p, sessionBillingProfile),
+          unitPrice,
           seatLabel: null,
           seatNo: sn,
+          ...(addonKey ? { addonIdsKey: addonKey } : {}),
+          ...(notesForLine ? { kitchenNotes: notesForLine } : {}),
         },
       ];
     });
+  }
+
+  /** ضغطة على صنف: دائماً خطوة اختيار إضافات (مودال) — تجنّباً لتخطّي المودال عند تأخّر الشبكة أو كتالوج فارغ */
+  function beginAddProduct(p: Product) {
+    if (orderTakingLocked && captainGate?.name) {
+      setMsg(`الطاولة مسندة إلى جرسون الطلبات: ${captainGate.name}. لا يمكن إضافة بنود إلا من حساب المسند أو عبر المدير (قفل الطاولة مفعّل).`);
+      return;
+    }
+    if (selectedTableBlocked) {
+      setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
+      return;
+    }
+    const stopNote = kitchenStoppedMap.get(p.CardGuide);
+    if (stopNote) {
+      setMsg(`الصنف غير متاح الآن من المطبخ: ${p.ProductName}${stopNote ? ` — ${stopNote}` : ""}`);
+      return;
+    }
+    if (billingLocked) {
+      setMsg("تم طلب الحساب — لا يمكن إضافة بنود حتى يُسدّد الكاشير.");
+      return;
+    }
+    setAddonPickerProduct(p);
+    setAddonPickerSel({});
+  }
+
+  function confirmAddonPicker(opts: { withoutAddons: boolean }) {
+    const p = addonPickerProduct;
+    if (!p) return;
+    setAddonPickerProduct(null);
+    if (opts.withoutAddons) {
+      pushCartLineForProduct(p, []);
+      return;
+    }
+    const picked = activeCatalogAddons.filter((r) => addonPickerSel[r.id]);
+    pushCartLineForProduct(p, picked);
   }
 
   function setQty(lineIdStr: string, qty: number) {
@@ -825,18 +976,24 @@ export default function WaiterOrderPage() {
       const items = cart.map((l) => {
         const sn = seatNoFromLine(l);
         const tag = assignmentMode === "general" || sn == null ? null : seatGuestDisplay(sn);
+        const kn = String(l.kitchenNotes || "").trim();
+        let nm = tag ? `${l.name} (${tag})` : l.name;
+        if (kn) nm += ` — ${kn.slice(0, 160)}`;
         return {
           productGuide: l.productGuide,
           menuItemId: l.productGuide,
-          name: tag ? `${l.name} (${tag})` : l.name,
+          name: nm,
           quantity: l.qty,
           unitPrice: l.unitPrice,
           ...(assignmentMode === "general" || sn == null ? {} : { seatNo: sn }),
         };
       });
 
+      const orderKind =
+        String(embeddedChannel || "").trim().toLowerCase() === "delivery" ? "delivery" : "table";
+
       const body = {
-        orderType: "table",
+        orderType: orderKind,
         sessionId: activeSessionId,
         tableId: selectedTableId,
         tableGuid: selectedTableId,
@@ -1039,7 +1196,8 @@ export default function WaiterOrderPage() {
   return (
     <div className="role-op waiter-pos">
       <OperationalRoleHeader
-        roleTitle="✦ OYA Resturant ✦"
+        roleTitle={pageTitle?.trim() ? pageTitle : "✦ OYA Resturant ✦"}
+        backTo={backTo}
         hideUser
         titleStyle={{
           fontSize: "2rem",
@@ -1059,7 +1217,7 @@ export default function WaiterOrderPage() {
           whiteSpace: "nowrap",
           zIndex: 2,
         }}
-        onBack={() => navigate("/app/waiter/tables")}
+        onBack={backTo ? undefined : () => navigate("/app/waiter/tables")}
         rightSlot={
           <div style={{ display: "flex", alignItems: "flex-end", gap: 8, direction: "ltr", minWidth: 0, width: "100%", justifyContent: "flex-end" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, minWidth: 280 }}>
@@ -1369,6 +1527,14 @@ export default function WaiterOrderPage() {
                   style={{ marginTop: 0, background: "#fff", color: "#0f172a", borderColor: "#94a3b8", padding: "10px 12px", fontSize: "0.95rem", fontWeight: 700 }}
                 />
               </div>
+              {activeSessionId ? (
+                <div className="waiter-pos__table-kitchen-strip" style={{ marginTop: 10 }}>
+                  <div className="waiter-pos__table-kitchen-strip__title">موقف الطلبات بالمطبخ (جلسة التسكين الحالية)</div>
+                  <div className="waiter-pos__table-kitchen-strip__counts" title="طلبات الجلسة الحالية المرسلة للمطبخ — حسب حالة التذكرة">
+                    انتظار {sessionKitchenStats.pending} · تحضير {sessionKitchenStats.preparing} · جاهز {sessionKitchenStats.ready}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="waiter-pos__top-card waiter-pos__top-card--tablemeta" style={{ order: 99 }}>
@@ -1394,6 +1560,9 @@ export default function WaiterOrderPage() {
                         const tag = xn != null ? seatGuestDisplay(xn) : null;
                         return tag ? `${l.name} · ${tag}` : l.name;
                       })()}
+                      {l.kitchenNotes?.trim() ? (
+                        <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2 }}>ملاحظة: {l.kitchenNotes.trim()}</div>
+                      ) : null}
                     </div>
                     <input type="number" min={1} value={l.qty} onChange={(e) => setQty(l.id, Number(e.target.value) || 0)} disabled={billingLocked} />
                     <span>{Math.max(0, l.qty * l.unitPrice - (promoResult.lineDiscounts[l.id] || 0)).toFixed(0)} ج.م</span>
@@ -1641,7 +1810,7 @@ export default function WaiterOrderPage() {
           <div className="waiter-pos__search-wrap" style={{ marginBottom: "0.5rem" }}>
             <SmartProductSearch
               onSelect={(hit) =>
-                addProduct(
+                beginAddProduct(
                   products.find((p) => String(p.CardGuide) === String(hit.CardGuide)) || {
                     CardGuide: hit.CardGuide,
                     ProductName: hit.ProductName,
@@ -1669,7 +1838,7 @@ export default function WaiterOrderPage() {
                   key={p.CardGuide}
                   type="button"
                   className="waiter-pos__card"
-                  onClick={() => addProduct(p)}
+                  onClick={() => beginAddProduct(p)}
                   style={{ opacity: stopped ? 0.55 : 1, position: "relative" }}
                   title={stopped ? stopNote : undefined}
                 >
@@ -1705,6 +1874,136 @@ export default function WaiterOrderPage() {
           </div>
         </main>
       </div>
+
+      {addonPickerProduct ? (
+        <div
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 200,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setAddonPickerProduct(null)}
+        >
+          <div
+            role="dialog"
+            aria-labelledby="addon-picker-title"
+            style={{
+              width: "min(420px, 100%)",
+              maxHeight: "min(72vh, 520px)",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 14,
+              boxShadow: "0 22px 50px rgba(0,0,0,0.22)",
+              border: "1px solid #e2e8f0",
+              padding: "1rem 1.1rem 1rem",
+              direction: "rtl",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="addon-picker-title" style={{ marginTop: 0, marginBottom: 8, fontSize: "1.05rem", fontWeight: 900 }}>
+              الإضافات — ملاحظات الطلب
+            </h3>
+            <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 12, lineHeight: 1.4 }}>{addonPickerProduct.ProductName}</div>
+            {!catalogAddonsReady ? (
+              <div style={{ padding: "1rem 0", textAlign: "center", color: "#64748b", fontWeight: 700 }}>
+                جاري تحميل كتالوج الإضافات…
+              </div>
+            ) : activeCatalogAddons.length === 0 ? (
+              <div
+                style={{
+                  marginBottom: 14,
+                  padding: "12px 10px",
+                  borderRadius: 10,
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  color: "#334155",
+                  lineHeight: 1.5,
+                  fontSize: "0.92rem",
+                }}
+              >
+                لا توجد إضافات نشطة في الكتالوج. راجع <strong>إعدادات المدير → الإضافات (كتالوج)</strong> أو أضف الصنف مباشرة.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                {activeCatalogAddons.map((r) => (
+                  <label
+                    key={r.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e2e8f0",
+                      cursor: "pointer",
+                      background: addonPickerSel[r.id] ? "#ecfdf5" : "#f8fafc",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(addonPickerSel[r.id])}
+                      onChange={(e) => setAddonPickerSel((prev) => ({ ...prev, [r.id]: e.target.checked }))}
+                    />
+                    <span style={{ flex: 1, fontWeight: 700 }}>{r.label}</span>
+                    <span style={{ fontWeight: 800, color: "#15803d" }}>+{r.price.toFixed(0)} ج.م</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <label style={{ display: "block", marginBottom: 14 }}>
+              <span style={{ display: "block", fontWeight: 800, marginBottom: 6 }}>ملاحظات</span>
+              <textarea
+                value={addonPickerNotes}
+                onChange={(e) => setAddonPickerNotes(e.target.value)}
+                placeholder="تعليمات للمطبخ (اختياري)…"
+                rows={3}
+                maxLength={400}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #cbd5e1",
+                  fontFamily: "inherit",
+                  resize: "vertical",
+                }}
+              />
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" onClick={() => setAddonPickerProduct(null)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="waiter-pos__btn waiter-pos__btn--ghost"
+                disabled={!catalogAddonsReady}
+                onClick={() => confirmAddonPicker({ withoutAddons: true })}
+              >
+                بدون إضافات
+              </button>
+              <button
+                type="button"
+                className="waiter-pos__btn"
+                disabled={!catalogAddonsReady || activeCatalogAddons.length === 0}
+                onClick={() => confirmAddonPicker({ withoutAddons: false })}
+                title={
+                  activeCatalogAddons.length === 0
+                    ? "لا توجد إضافات للاختيار — استخدم «بدون إضافات»"
+                    : undefined
+                }
+              >
+                أضف للطلب
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
