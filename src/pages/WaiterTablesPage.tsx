@@ -10,6 +10,7 @@ import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../li
 import "../styles/operationalRoles.css";
 
 type RestTable = SegmentedTableRow;
+type AlertPreset = { id: string; type: string; label: string };
 type TableSession = {
   id?: string;
   tableId?: string;
@@ -20,8 +21,15 @@ type TableSession = {
   captainLogin?: string;
   captainName?: string;
   captainClaimedAt?: string;
+  billingProfile?: {
+    active?: boolean;
+    source?: string;
+    vipTemplateId?: string;
+    vipOwnerLabel?: string;
+  };
 };
 type StaffUser = { id: string; login: string; name: string; role: string; isActive?: boolean };
+type VipTemplate = { id: string; label: string; active: boolean };
 type OrderItem = { name?: string; quantity?: number; unitPrice?: number };
 type OrderRow = {
   id?: string;
@@ -66,6 +74,14 @@ export default function WaiterTablesPage() {
   const [reassignPickId, setReassignPickId] = useState("");
   const [claimBusy, setClaimBusy] = useState(false);
   const [reassignBusy, setReassignBusy] = useState(false);
+  const [alertPresets, setAlertPresets] = useState<AlertPreset[]>([]);
+  const [alertPickByTable, setAlertPickByTable] = useState<Record<string, string>>({});
+  const [alertBusyByTable, setAlertBusyByTable] = useState<Record<string, boolean>>({});
+  const [minChargeDraftByTable, setMinChargeDraftByTable] = useState<Record<string, string>>({});
+  const [minChargeBusyByTable, setMinChargeBusyByTable] = useState<Record<string, boolean>>({});
+  const [vipTemplates, setVipTemplates] = useState<VipTemplate[]>([]);
+  const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
+  const [vipBusySessionId, setVipBusySessionId] = useState<string>("");
 
   function isTodayIso(iso?: string): boolean {
     if (!iso) return false;
@@ -94,18 +110,20 @@ export default function WaiterTablesPage() {
 
   const loadTables = useCallback(async () => {
     try {
-      const [fp, rt, rs, ro, wf] = await Promise.all([
+      const [fp, rt, rs, ro, wf, ops] = await Promise.all([
         safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
         safeFetch(`${base}/api/restaurant/tables`),
         safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
         safeFetch(`${base}/api/restaurant/orders`),
         safeFetch(`${base}/api/restaurant/workflow-settings`),
+        safeFetch(`${base}/api/restaurant/ops-settings`),
       ]);
       const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const js = (tryParseJson(await rs.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const oj = (tryParseJson(await ro.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const opsj = (tryParseJson(await ops.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const httpLabel = (r: Response, nameAr: string) =>
         `${nameAr} (${r.status === 0 ? "لا اتصال — شغّل API 2288" : `HTTP ${r.status}`})`;
       const bad: string[] = [];
@@ -114,6 +132,7 @@ export default function WaiterTablesPage() {
       if (!rs.ok) bad.push(httpLabel(rs, "الجلسات"));
       if (!ro.ok) bad.push(httpLabel(ro, "الطلبات"));
       if (!wf.ok) bad.push(httpLabel(wf, "إعداد المسند"));
+      if (!ops.ok) bad.push(httpLabel(ops, "إعدادات Owner/VIP"));
       if (bad.length) {
         setMsg(
           `تعذّر تحميل البيانات: ${bad.join(" · ")}. إن ظهر «لا اتصال» فشغّل run_api.bat ثم افتح http://127.0.0.1:2288/api/ping`,
@@ -127,6 +146,42 @@ export default function WaiterTablesPage() {
       setMsg("");
       const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
       setExclusiveOn(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
+      try {
+        const raw = String((opsj as { vipOwnerTemplatesJson?: unknown })?.vipOwnerTemplatesJson || "").trim();
+        const arr = raw ? (JSON.parse(raw) as unknown[]) : [];
+        const rows = (Array.isArray(arr) ? arr : [])
+          .filter((x) => x && typeof x === "object")
+          .map((x) => {
+            const row = x as Record<string, unknown>;
+            const id = String(row.id || "").trim();
+            const label = String(row.label || "").trim() || "Owner/VIP";
+            const active = row.isActive !== false;
+            return { id, label, active };
+          })
+          .filter((x) => x.id);
+        setVipTemplates(rows);
+      } catch {
+        setVipTemplates([]);
+      }
+
+      try {
+        const raw = String((opsj as { tableCashierAlertPresetsJson?: unknown })?.tableCashierAlertPresetsJson || "").trim();
+        const arr = raw ? (JSON.parse(raw) as unknown) : [];
+        const out: AlertPreset[] = [];
+        if (Array.isArray(arr)) {
+          for (const x of arr) {
+            const row = x && typeof x === "object" ? (x as Record<string, unknown>) : {};
+            const id = String(row.id || "").trim();
+            const type = String(row.type || "").trim().toLowerCase();
+            const label = String(row.label || "").trim();
+            if (!id || !type || !label) continue;
+            out.push({ id, type, label });
+          }
+        }
+        setAlertPresets(out);
+      } catch {
+        setAlertPresets([]);
+      }
 
       const apiTables: RestTable[] = Array.isArray(jt["tables"]) ? (jt["tables"] as RestTable[]) : [];
       const planRaw = fpj["plan"];
@@ -141,6 +196,18 @@ export default function WaiterTablesPage() {
           cleanupOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.cleanupOverdue),
         })),
       );
+
+      setMinChargeDraftByTable((prev) => {
+        const next = { ...prev };
+        for (const t of apiTables as any[]) {
+          const tid = String(t?.id || "").trim();
+          if (!tid) continue;
+          if (next[tid] != null && String(next[tid]).trim() !== "") continue;
+          const mc = Number(t?.minimumCharge ?? 0);
+          next[tid] = Number.isFinite(mc) ? String(Math.max(0, mc)) : "0";
+        }
+        return next;
+      });
       const m = new Map<string, string>();
       const sessions = (Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
         isTodayIso(String((s as TableSession)?.startTime || "")),
@@ -321,6 +388,129 @@ export default function WaiterTablesPage() {
     }
   }
 
+  async function applyVipBilling(sessionId: string, mode: string) {
+    if (!sessionId) return;
+    setMsg("");
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
+    setVipBusySessionId(sessionId);
+    try {
+      const body: Record<string, unknown> = { mat3amActor: actor };
+      if (!mode) {
+        body.clear = true;
+      } else if (mode === "__ops_defaults__") {
+        body.applyOpsDefaults = true;
+      } else {
+        body.vipTemplateId = mode;
+      }
+      const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/billing-profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg(!mode ? "تم إلغاء Owner/VIP للجلسة." : mode === "__ops_defaults__" ? "تم تطبيق افتراضيات Owner/VIP." : "تم تطبيق قالب Owner/VIP.");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setVipBusySessionId("");
+    }
+  }
+
+  async function saveMinimumCharge(tableId: string) {
+    const tid = String(tableId || "").trim();
+    if (!tid) return;
+    if (!(user?.role === "manager" || user?.role === "developer")) return;
+    const raw = String(minChargeDraftByTable[tid] ?? "").trim();
+    const mc = Number(raw);
+    if (!Number.isFinite(mc) || mc < 0) {
+      setMsg("minimum charge غير صالح.");
+      return;
+    }
+    setMinChargeBusyByTable((p) => ({ ...p, [tid]: true }));
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/tables/${encodeURIComponent(tid)}/minimum-charge`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minimumCharge: mc }),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم حفظ minimum charge للطاولة.");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setMinChargeBusyByTable((p) => ({ ...p, [tid]: false }));
+    }
+  }
+
+  async function sendTableAlert(tableId: string, sessionId: string | null) {
+    const tid = String(tableId || "").trim();
+    if (!tid) return;
+    const pickId = String(alertPickByTable[tid] || "").trim();
+    const preset = alertPresets.find((x) => x.id === pickId) || null;
+    if (!preset) {
+      setMsg("اختر نوع تنبيه أولاً.");
+      return;
+    }
+    setAlertBusyByTable((p) => ({ ...p, [tid]: true }));
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/cashier/alerts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: preset.type,
+          title: preset.label,
+          tableId: tid,
+          sessionId: sessionId || undefined,
+          sourceKey: `tbl:${tid}:${preset.id}:${Date.now()}`,
+        }),
+      });
+      const txt = await r.text();
+      if (!r.ok) {
+        if (r.status === 0) {
+          setMsg(briefNetworkHint("Failed to fetch"));
+          return;
+        }
+        const j = tryParseJson<{ detail?: unknown }>(txt);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : txt || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم إرسال التنبيه.");
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setAlertBusyByTable((p) => ({ ...p, [tid]: false }));
+    }
+  }
+
   const orderQty = (o: OrderRow) =>
     (Array.isArray(o.items) ? o.items : []).reduce((a, it) => a + Math.max(0, Number(it?.quantity ?? 0)), 0);
   const orderTotal = (o: OrderRow) => {
@@ -333,6 +523,22 @@ export default function WaiterTablesPage() {
   };
   const isArrived = (status: string) => ["ready", "served", "completed", "delivered"].includes(status);
   const isKitchen = (status: string) => ["pending", "preparing"].includes(status);
+
+  const costByTableId = useCallback(
+    (tableId: string, sessionId: string | null) => {
+      const tid = String(tableId || "");
+      const sid = sessionId ? String(sessionId) : "";
+      const related = orders
+        .filter((o) => String(o?.tableId || "") === tid || (sid ? String(o?.sessionId || "") === sid : false))
+        .filter((o) => isTodayIso(String(o?.createdAt || "")));
+      const totalCost = related.reduce((a, o) => a + orderTotal(o), 0);
+      const pendingCost = related
+        .filter((o) => isKitchen(String(o?.status || "").toLowerCase()))
+        .reduce((a, o) => a + orderTotal(o), 0);
+      return { totalCost, pendingCost, orderCount: related.length };
+    },
+    [orders],
+  );
   const showTableReport = (t: RestTable, ev: ReactMouseEvent<HTMLButtonElement>) => {
     ev.preventDefault();
     const tid = String(t.id);
@@ -427,13 +633,26 @@ export default function WaiterTablesPage() {
               ? String(sessRow.captainName || sessRow.captainLogin || "").trim() || ""
               : "";
             const capId = sessRow ? String(sessRow.captainUserId || "").trim() : "";
+            const bp = sessRow?.billingProfile;
+            const vipOwnerLabel =
+              bp && typeof bp === "object" && bp.active !== false
+                ? String(bp.vipOwnerLabel || "").trim() || ""
+                : "";
             const isVipTable = Boolean(t.features?.vipSection);
             const cardTone = notReady ? "blocked" : isBusy ? "busy" : "ready";
+            const money = costByTableId(String(t.id), sidStr || null);
+            const minRaw = String(minChargeDraftByTable[String(t.id)] ?? "").trim();
+            const minCharge = Number(minRaw);
+            const minOk = Number.isFinite(minCharge) ? Math.max(0, minCharge) : 0;
+            const minGap = minOk > 0 && money.totalCost < minOk ? minOk - money.totalCost : 0;
+            const alertPick = alertPickByTable[String(t.id)] ?? "";
+            const alertBusy = Boolean(alertBusyByTable[String(t.id)]);
+            const canEditMin = user?.role === "manager" || user?.role === "developer";
             return (
               <div key={t.id} className="waiter-tables-card-wrap">
               <button
                 type="button"
-                className={`waiter-tables-card waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}`}
+                className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}`}
                 onClick={() => {
                   if (notReady) {
                     setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
@@ -458,40 +677,138 @@ export default function WaiterTablesPage() {
                 }}
                 onContextMenu={(ev) => showTableReport(t, ev)}
               >
-                {noOrderOverdue ? <span className="waiter-tables-card-flag" title="تأخر طلب على الطاولة">⏱</span> : null}
-                <div className="waiter-tables-card-num">
-                  <span>{num}</span>
-                  {isVipTable ? (
-                    <span className="waiter-tables-vip-pill" title="فوترة VIP من إعدادات التشغيل عند فتح الجلسة">
-                      VIP
-                    </span>
-                  ) : null}
-                </div>
-                <div className="waiter-tables-card-meta">المقاعد: {t.seats ?? "—"}</div>
-                {captainLabel ? (
-                  <div className="waiter-tables-card-captain">كابتن: {captainLabel}</div>
-                ) : sidStr ? (
-                  <div className="waiter-tables-card-captain waiter-tables-card-captain--muted">لم يُسكَّن كابتن بعد</div>
-                ) : null}
-                <div
-                  className={`waiter-tables-card-status ${notReady ? "waiter-tables-card-status--hold" : isBusy ? "waiter-tables-card-status--busy" : "waiter-tables-card-status--ok"}`}
-                >
-                  {notReady ? (tStatus === "dirty" ? "متسخة" : "قيد التنظيف") : isBusy ? "مشغولة" : "جاهزة"}
-                  {billReq ? " · طلب حساب" : ""}
-                </div>
-                {cleanupOverdue ? (
-                  <div className="waiter-tables-card-alert waiter-tables-card-alert--danger">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div>
-                ) : null}
-                {noOrderOverdue ? (
-                  <div className="waiter-tables-card-alert waiter-tables-card-alert--delay">
-                    تنبيه: تأخر أخذ الطلب {noOrderMinutes} د
+                <div className="waiter-tblcard__spec-top">
+                  <div className="waiter-tblcard__spec-id">
+                    <span className="waiter-tblcard__spec-id-text">{num}</span>
+                    {isVipTable ? <span className="waiter-tables-vip-pill">VIP</span> : null}
+                    {vipOwnerLabel ? <span className="waiter-tables-owner-pill">{vipOwnerLabel}</span> : null}
                   </div>
+                  <div className="waiter-tblcard__spec-meta-row">
+                    <span className="waiter-tblcard__spec-seats">المقاعد: {t.seats ?? "—"}</span>
+                    <span className="waiter-tblcard__mini-chip">{tStatus === "dirty" ? "متسخة" : tStatus === "cleaning" ? "قيد التنظيف" : isBusy ? "مشغولة" : "جاهزة"}</span>
+                    {billReq ? <span className="waiter-tblcard__mini-chip" style={{ borderColor: "rgba(59,130,246,0.5)", background: "rgba(59,130,246,0.12)" }}>طلب حساب</span> : null}
+                    {noOrderOverdue ? <span className="waiter-tblcard__mini-chip" title="تأخر أخذ الطلب">⏱ {noOrderMinutes} د</span> : null}
+                  </div>
+                  <div className="waiter-tblcard__spec-seated-by">
+                    {captainLabel ? (
+                      <span className="waiter-tblcard__spec-captain">كابتن: {captainLabel}</span>
+                    ) : sidStr ? (
+                      <span className="waiter-tblcard__spec-muted">لم يُسكَّن كابتن بعد</span>
+                    ) : (
+                      <span className="waiter-tblcard__spec-muted">لا توجد جلسة نشطة</span>
+                    )}
+                  </div>
+                  {cleanupOverdue ? <div className="waiter-tblcard__session-gap">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div> : null}
+                </div>
+
+                <div className="waiter-tblcard__spec-open">
+                  <button
+                    type="button"
+                    className="waiter-tblcard__open-order"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (notReady) {
+                        setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
+                        return;
+                      }
+                      if (
+                        exclusiveOn &&
+                        capId &&
+                        user?.id &&
+                        String(capId) !== String(user.id) &&
+                        user.role !== "manager" &&
+                        user.role !== "developer"
+                      ) {
+                        const nm = captainLabel || "كابتن آخر";
+                        setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
+                        return;
+                      }
+                      const q = `tableId=${encodeURIComponent(t.id)}` + (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
+                      navigate(`${orderTakerBase}/order-taker?${q}`);
+                    }}
+                  >
+                    فتح الطلب
+                  </button>
+                </div>
+
+                <div className="waiter-tblcard__spec-money">
+                  <div className="waiter-tblcard__money-est">
+                    <div className="waiter-tblcard__money-est-label">قيمة تقديرية</div>
+                    <div className="waiter-tblcard__money-est-val">{money.totalCost.toFixed(0)} ج</div>
+                  </div>
+                  <div className="waiter-tblcard__money-min-stack" onClick={(e) => e.stopPropagation()}>
+                    {canEditMin ? (
+                      <input
+                        className="waiter-tblcard__money-input"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={minChargeDraftByTable[String(t.id)] ?? ""}
+                        onChange={(e) => setMinChargeDraftByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
+                        disabled={Boolean(minChargeBusyByTable[String(t.id)])}
+                        title="Minimum charge للطاولة"
+                      />
+                    ) : (
+                      <div className="waiter-tblcard__money-min-readout">{minOk.toFixed(0)}</div>
+                    )}
+                    <div className="waiter-tblcard__money-min-hint">minimum</div>
+                  </div>
+                  <div className="waiter-tblcard__money-min-label">
+                    {canEditMin ? (
+                      <button
+                        type="button"
+                        className="waiter-tblcard__pill waiter-tblcard__pill--clean-done"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void saveMinimumCharge(String(t.id));
+                        }}
+                        disabled={Boolean(minChargeBusyByTable[String(t.id)])}
+                      >
+                        {Boolean(minChargeBusyByTable[String(t.id)]) ? "…" : "حفظ"}
+                      </button>
+                    ) : (
+                      <span className="waiter-tblcard__spec-muted">حد أدنى للطاولة</span>
+                    )}
+                  </div>
+                </div>
+
+                {minGap > 0 ? (
+                  <div className="waiter-tblcard__spec-min-gap">فرق الحد الأدنى: {minGap.toFixed(0)} ج</div>
                 ) : null}
-                <div className="waiter-tables-inline-actions">
-                  {tStatus === "dirty" && (
+
+                <div className="waiter-tblcard__spec-alert" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="waiter-tblcard__send"
+                    disabled={alertBusy || !sidStr}
+                    onClick={() => void sendTableAlert(String(t.id), sidStr || null)}
+                  >
+                    {alertBusy ? "…" : "تنبيه"}
+                  </button>
+                  <select
+                    className="waiter-tblcard__alert-select"
+                    value={alertPick}
+                    onChange={(e) => setAlertPickByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
+                    disabled={alertBusy || alertPresets.length === 0}
+                    title="تنبيه سريع"
+                  >
+                    <option value="">— اختر —</option>
+                    {alertPresets.map((x) => (
+                      <option key={`al-${x.id}`} value={x.id}>
+                        {x.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="waiter-tblcard__spec-footer">
+                  <button type="button" className="waiter-tblcard__report" onClick={(e) => showTableReport(t, e as any)}>
+                    تقرير سريع
+                  </button>
+                  {tStatus === "dirty" ? (
                     <button
                       type="button"
-                      className="waiter-tables-pill-btn waiter-tables-pill-btn--warm"
+                      className="waiter-tblcard__pill waiter-tblcard__pill--clean-go"
                       onClick={(e) => {
                         e.stopPropagation();
                         void changeTableStatus(String(t.id), "cleaning");
@@ -499,11 +816,11 @@ export default function WaiterTablesPage() {
                     >
                       بدء تنظيف
                     </button>
-                  )}
-                  {tStatus === "cleaning" && (
+                  ) : null}
+                  {tStatus === "cleaning" ? (
                     <button
                       type="button"
-                      className="waiter-tables-pill-btn waiter-tables-pill-btn--ok"
+                      className="waiter-tblcard__pill waiter-tblcard__pill--clean-done"
                       onClick={(e) => {
                         e.stopPropagation();
                         void changeTableStatus(String(t.id), "ready");
@@ -511,7 +828,7 @@ export default function WaiterTablesPage() {
                     >
                       تم التنظيف
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </button>
               {sidStr ? (
@@ -539,6 +856,44 @@ export default function WaiterTablesPage() {
                       تحويل كابتن
                     </button>
                   )}
+                  {(() => {
+                    const bp = sessRow?.billingProfile;
+                    const currentMode = bp?.active === false
+                      ? ""
+                      : String(bp?.source || "").toLowerCase() === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                        ? String(bp?.vipTemplateId || "").trim()
+                        : bp && String(bp?.source || "").trim()
+                          ? "__ops_defaults__"
+                          : "";
+                    const chosen = vipChoiceBySession[sidStr] ?? currentMode;
+                    return (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, width: "100%", marginTop: 6 }}>
+                        <select
+                          className="waiter-pos__select"
+                          value={chosen}
+                          onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
+                          title="Owner & VIP"
+                        >
+                          <option value="">عادي (بدون Owner/VIP)</option>
+                          <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
+                          {vipTemplates.filter((x) => x.active).map((tpl) => (
+                            <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
+                              {tpl.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
+                          disabled={vipBusySessionId === sidStr}
+                          onClick={() => void applyVipBilling(sidStr, chosen)}
+                        >
+                          {vipBusySessionId === sidStr ? "..." : "تطبيق Owner/VIP"}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : null}
               </div>
