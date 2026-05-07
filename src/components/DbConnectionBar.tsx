@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
+import { safeFetch } from "../lib/safeFetch";
 
 type ReadyDb = {
   status?: string;
@@ -44,8 +45,8 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
       try {
         /** أولاً: ping خفيف — يثبت أن FastAPI يعمل حتى لو فحص ODBC في /ready بطيء أو فاشل */
         const [rPing, rCfg] = await Promise.all([
-          fetch(`${base}/api/ping`, { cache: "no-store" }),
-          fetch(`${base}/api/settings/connection`, { cache: "no-store" }).catch(() => new Response("", { status: 0 })),
+          safeFetch(`${base}/api/ping`),
+          safeFetch(`${base}/api/settings/connection`),
         ]);
         const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : new Response("", { status: 0 }));
 
@@ -71,7 +72,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
 
         if (!cancelled) setApiDown(false);
 
-        const rReady = await fetch(`${base}/api/ready?check_db=1`, { cache: "no-store" });
+        const rReady = await safeFetch(`${base}/api/ready?check_db=1`);
         if (cancelled) return;
         if (!rReady.ok) {
           setOk(false);
@@ -88,7 +89,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
         setServerLabel(db?.serverLabel?.trim() || cfgServer);
       } catch {
         try {
-          const rCfg = await fetch(`${base}/api/settings/connection`, { cache: "no-store" });
+          const rCfg = await safeFetch(`${base}/api/settings/connection`);
           const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : new Response("", { status: 0 }));
           if (!cancelled) {
             setDbName(cfgDb);
@@ -118,7 +119,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
   }, []);
 
   const label = apiDown
-    ? "تعذر الاتصال بالخادم"
+    ? "لا تستجيب (المنافذ 2288/9999)"
     : dbName
       ? dbName
       : "لم تُحفَظ إعدادات القاعدة — افتح «اتصال القاعدة» واضغط حفظ";
@@ -129,7 +130,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
     <div
       title={
         apiDown
-          ? "شغّل run_api.bat أو run_full_stack — ثم http://127.0.0.1:2288/api/ping | الواجهة من Vite: المنفذ 9999"
+          ? "يجب تشغيل API على 2288 (run_api.bat) والواجهة من Vite على 9999. جرّب: http://127.0.0.1:2288/api/ping"
           : sub || undefined
       }
       style={{
@@ -156,7 +157,8 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
       />
       <span style={{ display: "flex", flexDirection: "column", gap: 0, lineHeight: 1.25, minWidth: 0 }}>
         <span style={{ color: "var(--fg, #e2e8f0)" }}>
-          قاعدة البيانات: <span style={{ fontWeight: 600 }}>{label}</span>
+          {apiDown ? "خدمة API: " : "قاعدة البيانات: "}
+          <span style={{ fontWeight: 600 }}>{label}</span>
         </span>
         {!compact && sub ? (
           <span style={{ fontSize: "0.72rem", opacity: 0.85 }}>{sub}</span>

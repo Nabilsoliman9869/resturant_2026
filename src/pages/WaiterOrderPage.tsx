@@ -230,6 +230,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [addonPickerProduct, setAddonPickerProduct] = useState<Product | null>(null);
   const [addonPickerSel, setAddonPickerSel] = useState<Record<number, boolean>>({});
   const [addonPickerNotes, setAddonPickerNotes] = useState("");
+  const [addonPickerQty, setAddonPickerQty] = useState(1);
   const [billingRequestedAt, setBillingRequestedAt] = useState<string | null>(null);
   const [sessionBillingProfile, setSessionBillingProfile] = useState<SessionBillingProfile | null>(null);
   const [requestBillBusy, setRequestBillBusy] = useState(false);
@@ -444,11 +445,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }
         let row:
           | {
-              captainUserId?: string;
-              captainName?: string;
-              captainLogin?: string;
-              billingProfile?: SessionBillingProfile;
-            }
+            captainUserId?: string;
+            captainName?: string;
+            captainLogin?: string;
+            billingProfile?: SessionBillingProfile;
+          }
           | undefined;
         for (const x of sess) {
           if (!x || typeof x !== "object") continue;
@@ -844,8 +845,30 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   );
   const itemCount = cart.reduce((a, l) => a + l.qty, 0);
   const billingLocked = Boolean(billingRequestedAt);
+  const addonPreview = useMemo(() => {
+    if (!addonPickerProduct) {
+      return { base: 0, addons: 0, unit: 0, service: 0, vat: 0, total: 0 };
+    }
+    const base = resolveGuestUnitPrice(addonPickerProduct, sessionBillingProfile);
+    const picked = activeCatalogAddons.filter((r) => addonPickerSel[r.id]);
+    const addons = picked.reduce((s, a) => s + Math.max(0, Number(a.price || 0)), 0);
+    const unit = Math.max(0, base + addons);
+    const service = Math.max(0, (unit * Number(policy.servicePercent || 0)) / 100);
+    const vatBase = policy.serviceBeforeVat ? unit + service : unit;
+    const vat = Math.max(0, (vatBase * Number(policy.vatPercent || 0)) / 100);
+    const total = Math.max(0, unit + service + vat);
+    return { base, addons, unit, service, vat, total };
+  }, [
+    addonPickerProduct,
+    addonPickerSel,
+    activeCatalogAddons,
+    policy.servicePercent,
+    policy.vatPercent,
+    policy.serviceBeforeVat,
+    sessionBillingProfile,
+  ]);
 
-  function pushCartLineForProduct(p: Product, addons: CatalogAddonRow[], kitchenNotesRaw = "") {
+  function pushCartLineForProduct(p: Product, addons: CatalogAddonRow[], kitchenNotesRaw = "", qtyRaw = 1) {
     if (orderTakingLocked && captainGate?.name) {
       setMsg(`الطاولة مسندة إلى جرسون الطلبات: ${captainGate.name}. لا يمكن إضافة بنود إلا من حساب المسند أو عبر المدير (قفل الطاولة مفعّل).`);
       return;
@@ -864,6 +887,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       return;
     }
     const notesForLine = String(kitchenNotesRaw || "").trim().slice(0, 300);
+    const addQty = Math.max(1, Math.round(Number(qtyRaw) || 1));
     const addonKey = addonRowsKey(addons);
     const basePrice = resolveGuestUnitPrice(p, sessionBillingProfile);
     const addonSum = addons.reduce((s, a) => s + Math.max(0, a.price), 0);
@@ -885,7 +909,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           const nk = String(x.kitchenNotes || "").trim();
           const match =
             x.productGuide === p.CardGuide && (sn == null ? xn == null : xn === sn) && ak === addonKey && nk === notesForLine;
-          return match ? { ...x, qty: x.qty + 1 } : x;
+          return match ? { ...x, qty: x.qty + addQty } : x;
         });
       }
       return [
@@ -894,7 +918,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           id: lineId(),
           productGuide: p.CardGuide,
           name: lineName,
-          qty: 1,
+          qty: addQty,
           unitPrice,
           seatLabel: null,
           seatNo: sn,
@@ -926,18 +950,24 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
     setAddonPickerProduct(p);
     setAddonPickerSel({});
+    setAddonPickerNotes("");
+    setAddonPickerQty(1);
   }
 
   function confirmAddonPicker(opts: { withoutAddons: boolean }) {
     const p = addonPickerProduct;
     if (!p) return;
+    const notes = String(addonPickerNotes || "").trim();
+    const qty = Math.max(1, Math.round(Number(addonPickerQty) || 1));
     setAddonPickerProduct(null);
+    setAddonPickerNotes("");
+    setAddonPickerQty(1);
     if (opts.withoutAddons) {
-      pushCartLineForProduct(p, []);
+      pushCartLineForProduct(p, [], notes, qty);
       return;
     }
     const picked = activeCatalogAddons.filter((r) => addonPickerSel[r.id]);
-    pushCartLineForProduct(p, picked);
+    pushCartLineForProduct(p, picked, notes, qty);
   }
 
   function setQty(lineIdStr: string, qty: number) {
@@ -1640,129 +1670,129 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     className="waiter-pos__seat-list-scroll waiter-pos__dropdown-wrap waiter-pos__seat-list-scroll--in-topbar"
                     style={{ marginTop: 4 }}
                   >
-                  <div className="waiter-pos__seats waiter-pos__seats--twelve waiter-pos__seats--twelve-list">
-                    {[SHARED_SEAT_NO, ...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1)].map((n) => {
-                      const seatLines = cart.filter((l) => seatNoFromLine(l) === n);
-                      const qty = seatLines.reduce((a, l) => a + l.qty, 0);
-                      const dn = seatGuestDisplay(n);
-                      const sharedRow = n === SHARED_SEAT_NO;
-                      return (
-                        <div
-                          key={`top-seat-${n}`}
-                          className={`waiter-pos__seat-slot waiter-pos__seat-slot--compact-row ${sharedRow ? "waiter-pos__seat-slot--shared" : ""} ${selectedSeat === n ? "waiter-pos__seat-slot--active-order" : ""}`}
-                          onClick={() => {
-                            if (billingLocked) return;
-                            setSelectedSeat(n);
-                            if (seatNameEditorSeat != null && seatNameEditorSeat !== n) setSeatNameEditorSeat(null);
-                          }}
-                          role="presentation"
-                        >
-                          <div className="waiter-pos__seat-slot-head">
-                            <span
-                              className={`waiter-pos__seat-slot-no ${sharedRow ? "waiter-pos__seat-slot-no--shared" : ""}`}
-                              title={
-                                sharedRow
-                                  ? "كرسي ١٣ — طلب مشترك؛ يُقسَّم بالتساوي على الشيكات عند السبليت"
-                                  : `مقعد ${n}`
-                              }
-                            >
-                              {sharedRow ? (
-                                <>
-                                  {n}
-                                  <span className="waiter-pos__seat-slot-no__sub">مشترك</span>
-                                </>
-                              ) : (
-                                n
-                              )}
-                            </span>
-                            {seatNameEditorSeat === n ? (
-                              <input
-                                type="text"
-                                dir="rtl"
-                                autoFocus
-                                className={`waiter-pos__seat-slot-input waiter-pos__seat-slot-input--compact ${selectedSeat === n ? "waiter-pos__seat-slot-input--sel" : ""}`}
-                                placeholder={sharedRow ? "ملاحظة (اختياري)" : "اسم على الشيك"}
-                                value={String(seatGuestLabels[n] ?? "")}
-                                onFocus={() => setSelectedSeat(n)}
-                                onClick={(e) => e.stopPropagation()}
-                                onBlur={() => setSeatNameEditorSeat((cur) => (cur === n ? null : cur))}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Escape") {
-                                    e.stopPropagation();
-                                    setSeatNameEditorSeat(null);
-                                    (e.target as HTMLInputElement).blur();
-                                  }
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    setSeatNameEditorSeat(null);
-                                    (e.target as HTMLInputElement).blur();
-                                  }
-                                }}
-                                onChange={(e) => onSeatGuestInputChange(n, e.target.value)}
-                                disabled={billingLocked}
-                                aria-label={sharedRow ? `ملاحظة الطلب المشترك (${n})` : `تحرير نص مقعد ${n} للطباعة على الشيك`}
-                                maxLength={120}
-                              />
-                            ) : (
-                              <button
-                                type="button"
-                                dir="rtl"
-                                className={`waiter-pos__seat-slot-labelbtn waiter-pos__seat-slot-labelbtn--compact ${selectedSeat === n ? "waiter-pos__seat-slot-labelbtn--active" : ""}`}
+                    <div className="waiter-pos__seats waiter-pos__seats--twelve waiter-pos__seats--twelve-list">
+                      {[SHARED_SEAT_NO, ...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1)].map((n) => {
+                        const seatLines = cart.filter((l) => seatNoFromLine(l) === n);
+                        const qty = seatLines.reduce((a, l) => a + l.qty, 0);
+                        const dn = seatGuestDisplay(n);
+                        const sharedRow = n === SHARED_SEAT_NO;
+                        return (
+                          <div
+                            key={`top-seat-${n}`}
+                            className={`waiter-pos__seat-slot waiter-pos__seat-slot--compact-row ${sharedRow ? "waiter-pos__seat-slot--shared" : ""} ${selectedSeat === n ? "waiter-pos__seat-slot--active-order" : ""}`}
+                            onClick={() => {
+                              if (billingLocked) return;
+                              setSelectedSeat(n);
+                              if (seatNameEditorSeat != null && seatNameEditorSeat !== n) setSeatNameEditorSeat(null);
+                            }}
+                            role="presentation"
+                          >
+                            <div className="waiter-pos__seat-slot-head">
+                              <span
+                                className={`waiter-pos__seat-slot-no ${sharedRow ? "waiter-pos__seat-slot-no--shared" : ""}`}
                                 title={
                                   sharedRow
-                                    ? `${dn}${String(seatGuestLabels[n] ?? "").trim() ? "" : " — ملاحظة اختيارية"}`
-                                    : dn === `كرسي ${n}`
-                                      ? `مقعد ${n} — اضغط لاسم على الشيك`
-                                      : `${dn} — مقعد ${n}`
+                                    ? "كرسي ١٣ — طلب مشترك؛ يُقسَّم بالتساوي على الشيكات عند السبليت"
+                                    : `مقعد ${n}`
                                 }
-                                disabled={billingLocked}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (billingLocked) return;
-                                  setSelectedSeat(n);
-                                  setSeatNameEditorSeat(n);
-                                }}
                               >
-                                <span className="waiter-pos__seat-name-only">{dn}</span>
-                              </button>
-                            )}
-                            {qty > 0 ? (
-                              <span className="waiter-pos__seat-slot-inline-qty" title={`كمية المرسل لهذا المقعد: ${qty}`}>
-                                {qty}
+                                {sharedRow ? (
+                                  <>
+                                    {n}
+                                    <span className="waiter-pos__seat-slot-no__sub">مشترك</span>
+                                  </>
+                                ) : (
+                                  n
+                                )}
                               </span>
-                            ) : null}
-                            {qty > 0 ? (
-                              <button
-                                type="button"
-                                className="waiter-pos__seat-clear waiter-pos__seat-clear--compact"
-                                title="مسح بنود هذا المقعد"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  clearSeatLines(n);
+                              {seatNameEditorSeat === n ? (
+                                <input
+                                  type="text"
+                                  dir="rtl"
+                                  autoFocus
+                                  className={`waiter-pos__seat-slot-input waiter-pos__seat-slot-input--compact ${selectedSeat === n ? "waiter-pos__seat-slot-input--sel" : ""}`}
+                                  placeholder={sharedRow ? "ملاحظة (اختياري)" : "اسم على الشيك"}
+                                  value={String(seatGuestLabels[n] ?? "")}
+                                  onFocus={() => setSelectedSeat(n)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onBlur={() => setSeatNameEditorSeat((cur) => (cur === n ? null : cur))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") {
+                                      e.stopPropagation();
+                                      setSeatNameEditorSeat(null);
+                                      (e.target as HTMLInputElement).blur();
+                                    }
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      setSeatNameEditorSeat(null);
+                                      (e.target as HTMLInputElement).blur();
+                                    }
+                                  }}
+                                  onChange={(e) => onSeatGuestInputChange(n, e.target.value)}
+                                  disabled={billingLocked}
+                                  aria-label={sharedRow ? `ملاحظة الطلب المشترك (${n})` : `تحرير نص مقعد ${n} للطباعة على الشيك`}
+                                  maxLength={120}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  dir="rtl"
+                                  className={`waiter-pos__seat-slot-labelbtn waiter-pos__seat-slot-labelbtn--compact ${selectedSeat === n ? "waiter-pos__seat-slot-labelbtn--active" : ""}`}
+                                  title={
+                                    sharedRow
+                                      ? `${dn}${String(seatGuestLabels[n] ?? "").trim() ? "" : " — ملاحظة اختيارية"}`
+                                      : dn === `كرسي ${n}`
+                                        ? `مقعد ${n} — اضغط لاسم على الشيك`
+                                        : `${dn} — مقعد ${n}`
+                                  }
+                                  disabled={billingLocked}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (billingLocked) return;
+                                    setSelectedSeat(n);
+                                    setSeatNameEditorSeat(n);
+                                  }}
+                                >
+                                  <span className="waiter-pos__seat-name-only">{dn}</span>
+                                </button>
+                              )}
+                              {qty > 0 ? (
+                                <span className="waiter-pos__seat-slot-inline-qty" title={`كمية المرسل لهذا المقعد: ${qty}`}>
+                                  {qty}
+                                </span>
+                              ) : null}
+                              {qty > 0 ? (
+                                <button
+                                  type="button"
+                                  className="waiter-pos__seat-clear waiter-pos__seat-clear--compact"
+                                  title="مسح بنود هذا المقعد"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    clearSeatLines(n);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </div>
+                            {sharedRow ? (
+                              <div
+                                style={{
+                                  marginTop: 4,
+                                  color: "var(--wp-muted)",
+                                  fontSize: "0.68rem",
+                                  fontWeight: 700,
+                                  lineHeight: 1.3,
                                 }}
+                                onClick={(e) => e.stopPropagation()}
                               >
-                                ×
-                              </button>
+                                اختر الصف ثم أضف الأصناف — يُقسَّم على شيكات السبليت بالتساوي.
+                              </div>
                             ) : null}
                           </div>
-                          {sharedRow ? (
-                            <div
-                              style={{
-                                marginTop: 4,
-                                color: "var(--wp-muted)",
-                                fontSize: "0.68rem",
-                                fontWeight: 700,
-                                lineHeight: 1.3,
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              اختر الصف ثم أضف الأصناف — يُقسَّم على شيكات السبليت بالتساوي.
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </>
               ) : null}
@@ -1919,128 +1949,110 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       {addonPickerProduct ? (
         <div
           role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 200,
-            background: "rgba(15, 23, 42, 0.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-          }}
+          className="waiter-addon-modal__overlay"
           onClick={() => setAddonPickerProduct(null)}
         >
           <div
             role="dialog"
             aria-labelledby="addon-picker-title"
-            style={{
-              width: "min(420px, 100%)",
-              maxHeight: "min(72vh, 520px)",
-              overflow: "auto",
-              background: "#fff",
-              borderRadius: 14,
-              boxShadow: "0 22px 50px rgba(0,0,0,0.22)",
-              border: "1px solid #e2e8f0",
-              padding: "1rem 1.1rem 1rem",
-              direction: "rtl",
-            }}
+            className="waiter-addon-modal"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 id="addon-picker-title" style={{ marginTop: 0, marginBottom: 8, fontSize: "1.05rem", fontWeight: 900 }}>
-              الإضافات — ملاحظات الطلب
-            </h3>
-            <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 12, lineHeight: 1.4 }}>{addonPickerProduct.ProductName}</div>
+            <div className="waiter-addon-modal__head">
+              <h3 id="addon-picker-title">مكونات الصنف (إجابة العميل)</h3>
+              <div className="waiter-addon-modal__product">{addonPickerProduct.ProductName}</div>
+              <div className="waiter-addon-modal__sub">
+                {assignmentMode === "general" ? "طلب عام" : `كرسي ${selectedSeat}`} · سعر البطاقة: {addonPreview.base.toFixed(2)} ج.م
+              </div>
+            </div>
+            <div className="waiter-addon-modal__empty">
+              لا توجد مكونات مسجلة لهذا الصنف.
+            </div>
+            <div className="waiter-addon-modal__price-box">
+              <div className="waiter-addon-modal__price-title">تقدير / وحدة (حسب «الضريبة والخدمة»)</div>
+              <div className="waiter-addon-modal__price-row">
+                <span>سعر السطر بعد الإضافات</span>
+                <strong>{addonPreview.unit.toFixed(2)}</strong>
+              </div>
+              <div className="waiter-addon-modal__price-row">
+                <span>خدمة ({policy.servicePercent}%)</span>
+                <strong>{addonPreview.service.toFixed(2)} — تُدخل في أساس الضريبة</strong>
+              </div>
+              <div className="waiter-addon-modal__price-row">
+                <span>VAT ({policy.vatPercent}%)</span>
+                <strong>{addonPreview.vat.toFixed(2)}</strong>
+              </div>
+              <div className="waiter-addon-modal__price-total">إجمالي تقديري: {addonPreview.total.toFixed(2)} ج.م</div>
+            </div>
+            <div className="waiter-addon-modal__catalog-note">
+              الإضافات (مجموعات) — من إعدادات النظام ← الإضافات.
+              <br />
+              حدّث الصنف بعد تعديل الكتالوج (أغلق المودال وافتحه) إن لزم.
+            </div>
+            <div className="waiter-addon-modal__list-title">الإضافات (من الإعدادات)</div>
             {!catalogAddonsReady ? (
-              <div style={{ padding: "1rem 0", textAlign: "center", color: "#64748b", fontWeight: 700 }}>
+              <div className="waiter-addon-modal__empty">
                 جاري تحميل كتالوج الإضافات…
               </div>
             ) : activeCatalogAddons.length === 0 ? (
-              <div
-                style={{
-                  marginBottom: 14,
-                  padding: "12px 10px",
-                  borderRadius: 10,
-                  background: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                  color: "#334155",
-                  lineHeight: 1.5,
-                  fontSize: "0.92rem",
-                }}
-              >
-                لا توجد إضافات نشطة في الكتالوج. راجع <strong>إعدادات المدير → الإضافات (كتالوج)</strong> أو أضف الصنف مباشرة.
+              <div className="waiter-addon-modal__empty">
+                لا توجد إضافات نشطة في الكتالوج.
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              <div className="waiter-addon-modal__list">
                 {activeCatalogAddons.map((r) => (
                   <label
                     key={r.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid #e2e8f0",
-                      cursor: "pointer",
-                      background: addonPickerSel[r.id] ? "#ecfdf5" : "#f8fafc",
-                    }}
+                    className={`waiter-addon-modal__row ${addonPickerSel[r.id] ? "is-on" : ""}`}
                   >
+                    <span className="waiter-addon-modal__amt">+{r.price.toFixed(0)} ج.م</span>
+                    <span className="waiter-addon-modal__name">{r.label}</span>
                     <input
                       type="checkbox"
+                      className="waiter-addon-modal__check"
                       checked={Boolean(addonPickerSel[r.id])}
                       onChange={(e) => setAddonPickerSel((prev) => ({ ...prev, [r.id]: e.target.checked }))}
                     />
-                    <span style={{ flex: 1, fontWeight: 700 }}>{r.label}</span>
-                    <span style={{ fontWeight: 800, color: "#15803d" }}>+{r.price.toFixed(0)} ج.م</span>
                   </label>
                 ))}
               </div>
             )}
-            <label style={{ display: "block", marginBottom: 14 }}>
-              <span style={{ display: "block", fontWeight: 800, marginBottom: 6 }}>ملاحظات</span>
+            <label className="waiter-addon-modal__notes-wrap">
+              <span>مواصفات وحرّة (نص للمطبخ)</span>
               <textarea
                 value={addonPickerNotes}
                 onChange={(e) => setAddonPickerNotes(e.target.value)}
-                placeholder="تعليمات للمطبخ (اختياري)…"
+                placeholder="مثال: بدون زيتون — صوص حار على الجانب"
                 rows={3}
                 maxLength={400}
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #cbd5e1",
-                  fontFamily: "inherit",
-                  resize: "vertical",
-                }}
+                className="waiter-addon-modal__notes"
               />
             </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" onClick={() => setAddonPickerProduct(null)}>
-                إلغاء
-              </button>
-              <button
-                type="button"
-                className="waiter-pos__btn waiter-pos__btn--ghost"
-                disabled={!catalogAddonsReady}
-                onClick={() => confirmAddonPicker({ withoutAddons: true })}
-              >
-                بدون إضافات
-              </button>
+            <label className="waiter-addon-modal__qty">
+              <span>الكمية</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={addonPickerQty}
+                onChange={(e) => setAddonPickerQty(Math.max(1, Math.round(Number(e.target.value) || 1)))}
+              />
+            </label>
+            <div className="waiter-addon-modal__actions">
               <button
                 type="button"
                 className="waiter-pos__btn"
-                disabled={!catalogAddonsReady || activeCatalogAddons.length === 0}
+                disabled={!catalogAddonsReady}
                 onClick={() => confirmAddonPicker({ withoutAddons: false })}
-                title={
-                  activeCatalogAddons.length === 0
-                    ? "لا توجد إضافات للاختيار — استخدم «بدون إضافات»"
-                    : undefined
-                }
               >
-                أضف للطلب
+                إضافة للطلب
               </button>
+              <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" onClick={() => setAddonPickerProduct(null)}>
+                إلغاء
+              </button>
+            </div>
+            <div className="waiter-addon-modal__footnote">
+              Esc لإلغاء. لنفس الصنف بمواصفات أخرى أضف من جديد بنص مختلف.
             </div>
           </div>
         </div>

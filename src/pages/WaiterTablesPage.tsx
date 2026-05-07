@@ -701,6 +701,90 @@ export default function WaiterTablesPage() {
                   {cleanupOverdue ? <div className="waiter-tblcard__session-gap">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div> : null}
                 </div>
 
+                <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
+                  <div className="waiter-tblcard__pill-row">
+                    <button
+                      type="button"
+                      className="waiter-tblcard__pill waiter-tblcard__pill--assign"
+                      disabled={claimBusy || notReady || !sidStr}
+                      onClick={() => {
+                        if (!sidStr) return;
+                        void claimCaptain(sidStr);
+                      }}
+                      title={sidStr ? "تسكين كابتن (ربط الطاولة على المسند)" : "لا توجد جلسة نشطة"}
+                    >
+                      {capId && user?.id && String(capId) === String(user.id) ? "أنت الكابتن ✓" : "تسكين كابتن"}
+                    </button>
+
+                    {(user?.role === "manager" || user?.role === "developer") && sidStr ? (
+                      <button
+                        type="button"
+                        className="waiter-tblcard__pill"
+                        disabled={notReady}
+                        onClick={() => {
+                          setReassignSid(sidStr);
+                          setReassignPickId("");
+                        }}
+                        title="تغيير/تحويل الكابتن"
+                      >
+                        تغيير كابتن
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="waiter-tblcard__pill-row waiter-tblcard__pill-row--solo">
+                    <span className={`waiter-tblcard__pill ${notReady ? "waiter-tblcard__pill--dirty" : isBusy ? "waiter-tblcard__pill--busy" : "waiter-tblcard__pill--ready"}`}>
+                      {notReady ? (tStatus === "dirty" ? "متسخة" : "قيد التنظيف") : isBusy ? "مشغولة" : "جاهزة"}
+                    </span>
+                    {billReq ? <span className="waiter-tblcard__pill">طلب حساب</span> : null}
+                  </div>
+                </div>
+
+                {sidStr ? (
+                  <div
+                    style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, width: "100%" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <select
+                      className="waiter-pos__select"
+                      value={(() => {
+                        const bp = sessRow?.billingProfile;
+                        const currentMode =
+                          bp?.active === false
+                            ? ""
+                            : String(bp?.source || "").toLowerCase() === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                              ? String(bp?.vipTemplateId || "").trim()
+                              : bp && String(bp?.source || "").trim()
+                                ? "__ops_defaults__"
+                                : "";
+                        return vipChoiceBySession[sidStr] ?? currentMode;
+                      })()}
+                      onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
+                      title="ربط الطاولة على Owner/VIP"
+                    >
+                      <option value="">عادي (بدون Owner/VIP)</option>
+                      <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
+                      {vipTemplates.filter((x) => x.active).map((tpl) => (
+                        <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
+                          {tpl.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontWeight: 900, whiteSpace: "nowrap" }}
+                      disabled={vipBusySessionId === sidStr}
+                      onClick={() => {
+                        const chosen = vipChoiceBySession[sidStr] ?? "";
+                        void applyVipBilling(sidStr, chosen);
+                      }}
+                    >
+                      {vipBusySessionId === sidStr ? "..." : "تطبيق Owner/VIP"}
+                    </button>
+                  </div>
+                ) : null}
+
                 <div className="waiter-tblcard__spec-open">
                   <button
                     type="button"
@@ -831,71 +915,6 @@ export default function WaiterTablesPage() {
                   ) : null}
                 </div>
               </button>
-              {sidStr ? (
-                <div className="waiter-tables-wrap-btns" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ fontSize: 12, padding: "4px 10px" }}
-                    disabled={claimBusy || notReady}
-                    onClick={() => void claimCaptain(sidStr)}
-                  >
-                    {capId && user?.id && String(capId) === String(user.id) ? "أنت الكابتن ✓" : "تسكين كابتن"}
-                  </button>
-                  {(user?.role === "manager" || user?.role === "developer") && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: 12, padding: "4px 10px" }}
-                      disabled={notReady}
-                      onClick={() => {
-                        setReassignSid(sidStr);
-                        setReassignPickId("");
-                      }}
-                    >
-                      تحويل كابتن
-                    </button>
-                  )}
-                  {(() => {
-                    const bp = sessRow?.billingProfile;
-                    const currentMode = bp?.active === false
-                      ? ""
-                      : String(bp?.source || "").toLowerCase() === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
-                        ? String(bp?.vipTemplateId || "").trim()
-                        : bp && String(bp?.source || "").trim()
-                          ? "__ops_defaults__"
-                          : "";
-                    const chosen = vipChoiceBySession[sidStr] ?? currentMode;
-                    return (
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, width: "100%", marginTop: 6 }}>
-                        <select
-                          className="waiter-pos__select"
-                          value={chosen}
-                          onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
-                          title="Owner & VIP"
-                        >
-                          <option value="">عادي (بدون Owner/VIP)</option>
-                          <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
-                          {vipTemplates.filter((x) => x.active).map((tpl) => (
-                            <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
-                              {tpl.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
-                          disabled={vipBusySessionId === sidStr}
-                          onClick={() => void applyVipBilling(sidStr, chosen)}
-                        >
-                          {vipBusySessionId === sidStr ? "..." : "تطبيق Owner/VIP"}
-                        </button>
-                      </div>
-                    );
-                  })()}
-                </div>
-              ) : null}
               </div>
             );
           })}

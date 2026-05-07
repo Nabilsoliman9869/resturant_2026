@@ -47,9 +47,12 @@ import KdsPrepTimesSettingsPage from "./pages/settings/KdsPrepTimesSettingsPage"
 import PosTaxPolicySettingsPage from "./pages/settings/PosTaxPolicySettingsPage";
 import PaymentRoutingSettingsPage from "./pages/settings/PaymentRoutingSettingsPage";
 import PosPromotionsSettingsPage from "./pages/settings/PosPromotionsSettingsPage";
+import AddonsSettingsPage from "./pages/settings/AddonsSettingsPage";
+import MinimumChargeSettingsPage from "./pages/settings/MinimumChargeSettingsPage";
 import KidsAreaPage from "./pages/KidsAreaPage";
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
+import DeliveryManagementPage from "./pages/DeliveryManagementPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
   const { user } = useAuth();
@@ -126,6 +129,7 @@ export default function App() {
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
+        <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -152,23 +156,25 @@ export default function App() {
           <Route path="pos-kds" element={<PosKdsSettingsPage />} />
           <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
           <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
+          <Route path="addons" element={<AddonsSettingsPage />} />
           <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
           <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
-          <Route path="connection" element={<Navigate to="venue" replace />} />
-          <Route path="init-db" element={<Navigate to="venue" replace />} />
-          <Route path="users" element={<Navigate to="venue" replace />} />
+          <Route path="connection" element={<DeveloperConnection />} />
+          <Route path="init-db" element={<DeveloperInitDb />} />
+          <Route path="users" element={<DeveloperUsers />} />
         </Route>
         <Route path="tables" element={<Navigate to="settings/tables" replace />} />
         <Route path="costing" element={<Navigate to="settings/costing" replace />} />
         <Route path="master-data" element={<Navigate to="settings/master-data" replace />} />
         <Route path="pos-admin" element={<Navigate to="settings/pos-venue" replace />} />
-        <Route path="connection" element={<Navigate to="settings/venue" replace />} />
-        <Route path="init-db" element={<Navigate to="settings/venue" replace />} />
-        <Route path="users" element={<Navigate to="settings/venue" replace />} />
+        <Route path="connection" element={<Navigate to="settings/connection" replace />} />
+        <Route path="init-db" element={<Navigate to="settings/init-db" replace />} />
+        <Route path="users" element={<Navigate to="settings/users" replace />} />
       </Route>
 
       <Route
@@ -252,6 +258,7 @@ export default function App() {
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
+        <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -278,12 +285,14 @@ export default function App() {
           <Route path="pos-kds" element={<PosKdsSettingsPage />} />
           <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
           <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
+          <Route path="addons" element={<AddonsSettingsPage />} />
           <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
           <Route path="pos-admin-legacy" element={<PosAdminPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
           <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />

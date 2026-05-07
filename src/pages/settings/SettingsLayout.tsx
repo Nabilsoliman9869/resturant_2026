@@ -22,6 +22,7 @@ const OPERATIONAL_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
       { path: "pos-kds", label: "شاشة المطبخ (KDS)" },
       { path: "pos-prep-times", label: "زمن التحضير لكل صنف" },
       { path: "pos-tax", label: "الضريبة والخدمة" },
+      { path: "addons", label: "الإضافات (كتالوج)" },
       { path: "payment-routing", label: "ربط التحصيل (حسابات)" },
       { path: "pos-promos", label: "العروض" },
     ],
@@ -47,6 +48,7 @@ const OPERATIONAL_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
       { path: "workflow", label: "دورة العمل والأدوار" },
       { path: "role-schedule", label: "جدولة أدوار المستخدمين" },
       { path: "restaurant-ops", label: "إعدادات التشغيل الشاملة" },
+      { path: "minimum-charge", label: "الميني موم تشارج" },
     ],
   },
 ];
@@ -69,11 +71,12 @@ export default function SettingsLayout() {
   const loc = useLocation();
   const role = roleFromPath(loc.pathname);
   const base = role ? `/app/${role}/settings` : "/app/manager/settings";
-  const isDeveloper = role === "developer";
+  /** المدير والمطوّر يريان قسم التقنية (لا يُخفى على المدير بينما المسارات كانت تُعاد لتوجيه وهمي). */
+  const showTechSection = role === "developer" || role === "manager";
 
-  const sections = isDeveloper ? [TECH_SECTION, ...OPERATIONAL_SECTIONS] : OPERATIONAL_SECTIONS;
+  const sections = showTechSection ? [TECH_SECTION, ...OPERATIONAL_SECTIONS] : OPERATIONAL_SECTIONS;
 
-  const asideTitle = isDeveloper ? "إعدادات" : "إعدادات التشغيل";
+  const asideTitle = showTechSection ? "إعدادات" : "إعدادات التشغيل";
 
   return (
     <div style={{ display: "flex", gap: "1.25rem", alignItems: "stretch", minHeight: "70vh" }}>

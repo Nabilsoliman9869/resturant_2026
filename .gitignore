@@ -16,6 +16,26 @@ config/tbl_seed_pack_from_db.generated.json
 # إعدادات SQL المحلية — انسخ من config/settings.example.json
 config/settings.json
 
+# بيانات تشغيل المطعم (محلية/تجريبية) — لا تُرفع
+config/restaurant/
+
+# ملفات build الناتجة (Vite outDir = ui/restaurant) — لا تُرفع
+ui/restaurant/assets/
+
+# تقارير/مرفقات محلية
+*.pdf
+*.docx
+
+# نسخ احتياطية / مخرجات مؤقتة
+backups/
+tmp_*.json
+tmp*.json
+
+# ملفات Cursor/أدوات محلية
+.venv_audit/
+!/.cursor/rules/
+!/.cursor/rules/*.mdc
+
 # Python
 __pycache__/
 *.py[cod]

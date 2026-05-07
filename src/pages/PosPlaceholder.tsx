@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 import { applyPromotions, type Promotion } from "../lib/posPromotions";
@@ -30,7 +31,26 @@ function toNum(v: unknown, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-export default function PosPlaceholder() {
+export type PosPlaceholderProps = {
+  /** يضبط نوع الطلب الابتدائي (مثلاً sites → طاولة داخلية) */
+  saleChannel?: string;
+  pageTitle?: string;
+  backTo?: string;
+};
+
+function initialOrderTypeFromSaleChannel(saleChannel: string | undefined) {
+  const ch = String(saleChannel || "").trim().toLowerCase();
+  if (ch === "delivery" || ch === "دليفري") return "delivery" as const;
+  if (ch === "takeaway" || ch === "سفري") return "takeaway" as const;
+  if (ch === "bar_quick" || ch === "bar") return "bar_quick" as const;
+  if (ch === "catering") return "catering" as const;
+  /** مواقع / صالة / افتراضي — أقرب نمط مدعوم */
+  return defaultOrderTypeForVenue(readCachedVenueType() ?? "restaurant");
+}
+
+export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
+  const { saleChannel, pageTitle = "نقطة البيع — احترافي", backTo } = props;
+  const navigate = useNavigate();
   const { venueType, ready } = useVenue();
   const base = getApiBase();
   const [products, setProducts] = useState<Product[]>([]);
@@ -42,7 +62,7 @@ export default function PosPlaceholder() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [orderType, setOrderType] = useState<
     "table" | "takeaway" | "delivery" | "bar_quick" | "catering"
-  >(() => defaultOrderTypeForVenue(readCachedVenueType() ?? "restaurant"));
+  >(() => initialOrderTypeFromSaleChannel(saleChannel));
   /** للطلب على الطاولة: يُفعَّل بعد «اكتمل الطلب» لاحتساب بند الخدمة */
   const [orderFinalized, setOrderFinalized] = useState(false);
   const [payment, setPayment] = useState("cash");
@@ -91,9 +111,9 @@ export default function PosPlaceholder() {
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || saleChannel) return;
     setOrderType(defaultOrderTypeForVenue(venueType));
-  }, [ready, venueType]);
+  }, [ready, venueType, saleChannel]);
 
   useEffect(() => {
     if (orderType !== "table") setOrderFinalized(false);
@@ -291,7 +311,14 @@ export default function PosPlaceholder() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>نقطة البيع — احترافي</h2>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 0 }}>
+        {backTo ? (
+          <button type="button" className="btn" onClick={() => navigate(backTo)} aria-label="رجوع">
+            ← رجوع
+          </button>
+        ) : null}
+        <h2 style={{ margin: 0 }}>{pageTitle}</h2>
+      </div>
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="btn" onClick={() => void loadProducts()}>

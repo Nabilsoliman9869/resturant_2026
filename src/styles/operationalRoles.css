@@ -1592,6 +1592,15 @@
   border: 2px solid transparent;
 }
 
+.waiter-tables-card-topline {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: #0f172a;
+  opacity: 0.82;
+  letter-spacing: 0.01em;
+}
+
 .waiter-tables-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.09);
@@ -1699,6 +1708,20 @@
   background: linear-gradient(180deg, #fde68a, #fbbf24);
   color: #78350f;
   border: 1px solid #d97706;
+}
+
+.waiter-tables-owner-pill {
+  font-size: 10px;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.16), rgba(255, 255, 255, 0.92));
+  color: #075985;
+  border: 1px solid rgba(14, 165, 233, 0.55);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .waiter-tables-inline-actions {
@@ -2394,6 +2417,246 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
+}
+
+/* نافذة إضافات الصنف (مطابقة الطابع القديم الداكن) */
+.waiter-addon-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(2, 9, 23, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.9rem;
+}
+
+.waiter-addon-modal {
+  width: min(460px, 100%);
+  max-height: min(86vh, 760px);
+  overflow: auto;
+  direction: rtl;
+  border-radius: 16px;
+  border: 1px solid #1e3a5f;
+  background: linear-gradient(180deg, #0b1a2e 0%, #0a1527 100%);
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.5);
+  color: #e2e8f0;
+  padding: 0.9rem 0.95rem;
+}
+
+.waiter-addon-modal__head {
+  border: 1px solid #2a3e63;
+  border-radius: 12px;
+  background: rgba(11, 25, 44, 0.86);
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.62rem;
+}
+
+.waiter-addon-modal__head h3 {
+  margin: 0 0 0.18rem;
+  color: #dbeafe;
+  font-size: 0.98rem;
+  font-weight: 900;
+}
+
+.waiter-addon-modal__product {
+  color: #f8fafc;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.waiter-addon-modal__sub {
+  margin-top: 0.2rem;
+  color: #94a3b8;
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.waiter-addon-modal__price-box {
+  border: 1px solid #164e7a;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(8, 47, 73, 0.58) 0%, rgba(7, 29, 53, 0.54) 100%);
+  padding: 0.56rem 0.62rem;
+  margin-bottom: 0.66rem;
+}
+
+.waiter-addon-modal__price-title {
+  color: #bfdbfe;
+  font-weight: 900;
+  font-size: 0.86rem;
+  margin-bottom: 0.32rem;
+}
+
+.waiter-addon-modal__price-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+  color: #cbd5e1;
+  padding: 0.08rem 0;
+}
+
+.waiter-addon-modal__price-row strong {
+  color: #f8fafc;
+}
+
+.waiter-addon-modal__price-total {
+  margin-top: 0.36rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.4);
+  padding-top: 0.35rem;
+  color: #34d399;
+  font-weight: 900;
+  font-size: 0.95rem;
+}
+
+.waiter-addon-modal__catalog-note {
+  margin-bottom: 0.45rem;
+  color: #bfdbfe;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  font-weight: 700;
+}
+
+.waiter-addon-modal__list-title {
+  margin-bottom: 0.35rem;
+  color: #f8fafc;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.waiter-addon-modal__empty {
+  margin-bottom: 0.7rem;
+  padding: 0.55rem 0.62rem;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: rgba(15, 23, 42, 0.78);
+  color: #cbd5e1;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.waiter-addon-modal__list {
+  margin-bottom: 0.7rem;
+  max-height: min(36vh, 340px);
+  overflow: auto;
+  border: 1px solid #2a3f62;
+  border-radius: 12px;
+  background: rgba(8, 18, 35, 0.74);
+  padding: 0.35rem;
+}
+
+.waiter-addon-modal__row {
+  display: grid;
+  grid-template-columns: 96px 1fr 26px;
+  align-items: center;
+  gap: 0.56rem;
+  padding: 0.42rem 0.45rem;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  direction: ltr;
+}
+
+.waiter-addon-modal__row + .waiter-addon-modal__row {
+  margin-top: 0.22rem;
+}
+
+.waiter-addon-modal__row:hover {
+  border-color: rgba(125, 211, 252, 0.45);
+  background: rgba(30, 41, 59, 0.55);
+}
+
+.waiter-addon-modal__row.is-on {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(20, 83, 45, 0.36);
+}
+
+.waiter-addon-modal__check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  justify-self: end;
+  accent-color: #22c55e;
+}
+
+.waiter-addon-modal__name {
+  min-width: 0;
+  font-weight: 800;
+  color: #f8fafc;
+  direction: rtl;
+  text-align: right;
+}
+
+.waiter-addon-modal__amt {
+  color: #22c55e;
+  font-weight: 900;
+  white-space: nowrap;
+  justify-self: start;
+  text-align: left;
+  direction: rtl;
+}
+
+.waiter-addon-modal__notes-wrap {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.waiter-addon-modal__notes-wrap > span {
+  display: block;
+  margin-bottom: 0.34rem;
+  color: #e2e8f0;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.waiter-addon-modal__notes {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  font-family: inherit;
+  padding: 0.52rem 0.62rem;
+  resize: vertical;
+}
+
+.waiter-addon-modal__qty {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.waiter-addon-modal__qty > span {
+  color: #e2e8f0;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.waiter-addon-modal__qty > input {
+  width: 84px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  padding: 0.38rem 0.45rem;
+  font-family: inherit;
+}
+
+.waiter-addon-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.waiter-addon-modal__footnote {
+  margin-top: 0.45rem;
+  color: #93c5fd;
+  font-size: 0.78rem;
+  text-align: left;
 }
 
 /* —— KDS: كروت مطبخ + شريط طاولات —— */
