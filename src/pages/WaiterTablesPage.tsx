@@ -232,11 +232,10 @@ export default function WaiterTablesPage() {
       );
 
       setMinChargeDraftByTable((prev) => {
-        const next = { ...prev };
+        const next: Record<string, string> = { ...prev };
         for (const t of apiTables as any[]) {
           const tid = String(t?.id || "").trim();
           if (!tid) continue;
-          if (next[tid] != null && String(next[tid]).trim() !== "") continue;
           const mc = Number(t?.minimumCharge ?? 0);
           next[tid] = Number.isFinite(mc) ? String(Math.max(0, mc)) : "0";
         }

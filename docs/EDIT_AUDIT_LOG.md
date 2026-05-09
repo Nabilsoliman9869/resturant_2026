@@ -95,3 +95,9 @@
 - `backend/api_server.py`: إنشاء تخزين **`captain_transfer_requests`** مع **`POST /api/restaurant/table-sessions/{id}/request-captain-transfer`** (الكابتن الحالي فقط؛ يستخرج من **`MAT3AM_APP_USERS`** + **`MAT3AM_USER_ROLE_SCHEDULE`** زملاء بنفس **الدور الفعّال لليوم** عبر **`_resolve_effective_role_code`**)، وإنشاء عنصر وارد **`captain_transfer_request`** في **`role_inbox`** مع **`targetUserIds`**. مسارا **`POST /captain-transfer-requests/{id}/accept`** و**`/cancel`**؛ **`GET …/role-inbox`** يقبل **`userId`** لتصفية عناصر موجّهة لمستخدم محدّد وتمرير **`transferRequestId`**/**`sessionId`** في العناصر.
 - `src/components/RestaurantDualBells.tsx` + `AppShell.tsx`: تمرير **`userId`** و**`mat3amActor`** إلى استطلاع الوارد؛ زر **«قبول التحويل»** لنوع **`captain_transfer_request`**.
 - `src/pages/WaiterTablesPage.tsx`: زر **«طلب تحويل»** للجرسون/الاستقبال عندما يكون المستخدم هو الكابتن على الجلسة النشطة.
+
+### 018 — إعادة حد الطاولة للافتراضي + ترشيح أصناف ضمن فرق المينيموم — `UTC 2026-05-08T17:45:00Z` — ID `mincharge-reset-gap-picks`
+
+- `backend/api_server.py`: **`_restaurant_clear_table_minimum_charge_override`** يزيل `minimumCharge` المخصّص من ملف الطاولات؛ يُستدعى عند إنشاء **جلسة جديدة** (`POST /table-sessions` فرع الإنشاء فقط، وليس عند إعادة استخدام جلسة نشطة اليوم). عند **`PATCH …/tables/{id}/status`** وحالة **`ready`** يُزال الحد المخصّص تلقائياً مع انتهاء التنظيف. مسار جديد **`GET /api/products/picks-under-price`** يعيد أصنافاً من **TBL007** بـ `AgentPrice <= max_price` مرتبة تصاعدياً بالسعر.
+- `src/pages/WaiterOrderPage.tsx`: لوحة **بدائل ضمن فرق المينيموم** تحت ملخص الفاتورة عند وجود فرق؛ أزرار تضيف صنفاً مباشرة للسلة (`pushCartLineForProduct`) بدون غرامة منفصلة — الصافي يرتفع بأصناف حقيقية. استخدام **`safeFetch`** لجلب الاقتراحات؛ الإخفاء عند طلب الحساب أو قفل الكابتن.
+- `src/pages/WaiterTablesPage.tsx`: مسودة حقل المينيموم على الشريحة تُحدَّث من الخادم في كل **`loadTables`** حتى يظهر صفر/افتراضي فور مسح التخصيص من الخلفية.

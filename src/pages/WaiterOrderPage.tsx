@@ -10,6 +10,7 @@ import "../styles/operationalRoles.css";
 import SmartProductSearch from "../components/SmartProductSearch";
 import { useAuth } from "../auth/AuthContext";
 import { buildMat3amActor } from "../lib/mat3amActor";
+import { safeFetch } from "../lib/safeFetch";
 
 type Product = {
   CardGuide: string;
@@ -245,6 +246,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [seatGuestLabels, setSeatGuestLabels] = useState<Record<number, string>>({});
   /** حدّ أدنى افتراضي من `/api/restaurant/ops-settings` عندما لا يُحدَّد على الطاولة */
   const [tableMinDefaultOps, setTableMinDefaultOps] = useState(0);
+  /** ترشيح أصناف بسعر الوحدة ضمن فرق المينيموم (بديل عن دفع فرق بدون منفعة) */
+  const [gapPickHits, setGapPickHits] = useState<Product[]>([]);
+  const [gapPickBusy, setGapPickBusy] = useState(false);
   const seatGuestLabelsRef = useRef<Record<number, string>>({});
   const patchSeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** مقعد واحد له حقل اسم مفتوح (بعد ضغط الزر)، أو الكتابة مباشرة في الحقل بعد الفتح */
@@ -861,6 +865,53 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   );
   const itemCount = cart.reduce((a, l) => a + l.qty, 0);
   const billingLocked = Boolean(billingRequestedAt);
+
+  useEffect(() => {
+    if (isDeliveryEmbedded || minimumChargeDelta <= 0.001 || billingLocked || orderTakingLocked) {
+      setGapPickHits([]);
+      setGapPickBusy(false);
+      return;
+    }
+    let cancelled = false;
+    setGapPickBusy(true);
+    const maxPx = Math.round(minimumChargeDelta * 100) / 100;
+    void (async () => {
+      try {
+        const r = await safeFetch(
+          `${base}/api/products/picks-under-price?max_price=${encodeURIComponent(String(maxPx))}&limit=28`,
+        );
+        const t = await r.text();
+        if (cancelled || !r.ok) {
+          if (!cancelled) setGapPickHits([]);
+          return;
+        }
+        const j = tryParseJson<{ products?: unknown[] }>(t) ?? {};
+        const arr = Array.isArray(j.products) ? j.products : [];
+        const mapped: Product[] = [];
+        for (const row of arr) {
+          const p = row as Record<string, unknown>;
+          const cg = String(p.CardGuide || "").trim();
+          if (!cg) continue;
+          const price = Number(p.Price ?? p.AgentPrice ?? 0) || 0;
+          mapped.push({
+            CardGuide: cg,
+            ProductName: String(p.ProductName || ""),
+            Price: price,
+            AgentPrice: Number(p.AgentPrice ?? p.Price ?? 0) || 0,
+          });
+        }
+        if (!cancelled) setGapPickHits(mapped);
+      } catch {
+        if (!cancelled) setGapPickHits([]);
+      } finally {
+        if (!cancelled) setGapPickBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [base, minimumChargeDelta, isDeliveryEmbedded, billingLocked, orderTakingLocked]);
+
   const addonPreview = useMemo(() => {
     if (!addonPickerProduct) {
       return { base: 0, addons: 0, unit: 0, service: 0, vat: 0, total: 0 };
@@ -1851,6 +1902,49 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   <div style={{ color: "#92400e", fontSize: "0.85rem", fontWeight: 800, lineHeight: 1.35 }}>
                     الحدّ الأدنى {effectiveTableMinimum.toFixed(2)} ج.م — فرق مطبَّق على الصافي {minimumChargeDelta.toFixed(2)} ج.م (بدون فرق كان{" "}
                     {netBeforeTax.toFixed(2)}).
+                  </div>
+                ) : null}
+                {effectiveTableMinimum > 0 && minimumChargeDelta > 0 && !billingLocked && !orderTakingLocked ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(217,119,6,0.35)",
+                      background: "rgba(251,191,36,0.08)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, fontSize: "0.82rem", marginBottom: 6, color: "#92400e" }}>
+                      بدائل ضمن فرق المينيموم — أضِف صنفاً تستفيد به بدل دفع الفرق وحده
+                    </div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: 8, lineHeight: 1.35 }}>
+                      أصناف بسعر الوحدة ≤ {minimumChargeDelta.toFixed(2)} ج.م (قائمة الكتالوج). Minimum charge gap ≈{" "}
+                      {minimumChargeDelta.toFixed(2)} ج.م
+                    </div>
+                    {gapPickBusy ? (
+                      <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>جاري تحميل الاقتراحات…</div>
+                    ) : gapPickHits.length === 0 ? (
+                      <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                        لا توجد أصناف ضمن هذا السقف في الكتالوج — استخدم البحث أدناه أو راجع المدير.
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {gapPickHits.slice(0, 14).map((p) => (
+                          <button
+                            key={`gap-${p.CardGuide}`}
+                            type="button"
+                            className="waiter-pos__btn waiter-pos__btn--ghost"
+                            style={{ fontSize: "0.76rem", padding: "5px 10px", maxWidth: "100%" }}
+                            title={`إضافة ${p.ProductName} إلى السلة`}
+                            onClick={() => pushCartLineForProduct(p, [], "", 1)}
+                          >
+                            {p.ProductName.slice(0, 42)}
+                            {p.ProductName.length > 42 ? "…" : ""}{" "}
+                            <span style={{ opacity: 0.85 }}>({p.Price.toFixed(0)})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 {billingTotals.ownerDiscountPct > 0 ? (

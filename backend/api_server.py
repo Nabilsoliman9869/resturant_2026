@@ -4364,6 +4364,55 @@ def search_products(search_text: str):
             pass
 
 
+@app.get("/api/products/picks-under-price")
+def products_picks_under_price(
+    max_price: float = Query(..., ge=0),
+    limit: int = Query(24, ge=1, le=80),
+):
+    """أصناف بسعر الوحدة ≤ max_price — لترشيح بدائل ضمن فرق المينيموم تشارج."""
+    if max_price <= 0:
+        return {"products": []}
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    lim = min(int(limit), 80)
+    try:
+        cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
+        query = f"""
+        SELECT TOP ({lim}) CardGuide, ProductName, AgentPrice, ProductImageUrl, Hieght3
+        FROM TBL007
+        WHERE NotActive = 0 AND AgentPrice IS NOT NULL AND AgentPrice <= ?
+        ORDER BY AgentPrice ASC, ProductName ASC
+        """
+        cursor.execute(query, (float(max_price),))
+        products = []
+        for row in cursor.fetchall():
+            guid = str(row[0])
+            img_manifest = _product_images_manifest_get(guid)
+            img_db = str(row[3]) if len(row) > 3 and row[3] else None
+            products.append(
+                {
+                    "CardGuide": guid,
+                    "ProductName": row[1],
+                    "Price": float(row[2]) if row[2] else 0.0,
+                    "AgentPrice": float(row[2]) if row[2] else 0.0,
+                    "image": f"/api/products/{guid}/image",
+                    "imageUrl": img_manifest or img_db or f"/api/products/{guid}/image",
+                    "PrepMinutes": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
+                    "Hieght3": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
+                }
+            )
+        return {"products": products}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.get("/api/products/{card_guide}/xtra")
 def get_product_xtra_card(card_guide: str):
     """بطاقة مادة كاملة — قراءة صف TBL007 + نصوص العرض للحقول المرتبطة."""
@@ -13255,6 +13304,8 @@ def restaurant_update_table_status(table_id: str, body: dict):
                 t["readyAt"] = now_iso
                 t["dirtyAt"] = None
                 t["cleaningStartedAt"] = None
+                t.pop("minimumCharge", None)
+                t.pop("minimumChargeUpdatedAt", None)
             _restaurant_save("tables", data)
             return t
     conn = get_connection()
@@ -13308,6 +13359,29 @@ def restaurant_update_table_minimum_charge(table_id: str, body: dict):
     data.append(rec)
     _restaurant_save("tables", data)
     return {"ok": True, "id": tid, "minimumCharge": mc}
+
+
+def _restaurant_clear_table_minimum_charge_override(table_id: str) -> None:
+    """إزالة الحد الأدنى المخصّص للطاولة ليعود السلوك للافتراضي من الإعدادات."""
+    tid = str(table_id or "").strip()
+    if not tid:
+        return
+    data = _restaurant_load("tables", [])
+    if not isinstance(data, list):
+        data = []
+    changed = False
+    for t in data:
+        if not isinstance(t, dict):
+            continue
+        if str(t.get("id") or "").strip().upper() != tid.upper():
+            continue
+        if "minimumCharge" in t or "minimumChargeUpdatedAt" in t:
+            t.pop("minimumCharge", None)
+            t.pop("minimumChargeUpdatedAt", None)
+            changed = True
+        break
+    if changed:
+        _restaurant_save("tables", data)
 
 
 @app.patch("/api/restaurant/tables/{table_id}/mark-dirty")
@@ -13712,6 +13786,7 @@ def restaurant_create_session(body: dict):
     _restaurant_assign_captain_from_actor_if_needed(rec, actor, body)
     data.append(rec)
     _restaurant_save("table_sessions", data)
+    _restaurant_clear_table_minimum_charge_override(table_id)
     try:
         restaurant_update_table_status(table_id, {"status": "occupied"})
     except Exception:
