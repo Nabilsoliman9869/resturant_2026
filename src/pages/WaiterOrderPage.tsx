@@ -1144,7 +1144,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         total,
       };
 
-      const r = await fetch(`${base}/api/restaurant/invoices`, {
+      const r = await safeFetch(`${base}/api/restaurant/invoices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1470,6 +1470,37 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         </div>
       ) : null}
 
+      {String(msg || "").trim() ? (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            margin: "0 1rem 0.75rem",
+            padding: "12px 14px",
+            borderRadius: 12,
+            background:
+              /تم إرسال|تم تحويل|تم طلب|تم إخطار|تم إلغاء|تم دمج/.test(String(msg))
+                ? "rgba(22, 163, 74, 0.12)"
+                : /فشل|تعذر|لا يمكن|مسند|قفل|غير جاهز|الطلب فارغ|اختر طاولة/.test(String(msg))
+                  ? "rgba(185, 28, 28, 0.1)"
+                  : "rgba(30, 64, 175, 0.08)",
+            border:
+              /تم إرسال|تم تحويل|تم طلب|تم إخطار|تم إلغاء|تم دمج/.test(String(msg))
+                ? "1px solid rgba(22, 163, 74, 0.45)"
+                : /فشل|تعذر|لا يمكن|مسند|قفل|غير جاهز|الطلب فارغ|اختر طاولة/.test(String(msg))
+                  ? "1px solid rgba(185, 28, 28, 0.4)"
+                  : "1px solid rgba(59, 130, 246, 0.35)",
+            color: "#0f172a",
+            fontWeight: 750,
+            fontSize: "0.92rem",
+            lineHeight: 1.45,
+            textAlign: "right",
+          }}
+        >
+          {msg}
+        </div>
+      ) : null}
+
       {showSummary && (
         <div className="card waiter-pos__summary-panel" style={{ margin: "0.75rem 1rem", padding: "1rem 1.1rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -1713,11 +1744,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
                   color: "#fff",
                   border: "1px solid #15803d",
+                  opacity: loading || billingLocked ? 0.65 : 1,
+                  cursor: loading || billingLocked ? "not-allowed" : "pointer",
                 }}
                 disabled={loading || billingLocked}
                 onClick={() => void submitSale()}
               >
-                {loading ? "..." : "إرسال الطلب"}
+                {loading ? "جاري الإرسال…" : "إرسال الطلب"}
               </button>
             </div>
 
@@ -1985,7 +2018,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   </button>
                 </div>
               </div>
-              {msg && <div className="waiter-pos__msg" style={{ fontSize: "0.7rem", padding: "4px" }}>{msg}</div>}
             </div>
           </div>
           <div className="waiter-pos__search-wrap" style={{ marginBottom: "0.5rem" }}>

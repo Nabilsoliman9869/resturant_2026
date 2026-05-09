@@ -31,7 +31,7 @@ export default defineConfig({
       "/link_invoices.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
     },
   },
-  base: "./",
+  base: "/",
   /** يجب أن يطابق ما يخدمه api_server (REST_DIR = ui/restaurant) وحزمة PyInstaller (مجلد ui). */
   build: {
     outDir: "ui/restaurant",
