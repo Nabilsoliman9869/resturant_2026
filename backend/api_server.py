@@ -11139,6 +11139,365 @@ def _kids_area_package_price(settings: dict, package_id: str) -> float:
     return 0.0
 
 
+# ========== Kids Area v2 — POS بنقطة بيع كاشير + شريحة فاتورة مفتوحة ==========
+KIDS_ROOT_LATIN_NAME = "Kids Area Services"
+KIDS_ROOT_AR_NAME = "خدمات الكيدز ايريا"
+KIDS_KITCHEN_MARKER = "55555"  # tbl007.Custom5 ⇒ بند يُرسَل للمطبخ
+KIDS_AGENT_GROUP_NAME = "kids_area_customers"
+KIDS_DEFAULT_AGENT_NAME = "Kids Area"
+KIDS_COST_CENTER_NAME = "كيدز ايريا"
+KIDS_DEFAULT_PACKAGES = [
+    {
+        "groupName": "باقة 1 خدمات الكيدز ايريا",
+        "latinName": "Kids Area Services _01",
+        "items": [
+            {"name": "ساعة كيدز ايريا", "price": 100.0, "minutes": 60, "kitchen": False},
+        ],
+    },
+    {
+        "groupName": "باقة 2 خدمات الكيدز ايريا",
+        "latinName": "Kids Area Services _02",
+        "items": [
+            {"name": "ساعتين كيدز ايريا", "price": 175.0, "minutes": 120, "kitchen": False},
+            {"name": "بيتزا أطفال", "price": 50.0, "minutes": 0, "kitchen": True},
+        ],
+    },
+    {
+        "groupName": "باقة 3 خدمات الكيدز ايريا",
+        "latinName": "Kids Area Services _03",
+        "items": [
+            {"name": "ثلاث ساعات كيدز ايريا", "price": 250.0, "minutes": 180, "kitchen": False},
+            {"name": "بيتزا أطفال", "price": 50.0, "minutes": 0, "kitchen": True},
+            {"name": "عصير طبيعي صغير", "price": 50.0, "minutes": 0, "kitchen": True},
+        ],
+    },
+]
+
+
+def _kids_path(name: str) -> str:
+    os.makedirs(_restaurant_dir, exist_ok=True)
+    return os.path.join(_restaurant_dir, name)
+
+
+def _kids_load(name: str, default):
+    p = _kids_path(name)
+    if not os.path.exists(p):
+        return default
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d
+    except Exception:
+        return default
+
+
+def _kids_save(name: str, data) -> None:
+    with open(_kids_path(name), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _kids_resolve_root_group_guid(cursor) -> Optional[str]:
+    """يحاول إيجاد جذر TBL006 «Kids Area Services» بالاسم اللاتيني أو العربي."""
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide FROM dbo.TBL006
+            WHERE (LatinName IS NOT NULL AND LOWER(LTRIM(RTRIM(CAST(LatinName AS NVARCHAR(400))))) = LOWER(?))
+               OR (GroupName IS NOT NULL AND LTRIM(RTRIM(CAST(GroupName AS NVARCHAR(400)))) = ?)
+            ORDER BY CASE WHEN MainGuide IS NULL THEN 0 ELSE 1 END, ID
+            """,
+            (KIDS_ROOT_LATIN_NAME.lower(), KIDS_ROOT_AR_NAME),
+        )
+        r = cursor.fetchone()
+        if r and r[0]:
+            return str(r[0]).strip().upper()
+    except Exception:
+        pass
+    return None
+
+
+def _kids_ensure_root_group(cursor, conn) -> str:
+    """يضمن وجود جذر TBL006 ويُعيد CardGuide له. ينشئه إن لم يوجد."""
+    g = _kids_resolve_root_group_guid(cursor)
+    if g:
+        return g
+    new_guid = str(uuid.uuid4()).upper()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, NULL, 1)
+            """,
+            (new_guid, KIDS_ROOT_AR_NAME, KIDS_ROOT_LATIN_NAME),
+        )
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر إنشاء مجموعة الكيدز ايريا الجذر في TBL006: {e}")
+    return new_guid
+
+
+def _kids_ensure_default_agent(cursor, conn) -> str:
+    """عميل افتراضي «Kids Area» في TBL016 ضمن مجموعة kids_area_customers — يُنشأ مرة واحدة."""
+    try:
+        group_guid = _ensure_tbl015_group_by_name(cursor, conn, KIDS_AGENT_GROUP_NAME)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تجهيز مجموعة عملاء الكيدز ايريا: {e}")
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide FROM dbo.TBL016
+            WHERE AgentName IS NOT NULL
+              AND LOWER(LTRIM(RTRIM(AgentName))) = LOWER(?)
+              AND MainGroupGuide = CAST(? AS uniqueidentifier)
+            ORDER BY ID
+            """,
+            (KIDS_DEFAULT_AGENT_NAME, group_guid),
+        )
+        r = cursor.fetchone()
+        if r and r[0]:
+            return str(r[0]).strip().upper()
+    except Exception:
+        pass
+    acct_guid = _pick_default_account_guid_tbl004(cursor)
+    if not acct_guid:
+        raise HTTPException(
+            status_code=400,
+            detail="لا يوجد حساب في TBL004 لربط عميل الكيدز ايريا الافتراضي. أضف حساباً أولاً.",
+        )
+    try:
+        acct_guid = str(uuid.UUID(str(acct_guid))).upper()
+    except Exception:
+        raise HTTPException(status_code=400, detail="حساب TBL004 الافتراضي غير صالح GUID.")
+    new_guid = str(uuid.uuid4()).upper()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO dbo.TBL016 (CardGuide, AgentName, NotActive, MainGroupGuide, AccountID)
+            VALUES (?, ?, 0, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier))
+            """,
+            (new_guid, KIDS_DEFAULT_AGENT_NAME, group_guid, acct_guid),
+        )
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر إنشاء عميل الكيدز ايريا الافتراضي: {e}")
+    return new_guid
+
+
+def _kids_ensure_cost_center(cursor, conn) -> Optional[str]:
+    """مركز كلفة «كيدز ايريا» في TBL005 — يُنشأ إن لم يوجد. يعود None لو فشل (لا يفسد البوتستراب)."""
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide FROM dbo.TBL005
+            WHERE GroupName IS NOT NULL
+              AND LTRIM(RTRIM(CAST(GroupName AS NVARCHAR(400)))) = ?
+            ORDER BY ID
+            """,
+            (KIDS_COST_CENTER_NAME,),
+        )
+        r = cursor.fetchone()
+        if r and r[0]:
+            return str(r[0]).strip().upper()
+    except Exception:
+        return None
+    new_guid = str(uuid.uuid4()).upper()
+    try:
+        cursor.execute(
+            "INSERT INTO dbo.TBL005 (CardGuide, GroupName) VALUES (?, ?)",
+            (new_guid, KIDS_COST_CENTER_NAME),
+        )
+        conn.commit()
+        return new_guid
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def _kids_pick_default_unit_for_products(cursor) -> Optional[str]:
+    try:
+        cursor.execute("SELECT TOP 1 CardGuide FROM dbo.TBL019 WHERE GroupName IS NOT NULL ORDER BY ID")
+        r = cursor.fetchone()
+        if r and r[0]:
+            return str(r[0]).strip().upper()
+    except Exception:
+        return None
+    return None
+
+
+def _kids_load_packages_from_db(cursor) -> list:
+    """يقرأ الباقات (sub-groups تحت الجذر) ومنتجاتها من TBL006/TBL007."""
+    root = _kids_resolve_root_group_guid(cursor)
+    if not root:
+        return []
+    out: list = []
+    try:
+        cursor.execute(
+            """
+            SELECT CardGuide, GroupName, LatinName
+            FROM dbo.TBL006
+            WHERE MainGuide = CAST(? AS uniqueidentifier)
+            ORDER BY ID
+            """,
+            (root,),
+        )
+        sub_groups = [
+            {"groupGuide": str(r[0]).strip().upper(), "groupName": r[1] or "", "latinName": r[2] or ""}
+            for r in (cursor.fetchall() or [])
+        ]
+    except Exception:
+        return []
+    for g in sub_groups:
+        items: list = []
+        try:
+            cursor.execute(
+                """
+                SELECT CardGuide, ProductName, AgentPrice, EndUserPrice, Custom5, Hieght3
+                FROM dbo.TBL007
+                WHERE GroupGuid = CAST(? AS uniqueidentifier)
+                  AND (NotActive = 0 OR NotActive IS NULL)
+                ORDER BY ID
+                """,
+                (g["groupGuide"],),
+            )
+            for r in cursor.fetchall() or []:
+                price = float(r[2] or r[3] or 0)
+                marker = str(r[4] or "").strip()
+                minutes = 0
+                try:
+                    minutes = int(r[5]) if r[5] is not None else 0
+                except (TypeError, ValueError):
+                    minutes = 0
+                items.append(
+                    {
+                        "productGuide": str(r[0]).strip().upper(),
+                        "name": str(r[1] or ""),
+                        "price": price,
+                        "isKitchen": marker == KIDS_KITCHEN_MARKER,
+                        "minutes": minutes,
+                    }
+                )
+        except Exception:
+            items = []
+        if not items:
+            continue
+        total_price = round(sum(float(it.get("price") or 0) for it in items), 2)
+        total_minutes = max((int(it.get("minutes") or 0) for it in items), default=0)
+        out.append(
+            {
+                "packageGuide": g["groupGuide"],
+                "packageName": g["groupName"],
+                "latinName": g["latinName"],
+                "items": items,
+                "totalPrice": total_price,
+                "durationMinutes": total_minutes,
+            }
+        )
+    return out
+
+
+def _kids_bootstrap_default_packages(cursor, conn) -> int:
+    """ينشئ الباقات الافتراضية إن لم توجد أي باقات تحت الجذر. يعيد عدد الباقات المُنشأة."""
+    root = _kids_ensure_root_group(cursor, conn)
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) FROM dbo.TBL006 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+            (root,),
+        )
+        c = cursor.fetchone()
+        if c and c[0] and int(c[0]) > 0:
+            return 0
+    except Exception:
+        return 0
+    unit_guid = _kids_pick_default_unit_for_products(cursor)
+    created = 0
+    code_seed = 14001
+    for idx, pkg in enumerate(KIDS_DEFAULT_PACKAGES, start=1):
+        sub_guid = str(uuid.uuid4()).upper()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security, CardCode)
+                VALUES (CAST(? AS uniqueidentifier), ?, ?, CAST(? AS uniqueidentifier), 1, ?)
+                """,
+                (sub_guid, pkg["groupName"], pkg["latinName"], root, str(code_seed + idx)),
+            )
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            continue
+        for jdx, it in enumerate(pkg["items"], start=1):
+            prod_guid = str(uuid.uuid4()).upper()
+            marker = KIDS_KITCHEN_MARKER if it.get("kitchen") else None
+            minutes_val = int(it.get("minutes") or 0)
+            try:
+                if unit_guid:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.TBL007
+                        (CardGuide, CardCode, ProductName, GroupGuid, DefaultUnit, Unit, Security,
+                         AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
+                        VALUES (?, ?, ?, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
+                                CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
+                        """,
+                        (
+                            prod_guid,
+                            f"{code_seed + idx}{jdx:03d}",
+                            it["name"],
+                            sub_guid,
+                            unit_guid,
+                            unit_guid,
+                            float(it["price"]),
+                            float(it["price"]),
+                            marker,
+                            minutes_val,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.TBL007
+                        (CardGuide, CardCode, ProductName, GroupGuid, Security,
+                         AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
+                        VALUES (?, ?, ?, CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
+                        """,
+                        (
+                            prod_guid,
+                            f"{code_seed + idx}{jdx:03d}",
+                            it["name"],
+                            sub_guid,
+                            float(it["price"]),
+                            float(it["price"]),
+                            marker,
+                            minutes_val,
+                        ),
+                    )
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                continue
+        created += 1
+    try:
+        conn.commit()
+    except Exception:
+        pass
+    return created
+
+
 def _restaurant_venue_path() -> str:
     os.makedirs(_restaurant_dir, exist_ok=True)
     return os.path.join(_restaurant_dir, "venue.json")
@@ -15876,6 +16235,1015 @@ def _kds_upsert_table_order(ord_data: list, payload: dict) -> dict:
 @app.get("/api/restaurant/kids-area/settings")
 def restaurant_kids_area_settings_get():
     return _kids_area_load_settings()
+
+
+# ========== Kids Area v2 Routes ==========
+def _kids_create_open_invoice(
+    cursor,
+    conn,
+    *,
+    agent_guid: str,
+    items_to_invoice: list,
+    bill_notes: str,
+    bill_notes2: str,
+    bill_notes3: str,
+    bill_notes4: str,
+    bill_notes5: str,
+    customer_name: str,
+    cost_center: Optional[str],
+    down_payment: float,
+    down_payment_notes: str,
+    invoice_type_guid: Optional[str] = None,
+) -> dict:
+    """ينشئ فاتورة TBL022 مفتوحة (Paid=0, LockRelations=0) + بنود TBL023 — مع BillNotes2..5 و CustomerName و DownPayment."""
+    try:
+        _ensure_costing_and_stock_schema(cursor)
+    except Exception:
+        pass
+    main_guide = str(uuid.uuid4()).upper()
+    invoice_type = (invoice_type_guid or _get_restaurant_invoice_type_guid(cursor, "table") or FALLBACK_INVOICE_TYPE_GUID).upper()
+    now_dt = datetime.now()
+    bill_date = now_dt
+    done_in = now_dt
+
+    cursor.execute(
+        "SELECT ISNULL(MAX(BillNumber), 0) FROM TBL022 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+        (_mat3am_guid_sql_param(invoice_type),),
+    )
+    _mx = cursor.fetchone()
+    final_bill_number = (int(_mx[0]) if _mx and _mx[0] is not None else 0) + 1
+
+    tbl022_m = _tbl022_column_names_map(cursor)
+    store_col = tbl022_m.get("storeguide")
+    currency_col = tbl022_m.get("currencyguide")
+    date_value_col = tbl022_m.get("datevalue01")
+
+    store_gv: Optional[str] = None
+    if store_col:
+        try:
+            store_gv = _mat3am_store_guid_for_invoice_main_guide(cursor, invoice_type)
+        except Exception:
+            store_gv = None
+        if not store_gv:
+            store_gv = _mat3am_get_or_create_default_store_guid(cursor)
+
+    cur_gv: Optional[str] = None
+    if currency_col:
+        try:
+            cur_gv = _mat3am_default_currency_guid_for_invoice(cursor)
+        except Exception:
+            cur_gv = None
+        if not cur_gv:
+            try:
+                cursor.execute("SELECT TOP (1) CardGuide FROM dbo.TBL001 WHERE CardGuide IS NOT NULL")
+                rr = cursor.fetchone()
+                if rr and rr[0]:
+                    cur_gv = _mat3am_guid_sql_param(rr[0])
+            except Exception:
+                pass
+
+    cols: list = ["CardGuide"]
+    vals: list = [main_guide]
+    if store_col and store_gv:
+        cols.append(store_col); vals.append(store_gv)
+    elif store_col and not store_gv:
+        raise HTTPException(status_code=500, detail="StoreGuide إلزامي ولم يُحلّ — راجع TBL008.")
+    if currency_col and cur_gv:
+        cols.append(currency_col); vals.append(cur_gv)
+
+    cols.extend([
+        "MainGuide", "BillNumber", "BillDate", "DoneIn", "AgentGuide",
+        "CostCenter", "Notes", "BillNotes2", "BillNotes3", "BillNotes4", "BillNotes5",
+        "CustomerName", "Discount", "TaxValue", "LocalAdministrativeTax",
+        "DownPayment", "DownPaymentNotes",
+        "LockRelations", "InsertedIn", "Paid", "PayMethod",
+    ])
+    vals.extend([
+        invoice_type, final_bill_number, bill_date, done_in, agent_guid,
+        cost_center or None,
+        bill_notes or None, bill_notes2 or None, bill_notes3 or None, bill_notes4 or None, bill_notes5 or None,
+        customer_name or None,
+        0.0, 0.0, 0.0,
+        float(down_payment or 0), down_payment_notes or None,
+        False, datetime.now(), 0.0, 1,  # PayMethod=1 (نقدي افتراضياً)
+    ])
+    if date_value_col:
+        cols.append(date_value_col); vals.append(bill_date)
+    _mat3am_apply_tbl022_fk_tbl019_columns(cursor, cols, vals, tbl022_m)
+
+    colnames_sql = ", ".join(cols)
+    placeholders = ", ".join(["?"] * len(vals))
+    cursor.execute(f"INSERT INTO TBL022 ({colnames_sql}) VALUES ({placeholders})", tuple(vals))
+
+    # بنود TBL023 — نستخدم نفس الآلية المعروفة (Unit tinyint + RelatedAgent)
+    inv_for_lines = InvoiceHeader(
+        BillDate=bill_date.strftime("%Y-%m-%d"),
+        DoneIn=done_in.strftime("%Y-%m-%d"),
+        AgentGuide=agent_guid,
+        Items=[
+            InvoiceItem(
+                ProductGuide=str(it["productGuide"]),
+                ProductName=str(it.get("name") or "صنف"),
+                Quantity=float(it.get("quantity") or 1),
+                Unit=str(it.get("unit") or "1"),
+                UnitPrice=float(it.get("unitPrice") or 0),
+                TotalValue=float(it.get("totalValue") or (float(it.get("quantity") or 1) * float(it.get("unitPrice") or 0))),
+            )
+            for it in items_to_invoice
+        ],
+    )
+    _mat3am_insert_tbl023_invoice_lines_xtra_style(cursor, main_guide, inv_for_lines, None)
+    conn.commit()
+
+    total_value = round(sum(float(it.get("quantity") or 1) * float(it.get("unitPrice") or 0) for it in items_to_invoice), 2)
+    return {
+        "invoiceCardGuide": main_guide,
+        "billNumber": final_bill_number,
+        "invoiceTypeGuide": invoice_type,
+        "billDate": bill_date.isoformat(),
+        "totalValue": total_value,
+        "downPayment": float(down_payment or 0),
+    }
+
+
+def _kids_settle_invoice_close(cursor, conn, *, main_guide: str, paid_value: float) -> None:
+    """يقفل الفاتورة: Paid=1, LockRelations=1، يضع DownPayment=قيمة المدفوع الإجمالي."""
+    cursor.execute(
+        """
+        UPDATE TBL022
+        SET Paid = 1, LockRelations = 1, DownPayment = ?
+        WHERE CardGuide = CAST(? AS uniqueidentifier)
+        """,
+        (float(paid_value or 0), main_guide),
+    )
+    conn.commit()
+
+
+def _kids_append_tbl023_line(cursor, conn, *, main_guide: str, agent_guid: str, item: dict) -> None:
+    """يضيف سطر TBL023 على فاتورة مفتوحة."""
+    qty = float(item.get("quantity") or 1)
+    unit_price = float(item.get("unitPrice") or 0)
+    total_value = float(item.get("totalValue") or qty * unit_price)
+    unit_val = int(_mat3am_tbl023_unit_as_tinyint(str(item.get("unit") or "1")))
+    cursor.execute(
+        """
+        INSERT INTO TBL023
+        (MainGuide, ProductGuide, Quantity, Unit, TotalValue, InsertedIn, RelatedAgent)
+        VALUES (?, ?, ?, CAST(? AS tinyint), ?, ?, ?)
+        """,
+        (
+            main_guide,
+            str(item.get("productGuide") or ""),
+            qty,
+            unit_val,
+            total_value,
+            datetime.now(),
+            agent_guid,
+        ),
+    )
+    conn.commit()
+
+
+def _kids_load_tickets() -> list:
+    d = _kids_load("kids_tickets.json", [])
+    return d if isinstance(d, list) else []
+
+
+def _kids_save_tickets(data: list) -> None:
+    _kids_save("kids_tickets.json", data)
+
+
+def _kids_load_payments() -> list:
+    d = _kids_load("kids_payments.json", [])
+    return d if isinstance(d, list) else []
+
+
+def _kids_save_payments(data: list) -> None:
+    _kids_save("kids_payments.json", data)
+
+
+def _kids_ticket_total(ticket: dict) -> float:
+    """مجموع كل بنود الفاتورة الحالية (الباقة + الإضافات)."""
+    s = 0.0
+    for ln in (ticket.get("lines") or []):
+        if not isinstance(ln, dict):
+            continue
+        try:
+            s += float(ln.get("quantity") or 1) * float(ln.get("unitPrice") or 0)
+        except Exception:
+            pass
+    return round(s, 2)
+
+
+def _kids_ticket_paid_total(ticket: dict) -> float:
+    s = 0.0
+    for p in (ticket.get("payments") or []):
+        if not isinstance(p, dict):
+            continue
+        try:
+            s += float(p.get("amount") or 0)
+        except Exception:
+            pass
+    return round(s, 2)
+
+
+def _kids_format_bill_notes4(pkg_name: str, minutes: int) -> str:
+    """يبني نص BillNotes4: اسم الباقة + المدة بالساعات/الدقائق."""
+    nm = (pkg_name or "").strip() or "Kids Area Package"
+    if minutes <= 0:
+        return nm[:240]
+    if minutes % 60 == 0:
+        return f"{nm} / {minutes // 60}h"[:240]
+    return f"{nm} / {minutes}m"[:240]
+
+
+@app.get("/api/kids/packages")
+def kids_packages_get(bootstrap: bool = True):
+    """يقرأ هرم باقات الكيدز ايريا من TBL006/007. عند bootstrap=True يُهيّئ الافتراضيات إن لم توجد."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        try:
+            _ensure_menu_tables(cur)
+        except Exception:
+            pass
+        if bootstrap:
+            try:
+                _kids_ensure_root_group(cur, conn)
+                _kids_bootstrap_default_packages(cur, conn)
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"[kids] bootstrap warn: {e}", flush=True)
+        packages = _kids_load_packages_from_db(cur)
+        root = _kids_resolve_root_group_guid(cur)
+        return {"rootGroupGuide": root, "packages": packages}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/kids/packages")
+def kids_packages_create(body: dict):
+    """ينشئ باقة جديدة (sub-group في TBL006) مع منتجاتها (TBL007). الإدخال:
+       { "name": "...", "latinName": "...", "items": [{"name", "price", "minutes", "kitchen": bool}] }"""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    name = str(body.get("name") or body.get("groupName") or "").strip()
+    latin = str(body.get("latinName") or name).strip()
+    items_in = body.get("items") if isinstance(body.get("items"), list) else []
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم الباقة مطلوب")
+    if not items_in:
+        raise HTTPException(status_code=400, detail="مكونات الباقة مطلوبة (عنصر واحد على الأقل)")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        try:
+            _ensure_menu_tables(cur)
+        except Exception:
+            pass
+        root = _kids_ensure_root_group(cur, conn)
+        sub_guid = str(uuid.uuid4()).upper()
+        cur.execute(
+            """
+            INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, CAST(? AS uniqueidentifier), 1)
+            """,
+            (sub_guid, name, latin, root),
+        )
+        unit_guid = _kids_pick_default_unit_for_products(cur)
+        for jdx, it in enumerate(items_in, start=1):
+            if not isinstance(it, dict):
+                continue
+            pname = str(it.get("name") or "").strip()
+            if not pname:
+                continue
+            price = float(it.get("price") or 0)
+            minutes = int(it.get("minutes") or 0)
+            marker = KIDS_KITCHEN_MARKER if bool(it.get("kitchen")) else None
+            prod_guid = str(uuid.uuid4()).upper()
+            try:
+                if unit_guid:
+                    cur.execute(
+                        """
+                        INSERT INTO dbo.TBL007
+                        (CardGuide, ProductName, GroupGuid, DefaultUnit, Unit, Security,
+                         AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
+                        VALUES (?, ?, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
+                                CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
+                        """,
+                        (prod_guid, pname, sub_guid, unit_guid, unit_guid, price, price, marker, minutes),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO dbo.TBL007
+                        (CardGuide, ProductName, GroupGuid, Security,
+                         AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
+                        VALUES (?, ?, CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
+                        """,
+                        (prod_guid, pname, sub_guid, price, price, marker, minutes),
+                    )
+            except Exception as e:
+                try: conn.rollback()
+                except Exception: pass
+                raise HTTPException(status_code=500, detail=f"تعذر إضافة بند {pname}: {e}")
+        conn.commit()
+        return {"success": True, "packageGuide": sub_guid, "name": name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"خطأ في إنشاء الباقة: {e}")
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+# ========== Kids Area v2 — حساب الوقت الإضافي ==========
+KIDS_OVERTIME_TOLERANCE_MIN = 5   # مهلة سماح
+KIDS_OVERTIME_ROUND_STEP_MIN = 5  # وحدة التقريب
+import math as _kids_math
+
+
+def _kids_parse_iso_dt(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        try:
+            return datetime.strptime(str(s)[:19], "%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            return None
+
+
+def _kids_compute_overtime(ticket: dict) -> dict:
+    """يحسب الوقت الإضافي لتذكرة نشطة (أو يرجّع 0 إن لم يحن، أو أُضيف مسبقاً، أو أُعفي).
+
+    صيغة السعر: package_time_price ÷ package_minutes = سعر الدقيقة.
+    التقريب: ceil لأقرب 5 دقائق بعد طرح مهلة 5 د.
+    """
+    out = {
+        "applicable": False,
+        "exempt": bool((ticket or {}).get("overtimeExempt")),
+        "alreadyApplied": bool((ticket or {}).get("overtimeAppliedAt")),
+        "rawMinutes": 0,
+        "billableMinutes": 0,
+        "ratePerMinute": 0.0,
+        "packageMinutes": 0,
+        "packageTimePrice": 0.0,
+        "charge": 0.0,
+        "refProductGuide": None,
+        "refName": None,
+        "exitExpectedAt": (ticket or {}).get("exitExpectedAt"),
+    }
+    if not isinstance(ticket, dict):
+        return out
+    if str(ticket.get("status") or "").lower() != "active":
+        return out
+
+    # 1) بنود المدة في الباقة (غير المطبخ، fromPackage=true)
+    pkg_time_lines = [
+        ln for ln in (ticket.get("lines") or [])
+        if isinstance(ln, dict)
+        and bool(ln.get("fromPackage"))
+        and not bool(ln.get("isKitchen"))
+    ]
+    pkg_minutes = 0
+    pkg_time_price = 0.0
+    ref_product_guide = None
+    ref_name = None
+    for ln in pkg_time_lines:
+        try:
+            pkg_minutes += int(ln.get("minutes") or 0)
+        except Exception:
+            pass
+        try:
+            pkg_time_price += float(ln.get("unitPrice") or 0) * float(ln.get("quantity") or 1)
+        except Exception:
+            pass
+        if not ref_product_guide:
+            ref_product_guide = str(ln.get("productGuide") or "") or None
+            ref_name = str(ln.get("name") or "") or None
+
+    if pkg_minutes <= 0 or pkg_time_price <= 0 or not ref_product_guide:
+        # لا يمكن احتساب الإضافي بلا مدة/سعر مرجعي
+        return out
+
+    rate_per_min = round(pkg_time_price / pkg_minutes, 6)
+    out["packageMinutes"] = pkg_minutes
+    out["packageTimePrice"] = round(pkg_time_price, 2)
+    out["ratePerMinute"] = rate_per_min
+    out["refProductGuide"] = ref_product_guide
+    out["refName"] = ref_name
+
+    # 2) الوقت الخام بالدقائق
+    exit_exp = _kids_parse_iso_dt(ticket.get("exitExpectedAt"))
+    if not exit_exp:
+        # تُحسب من entryAt + packageMinutes كاحتياط
+        entry = _kids_parse_iso_dt(ticket.get("entryAt"))
+        if not entry:
+            return out
+        from datetime import timedelta as _td
+        exit_exp = entry + _td(minutes=int(ticket.get("packageMinutes") or pkg_minutes))
+
+    raw = (datetime.now() - exit_exp).total_seconds() / 60.0
+    raw_min = int(_kids_math.floor(max(0.0, raw)))
+    out["rawMinutes"] = raw_min
+
+    # 3) بعد مهلة السماح + التقريب لأعلى لأقرب 5 د
+    after_tol = max(0, raw_min - KIDS_OVERTIME_TOLERANCE_MIN)
+    if after_tol <= 0:
+        return out
+    billable = int(_kids_math.ceil(after_tol / KIDS_OVERTIME_ROUND_STEP_MIN)) * KIDS_OVERTIME_ROUND_STEP_MIN
+    out["billableMinutes"] = billable
+    out["charge"] = round(billable * rate_per_min, 2)
+    out["applicable"] = billable > 0 and not out["exempt"] and not out["alreadyApplied"]
+    return out
+
+
+def _kids_enrich_ticket(t: dict) -> dict:
+    """يضيف لقطة overtime للتذكرة دون تعديل القرص."""
+    if not isinstance(t, dict):
+        return t
+    try:
+        t["overtime"] = _kids_compute_overtime(t)
+    except Exception:
+        t["overtime"] = {
+            "applicable": False, "charge": 0.0, "billableMinutes": 0,
+            "rawMinutes": 0, "ratePerMinute": 0.0,
+            "exempt": bool(t.get("overtimeExempt")),
+            "alreadyApplied": bool(t.get("overtimeAppliedAt")),
+        }
+    return t
+
+
+@app.get("/api/kids/tickets")
+def kids_tickets_get(status: Optional[str] = "active"):
+    data = _kids_load_tickets()
+    if status:
+        st = str(status).strip().lower()
+        data = [t for t in data if isinstance(t, dict) and str(t.get("status") or "").lower() == st]
+    data.sort(key=lambda t: str((t or {}).get("entryAt") or ""), reverse=True)
+    data = [_kids_enrich_ticket(t) for t in data]
+    return {"tickets": data}
+
+
+@app.get("/api/kids/tickets/{ticket_id}")
+def kids_ticket_get(ticket_id: str):
+    for t in _kids_load_tickets():
+        if isinstance(t, dict) and str(t.get("id") or "") == ticket_id:
+            return _kids_enrich_ticket(t)
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+
+@app.post("/api/kids/tickets")
+def kids_ticket_create(body: dict):
+    """فتح تذكرة جديدة + فاتورة مفتوحة TBL022/023 + DownPayment.
+    body: { childName, fatherName, phone, age?, packageGuide, companionsNote?, downPayment? }"""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    child = str(body.get("childName") or "").strip()
+    father = str(body.get("fatherName") or "").strip()
+    phone = str(body.get("phone") or "").strip()
+    age = body.get("age")
+    pkg_guide = str(body.get("packageGuide") or "").strip().upper()
+    if not child or not phone:
+        raise HTTPException(status_code=400, detail="اسم الطفل وهاتف الوالد مطلوبان")
+    if not pkg_guide:
+        raise HTTPException(status_code=400, detail="packageGuide مطلوب")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        try: _ensure_menu_tables(cur)
+        except Exception: pass
+
+        # 1) الباقة + مكوناتها من القاعدة
+        packages = _kids_load_packages_from_db(cur)
+        pkg = next((p for p in packages if str(p.get("packageGuide") or "").upper() == pkg_guide), None)
+        if not pkg:
+            raise HTTPException(status_code=404, detail="الباقة غير موجودة أو لا تحوي مكونات")
+        pkg_minutes = int(pkg.get("durationMinutes") or 0)
+        pkg_total = float(pkg.get("totalPrice") or 0)
+        pkg_items = pkg.get("items") or []
+
+        # 2) عميل افتراضي + مركز كلفة
+        agent = _kids_ensure_default_agent(cur, conn)
+        cost_center = _kids_ensure_cost_center(cur, conn)
+
+        # 3) تجهيز بنود الفاتورة من مكونات الباقة
+        invoice_lines = []
+        ticket_lines = []
+        line_seq = 0
+        for it in pkg_items:
+            line_seq += 1
+            line_id = str(uuid.uuid4())
+            invoice_lines.append({
+                "productGuide": it["productGuide"],
+                "name": it["name"],
+                "quantity": 1.0,
+                "unitPrice": float(it.get("price") or 0),
+                "totalValue": float(it.get("price") or 0),
+                "unit": "1",
+            })
+            ticket_lines.append({
+                "lineId": line_id,
+                "productGuide": it["productGuide"],
+                "name": it["name"],
+                "quantity": 1.0,
+                "unitPrice": float(it.get("price") or 0),
+                "isKitchen": bool(it.get("isKitchen")),
+                "kitchenStatus": "pending" if bool(it.get("isKitchen")) else None,
+                "minutes": int(it.get("minutes") or 0),
+                "addedAt": datetime.now().isoformat(),
+                "fromPackage": True,
+            })
+
+        # 4) DownPayment
+        try:
+            dp_in = body.get("downPayment")
+            down_payment = float(dp_in) if dp_in is not None else pkg_total
+        except Exception:
+            down_payment = pkg_total
+        if down_payment < 0:
+            down_payment = 0
+        if down_payment > pkg_total + 0.001:
+            down_payment = pkg_total
+
+        # 5) حقول الملاحظات
+        notes_summary = f"KIDS|child={child}|phone={phone}|pkg={pkg.get('packageName') or ''}"[:480]
+        bill_notes4 = _kids_format_bill_notes4(str(pkg.get("packageName") or ""), pkg_minutes)
+        ticket_id = str(uuid.uuid4())
+        bill_notes5 = f"ticketId={ticket_id}"
+
+        # 6) إنشاء فاتورة مفتوحة
+        inv = _kids_create_open_invoice(
+            cur, conn,
+            agent_guid=agent,
+            items_to_invoice=invoice_lines,
+            bill_notes=notes_summary,
+            bill_notes2=child[:240],
+            bill_notes3=phone[:60],
+            bill_notes4=bill_notes4,
+            bill_notes5=bill_notes5,
+            customer_name=child[:60],
+            cost_center=cost_center,
+            down_payment=down_payment,
+            down_payment_notes=f"Kids booking — {child}"[:240],
+        )
+
+        # 7) حفظ التذكرة في JSON
+        now_iso = datetime.now().isoformat()
+        try:
+            exit_expected_dt = datetime.now()
+            if pkg_minutes > 0:
+                from datetime import timedelta as _td
+                exit_expected_dt = datetime.now() + _td(minutes=pkg_minutes)
+            exit_expected = exit_expected_dt.isoformat()
+        except Exception:
+            exit_expected = None
+        ticket = {
+            "id": ticket_id,
+            "status": "active",
+            "childName": child,
+            "fatherName": father,
+            "phone": phone,
+            "age": int(age) if str(age or "").strip().isdigit() else None,
+            "packageGuide": pkg_guide,
+            "packageName": pkg.get("packageName") or "",
+            "packageMinutes": pkg_minutes,
+            "packageTotal": pkg_total,
+            "companionsNote": str(body.get("companionsNote") or "").strip(),
+            "entryAt": now_iso,
+            "exitExpectedAt": exit_expected,
+            "exitAt": None,
+            "lines": ticket_lines,
+            "invoice": {
+                "cardGuide": inv["invoiceCardGuide"],
+                "billNumber": inv["billNumber"],
+                "invoiceTypeGuide": inv["invoiceTypeGuide"],
+                "agentGuide": agent,
+                "costCenter": cost_center,
+            },
+            "payments": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "kind": "down_payment",
+                    "amount": down_payment,
+                    "method": "cash",
+                    "at": now_iso,
+                    "note": "دفعة الحجز",
+                }
+            ],
+            "alerts": [],
+            "notes": [],
+        }
+        tickets = _kids_load_tickets()
+        tickets.insert(0, ticket)
+        _kids_save_tickets(tickets)
+
+        # سجل دفعات للتدقيق
+        pays = _kids_load_payments()
+        pays.insert(0, {
+            "id": str(uuid.uuid4()),
+            "ticketId": ticket_id,
+            "invoiceCardGuide": inv["invoiceCardGuide"],
+            "kind": "down_payment",
+            "amount": down_payment,
+            "method": "cash",
+            "at": now_iso,
+            "by": str((body.get("mat3amActor") or {}).get("name") or ""),
+        })
+        _kids_save_payments(pays)
+
+        # تحديث ملف الأهالي (إعادة استخدام)
+        try:
+            _kids_area_upsert_profile(phone, father, child)
+        except Exception:
+            pass
+
+        return ticket
+    except HTTPException:
+        raise
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"خطأ في إنشاء التذكرة: {e}")
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+@app.post("/api/kids/tickets/{ticket_id}/fire-kitchen")
+def kids_ticket_fire_kitchen(ticket_id: str, body: dict):
+    """يطلق سطور المطبخ من تذكرة كيدز إلى نظام KDS الحالي.
+    body: { lineIds?: [..] (افتراضياً كل بنود المطبخ pending), mat3amActor? }"""
+    body = body if isinstance(body, dict) else {}
+    line_ids_filter = body.get("lineIds") if isinstance(body.get("lineIds"), list) else None
+    tickets = _kids_load_tickets()
+    for t in tickets:
+        if not isinstance(t, dict) or str(t.get("id") or "") != ticket_id:
+            continue
+        if str(t.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=409, detail="التذكرة ليست نشطة")
+        kitchen_lines = [
+            ln for ln in (t.get("lines") or [])
+            if isinstance(ln, dict) and bool(ln.get("isKitchen"))
+            and str(ln.get("kitchenStatus") or "pending").lower() == "pending"
+            and (line_ids_filter is None or str(ln.get("lineId")) in [str(x) for x in line_ids_filter])
+        ]
+        if not kitchen_lines:
+            raise HTTPException(status_code=409, detail="لا توجد بنود مطبخ بانتظار الإرسال")
+        # حمولة الطلب للمطبخ — على نمط طلبات الطاولة لكن tableId/tableLabel = اسم الطفل
+        kid_label = f"كيدز - {t.get('childName') or ''}"[:80]
+        items_payload = [
+            {
+                "name": str(ln.get("name") or ""),
+                "quantity": float(ln.get("quantity") or 1),
+                "unitPrice": float(ln.get("unitPrice") or 0),
+                "productGuide": str(ln.get("productGuide") or ""),
+            }
+            for ln in kitchen_lines
+        ]
+        ord_data = _restaurant_load("orders", [])
+        if not isinstance(ord_data, list):
+            ord_data = []
+        payload = {
+            "sessionId": f"kids:{ticket_id}",
+            "tableId": f"kids:{ticket_id}",
+            "tableGuid": f"kids:{ticket_id}",
+            "tableLabel": kid_label,
+            "items": items_payload,
+        }
+        rec = _kds_upsert_table_order(ord_data, payload)
+        _restaurant_save("orders", ord_data)
+        now_iso = datetime.now().isoformat()
+        for ln in kitchen_lines:
+            ln["kitchenStatus"] = "sent"
+            ln["kitchenSentAt"] = now_iso
+            ln["kitchenOrderId"] = rec.get("id")
+        _kids_save_tickets(tickets)
+        return {"success": True, "ticket": t, "kitchenOrderId": rec.get("id"), "fired": len(kitchen_lines)}
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+
+@app.post("/api/kids/tickets/{ticket_id}/add-line")
+def kids_ticket_add_line(ticket_id: str, body: dict):
+    """يضيف بنداً للتذكرة + سطر TBL023 على نفس الفاتورة المفتوحة.
+    body: { productGuide, quantity?=1 }"""
+    body = body if isinstance(body, dict) else {}
+    pg = str(body.get("productGuide") or "").strip().upper()
+    qty = float(body.get("quantity") or 1)
+    if not pg or qty <= 0:
+        raise HTTPException(status_code=400, detail="productGuide وquantity مطلوبان")
+    tickets = _kids_load_tickets()
+    for t in tickets:
+        if not isinstance(t, dict) or str(t.get("id") or "") != ticket_id:
+            continue
+        if str(t.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=409, detail="التذكرة ليست نشطة")
+        # نقرأ الصنف من القاعدة لمعرفة السعر/الاسم/علامة المطبخ
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT TOP 1 CardGuide, ProductName, AgentPrice, EndUserPrice, Custom5
+                FROM dbo.TBL007
+                WHERE CardGuide = CAST(? AS uniqueidentifier)
+                  AND (NotActive = 0 OR NotActive IS NULL)
+                """,
+                (pg,),
+            )
+            r = cur.fetchone()
+            if not r:
+                raise HTTPException(status_code=404, detail="الصنف غير موجود")
+            name = str(r[1] or "")
+            price = float(r[2] or r[3] or 0)
+            is_kitchen = str(r[4] or "").strip() == KIDS_KITCHEN_MARKER
+            inv_card = str((t.get("invoice") or {}).get("cardGuide") or "")
+            agent = str((t.get("invoice") or {}).get("agentGuide") or "")
+            if not inv_card or not agent:
+                raise HTTPException(status_code=409, detail="الفاتورة المرتبطة مفقودة")
+            _kids_append_tbl023_line(
+                cur, conn,
+                main_guide=inv_card,
+                agent_guid=agent,
+                item={
+                    "productGuide": pg,
+                    "quantity": qty,
+                    "unitPrice": price,
+                    "totalValue": qty * price,
+                    "unit": "1",
+                },
+            )
+        finally:
+            try: conn.close()
+            except Exception: pass
+        line_id = str(uuid.uuid4())
+        (t.setdefault("lines", [])).append({
+            "lineId": line_id,
+            "productGuide": pg,
+            "name": name,
+            "quantity": qty,
+            "unitPrice": price,
+            "isKitchen": is_kitchen,
+            "kitchenStatus": "pending" if is_kitchen else None,
+            "minutes": 0,
+            "addedAt": datetime.now().isoformat(),
+            "fromPackage": False,
+        })
+        _kids_save_tickets(tickets)
+        return {"success": True, "ticket": t, "lineId": line_id}
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+
+@app.post("/api/kids/tickets/{ticket_id}/payment")
+def kids_ticket_payment(ticket_id: str, body: dict):
+    """يضيف دفعة على التذكرة (دون إقفال). body: { amount, method?='cash', note? }"""
+    body = body if isinstance(body, dict) else {}
+    try:
+        amount = float(body.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount يجب أن تكون موجبة")
+    method = str(body.get("method") or "cash")
+    note = str(body.get("note") or "")
+    tickets = _kids_load_tickets()
+    for t in tickets:
+        if not isinstance(t, dict) or str(t.get("id") or "") != ticket_id:
+            continue
+        if str(t.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=409, detail="التذكرة ليست نشطة")
+        now_iso = datetime.now().isoformat()
+        rec = {"id": str(uuid.uuid4()), "kind": "interim", "amount": amount, "method": method, "at": now_iso, "note": note}
+        (t.setdefault("payments", [])).append(rec)
+        _kids_save_tickets(tickets)
+        pays = _kids_load_payments()
+        pays.insert(0, {**rec, "ticketId": ticket_id, "invoiceCardGuide": str((t.get("invoice") or {}).get("cardGuide") or ""), "by": str((body.get("mat3amActor") or {}).get("name") or "")})
+        _kids_save_payments(pays)
+        return {"success": True, "ticket": t}
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+
+def _kids_apply_overtime_to_invoice(cur, conn, ticket: dict) -> Optional[dict]:
+    """يضيف سطر TBL023 للوقت الإضافي ويحدّث ticket محلياً. يعيد dict بالتفاصيل أو None.
+
+    يحترم flags: overtimeExempt + overtimeAppliedAt (لا يُكرَّر).
+    """
+    ot = _kids_compute_overtime(ticket)
+    if not ot.get("applicable"):
+        return None
+    ref_pg = ot.get("refProductGuide")
+    if not ref_pg:
+        return None
+    inv_card = str((ticket.get("invoice") or {}).get("cardGuide") or "")
+    agent_guid = str((ticket.get("invoice") or {}).get("agentGuide") or "")
+    if not inv_card or not agent_guid:
+        return None
+    minutes = int(ot.get("billableMinutes") or 0)
+    charge = float(ot.get("charge") or 0)
+    if minutes <= 0 or charge <= 0:
+        return None
+    # نص ملاحظة بصيغة ساعات/دقائق
+    h = minutes // 60
+    m = minutes % 60
+    if h > 0 and m > 0:
+        dur_text = f"{h} س {m} د"
+    elif h > 0:
+        dur_text = f"{h} س"
+    else:
+        dur_text = f"{m} د"
+    notes = f"وقت إضافي {dur_text} ({ot.get('refName') or 'باقة كيدز'})"
+
+    _kids_append_tbl023_line(
+        cur, conn,
+        main_guide=inv_card,
+        agent_guid=agent_guid,
+        item={
+            "productGuide": ref_pg,
+            "quantity": 1,
+            "unitPrice": charge,
+            "totalValue": charge,
+            "unit": "1",
+        },
+    )
+    line_id = str(uuid.uuid4())
+    (ticket.setdefault("lines", [])).append({
+        "lineId": line_id,
+        "productGuide": ref_pg,
+        "name": notes,
+        "quantity": 1.0,
+        "unitPrice": charge,
+        "isKitchen": False,
+        "kitchenStatus": None,
+        "minutes": 0,
+        "addedAt": datetime.now().isoformat(),
+        "fromPackage": False,
+        "isOvertime": True,
+        "overtimeMinutes": minutes,
+    })
+    ticket["overtimeAppliedAt"] = datetime.now().isoformat()
+    ticket["overtimeMinutesApplied"] = minutes
+    ticket["overtimeChargeApplied"] = charge
+    return {"minutes": minutes, "charge": charge, "lineId": line_id, "notes": notes}
+
+
+@app.post("/api/kids/tickets/{ticket_id}/exempt-overtime")
+def kids_ticket_exempt_overtime(ticket_id: str, body: dict):
+    """إعفاء من الوقت الإضافي — للمدير/المطوّر فقط."""
+    body = body if isinstance(body, dict) else {}
+    actor = body.get("mat3amActor") or {}
+    role = str((actor or {}).get("role") or "").strip().lower()
+    if role not in ("manager", "developer"):
+        raise HTTPException(status_code=403, detail="الإعفاء متاح للمدير فقط")
+    tickets = _kids_load_tickets()
+    for t in tickets:
+        if not isinstance(t, dict) or str(t.get("id") or "") != ticket_id:
+            continue
+        if str(t.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=409, detail="التذكرة مغلقة")
+        if t.get("overtimeAppliedAt"):
+            raise HTTPException(status_code=409, detail="الوقت الإضافي طُبّق فعلاً ولا يمكن الإعفاء")
+        t["overtimeExempt"] = True
+        t["overtimeExemptAt"] = datetime.now().isoformat()
+        t["overtimeExemptBy"] = str((actor or {}).get("name") or "")
+        reason = str(body.get("reason") or "").strip()
+        if reason:
+            t["overtimeExemptReason"] = reason[:240]
+        _kids_save_tickets(tickets)
+        return {"success": True, "ticket": _kids_enrich_ticket(t)}
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+
+@app.post("/api/kids/tickets/{ticket_id}/settle")
+def kids_ticket_settle(ticket_id: str, body: dict):
+    """تسوية التذكرة وإقفال الفاتورة. body: { amountPaid?: قيمة الدفعة الأخيرة, method?='cash' }
+
+    قبل الإقفال: لو هناك وقت إضافي مستحق وغير مُعفى، يُضاف سطر TBL023 تلقائياً.
+    """
+    body = body if isinstance(body, dict) else {}
+    method = str(body.get("method") or "cash")
+    tickets = _kids_load_tickets()
+    for t in tickets:
+        if not isinstance(t, dict) or str(t.get("id") or "") != ticket_id:
+            continue
+        if str(t.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=409, detail="التذكرة مغلقة مسبقاً")
+
+        # 1) إضافة سطر الوقت الإضافي إن وُجد (قبل احتساب الإجمالي)
+        overtime_applied = None
+        inv_card = str((t.get("invoice") or {}).get("cardGuide") or "")
+        if inv_card:
+            ot_pre = _kids_compute_overtime(t)
+            if ot_pre.get("applicable"):
+                conn0 = get_connection()
+                if conn0:
+                    try:
+                        cur0 = conn0.cursor()
+                        overtime_applied = _kids_apply_overtime_to_invoice(cur0, conn0, t)
+                    finally:
+                        try: conn0.close()
+                        except Exception: pass
+
+        # 2) إجمالي بعد إضافة الإضافي
+        total = _kids_ticket_total(t)
+        already_paid = _kids_ticket_paid_total(t)
+        remaining = round(max(0.0, total - already_paid), 2)
+        try:
+            amount_paid_in = float(body.get("amountPaid")) if body.get("amountPaid") is not None else remaining
+        except Exception:
+            amount_paid_in = remaining
+        if amount_paid_in < 0:
+            amount_paid_in = 0
+        now_iso = datetime.now().isoformat()
+        if amount_paid_in > 0:
+            (t.setdefault("payments", [])).append({
+                "id": str(uuid.uuid4()),
+                "kind": "settlement",
+                "amount": amount_paid_in,
+                "method": method,
+                "at": now_iso,
+                "note": "تسوية وإقفال",
+            })
+        final_paid = _kids_ticket_paid_total(t)
+
+        # 3) إقفال الفاتورة
+        if inv_card:
+            conn = get_connection()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    _kids_settle_invoice_close(cur, conn, main_guide=inv_card, paid_value=final_paid)
+                finally:
+                    try: conn.close()
+                    except Exception: pass
+
+        t["status"] = "closed"
+        t["exitAt"] = now_iso
+        t["totalAtClose"] = total
+        t["paidAtClose"] = final_paid
+        _kids_save_tickets(tickets)
+
+        if amount_paid_in > 0:
+            pays = _kids_load_payments()
+            pays.insert(0, {
+                "id": str(uuid.uuid4()),
+                "ticketId": ticket_id,
+                "invoiceCardGuide": inv_card,
+                "kind": "settlement",
+                "amount": amount_paid_in,
+                "method": method,
+                "at": now_iso,
+                "by": str((body.get("mat3amActor") or {}).get("name") or ""),
+            })
+            _kids_save_payments(pays)
+
+        return {
+            "success": True,
+            "ticket": t,
+            "total": total,
+            "paid": final_paid,
+            "remaining": round(max(0.0, total - final_paid), 2),
+            "overtimeApplied": overtime_applied,
+        }
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+
+@app.post("/api/kids/tickets/{ticket_id}/note")
+def kids_ticket_note(ticket_id: str, body: dict):
+    """ملاحظة/تنبيه على التذكرة. body: { text, kind?: 'note'|'alert' }"""
+    body = body if isinstance(body, dict) else {}
+    text = str(body.get("text") or "").strip()
+    kind = str(body.get("kind") or "note").strip().lower()
+    if not text:
+        raise HTTPException(status_code=400, detail="text مطلوب")
+    tickets = _kids_load_tickets()
+    for t in tickets:
+        if not isinstance(t, dict) or str(t.get("id") or "") != ticket_id:
+            continue
+        rec = {"id": str(uuid.uuid4()), "text": text[:240], "at": datetime.now().isoformat(), "by": str((body.get("mat3amActor") or {}).get("name") or "")}
+        if kind == "alert":
+            (t.setdefault("alerts", [])).append(rec)
+        else:
+            (t.setdefault("notes", [])).append(rec)
+        _kids_save_tickets(tickets)
+        return {"success": True, "ticket": t}
+    raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
 
 
 @app.put("/api/restaurant/kids-area/settings")

@@ -109,3 +109,33 @@
 ### 020 — إصلاح شاشة بيضاء على المسارات العميقة (Vite base) — `UTC 2026-05-09T12:15:00Z` — ID `vite-base-absolute-deep-routes`
 
 - `vite.config.ts`: تغيير **`base: "./"`** إلى **`base: "/"`**. مع base نسبي، عند فتح **`/app/waiter/order-taker`** (مسار React Router عميق) كان `<script src="./assets/index-...js">` يتحوّل إلى **`/app/waiter/assets/index-...js`** فيلتقطه catch-all لـ `api_server` ويردّ **`index.html`** بـ Content-Type `text/html` بدل `application/javascript` ⇒ يرفض المتصفح تنفيذه ⇒ **شاشة بيضاء** بلا أخطاء واضحة. base مطلق يحل المشكلة لأن المتصفح يطلب الأصول من جذر الموقع دائماً.
+
+### 022 — Kids Area v2: حساب وقت إضافي تلقائي عند الإقفال + إعفاء للمدير — `UTC 2026-05-09T23:05:00Z` — ID `kids-area-v2-overtime-auto-charge`
+
+- **آلية الاحتساب**: سعر الدقيقة في الباقة = مجموع `AgentPrice` لبنود المدة (`Custom5 ≠ '55555'`) ÷ مجموع `Hieght3` لتلك البنود. الفرق الخام بالدقائق بين «الآن» و`exitExpectedAt`، يُطرح **5 دقائق مهلة سماح**، ثم يُقرَّب لأعلى **`ceil`** لأقرب 5 دقائق. القيمة = `billable_minutes × rate_per_min`.
+- **`backend/api_server.py`**:
+  - **`_kids_compute_overtime(ticket)`** يُرجع `{applicable, billableMinutes, rawMinutes, charge, ratePerMinute, packageMinutes, packageTimePrice, refProductGuide, refName, exempt, alreadyApplied}` — يعمل على البيانات المحفوظة في التذكرة دون استعلام DB إضافي. يرفض الاحتساب تلقائياً لو `packageMinutes ≤ 0` أو `packageTimePrice ≤ 0` (سلامة بيانات الباقة).
+  - **`_kids_enrich_ticket(t)`** يضيف لقطة `overtime` لكل تذكرة قبل الإرجاع — يُرصِّعها `GET /tickets` و`GET /tickets/{id}` بدون تعديل القرص.
+  - **`_kids_apply_overtime_to_invoice(cur, conn, ticket)`** يضيف سطر `TBL023` بـ `ProductGuide = نفس بطاقة بند المدة الأصلي` (الحفاظ على «كمية = 1»)، `Quantity=1`، `UnitPrice = القيمة المحسوبة`، `Notes = "وقت إضافي N د (اسم البند)"`. ثم يحدّث `ticket.lines` محلياً (مع `isOvertime=true`) ويختم `overtimeAppliedAt/MinutesApplied/ChargeApplied` لمنع التكرار.
+  - **`POST /api/kids/tickets/{id}/exempt-overtime`** — متاح فقط لـ `mat3amActor.role ∈ {manager, developer}`؛ يضع `overtimeExempt=true` + `exemptAt/By/Reason`. مرفوض لو سبق تطبيق الإضافي.
+  - **`POST /api/kids/tickets/{id}/settle`** عُدِّل ليستدعي `_kids_apply_overtime_to_invoice` **قبل** احتساب الإجمالي والإقفال — السطر يصبح جزءاً من فاتورة `TBL022` المغلقة. يعيد `overtimeApplied: {minutes, charge}` للواجهة.
+  - ثوابت: `KIDS_OVERTIME_TOLERANCE_MIN = 5`، `KIDS_OVERTIME_ROUND_STEP_MIN = 5`.
+- **`src/pages/KidsAreaPage.tsx`**:
+  - مؤقت داخلي `setInterval(30s)` لإعادة رسم العدّادات بدون انتظار polling السبع ثوانٍ.
+  - شارة **`kids__ot`** على بطاقة الشريحة: `«⏱ تجاوز 30 د ⇐ سيُضاف 25.00 ج.م عند الإقفال»` (لون كهرماني)، `«⏱ معفى من الوقت الإضافي ✓»` (أخضر)، أو `«⏱ أُضيف للفاتورة: …»` (سيان) بعد التطبيق.
+  - مودال التفاصيل: شارة overtime مفصّلة (دقائق خام، مهلة، معدل، قيمة)، شبكة 4 أعمدة (قبل الإضافي / وقت إضافي / مدفوع / متبقي)، زر «✓ إعفاء الوقت الإضافي» يظهر فقط للمدير/المطوّر إذا `overtime.applicable === true`.
+  - حوار التسوية يعرض «سيُضاف وقت إضافي N د = X ج.م» قبل تأكيد الدفعة الأخيرة، ورسالة النجاح تذكر الإضافي إن وُجد.
+- **متطلب البيانات**: لتفعيل الاحتساب يجب أن يكون لبند المدة في `TBL007` قيم `Hieght3 > 0` (دقائق) و`AgentPrice > 0`. البنود المطبخية تُعلَّم بـ `Custom5 = '55555'` ولا تدخل في حساب سعر الدقيقة.
+
+### 021 — وحدة Kids Area v2: نقطة بيع كاشير + شريحة فاتورة مفتوحة + هرم باقات هرمي — `UTC 2026-05-09T20:10:00Z` — ID `kids-area-v2-cashier-pos-open-invoice`
+
+- `backend/api_server.py` — وحدة جديدة كاملة:
+  - **ثوابت + bootstrap**: `KIDS_ROOT_LATIN_NAME = "Kids Area Services"` (TBL006 جذر)، `KIDS_KITCHEN_MARKER = "55555"` (`TBL007.Custom5`)، `KIDS_AGENT_GROUP_NAME = "kids_area_customers"` (TBL015) + عميل افتراضي **«Kids Area»** (TBL016) + مركز كلفة (TBL005). إن لم توجد الجذر/مجموعات/أصناف الافتراضية تُنشأ تلقائياً (idempotent).
+  - **هرم القراءة `_kids_load_packages_from_db`**: يقرأ TBL006 sub-groups تحت الجذر كباقات، وكل sub-group ⇒ منتجاتها من TBL007 مع `Custom5` لتمييز بنود المطبخ و`Hieght3` لمدة الباقة بالدقائق و`AgentPrice/EndUserPrice` للسعر.
+  - **مسارات جديدة**: `GET /api/kids/packages` (قراءة + bootstrap)، `POST /api/kids/packages` (إنشاء باقة فرعية + بنودها)، `GET /api/kids/tickets[/{id}]`، `POST /api/kids/tickets` (يفتح TBL022 مفتوحة `Paid=0, LockRelations=0` + TBL023 لكل بند الباقة + DownPayment + `BillNotes2..5` + `CustomerName=child`)، `POST /tickets/{id}/fire-kitchen` (يطلق pending kitchen lines إلى **`_kds_upsert_table_order`** بنفس آلية طاولات JSON ⇒ يظهر فوراً في شاشة المطبخ)، `POST /tickets/{id}/add-line` (يضيف صنفاً للفاتورة المفتوحة + يحدّث TBL023)، `POST /tickets/{id}/payment` (دفعة جزئية)، `POST /tickets/{id}/settle` (تسوية + `UPDATE TBL022 SET Paid=1, LockRelations=1, DownPayment=<نهائي>`)، `POST /tickets/{id}/note` (ملاحظة/تنبيه على الشريحة).
+  - **التخزين**: `config/restaurant/kids_tickets.json` و`kids_payments.json` لتفاصيل التذاكر والدفعات (إلى جانب الفاتورة الحقيقية في القاعدة).
+- `src/pages/KidsAreaPage.tsx` — استبدال كامل (v2) موحّد بحسب الدور:
+  - **كاشير**: زر «تذكرة جديدة» يفتح حواراً بشبكة باقات، اختيار → بيانات الطفل/الوالد/هاتف/عمر/ملاحظات/قيمة الحجز → `POST /tickets`. أزرار **+ بند إضافي**، **دفعة جزئية**، **تسوية وإقفال** على بطاقة التذكرة.
+  - **kids_guard** (موبيل): يرى نفس الشرائح، يضغط **«اطلب الوجبة الآن»** لإطلاق وجبات الباقة المعلّقة للمطبخ، **+ ملاحظة/+ تنبيه**.
+  - شرائح التذاكر: عدّاد المتبقي حتى الخروج المتوقع (يُحسب من `entryAt + packageMinutes`)، تحذير عند تجاوز الوقت، إجمالي/مدفوع/متبقّي، مؤشر **«N وجبة بانتظار إرسال للمطبخ»**.
+- نُقطة وصول: `/app/cashier/kids-area`، `/app/manager/kids-area` (منوي لاحقاً)، `/app/kids-guard/kids-area` — كلها صفحة واحدة تتفاعل مع `useAuth().user.role`.
