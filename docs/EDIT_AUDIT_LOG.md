@@ -110,7 +110,11 @@
 
 - `vite.config.ts`: تغيير **`base: "./"`** إلى **`base: "/"`**. مع base نسبي، عند فتح **`/app/waiter/order-taker`** (مسار React Router عميق) كان `<script src="./assets/index-...js">` يتحوّل إلى **`/app/waiter/assets/index-...js`** فيلتقطه catch-all لـ `api_server` ويردّ **`index.html`** بـ Content-Type `text/html` بدل `application/javascript` ⇒ يرفض المتصفح تنفيذه ⇒ **شاشة بيضاء** بلا أخطاء واضحة. base مطلق يحل المشكلة لأن المتصفح يطلب الأصول من جذر الموقع دائماً.
 
-### 022 — Kids Area v2: حساب وقت إضافي تلقائي عند الإقفال + إعفاء للمدير — `UTC 2026-05-09T23:05:00Z` — ID `kids-area-v2-overtime-auto-charge`
+### 023 — إصلاح «فشل الحفظ — أرسل mat3amActor» في إرسال طلب الجرسون للمطبخ — `UTC 2026-05-10T09:00:00Z` — ID `waiter-order-send-mat3am-actor`
+
+- المشكلة: عند الضغط على «إرسال» في `WaiterOrderPage` لطلب طاولة، يُردّ من الخادم: **`{"detail":"أرسل مع الطلب mat3amActor (المستخدم الحالي) لتفعيل قفل الكابتن."}`** فيظهر للمستخدم «فشل الحفظ: Error: …». السبب: body الـ `POST /api/restaurant/invoices` كان لا يحوي حقل `mat3amActor`، فدالة `_restaurant_assert_order_taker_may_use_session` تعجز عن التحقق من ملكية الكابتن وترفض العملية.
+- الإصلاح في `src/pages/WaiterOrderPage.tsx`: إضافة `mat3amActor: buildMat3amActor(user)` ضمن body الإرسال (موجود فعلاً في زر «تسكين كابتن» وكان مفقوداً هنا فقط).
+- بدون هذا الحقل: قفل الكابتن يفشل لكل المستخدمين عدا (manager/developer)، لأن السياسة هي «التحقق من المستخدم قبل أي طلب على الجلسة».
 
 - **آلية الاحتساب**: سعر الدقيقة في الباقة = مجموع `AgentPrice` لبنود المدة (`Custom5 ≠ '55555'`) ÷ مجموع `Hieght3` لتلك البنود. الفرق الخام بالدقائق بين «الآن» و`exitExpectedAt`، يُطرح **5 دقائق مهلة سماح**، ثم يُقرَّب لأعلى **`ceil`** لأقرب 5 دقائق. القيمة = `billable_minutes × rate_per_min`.
 - **`backend/api_server.py`**:

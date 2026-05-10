@@ -1142,6 +1142,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         tax: vatValue,
         tipAmount: Math.max(0, tipAmount || 0),
         total,
+        mat3amActor: buildMat3amActor(user),
       };
 
       const r = await safeFetch(`${base}/api/restaurant/invoices`, {
