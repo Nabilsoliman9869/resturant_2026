@@ -51,6 +51,7 @@ import AddonsSettingsPage from "./pages/settings/AddonsSettingsPage";
 import MinimumChargeSettingsPage from "./pages/settings/MinimumChargeSettingsPage";
 import KidsAreaPage from "./pages/KidsAreaPage";
 import KidsAreaPackagesSettingsPage from "./pages/settings/KidsAreaPackagesSettingsPage";
+import SharedTerminalSettingsPage from "./pages/settings/SharedTerminalSettingsPage";
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
 import DeliveryManagementPage from "./pages/DeliveryManagementPage";
@@ -165,6 +166,7 @@ export default function App() {
           <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
+          <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />
@@ -296,6 +298,7 @@ export default function App() {
           <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
+          <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />

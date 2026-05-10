@@ -11216,19 +11216,125 @@ def _kids_resolve_root_group_guid(cursor) -> Optional[str]:
     return None
 
 
+def _kids_next_root_card_code(cursor) -> str:
+    """يولّد CardCode لجذر TBL006 جديد (3 خانات). يبحث عن أعلى رقم بين الجذور (MainGuide IS NULL)."""
+    try:
+        cursor.execute(
+            "SELECT TOP 1 CardCode FROM dbo.TBL006 "
+            "WHERE MainGuide IS NULL AND CardCode IS NOT NULL "
+            "AND ISNUMERIC(CardCode) = 1 "
+            "ORDER BY TRY_CAST(CardCode AS BIGINT) DESC"
+        )
+        r = cursor.fetchone()
+        if r and r[0]:
+            try:
+                return str(int(str(r[0]).strip()) + 1)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "900"  # نطاق آمن لمنشأة لا تستخدم 9xx
+
+
+def _kids_next_subgroup_card_code(cursor, root_guid: str, root_card_code: Optional[str]) -> str:
+    """يولّد CardCode لباقة فرعية تحت root_guid: <root_code>NN حيث NN = max+1.
+
+    لو الجذر بدون CardCode (سابق وقع في خطأ) يستخدم بدلاً منه طابع زمني قصير.
+    """
+    base = (str(root_card_code).strip() if root_card_code else "")
+    try:
+        if base:
+            cursor.execute(
+                "SELECT TOP 1 CardCode FROM dbo.TBL006 "
+                "WHERE MainGuide = CAST(? AS uniqueidentifier) "
+                "AND CardCode LIKE ? AND ISNUMERIC(CardCode) = 1 "
+                "ORDER BY TRY_CAST(CardCode AS BIGINT) DESC",
+                (root_guid, f"{base}%"),
+            )
+        else:
+            cursor.execute(
+                "SELECT TOP 1 CardCode FROM dbo.TBL006 "
+                "WHERE MainGuide = CAST(? AS uniqueidentifier) "
+                "AND CardCode IS NOT NULL "
+                "ORDER BY TRY_CAST(CardCode AS BIGINT) DESC",
+                (root_guid,),
+            )
+        r = cursor.fetchone()
+        if r and r[0]:
+            try:
+                return str(int(str(r[0]).strip()) + 1)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if base:
+        return f"{base}01"
+    # احتياط: طابع زمني قصير
+    return datetime.now().strftime("9%H%M%S")
+
+
+def _kids_next_product_card_code(cursor, sub_group_guid: str, sub_card_code: Optional[str]) -> str:
+    """يولّد CardCode لبند TBL007 تحت مجموعة: <sub_code>NNN حيث NNN = max+1."""
+    base = (str(sub_card_code).strip() if sub_card_code else "")
+    try:
+        if base:
+            cursor.execute(
+                "SELECT TOP 1 CardCode FROM dbo.TBL007 "
+                "WHERE GroupGuid = CAST(? AS uniqueidentifier) "
+                "AND CardCode LIKE ? AND ISNUMERIC(CardCode) = 1 "
+                "ORDER BY TRY_CAST(CardCode AS BIGINT) DESC",
+                (sub_group_guid, f"{base}%"),
+            )
+        else:
+            cursor.execute(
+                "SELECT TOP 1 CardCode FROM dbo.TBL007 "
+                "WHERE GroupGuid = CAST(? AS uniqueidentifier) "
+                "AND CardCode IS NOT NULL "
+                "ORDER BY TRY_CAST(CardCode AS BIGINT) DESC",
+                (sub_group_guid,),
+            )
+        r = cursor.fetchone()
+        if r and r[0]:
+            try:
+                return str(int(str(r[0]).strip()) + 1)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if base:
+        return f"{base}001"
+    return datetime.now().strftime("9%H%M%S")
+
+
+def _kids_get_card_code(cursor, table: str, guid: str) -> Optional[str]:
+    """يقرأ CardCode المعرّف لمجموعة/بند موجود مسبقاً."""
+    try:
+        cursor.execute(
+            f"SELECT TOP 1 CardCode FROM dbo.{table} WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            (guid,),
+        )
+        r = cursor.fetchone()
+        if r and r[0] is not None:
+            return str(r[0]).strip()
+    except Exception:
+        pass
+    return None
+
+
 def _kids_ensure_root_group(cursor, conn) -> str:
-    """يضمن وجود جذر TBL006 ويُعيد CardGuide له. ينشئه إن لم يوجد."""
+    """يضمن وجود جذر TBL006 ويُعيد CardGuide له. ينشئه إن لم يوجد، مع CardCode غير NULL."""
     g = _kids_resolve_root_group_guid(cursor)
     if g:
         return g
     new_guid = str(uuid.uuid4()).upper()
+    new_code = _kids_next_root_card_code(cursor)
     try:
         cursor.execute(
             """
-            INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security)
-            VALUES (CAST(? AS uniqueidentifier), ?, ?, NULL, 1)
+            INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security, CardCode)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, NULL, 1, ?)
             """,
-            (new_guid, KIDS_ROOT_AR_NAME, KIDS_ROOT_LATIN_NAME),
+            (new_guid, KIDS_ROOT_AR_NAME, KIDS_ROOT_LATIN_NAME, new_code),
         )
         conn.commit()
     except Exception as e:
@@ -11878,6 +11984,584 @@ def restaurant_workflow_settings_get():
 @app.put("/api/restaurant/workflow-settings")
 def restaurant_workflow_settings_put(body: dict):
     return _restaurant_write_workflow(body if isinstance(body, dict) else {})
+
+
+# ============================================================
+# Shared Terminal Mode (Mandatory PIN Overlay) — إعدادات/تحقق/سجل تدقيق
+# ------------------------------------------------------------
+# يتعامل مع جدول MAT3AM_TERMINAL_SETTINGS (سطر واحد StateKey='global')
+# + MAT3AM_TERMINAL_PIN_AUDIT (كل محاولة) + MAT3AM_TERMINAL_LOCKOUT (قفل بعد محاولات).
+# يُصدر token قصير العمر مُوقَّع HMAC-SHA256 يربط terminalId+userId+expiresAt.
+# الأدوار الحساسة على السيرفر تستدعي _terminal_require_user(actor) قبل التنفيذ
+# عندما يكون SharedTerminalEnabled=1 — وإلا تعمل بالسلوك القديم بلا تغيير.
+# ============================================================
+
+TERMINAL_SETTINGS_DEFAULTS = {
+    "sharedTerminalEnabled": False,
+    # — النمط الافتراضي الجديد: هجين «نافذة منزلقة + step-up للعمليات الخطرة» —
+    "slidingRefreshAfterAction": True,   # عمليات روتينية تجدّد العداد بدون قفل
+    "stepUpForDangerOps": True,          # العمليات الخطرة تطلب PIN فوري في مكانها
+    "idleLockMinutes": 2,                # نافذة الخمول الأساسية (دقائق)
+    "hardLogoutMinutes": 10,             # خروج كامل بعد هذا الزمن من الإهمال
+    # — الإعدادات الكلاسيكية (تستخدم فقط عند slidingRefreshAfterAction = False) —
+    "lockAfterSave": False,
+    "lockAfterEdit": False,
+    "lockAfterSend": False,
+    "lockAfterDelete": False,
+    "lockAfterDiscount": False,
+    "lockAfterReturn": False,
+    "maxAttemptsBeforeLockout": 3,
+    "lockoutSeconds": 30,
+    "tokenTtlSeconds": 900,
+}
+
+# سرّ التوقيع: يُؤخذ من البيئة، أو يُولَّد ثابتاً لكل تشغيل (يُستحسن إعداد متغير دائم في الإنتاج).
+_TERMINAL_TOKEN_SECRET_ENV = os.environ.get("MAT3AM_TERMINAL_TOKEN_SECRET", "").strip()
+_TERMINAL_TOKEN_SECRET_RUNTIME = (_TERMINAL_TOKEN_SECRET_ENV or uuid.uuid4().hex + uuid.uuid4().hex).encode("utf-8")
+
+
+def _terminal_token_secret() -> bytes:
+    return _TERMINAL_TOKEN_SECRET_RUNTIME
+
+
+def _b64u(b: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+
+def _b64u_decode(s: str) -> bytes:
+    import base64
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+def _terminal_token_sign(payload: dict) -> str:
+    """يبني token بصيغة base64url(payload_json).base64url(hmac_sha256). بسيط ومحلّي بلا تبعيات JWT."""
+    import hmac, hashlib
+    p = _b64u(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    sig = hmac.new(_terminal_token_secret(), p.encode("ascii"), hashlib.sha256).digest()
+    return f"{p}.{_b64u(sig)}"
+
+
+def _terminal_token_verify(token: str) -> Optional[dict]:
+    """يتحقق توقيع الـtoken وانتهاء الصلاحية. يعيد payload أو None."""
+    if not token or "." not in token:
+        return None
+    try:
+        import hmac, hashlib
+        p, sig = token.split(".", 1)
+        expected = hmac.new(_terminal_token_secret(), p.encode("ascii"), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64u(expected), sig):
+            return None
+        payload = json.loads(_b64u_decode(p).decode("utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        exp = int(payload.get("exp") or 0)
+        if exp <= int(datetime.utcnow().timestamp()):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _terminal_settings_load(cursor) -> dict:
+    """يقرأ صف الإعدادات الوحيد ويُعيد dict camelCase. ينشئه إن غاب.
+    ملاحظة: الحقول الجديدة (SlidingRefreshAfterAction/HardLogoutMinutes/StepUpForDangerOps)
+    تُقرأ في استعلام منفصل بـ try/except حتى لا نكسر القراءة لو لم يُنفَّذ ALTER بعد."""
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 SharedTerminalEnabled, IdleLockMinutes,
+                   LockAfterSave, LockAfterEdit, LockAfterSend,
+                   LockAfterDelete, LockAfterDiscount, LockAfterReturn,
+                   MaxAttemptsBeforeLockout, LockoutSeconds, TokenTtlSeconds,
+                   UpdatedAt, UpdatedBy
+            FROM dbo.MAT3AM_TERMINAL_SETTINGS WHERE StateKey = N'global'
+            """
+        )
+        r = cursor.fetchone()
+    except Exception:
+        return dict(TERMINAL_SETTINGS_DEFAULTS)
+    if not r:
+        try:
+            cursor.execute("INSERT INTO dbo.MAT3AM_TERMINAL_SETTINGS (StateKey) VALUES (N'global')")
+            cursor.connection.commit()
+        except Exception:
+            try: cursor.connection.rollback()
+            except Exception: pass
+        return dict(TERMINAL_SETTINGS_DEFAULTS)
+    out = {
+        "sharedTerminalEnabled": bool(r[0]),
+        "idleLockMinutes": int(r[1] or 2),
+        "lockAfterSave": bool(r[2]),
+        "lockAfterEdit": bool(r[3]),
+        "lockAfterSend": bool(r[4]),
+        "lockAfterDelete": bool(r[5]),
+        "lockAfterDiscount": bool(r[6]),
+        "lockAfterReturn": bool(r[7]),
+        "maxAttemptsBeforeLockout": int(r[8] or 3),
+        "lockoutSeconds": int(r[9] or 30),
+        "tokenTtlSeconds": int(r[10] or 900),
+        "updatedAt": r[11].isoformat() if r[11] else None,
+        "updatedBy": r[12] or "",
+        # افتراضات لو الأعمدة الجديدة لم تُنفّذ بعد
+        "slidingRefreshAfterAction": True,
+        "hardLogoutMinutes": 10,
+        "stepUpForDangerOps": True,
+    }
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 SlidingRefreshAfterAction, HardLogoutMinutes, StepUpForDangerOps
+            FROM dbo.MAT3AM_TERMINAL_SETTINGS WHERE StateKey = N'global'
+            """
+        )
+        r2 = cursor.fetchone()
+        if r2:
+            out["slidingRefreshAfterAction"] = bool(r2[0])
+            out["hardLogoutMinutes"] = int(r2[1] or 10)
+            out["stepUpForDangerOps"] = bool(r2[2])
+    except Exception:
+        pass
+    return out
+
+
+def _terminal_settings_save(cursor, body: dict, by_name: str) -> dict:
+    """يُحدّث صف الإعدادات (UPSERT). يقتصر على المفاتيح المسموحة."""
+    cur_st = _terminal_settings_load(cursor)
+    merged = dict(cur_st)
+    for k in TERMINAL_SETTINGS_DEFAULTS.keys():
+        if k in body and body[k] is not None:
+            merged[k] = body[k]
+    # validation
+    try:
+        merged["idleLockMinutes"] = max(1, min(60, int(merged["idleLockMinutes"])))
+    except Exception:
+        merged["idleLockMinutes"] = 2
+    try:
+        merged["hardLogoutMinutes"] = max(1, min(240, int(merged.get("hardLogoutMinutes", 10))))
+    except Exception:
+        merged["hardLogoutMinutes"] = 10
+    try:
+        merged["maxAttemptsBeforeLockout"] = max(1, min(20, int(merged["maxAttemptsBeforeLockout"])))
+    except Exception:
+        merged["maxAttemptsBeforeLockout"] = 3
+    try:
+        merged["lockoutSeconds"] = max(5, min(900, int(merged["lockoutSeconds"])))
+    except Exception:
+        merged["lockoutSeconds"] = 30
+    try:
+        merged["tokenTtlSeconds"] = max(60, min(7200, int(merged["tokenTtlSeconds"])))
+    except Exception:
+        merged["tokenTtlSeconds"] = 900
+    cursor.execute(
+        """
+        UPDATE dbo.MAT3AM_TERMINAL_SETTINGS
+           SET SharedTerminalEnabled = ?, IdleLockMinutes = ?,
+               LockAfterSave = ?, LockAfterEdit = ?, LockAfterSend = ?,
+               LockAfterDelete = ?, LockAfterDiscount = ?, LockAfterReturn = ?,
+               MaxAttemptsBeforeLockout = ?, LockoutSeconds = ?, TokenTtlSeconds = ?,
+               UpdatedAt = SYSUTCDATETIME(), UpdatedBy = ?
+         WHERE StateKey = N'global'
+        """,
+        (
+            1 if merged["sharedTerminalEnabled"] else 0,
+            int(merged["idleLockMinutes"]),
+            1 if merged["lockAfterSave"] else 0,
+            1 if merged["lockAfterEdit"] else 0,
+            1 if merged["lockAfterSend"] else 0,
+            1 if merged["lockAfterDelete"] else 0,
+            1 if merged["lockAfterDiscount"] else 0,
+            1 if merged["lockAfterReturn"] else 0,
+            int(merged["maxAttemptsBeforeLockout"]),
+            int(merged["lockoutSeconds"]),
+            int(merged["tokenTtlSeconds"]),
+            (str(by_name or "")[:120] or None),
+        ),
+    )
+    # Update الحقول الجديدة بشكل منفصل (لا يكسر لو الأعمدة لم تُضَف بعد)
+    try:
+        cursor.execute(
+            """
+            UPDATE dbo.MAT3AM_TERMINAL_SETTINGS
+               SET SlidingRefreshAfterAction = ?, HardLogoutMinutes = ?, StepUpForDangerOps = ?
+             WHERE StateKey = N'global'
+            """,
+            (
+                1 if merged.get("slidingRefreshAfterAction", True) else 0,
+                int(merged.get("hardLogoutMinutes", 10)),
+                1 if merged.get("stepUpForDangerOps", True) else 0,
+            ),
+        )
+    except Exception:
+        # الأعمدة الجديدة غير موجودة بعد — نتجاهل
+        try: cursor.connection.rollback()
+        except Exception: pass
+    cursor.connection.commit()
+    return _terminal_settings_load(cursor)
+
+
+def _terminal_pin_audit(cursor, *, terminal_id: str, login: Optional[str],
+                        old_uid: Optional[str], new_uid: Optional[str],
+                        action: str, reason: Optional[str],
+                        ip: Optional[str], ua: Optional[str]) -> None:
+    try:
+        cursor.execute(
+            """
+            INSERT INTO dbo.MAT3AM_TERMINAL_PIN_AUDIT
+            (TerminalId, AttemptedLogin, OldUserId, NewUserId, ActionType, Reason, ClientIp, UserAgent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(terminal_id or "unknown")[:120],
+                (str(login or "")[:120] or None),
+                (str(old_uid or "")[:64] or None),
+                (str(new_uid or "")[:64] or None),
+                str(action or "pin_fail")[:40],
+                (str(reason or "")[:120] or None),
+                (str(ip or "")[:64] or None),
+                (str(ua or "")[:400] or None),
+            ),
+        )
+        cursor.connection.commit()
+    except Exception:
+        try: cursor.connection.rollback()
+        except Exception: pass
+
+
+def _terminal_get_lockout(cursor, terminal_id: str) -> tuple:
+    """يعيد (failedAttempts, lockedUntilUtc_or_None)."""
+    try:
+        cursor.execute(
+            "SELECT FailedAttempts, LockedUntilUtc FROM dbo.MAT3AM_TERMINAL_LOCKOUT WHERE TerminalId = ?",
+            (str(terminal_id or "unknown")[:120],),
+        )
+        r = cursor.fetchone()
+        if not r:
+            return (0, None)
+        return (int(r[0] or 0), r[1])
+    except Exception:
+        return (0, None)
+
+
+def _terminal_record_failure(cursor, terminal_id: str, max_attempts: int, lockout_seconds: int) -> tuple:
+    """يحدّث (أو يُدخل) صف القفل بعد محاولة فاشلة. يعيد (failedAttempts, lockedUntilUtc_or_None)."""
+    from datetime import timedelta as _td
+    fails, until = _terminal_get_lockout(cursor, terminal_id)
+    fails = int(fails or 0) + 1
+    new_until = until
+    if fails >= int(max_attempts or 3):
+        new_until = datetime.utcnow() + _td(seconds=int(lockout_seconds or 30))
+    try:
+        cursor.execute(
+            """
+            MERGE dbo.MAT3AM_TERMINAL_LOCKOUT AS t
+            USING (SELECT ? AS TerminalId) AS s
+               ON t.TerminalId = s.TerminalId
+            WHEN MATCHED THEN UPDATE SET FailedAttempts = ?, LockedUntilUtc = ?, LastAttemptAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (TerminalId, FailedAttempts, LockedUntilUtc, LastAttemptAt)
+                                  VALUES (?, ?, ?, SYSUTCDATETIME());
+            """,
+            (str(terminal_id or "unknown")[:120], fails, new_until,
+             str(terminal_id or "unknown")[:120], fails, new_until),
+        )
+        cursor.connection.commit()
+    except Exception:
+        try: cursor.connection.rollback()
+        except Exception: pass
+    return (fails, new_until)
+
+
+def _terminal_clear_lockout(cursor, terminal_id: str) -> None:
+    try:
+        cursor.execute(
+            "DELETE FROM dbo.MAT3AM_TERMINAL_LOCKOUT WHERE TerminalId = ?",
+            (str(terminal_id or "unknown")[:120],),
+        )
+        cursor.connection.commit()
+    except Exception:
+        try: cursor.connection.rollback()
+        except Exception: pass
+
+
+def _terminal_pin_compare(stored: str, presented: str) -> bool:
+    """نقبل: نص خام مطابق (للنظام القديم) أو sha256-hex(PIN) لمستخدمين جدد إن أُدخل بصيغة مهشّمة."""
+    if not stored or not presented:
+        return False
+    try:
+        import hmac, hashlib
+        if hmac.compare_digest(str(stored).strip(), str(presented).strip()):
+            return True
+        h = hashlib.sha256(str(presented).strip().encode("utf-8")).hexdigest()
+        if hmac.compare_digest(str(stored).strip().lower(), h.lower()):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _terminal_resolve_user_by_pin(cursor, pin: str, login_hint: Optional[str] = None) -> Optional[dict]:
+    """يحاول إيجاد مستخدم نشط في MAT3AM_APP_USERS بـ PIN معطى.
+    لو مرّر login_hint نطابق ضمن سجلّ ذلك المستخدم فقط (أكثر أماناً عند تكرار PIN قصير)."""
+    if not pin:
+        return None
+    try:
+        if login_hint:
+            cursor.execute(
+                """
+                SELECT TOP 1 Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
+                FROM dbo.MAT3AM_APP_USERS
+                WHERE LoginName = ? AND IsActive = 1
+                """,
+                (str(login_hint).strip().lower(),),
+            )
+            r = cursor.fetchone()
+            if r and _terminal_pin_compare(str(r[4] or ""), pin):
+                return {"id": str(r[0]).strip().upper(), "login": r[1], "name": r[2], "role": (r[3] or "").lower()}
+            return None
+        cursor.execute(
+            """
+            SELECT Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
+            FROM dbo.MAT3AM_APP_USERS WHERE IsActive = 1 ORDER BY CreatedAt DESC
+            """
+        )
+        for r in cursor.fetchall() or []:
+            if _terminal_pin_compare(str(r[4] or ""), pin):
+                return {"id": str(r[0]).strip().upper(), "login": r[1], "name": r[2], "role": (r[3] or "").lower()}
+    except Exception:
+        return None
+    return None
+
+
+# In-memory TTL cache للإعدادات — يُجدَّد كل CACHE_TTL_SEC ثانية.
+# مهم للأداء: قبل الـcache كل طلب حسّاس كان يفتح conn ويستدعي _ensure_mat3am_dev_schema
+# (≈60 DDL idempotent) ⇒ استنزاف pool وعدم استقرار اتصال DB في الذروة.
+_TERMINAL_SETTINGS_CACHE: dict = {"data": None, "fetched_at": 0.0}
+_TERMINAL_SETTINGS_CACHE_TTL_SEC = 30.0
+
+
+def _terminal_invalidate_settings_cache() -> None:
+    _TERMINAL_SETTINGS_CACHE["data"] = None
+    _TERMINAL_SETTINGS_CACHE["fetched_at"] = 0.0
+
+
+def _terminal_get_settings_cached() -> dict:
+    """قراءة الإعدادات بـ TTL cache (30 ثانية).
+    - لا يستدعي _ensure_mat3am_dev_schema (DDL يجب أن يُنفّذ في startup فقط).
+    - عند تعذّر الاتصال يعيد القيم المحفوظة سابقاً (lab survival)، أو الافتراضي."""
+    import time as _time
+    now = _time.time()
+    cached = _TERMINAL_SETTINGS_CACHE.get("data")
+    fetched_at = float(_TERMINAL_SETTINGS_CACHE.get("fetched_at") or 0.0)
+    if cached is not None and (now - fetched_at) < _TERMINAL_SETTINGS_CACHE_TTL_SEC:
+        return cached
+    conn = get_connection()
+    if not conn:
+        # لا اتصال: استعمل آخر قيمة مكاشة، أو الافتراضيات
+        return cached if cached is not None else dict(TERMINAL_SETTINGS_DEFAULTS)
+    try:
+        cur = conn.cursor()
+        out = _terminal_settings_load(cur)
+        _TERMINAL_SETTINGS_CACHE["data"] = out
+        _TERMINAL_SETTINGS_CACHE["fetched_at"] = now
+        return out
+    except Exception:
+        return cached if cached is not None else dict(TERMINAL_SETTINGS_DEFAULTS)
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def _terminal_require_user(actor: Optional[dict]) -> Optional[dict]:
+    """يُستدعى من endpoints الحسّاسة:
+    - لو SharedTerminalEnabled=False ⇒ يعيد actor كما هو (لا تغيير في السلوك القديم).
+    - لو True ⇒ يجب أن يحوي actor.terminalToken صالحاً، وإلا HTTPException(401).
+      عند النجاح يُرجع dict {id, login, role, name, terminalId, exp} المستخرَج من الـtoken.
+    """
+    st = _terminal_get_settings_cached()
+    if not st.get("sharedTerminalEnabled"):
+        return actor if isinstance(actor, dict) else None
+    if not isinstance(actor, dict):
+        raise HTTPException(status_code=401, detail="Shared Terminal Mode مفعّل: أرسل mat3amActor مع terminalToken صادر بعد التحقق بـ PIN.")
+    tok = str(actor.get("terminalToken") or "").strip()
+    payload = _terminal_token_verify(tok) if tok else None
+    if not payload:
+        raise HTTPException(status_code=401, detail="Shared Terminal Mode: الـ terminalToken مفقود/منتهي. أعد إدخال PIN.")
+    return {
+        "id": payload.get("uid"),
+        "login": payload.get("login"),
+        "name": payload.get("name") or actor.get("name"),
+        "role": payload.get("role") or actor.get("role"),
+        "terminalId": payload.get("tid"),
+        "exp": payload.get("exp"),
+    }
+
+
+@app.get("/api/settings/shared-terminal")
+def settings_shared_terminal_get():
+    return _terminal_get_settings_cached()
+
+
+@app.put("/api/settings/shared-terminal")
+def settings_shared_terminal_put(body: dict):
+    body = body if isinstance(body, dict) else {}
+    by_name = str((body.get("mat3amActor") or {}).get("name") or "")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        # DDL يُضمن في startup؛ هنا فقط حفظ سريع (نتسامح لو الجدول غاب)
+        try: _ensure_mat3am_dev_schema(cur)
+        except Exception: pass
+        out = _terminal_settings_save(cur, body, by_name)
+        # أبطل الـcache فوراً ⇒ القراءة التالية تجلب القيم المحدثة
+        _terminal_invalidate_settings_cache()
+        return out
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+@app.post("/api/terminal/pin-verify")
+def terminal_pin_verify(body: dict, request: Request):
+    """التحقق من PIN وإصدار terminalToken.
+    body: { pin: str (إجباري), terminalId: str (إجباري), login?: str, reason?: str, oldUserId?: str }
+    """
+    body = body if isinstance(body, dict) else {}
+    pin = str(body.get("pin") or "").strip()
+    tid = str(body.get("terminalId") or "").strip() or "unknown"
+    login_hint = str(body.get("login") or "").strip().lower() or None
+    reason = str(body.get("reason") or "mandatory_pin_overlay")[:120]
+    old_uid = str(body.get("oldUserId") or "").strip() or None
+    ip = (request.client.host if request and request.client else "") or ""
+    ua = (request.headers.get("user-agent") or "")[:400]
+    if not pin:
+        raise HTTPException(status_code=400, detail="PIN مطلوب")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        # ملاحظة: لا نستدعي _ensure_mat3am_dev_schema هنا — DDL يُضمَن في startup فقط
+        # (تجنّباً لاستنزاف pool في الذروة عند تكرار محاولات الـPIN).
+        st = _terminal_settings_load(cur)
+        # تحقق من القفل قبل أي شيء
+        fails, until = _terminal_get_lockout(cur, tid)
+        if until and isinstance(until, datetime) and until > datetime.utcnow():
+            wait = int((until - datetime.utcnow()).total_seconds())
+            _terminal_pin_audit(cur, terminal_id=tid, login=login_hint,
+                                old_uid=old_uid, new_uid=None,
+                                action="locked", reason=reason, ip=ip, ua=ua)
+            raise HTTPException(status_code=429, detail=f"الجهاز مقفول مؤقتاً. حاول بعد {wait} ثانية.")
+        user = _terminal_resolve_user_by_pin(cur, pin, login_hint)
+        if not user:
+            f, u = _terminal_record_failure(cur, tid, st["maxAttemptsBeforeLockout"], st["lockoutSeconds"])
+            _terminal_pin_audit(cur, terminal_id=tid, login=login_hint,
+                                old_uid=old_uid, new_uid=None,
+                                action="pin_fail", reason=reason, ip=ip, ua=ua)
+            remaining = max(0, int(st["maxAttemptsBeforeLockout"]) - int(f))
+            if u:
+                wait = int((u - datetime.utcnow()).total_seconds())
+                raise HTTPException(status_code=429, detail=f"PIN غير صحيح. تم قفل الجهاز {wait} ثانية بعد {f} محاولات.")
+            raise HTTPException(status_code=401, detail=f"PIN غير صحيح ({remaining} محاولات متبقية).")
+        # نجح
+        _terminal_clear_lockout(cur, tid)
+        ttl = int(st.get("tokenTtlSeconds") or 900)
+        exp = int(datetime.utcnow().timestamp()) + ttl
+        token = _terminal_token_sign({
+            "uid": user["id"], "login": user.get("login"), "name": user.get("name"),
+            "role": user.get("role"), "tid": tid, "iat": int(datetime.utcnow().timestamp()),
+            "exp": exp,
+        })
+        _terminal_pin_audit(cur, terminal_id=tid, login=user.get("login"),
+                            old_uid=old_uid, new_uid=user["id"],
+                            action="pin_ok", reason=reason, ip=ip, ua=ua)
+        return {
+            "ok": True,
+            "user": {
+                "id": user["id"],
+                "login": user.get("login"),
+                "name": user.get("name") or user.get("login"),
+                "role": user.get("role"),
+            },
+            "terminalToken": token,
+            "expiresAt": datetime.utcfromtimestamp(exp).isoformat() + "Z",
+            "ttlSeconds": ttl,
+            "settings": {
+                "idleLockMinutes": st["idleLockMinutes"],
+                "hardLogoutMinutes": st.get("hardLogoutMinutes", 10),
+                "slidingRefreshAfterAction": st.get("slidingRefreshAfterAction", True),
+                "stepUpForDangerOps": st.get("stepUpForDangerOps", True),
+                "lockAfterSave": st["lockAfterSave"],
+                "lockAfterEdit": st["lockAfterEdit"],
+                "lockAfterSend": st["lockAfterSend"],
+                "lockAfterDelete": st["lockAfterDelete"],
+                "lockAfterDiscount": st["lockAfterDiscount"],
+                "lockAfterReturn": st["lockAfterReturn"],
+            },
+        }
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+@app.get("/api/terminal/sensitive-routes")
+def terminal_sensitive_routes_get():
+    """قائمة المسارات المؤمَّنة بـ Shared Terminal Mode (للعرض في صفحة الإعدادات والمستندات)."""
+    return {
+        "routes": [
+            {"method": "POST", "path": "/api/restaurant/invoices",                          "label": "إرسال طلب جرسون / فاتورة طاولة"},
+            {"method": "POST", "path": "/api/restaurant/table-sessions",                    "label": "تسكين طاولة / فتح جلسة"},
+            {"method": "PATCH","path": "/api/restaurant/tables/{id}/minimum-charge",        "label": "تعديل الميني موم تشارج"},
+            {"method": "POST", "path": "/api/kids/tickets",                                 "label": "حجز تذكرة كيدز"},
+            {"method": "POST", "path": "/api/kids/tickets/{id}/start",                      "label": "بدء جلسة كيدز"},
+            {"method": "POST", "path": "/api/kids/tickets/{id}/fire-kitchen",               "label": "إرسال وجبة كيدز للمطبخ"},
+            {"method": "POST", "path": "/api/kids/tickets/{id}/payment",                    "label": "دفعة جزئية كيدز"},
+            {"method": "POST", "path": "/api/kids/tickets/{id}/settle",                     "label": "تسوية وإقفال تذكرة كيدز"},
+            {"method": "POST", "path": "/api/kids/tickets/{id}/exempt-overtime",            "label": "إعفاء وقت إضافي كيدز"},
+        ]
+    }
+
+
+@app.get("/api/terminal/audit")
+def terminal_audit_get(limit: int = 100, terminalId: Optional[str] = None):
+    """يقرأ آخر محاولات/قفل من سجل الـ PIN — للمدير/المطوّر."""
+    try: limit = max(1, min(500, int(limit)))
+    except Exception: limit = 100
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        if terminalId:
+            cur.execute(
+                f"SELECT TOP {limit} AtUtc, TerminalId, AttemptedLogin, OldUserId, NewUserId, ActionType, Reason, ClientIp "
+                "FROM dbo.MAT3AM_TERMINAL_PIN_AUDIT WHERE TerminalId = ? ORDER BY AtUtc DESC",
+                (str(terminalId)[:120],),
+            )
+        else:
+            cur.execute(
+                f"SELECT TOP {limit} AtUtc, TerminalId, AttemptedLogin, OldUserId, NewUserId, ActionType, Reason, ClientIp "
+                "FROM dbo.MAT3AM_TERMINAL_PIN_AUDIT ORDER BY AtUtc DESC"
+            )
+        rows = cur.fetchall() or []
+        out = []
+        for r in rows:
+            out.append({
+                "at": r[0].isoformat() if r[0] else None,
+                "terminalId": r[1] or "",
+                "login": r[2] or "",
+                "oldUserId": r[3] or "",
+                "newUserId": r[4] or "",
+                "action": r[5] or "",
+                "reason": r[6] or "",
+                "ip": r[7] or "",
+            })
+        return {"audit": out}
+    finally:
+        try: conn.close()
+        except Exception: pass
 
 
 # ----- إعدادات تشغيل المطعم (مطبخ / طباعة / VIP / كيدز / تدقيق) — JSON + SQL MAT3AM_RESTAURANT_OPS_SETTINGS -----
@@ -13694,6 +14378,8 @@ def restaurant_update_table_status(table_id: str, body: dict):
 @app.patch("/api/restaurant/tables/{table_id}/minimum-charge")
 def restaurant_update_table_minimum_charge(table_id: str, body: dict):
     """تحديث minimum charge لطاولة (يُحفظ محلياً حتى مع مصدر SQL)."""
+    # Shared Terminal: عملية تعديل/خصم حسّاسة
+    _terminal_require_user((body or {}).get("mat3amActor") if isinstance(body, dict) else None)
     tid = str(table_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="tableId مطلوب")
@@ -14056,6 +14742,8 @@ def restaurant_create_session(body: dict):
     """إنشاء جلسة طاولة (إسكان). جلسة نشطة واحدة منطقياً لكل tableId: إن وُجدت تُعاد كما هي ما لم يُمرَّر forceNewSession."""
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
+    # Shared Terminal: نتحقق من PIN قبل أي إنشاء جلسة جديدة
+    _terminal_require_user(body.get("mat3amActor") if isinstance(body, dict) else None)
     table_raw = str(body.get("tableId") or "").strip()
     if not table_raw:
         raise HTTPException(status_code=400, detail="tableId مطلوب")
@@ -16510,13 +17198,15 @@ def kids_packages_create(body: dict):
         except Exception:
             pass
         root = _kids_ensure_root_group(cur, conn)
+        root_code = _kids_get_card_code(cur, "TBL006", root)
         sub_guid = str(uuid.uuid4()).upper()
+        sub_code = _kids_next_subgroup_card_code(cur, root, root_code)
         cur.execute(
             """
-            INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security)
-            VALUES (CAST(? AS uniqueidentifier), ?, ?, CAST(? AS uniqueidentifier), 1)
+            INSERT INTO dbo.TBL006 (CardGuide, GroupName, LatinName, MainGuide, Security, CardCode)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, CAST(? AS uniqueidentifier), 1, ?)
             """,
-            (sub_guid, name, latin, root),
+            (sub_guid, name, latin, root, sub_code),
         )
         unit_guid = _kids_pick_default_unit_for_products(cur)
         for jdx, it in enumerate(items_in, start=1):
@@ -16529,34 +17219,35 @@ def kids_packages_create(body: dict):
             minutes = int(it.get("minutes") or 0)
             marker = KIDS_KITCHEN_MARKER if bool(it.get("kitchen")) else None
             prod_guid = str(uuid.uuid4()).upper()
+            prod_code = f"{sub_code}{jdx:03d}"
             try:
                 if unit_guid:
                     cur.execute(
                         """
                         INSERT INTO dbo.TBL007
-                        (CardGuide, ProductName, GroupGuid, DefaultUnit, Unit, Security,
+                        (CardGuide, CardCode, ProductName, GroupGuid, DefaultUnit, Unit, Security,
                          AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
-                        VALUES (?, ?, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
+                        VALUES (?, ?, ?, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
                                 CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
                         """,
-                        (prod_guid, pname, sub_guid, unit_guid, unit_guid, price, price, marker, minutes),
+                        (prod_guid, prod_code, pname, sub_guid, unit_guid, unit_guid, price, price, marker, minutes),
                     )
                 else:
                     cur.execute(
                         """
                         INSERT INTO dbo.TBL007
-                        (CardGuide, ProductName, GroupGuid, Security,
+                        (CardGuide, CardCode, ProductName, GroupGuid, Security,
                          AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
-                        VALUES (?, ?, CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
+                        VALUES (?, ?, ?, CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
                         """,
-                        (prod_guid, pname, sub_guid, price, price, marker, minutes),
+                        (prod_guid, prod_code, pname, sub_guid, price, price, marker, minutes),
                     )
             except Exception as e:
                 try: conn.rollback()
                 except Exception: pass
                 raise HTTPException(status_code=500, detail=f"تعذر إضافة بند {pname}: {e}")
         conn.commit()
-        return {"success": True, "packageGuide": sub_guid, "name": name}
+        return {"success": True, "packageGuide": sub_guid, "cardCode": sub_code, "name": name}
     except HTTPException:
         raise
     except Exception as e:
@@ -16661,30 +17352,32 @@ def kids_packages_add_item(package_guide: str, body: dict):
     try:
         cur = conn.cursor()
         unit_guid = _kids_pick_default_unit_for_products(cur)
+        sub_code = _kids_get_card_code(cur, "TBL006", pg)
         prod_guid = str(uuid.uuid4()).upper()
+        prod_code = _kids_next_product_card_code(cur, pg, sub_code)
         if unit_guid:
             cur.execute(
                 """
                 INSERT INTO dbo.TBL007
-                (CardGuide, ProductName, GroupGuid, DefaultUnit, Unit, Security,
+                (CardGuide, CardCode, ProductName, GroupGuid, DefaultUnit, Unit, Security,
                  AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
-                VALUES (?, ?, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
+                VALUES (?, ?, ?, CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
                         CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
                 """,
-                (prod_guid, pname, pg, unit_guid, unit_guid, price, price, marker, minutes),
+                (prod_guid, prod_code, pname, pg, unit_guid, unit_guid, price, price, marker, minutes),
             )
         else:
             cur.execute(
                 """
                 INSERT INTO dbo.TBL007
-                (CardGuide, ProductName, GroupGuid, Security,
+                (CardGuide, CardCode, ProductName, GroupGuid, Security,
                  AgentPrice, EndUserPrice, Custom5, Hieght3, NotActive, Source)
-                VALUES (?, ?, CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
+                VALUES (?, ?, ?, CAST(? AS uniqueidentifier), 1, ?, ?, ?, ?, 0, 1)
                 """,
-                (prod_guid, pname, pg, price, price, marker, minutes),
+                (prod_guid, prod_code, pname, pg, price, price, marker, minutes),
             )
         conn.commit()
-        return {"success": True, "productGuide": prod_guid, "name": pname}
+        return {"success": True, "productGuide": prod_guid, "cardCode": prod_code, "name": pname}
     except Exception as e:
         try: conn.rollback()
         except Exception: pass
@@ -17545,6 +18238,7 @@ def kids_ticket_create(body: dict):
     """
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
+    _terminal_require_user(body.get("mat3amActor"))
     child = str(body.get("childName") or "").strip()
     father = str(body.get("fatherName") or "").strip()
     phone = str(body.get("phone") or "").strip()
@@ -17647,6 +18341,7 @@ def kids_ticket_create(body: dict):
 def kids_ticket_start(ticket_id: str, body: dict = None):
     """يبدأ الجلسة (reserved → active). يحدّد `actualStartAt` و`exitExpectedAt`."""
     body = body if isinstance(body, dict) else {}
+    _terminal_require_user(body.get("mat3amActor"))
     by = str((body.get("mat3amActor") or {}).get("name") or "")
     res = _kids_db_start_ticket(ticket_id.upper(), by)
     t = _kids_db_load_ticket(ticket_id.upper())
@@ -17658,6 +18353,7 @@ def kids_ticket_fire_kitchen(ticket_id: str, body: dict):
     """يطلق بنود المطبخ المعلّقة من التذكرة (في MAT3AM_KIDS_TICKET_LINES) إلى KDS.
     body: { lineIds?: [..] (افتراضياً كل بنود المطبخ pending), mat3amActor? }"""
     body = body if isinstance(body, dict) else {}
+    _terminal_require_user(body.get("mat3amActor"))
     line_ids_filter = body.get("lineIds") if isinstance(body.get("lineIds"), list) else None
 
     t = _kids_db_load_ticket(ticket_id.upper())
@@ -17765,6 +18461,7 @@ def kids_ticket_add_line(ticket_id: str, body: dict):
 def kids_ticket_payment(ticket_id: str, body: dict):
     """يضيف دفعة جزئية (تُحفَظ في PaymentsJson + تُحدّث PaidTotal). لا تنشئ TBL022."""
     body = body if isinstance(body, dict) else {}
+    _terminal_require_user(body.get("mat3amActor"))
     try:
         amount = float(body.get("amount") or 0)
     except Exception:
@@ -17808,6 +18505,7 @@ def _kids_compute_overtime_v2(ticket: dict) -> dict:
 def kids_ticket_exempt_overtime(ticket_id: str, body: dict):
     """إعفاء من الوقت الإضافي — للمدير/المطوّر فقط."""
     body = body if isinstance(body, dict) else {}
+    _terminal_require_user(body.get("mat3amActor"))
     actor = body.get("mat3amActor") or {}
     role = str((actor or {}).get("role") or "").strip().lower()
     if role not in ("manager", "developer"):
@@ -17834,6 +18532,7 @@ def kids_ticket_settle(ticket_id: str, body: dict):
     بسعر = مدة_التجاوز_بالدقائق × (سعر_بنود_المدة ÷ مجموع_دقائق_الباقة).
     """
     body = body if isinstance(body, dict) else {}
+    _terminal_require_user(body.get("mat3amActor"))
     method = str(body.get("method") or "cash")
     actor_name = str((body.get("mat3amActor") or {}).get("name") or "")
 
@@ -18612,6 +19311,8 @@ def restaurant_invoice_type_mappings():
 @app.post("/api/restaurant/invoices")
 def restaurant_create_invoice(body: dict):
     """إنشاء فاتورة المطعم — تحويل لـ POST /api/invoices (XTRA)"""
+    # Shared Terminal: نتحقق قبل أي شيء (إن كان الوضع مفعّلاً) وإلا يعود actor كما هو.
+    _terminal_require_user(body.get("mat3amActor") if isinstance(body, dict) else None)
     session_id = body.get("sessionId")
     orders = body.get("orders", [])
     subtotal = float(body.get("subtotal", 0))
@@ -19727,6 +20428,80 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
             CREATE INDEX IX_MAT3AM_KIDS_TICKETS_Status ON dbo.MAT3AM_KIDS_TICKETS(Status, CreatedAt DESC);
             CREATE INDEX IX_MAT3AM_KIDS_TICKETS_StartedAt ON dbo.MAT3AM_KIDS_TICKETS(ActualStartAt DESC);
             CREATE INDEX IX_MAT3AM_KIDS_TICKETS_FinalInvoice ON dbo.MAT3AM_KIDS_TICKETS(FinalInvoiceCardGuide);
+        END
+        """,
+        # ============================================================
+        # Shared Terminal Mode (PIN overlay) — إعدادات + سجل تدقيق + قفل محاولات
+        # ============================================================
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_TERMINAL_SETTINGS', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_TERMINAL_SETTINGS (
+                StateKey NVARCHAR(64) NOT NULL PRIMARY KEY DEFAULT N'global',
+                SharedTerminalEnabled BIT NOT NULL DEFAULT 0,
+                IdleLockMinutes INT NOT NULL DEFAULT 3,
+                LockAfterSave BIT NOT NULL DEFAULT 1,
+                LockAfterEdit BIT NOT NULL DEFAULT 1,
+                LockAfterSend BIT NOT NULL DEFAULT 1,
+                LockAfterDelete BIT NOT NULL DEFAULT 1,
+                LockAfterDiscount BIT NOT NULL DEFAULT 1,
+                LockAfterReturn BIT NOT NULL DEFAULT 1,
+                MaxAttemptsBeforeLockout INT NOT NULL DEFAULT 3,
+                LockoutSeconds INT NOT NULL DEFAULT 30,
+                TokenTtlSeconds INT NOT NULL DEFAULT 900,
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                UpdatedBy NVARCHAR(120) NULL
+            );
+            INSERT INTO dbo.MAT3AM_TERMINAL_SETTINGS (StateKey) VALUES (N'global');
+        END
+        """,
+        # ALTER idempotent — للحقول التي أُضيفت بعد ميلاد الجدول (Hybrid Mode v2)
+        """
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name = N'SlidingRefreshAfterAction' AND Object_ID = Object_ID(N'dbo.MAT3AM_TERMINAL_SETTINGS'))
+        BEGIN
+            ALTER TABLE dbo.MAT3AM_TERMINAL_SETTINGS ADD SlidingRefreshAfterAction BIT NOT NULL DEFAULT 1;
+        END
+        """,
+        """
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name = N'HardLogoutMinutes' AND Object_ID = Object_ID(N'dbo.MAT3AM_TERMINAL_SETTINGS'))
+        BEGIN
+            ALTER TABLE dbo.MAT3AM_TERMINAL_SETTINGS ADD HardLogoutMinutes INT NOT NULL DEFAULT 10;
+        END
+        """,
+        """
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name = N'StepUpForDangerOps' AND Object_ID = Object_ID(N'dbo.MAT3AM_TERMINAL_SETTINGS'))
+        BEGIN
+            ALTER TABLE dbo.MAT3AM_TERMINAL_SETTINGS ADD StepUpForDangerOps BIT NOT NULL DEFAULT 1;
+        END
+        """,
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_TERMINAL_PIN_AUDIT', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_TERMINAL_PIN_AUDIT (
+                Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+                AtUtc DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                TerminalId NVARCHAR(120) NOT NULL,
+                AttemptedLogin NVARCHAR(120) NULL,
+                OldUserId NVARCHAR(64) NULL,
+                NewUserId NVARCHAR(64) NULL,
+                ActionType NVARCHAR(40) NOT NULL,  -- pin_ok / pin_fail / locked / unlocked / forced
+                Reason NVARCHAR(120) NULL,         -- mandatory_pin_overlay / idle / after_save / ...
+                ClientIp NVARCHAR(64) NULL,
+                UserAgent NVARCHAR(400) NULL
+            );
+            CREATE INDEX IX_MAT3AM_TERMINAL_PIN_AUDIT_AtUtc ON dbo.MAT3AM_TERMINAL_PIN_AUDIT(AtUtc DESC);
+            CREATE INDEX IX_MAT3AM_TERMINAL_PIN_AUDIT_Terminal ON dbo.MAT3AM_TERMINAL_PIN_AUDIT(TerminalId, AtUtc DESC);
+        END
+        """,
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_TERMINAL_LOCKOUT', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_TERMINAL_LOCKOUT (
+                TerminalId NVARCHAR(120) NOT NULL PRIMARY KEY,
+                FailedAttempts INT NOT NULL DEFAULT 0,
+                LockedUntilUtc DATETIME2 NULL,
+                LastAttemptAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
         END
         """,
         """

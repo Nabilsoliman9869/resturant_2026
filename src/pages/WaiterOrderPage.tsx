@@ -10,6 +10,7 @@ import "../styles/operationalRoles.css";
 import SmartProductSearch from "../components/SmartProductSearch";
 import { useAuth } from "../auth/AuthContext";
 import { buildMat3amActor } from "../lib/mat3amActor";
+import { useTerminalLock } from "../context/TerminalLockContext";
 import { safeFetch } from "../lib/safeFetch";
 
 type Product = {
@@ -196,6 +197,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const terminalLock = useTerminalLock();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
@@ -1157,6 +1159,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("تم إرسال الطلب للمطبخ (الفاتورة تُنشأ عند «طلب الحساب» فقط).");
       // لا ننتظر إعادة جلب الطلبات — تخفيف ثقل «جاري الإرسال» بعد رد الخادم
       void loadSessionOrders();
+      // Shared Terminal: إقفال تلقائي بعد كل إرسال للمطبخ (إن كان الإعداد مفعَّلاً)
+      try { terminalLock.triggerLock("send"); } catch { /* صامت */ }
     } catch (e) {
       setMsg(`فشل الحفظ: ${String(e)}`);
     } finally {

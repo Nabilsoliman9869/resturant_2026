@@ -4,6 +4,7 @@ import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
 import { buildMat3amActor } from "../lib/mat3amActor";
+import { InlinePinConfirm } from "../components/InlinePinConfirm";
 import { tryParseJson } from "../lib/tryParseJson";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
@@ -580,7 +581,7 @@ export default function WaiterTablesPage() {
       const r = await safeFetch(`${base}/api/restaurant/tables/${encodeURIComponent(tid)}/minimum-charge`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ minimumCharge: mc }),
+        body: JSON.stringify({ minimumCharge: mc, mat3amActor: buildMat3amActor(user) }),
       });
       const t = await r.text();
       if (!r.ok) {
@@ -1031,19 +1032,16 @@ export default function WaiterTablesPage() {
                     )}
                     <div className="waiter-tblcard__money-min-hint">minimum</div>
                   </div>
-                  <div className="waiter-tblcard__money-min-label">
+                  <div className="waiter-tblcard__money-min-label" onClick={(e) => e.stopPropagation()}>
                     {canEditMin ? (
-                      <button
-                        type="button"
-                        className="waiter-tblcard__pill waiter-tblcard__pill--clean-done"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void saveMinimumCharge(String(t.id));
-                        }}
+                      <InlinePinConfirm
+                        label={Boolean(minChargeBusyByTable[String(t.id)]) ? "…" : "حفظ"}
+                        reason="minimum_charge_override"
+                        promptHint="تعديل ميني-موم"
+                        variant="warn"
                         disabled={Boolean(minChargeBusyByTable[String(t.id)])}
-                      >
-                        {Boolean(minChargeBusyByTable[String(t.id)]) ? "…" : "حفظ"}
-                      </button>
+                        onConfirm={() => saveMinimumCharge(String(t.id))}
+                      />
                     ) : (
                       <span className="waiter-tblcard__spec-muted">حد أدنى للطاولة</span>
                     )}

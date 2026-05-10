@@ -148,7 +148,8 @@
 
 **المشكلات التي يحلّها هذا القيد** (مذكورة من المستخدم):
 1. تذاكر الكيدز كانت محفوظة في JSON محلي ⇒ لا تظهر بين الأجهزة. الحل: ترحيل التخزين إلى **MAT3AM_KIDS_TICKETS** و **MAT3AM_KIDS_TICKET_LINES** + هجرة لمرة واحدة من kids_tickets.json.
-2. الوقت لم يُحسب لأن TBL007.Hieght3 كان 0 — وكان الوقت يبدأ من لحظة الحجز. الحل: زر **«🟢 بدء الجلسة»** (state machine: eserved → active → closed) يضع ActualStartAt فعلياً، و**ExitExpectedAt = ActualStartAt + PackageMinutesSnapshot**؛ والشريحة تعرض **عدّاد تنازلي حيّ كل ثانية**.
+2. الوقت لم يُحسب لأن TBL007.Hieght3 كان 0 — وكان الوقت يبدأ من لحظة الحجز. الحل: زر **«🟢 بدء الجلسة»** (state machine: 
+eserved → active → closed) يضع ActualStartAt فعلياً، و**ExitExpectedAt = ActualStartAt + PackageMinutesSnapshot**؛ والشريحة تعرض **عدّاد تنازلي حيّ كل ثانية**.
 3. لا توجد صفحة لإضافة/تعديل الباقات. الحل: **/manager/settings/kids-area-packages** (متاحة كذلك للمطوّر) تُتيح CRUD كاملاً عبر TBL006/TBL007.
 4. تنبيه طلب الوجبة عند نصف الوقت + تنبيه استدعاء قبل 10 د من النهاية.
 5. الفاتورة TBL022/023 لم تُعد تُنشأ عند الحجز — تُنشأ **فقط عند الإقفال** (مع **DownPayment = إجمالي ما قُبض**)، ودفعة الحجز تظل **أمانة** حتى ذلك الوقت.
@@ -163,12 +164,15 @@
   - **endingSoonAlert**: { active, minutesLeft } (active إذا متبقّي ≤ 10 د و > 0).
   - **overtime** (محتفظ به كما في 022).
 - Endpoints جديدة/مُعدّلة:
-  - POST /api/kids/tickets: ينشئ تذكرة بحالة eserved ويسجّل PaidAtBooking كأمانة في PaymentsJson — **لا فاتورة TBL022 الآن**.
-  - POST /api/kids/tickets/{id}/start: ينقل eserved → active ويحدّد ActualStartAt وExitExpectedAt.
+  - POST /api/kids/tickets: ينشئ تذكرة بحالة 
+eserved ويسجّل PaidAtBooking كأمانة في PaymentsJson — **لا فاتورة TBL022 الآن**.
+  - POST /api/kids/tickets/{id}/start: ينقل 
+eserved → active ويحدّد ActualStartAt وExitExpectedAt.
   - POST /api/kids/tickets/{id}/fire-kitchen: يطلق فقط بنود IsKitchen=1 AND KitchenStatus IN (NULL,'pending') لشاشة المطبخ ويضع KitchenStatus='sent'.
   - POST /api/kids/tickets/{id}/add-line / /payment / /note / /exempt-overtime: نُقلت كلها لاستخدام جدولي SQL.
   - POST /api/kids/tickets/{id}/settle: عند ctive يضيف بند الوقت الإضافي إن استحق (نفس صيغة 022)؛ ثم **هنا فقط** يُنشئ TBL022/023 موحّدة عبر _kids_create_open_invoice بـ DownPayment = paid_total + amountPaid، ثم _kids_settle_invoice_close لإقفالها فوراً، ثم يحفظ FinalInvoiceCardGuide/FinalBillNumber/FinalTotal/PaidTotal على التذكرة وينقلها إلى closed.
-  - GET /api/kids/tickets?status=open يجمع eserved + active.
+  - GET /api/kids/tickets?status=open يجمع 
+eserved + active.
   - **PUT/DELETE/POST items** على /api/kids/packages/... لإدارة الباقات والبنود من صفحة الإعدادات (DELETE الباقة يخفي بنودها فقط بـ NotActive=1 ولا يُحذف من TBL007).
 
 **الواجهة — src/pages/KidsAreaPage.tsx** (إعادة كتابة كاملة):
@@ -187,4 +191,138 @@
 - بدون قيمة Hieght3 > 0 لبنود المدة، الباقة تُعرض في الواجهة بشارة تحذير أحمر «مدّة الباقة 0 — حدّد TBL007.Hieght3 لبند المدة»، ولا يُسمح ببدء الجلسة (/start يرفض بـ 409).
 - الفاتورة المالية الحقيقية (TBL022/TBL023) لا تُولَد إلا في الإقفال، ضامنةً عدم تشويش تقارير الفترة بفواتير «معلّقة».
 - الجدولان الجديدان يُنشآن تلقائياً عند startup (idempotent IF OBJECT_ID IS NULL).
+
+### 025 — Shared Terminal Mode + Mandatory PIN Overlay — `UTC 2026-05-10T20:35:00Z` — ID `feat-shared-terminal-pin-a1b2c3`
+
+**القاعدة الجديدة (DDL ضمن `_ensure_mat3am_dev_schema`):**
+- **MAT3AM_TERMINAL_SETTINGS** (StateKey='global' سطر واحد): SharedTerminalEnabled, IdleLockMinutes, LockAfter{Save/Edit/Send/Delete/Discount/Return}, MaxAttemptsBeforeLockout, LockoutSeconds, TokenTtlSeconds, UpdatedAt, UpdatedBy.
+- **MAT3AM_TERMINAL_PIN_AUDIT**: AtUtc, TerminalId, AttemptedLogin, OldUserId, NewUserId, ActionType (pin_ok/pin_fail/locked), Reason (mandatory_pin_overlay/idle/after_save…), ClientIp, UserAgent + فهرس على AtUtc وعلى (TerminalId, AtUtc).
+- **MAT3AM_TERMINAL_LOCKOUT**: TerminalId PK, FailedAttempts, LockedUntilUtc, LastAttemptAt — لاحتساب القفل بعد 3 محاولات.
+
+**مساعدات الباك-إند الجديدة في `backend/api_server.py`:**
+- `_terminal_settings_load/save` (camelCase + قيود min/max على المدد).
+- `_terminal_token_sign/verify` بصيغة `b64url(payload).b64url(hmac_sha256)` بسرّ من `MAT3AM_TERMINAL_TOKEN_SECRET` (أو يُولَّد لكل تشغيل) — payload: { uid, login, name, role, tid, iat, exp }.
+- `_terminal_pin_compare` يقبل النص الخام (للنظام الحالي) أو sha256-hex، فلا يكسر مستخدمين قائمين.
+- `_terminal_resolve_user_by_pin(cur, pin, login_hint?)` يبحث في `MAT3AM_APP_USERS WHERE IsActive=1`.
+- `_terminal_pin_audit` و`_terminal_get_lockout/_record_failure/_clear_lockout` و`_terminal_get_settings_cached`.
+- **`_terminal_require_user(actor)`**: gateway مركزي — يعيد actor كما هو إذا الوضع مُعطَّل، ويرفع 401 إذا مُفعَّل بدون terminalToken صالح.
+
+**Endpoints جديدة:**
+- `GET /api/settings/shared-terminal` و`PUT …` (قراءة/حفظ الإعدادات + إجراء `lockTerminal` فوري عند تفعيل الوضع).
+- `POST /api/terminal/pin-verify` (body: pin, terminalId, login?, reason?, oldUserId?) — يُصدر terminalToken + ttl، يحدث lockout، يُسجِّل في الـAudit. يرفع 429 مع عدّ الثواني المتبقية عند القفل.
+- `GET /api/terminal/sensitive-routes` لعرض المسارات المؤمَّنة في صفحة الإعدادات.
+- `GET /api/terminal/audit?limit&terminalId?` لعرض سجل التدقيق.
+
+**ربط `_terminal_require_user` على المسارات الحسّاسة:**
+- `POST /api/restaurant/invoices` (إرسال طلب طاولة).
+- `POST /api/restaurant/table-sessions` (تسكين/فتح جلسة).
+- `PATCH /api/restaurant/tables/{id}/minimum-charge` (تعديل ميني موم).
+- `POST /api/kids/tickets` و`/start`و`/fire-kitchen`و`/payment`و`/settle`و`/exempt-overtime`.
+
+**الواجهة:**
+- **`src/lib/terminalSession.ts`** (جديد): `getTerminalId()` (يُحفظ في localStorage)، `setTerminalToken/getTerminalToken/clearTerminalToken/getTerminalUserId` — token في الذاكرة فقط (window.__mat3amTerminalToken).
+- **`src/lib/mat3amActor.ts`**: توسعة `buildMat3amActor(user)` ليُلحق `terminalId` و`terminalToken` تلقائياً ⇒ كل callsite قائم يدعم الوضع الجديد بلا تعديل.
+- **`src/context/TerminalLockContext.tsx`** (جديد): `TerminalLockProvider` يقرأ الإعدادات، يدير حالة `locked/reason/failedAttempts/lockoutUntilEpoch`، مؤقّت خمول، listeners لأحداث الإدخال (mousedown/keydown/touchstart/wheel/visibilitychange)، وملك واجهات `lockTerminal(reason)` و`triggerLock("save"|"edit"|"send"|"delete"|"discount"|"return")` و`unlockWithPin(pin, login?)`.
+- **`src/components/PinOverlay.tsx`** (جديد): مودال كامل الشاشة بـ blur + dark filter، حقل PIN ممنوع تجاوزه بـ Tab/Esc، عدّاد تنازلي للقفل، يعرض المحاولات الفاشلة، زر «خروج كامل» بدلاً من «إلغاء» (لا يفك القفل).
+- **`src/components/AppShell.tsx`**: يلفّ كل المحتوى بـ `<TerminalLockProvider>` ويُركّب `<PinOverlay />` عالميّاً.
+- **`src/pages/settings/SharedTerminalSettingsPage.tsx`** (جديد): صفحة «إعدادات تشغيل نقطة البيع» — اختيار النمط (مستقل/مشترك)، مفاتيح المحفّزات الستة، حقول رقمية (دقائق الخمول، عدد المحاولات، ثواني القفل، TTL الرمز)، عرض المسارات المؤمَّنة، جدول آخر 50 سجلّاً تدقيقياً.
+- **`src/pages/settings/SettingsLayout.tsx`**: بند جديد ضمن قسم «التشغيل»: «إعدادات تشغيل نقطة البيع».
+- **`src/App.tsx`**: تسجيل المسار `pos-shared-terminal` لكل من `/app/manager/settings/...` و`/app/developer/settings/...`.
+- **`src/pages/WaiterOrderPage.tsx`**: استدعاء `terminalLock.triggerLock("send")` عقب نجاح إرسال الطلب للمطبخ ⇒ يُظهر الـ overlay فوراً عند تفعيل الوضع.
+
+**سياسة الأمان:**
+- الباك-إند هو مرجع الحماية: حتى لو فشل الفرونت في إظهار الـ overlay، أي طلب على مسار حسّاس بدون `terminalToken` صالح يرفض بـ 401.
+- الـ token موقَّع HMAC-SHA256 محلياً ولا يُحفظ في القرص؛ يبقى في ذاكرة التبويب فقط (يُمسَح عند تحديث الصفحة فيُطلب PIN جديد).
+- Lockout: بعد `maxAttemptsBeforeLockout` محاولات فاشلة يُغلق الجهاز `lockoutSeconds` ثانية (يُحدَّد في صف `MAT3AM_TERMINAL_LOCKOUT`).
+- التحقق من PIN يقبل النص الصريح المخزَّن حالياً في `MAT3AM_APP_USERS.PinHash` كما يقبل sha256-hex لمستخدمين مهيّأين بهاش حقيقي مستقبلاً.
+
+### 026 — Hybrid Mode v2 (Sliding Window + Inline Step-Up + Auto Hard-Logout + User Switch) — `UTC 2026-05-10T21:30:00Z` — ID `feat-shared-terminal-hybrid-d4e5f6`
+
+**الهدف**: استبدال نمط «قفل بعد كل عملية» (الذي يُسبّب احتكاكاً عالياً + اعتياداً ميكانيكياً على «نعم») بسيناريو أذكى:
+- العمليات الروتينية (إرسال، حفظ) ⇒ **لا تقفل**، فقط تجدّد عدّاد الخمول (Sliding Window).
+- العمليات الخطرة (خصم، مرتجع، حذف بند، تعديل ميني-موم، …) ⇒ **PIN فوري داخل الزر** (Step-Up Authentication).
+- الإهمال الطويل ⇒ **خروج كامل تلقائي** (Hard Logout) يُعيد التطبيق لشاشة تسجيل الدخول.
+- PIN لمستخدم مختلف ⇒ **تبديل الجلسة تلقائياً** للمستخدم الجديد عبر `auth.login(newUser)`.
+
+**القاعدة (ALTER TABLE idempotent على `MAT3AM_TERMINAL_SETTINGS`):**
+- `SlidingRefreshAfterAction BIT NOT NULL DEFAULT 1` ⇒ النمط الافتراضي الجديد هو الهجين.
+- `HardLogoutMinutes INT NOT NULL DEFAULT 10` ⇒ زمن الإهمال الذي يستدعي خروجاً كاملاً.
+- `StepUpForDangerOps BIT NOT NULL DEFAULT 1` ⇒ تفعيل نموذج PIN داخل أزرار العمليات الخطرة.
+
+**الباك-إند (`backend/api_server.py`):**
+- `TERMINAL_SETTINGS_DEFAULTS`: تحوّل `lockAfter*` إلى False افتراضياً، `idleLockMinutes=2`، إضافة الحقول الجديدة الثلاثة.
+- `_terminal_settings_load`: يقرأ الحقول الجديدة في استعلام منفصل (try/except) حتى لا يكسر القراءة قبل تنفيذ ALTER.
+- `_terminal_settings_save`: يحفظ الحقول الجديدة بـ UPDATE منفصل (try/except للتسامح).
+- رد `POST /api/terminal/pin-verify` يُرجع الآن `slidingRefreshAfterAction` و`hardLogoutMinutes` و`stepUpForDangerOps` في كائن `settings`.
+
+**الواجهة (3 ملفات جديدة + 4 معدّلة):**
+
+`src/context/TerminalLockContext.tsx` (إعادة كتابة):
+- نوع `TerminalSettings` يضم الحقول الستة الجديدة.
+- `triggerLock(trigger)` صار ذكياً: في النمط الهجين يجدّد المؤقت بدلاً من القفل.
+- مؤقّت `hardLogoutTimerRef` مستقل ⇒ يستدعي `auth.logout()` بعد `hardLogoutMinutes` من الإهمال.
+- `lastTokenIssuedAtRef` ⇒ لتتبع «حداثة» الـ token.
+- `stepUp(pin, opts)` جديد: PIN فوري لعملية بعينها، يقبل `skipIfRecent` و`freshSeconds` (افتراضي 60s) لتفادي إعادة الطلب لو الـ PIN حديث جدّاً.
+- `isTokenFresh(freshSeconds)` ⇒ يفحص ما إذا كان الـ token الحالي أحدث من `freshSeconds`.
+- `maybeSwitchUser(j)` ⇒ يستدعى داخل `consumeToken` ⇒ لو user.id من الرد ≠ user.id الحالي ⇒ `auth.login(newUser)` تلقائياً.
+
+`src/components/InlinePinConfirm.tsx` (جديد):
+- مكوّن زر يلفّ عملية خطرة. ثلاث حالات داخلية:
+  1. الوضع المشترك مغلق ⇒ زر عادي يستدعي `onConfirm` مباشرة.
+  2. الـ token «طازج» (آخر pin منذ < freshSeconds) ⇒ زر عادي بدون PIN، مع tooltip يُوضح ذلك.
+  3. خلاف ذلك ⇒ ضغطة الزر تكشف حقل PIN صغير + تأكيد + إلغاء (Esc/زر).
+- ينادي `lock.stepUp(pin, { reason })` ⇒ سجل تدقيق يُسجَّل بـ `step_up:<reason>`.
+- يدعم variants (`danger`/`warn`/`primary`).
+
+`src/pages/settings/SharedTerminalSettingsPage.tsx` (إعادة كتابة كاملة):
+- قسم «طريقة استخدام نقطة البيع»: راديو مستقل/مشترك.
+- قسم «نمط القفل»: راديو **هجين منزلق ★** (موصى به) / **قفل بعد كل عملية (كلاسيكي)**.
+- قسم «إعدادات النمط الهجين»: نافذة الخمول، خروج كامل، حداثة Token، تشغيل Step-Up.
+- قسم «نمط كلاسيكي»: نفس مفاتيح `lockAfter*` السابقة.
+- قسم «سياسة محاولات PIN»: max attempts + lockout seconds.
+- يستخدم `getApiBase()` بدلاً من المسارات النسبية ⇒ يعمل على Vite dev (9999) وعلى exe (file://).
+
+`src/pages/WaiterTablesPage.tsx`:
+- استيراد `InlinePinConfirm`.
+- زر «حفظ» على الميني-موم في بطاقة الطاولة ⇒ مستبدَل بـ `<InlinePinConfirm reason="minimum_charge_override" variant="warn">`.
+- `saveMinimumCharge` صار يُمرّر `mat3amActor: buildMat3amActor(user)` (كان مفقوداً ⇒ الباك-إند كان يرفض في الوضع المشترك).
+
+`src/components/PinOverlay.tsx`:
+- إضافة `hard_logout` لـ `REASON_LABEL` للتعامل الصحيح مع نوع `LockReason` الموسّع.
+
+**حدود/قرارات:**
+- الـ Hard-Logout يستدعي `auth.logout()` ⇒ المستخدم يُعاد لشاشة تسجيل الدخول الكلاسيكية ⇒ لا «معجزة استمرار»، فقط بداية نظيفة.
+- `freshSeconds` افتراضي 60 ⇒ لو الجرسون ضغط 5 أزرار خصم خلال دقيقة، يُطلب PIN واحد فقط في أوّلها.
+- `triggerLock("send")` في `WaiterOrderPage` لا يحتاج تعديل ⇒ يفرّع داخلياً حسب النمط (هجين: تجديد فقط، كلاسيكي: قفل).
+- لم يُربط بعدُ `InlinePinConfirm` على «حذف بند مرسل للمطبخ»/«مرتجع»/«إقفال جلسة» ⇒ متروك لجولة لاحقة (الباك-إند يحمي بالفعل).
+
+**الفحوص الأربعة (كلها خضراء):**
+- Backend `py_compile` ⇒ exit 0.
+- ReadLints على 6 ملفات (Context/Inline/Overlay/Settings/Tables/Order) ⇒ لا أخطاء.
+- `tsc -b` ⇒ نجح.
+- `vite build` ⇒ نجح (تحذير حجم chunk فقط).
+
+**سيناريو اختبار للمستخدم النهائي:**
+- اذهب إلى **إعدادات → التشغيل → إعدادات تشغيل نقطة البيع**.
+- اختر «جهاز مشترك» + «هجين منزلق ★» + اضبط نافذة الخمول 1د، خروج كامل 5د.
+- احفظ ⇒ يظهر overlay يطلب PIN.
+- ادخل PIN صحيح ⇒ يفتح. اذهب لـ «الطاولات» وافتح بطاقة طاولة.
+- اضغط زر «حفظ» على الميني-موم ⇒ يكشف حقل PIN (لأن الـ token > 60s أم لا — حسب التوقيت).
+- ادخل PIN ⇒ يحفظ ويختفي حقل PIN. كرّر خلال 60 ثانية ⇒ ينفذ مباشرة بلا PIN (token طازج).
+- اترك الجهاز دقيقة بدون لمس ⇒ overlay يظهر.
+- اترك 5 دقائق بدون لمس ⇒ خروج كامل، شاشة تسجيل الدخول تظهر.
+- ادخل PIN لمستخدم مختلف من الـ overlay ⇒ يفتح ويبدّل اسم المستخدم في الشريط الجانبي تلقائياً.
+
+**التحقق (الفحوص الأربعة كلها خضراء):**
+- Backend syntax: `python -m py_compile backend/api_server.py` — exit 0.
+- Frontend lints (ReadLints) — لا أخطاء.
+- TypeScript build (`tsc -b`) ضمن `npm run build` — نجح.
+- Vite build — نجح؛ تحذير حجم chunk فقط (ليس خطأ).
+
+**نقاط متروكة لجولة لاحقة (موثَّقة كـ TODO):**
+- `triggerLock("save")` لم يُربط بعدُ في `WaiterTablesPage` (تسكين/تعديل) ولا في صفحات الإعدادات الأخرى ولا في صفحة Kids؛ لكن **حماية الباك-إند تكفي وحدها** لرفض أي طلب بلا PIN. تجربة المستخدم ستتحسّن بإضافة الاستدعاءات لاحقاً.
+- لا ربط بعد لمحفّز `delete/discount/return` في صفحات الكاشير المتقدّمة — هي أيضاً محمية إن مرّت عبر مسارات الفواتير/المرتجعات الموجودة في القاعدة (تحتاج جولة لاحقة لربطها صراحة).
+- الـ secret التوقيعي يُولَّد عشوائياً عند تشغيل البروسس إن لم يُضبط `MAT3AM_TERMINAL_TOKEN_SECRET` ⇒ كل إعادة تشغيل تُبطل tokens سابقة (سلوك آمن لكن يستحسن ضبط متغير دائم في الإنتاج).
+- `MAT3AM_APP_USERS.PinHash` لا يزال نصّاً صريحاً لمستخدمين قدامى؛ خطة الترحيل لإجبار sha256 ستكون في إصدار لاحق.
+
 

@@ -3,10 +3,12 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { CashierAlertsBar } from "./CashierAlertsBar";
 import { RestaurantDualBells } from "./RestaurantDualBells";
 import { DbConnectionBar } from "./DbConnectionBar";
+import { PinOverlay } from "./PinOverlay";
 import { sessionDisplayName } from "../auth/displayUser";
 import { useAuth } from "../auth/AuthContext";
 import { useVenue } from "../context/VenueContext";
 import { useDbEpoch } from "../context/DbSettingsRefreshContext";
+import { TerminalLockProvider } from "../context/TerminalLockContext";
 import { venueBrandTitle } from "../lib/venueType";
 import type { RoleId } from "../auth/roles";
 import { buildMat3amActor } from "../lib/mat3amActor";
@@ -116,6 +118,7 @@ export function AppShell({ role }: { role: RoleId }) {
   const interDeptBells = role !== "kids_guard";
 
   return (
+    <TerminalLockProvider>
     <div style={{ display: "flex", minHeight: "100%" }}>
       {interDeptBells ? (
         <RestaurantDualBells role={role} userId={user?.id} mat3amActor={buildMat3amActor(user)} />
@@ -185,6 +188,8 @@ export function AppShell({ role }: { role: RoleId }) {
         {role === "cashier" ? <CashierAlertsBar /> : null}
         <Outlet key={dbEpoch} />
       </main>
+      <PinOverlay />
     </div>
+    </TerminalLockProvider>
   );
 }
