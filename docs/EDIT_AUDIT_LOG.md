@@ -143,3 +143,48 @@
   - **kids_guard** (موبيل): يرى نفس الشرائح، يضغط **«اطلب الوجبة الآن»** لإطلاق وجبات الباقة المعلّقة للمطبخ، **+ ملاحظة/+ تنبيه**.
   - شرائح التذاكر: عدّاد المتبقي حتى الخروج المتوقع (يُحسب من `entryAt + packageMinutes`)، تحذير عند تجاوز الوقت، إجمالي/مدفوع/متبقّي، مؤشر **«N وجبة بانتظار إرسال للمطبخ»**.
 - نُقطة وصول: `/app/cashier/kids-area`، `/app/manager/kids-area` (منوي لاحقاً)، `/app/kids-guard/kids-area` — كلها صفحة واحدة تتفاعل مع `useAuth().user.role`.
+
+### 024 — Kids Area v3: تخزين SQL مشترك + reserved/start + عدّاد تنازلي + تنبيهات (وجبة + استدعاء) + إعدادات الباقات — UTC 2026-05-10T17:30:00Z — ID kids-area-v3-sql-reserved-countdown-alerts
+
+**المشكلات التي يحلّها هذا القيد** (مذكورة من المستخدم):
+1. تذاكر الكيدز كانت محفوظة في JSON محلي ⇒ لا تظهر بين الأجهزة. الحل: ترحيل التخزين إلى **MAT3AM_KIDS_TICKETS** و **MAT3AM_KIDS_TICKET_LINES** + هجرة لمرة واحدة من kids_tickets.json.
+2. الوقت لم يُحسب لأن TBL007.Hieght3 كان 0 — وكان الوقت يبدأ من لحظة الحجز. الحل: زر **«🟢 بدء الجلسة»** (state machine: eserved → active → closed) يضع ActualStartAt فعلياً، و**ExitExpectedAt = ActualStartAt + PackageMinutesSnapshot**؛ والشريحة تعرض **عدّاد تنازلي حيّ كل ثانية**.
+3. لا توجد صفحة لإضافة/تعديل الباقات. الحل: **/manager/settings/kids-area-packages** (متاحة كذلك للمطوّر) تُتيح CRUD كاملاً عبر TBL006/TBL007.
+4. تنبيه طلب الوجبة عند نصف الوقت + تنبيه استدعاء قبل 10 د من النهاية.
+5. الفاتورة TBL022/023 لم تُعد تُنشأ عند الحجز — تُنشأ **فقط عند الإقفال** (مع **DownPayment = إجمالي ما قُبض**)، ودفعة الحجز تظل **أمانة** حتى ذلك الوقت.
+
+**الباك إند — ackend/api_server.py**:
+- DDL داخل **_ensure_mat3am_dev_schema**: جدولان جديدان مع فهارس على Status/CreatedAt/ActualStartAt/FinalInvoiceCardGuide وTicketId (lines).
+- Helpers: _kids_db_load_tickets/load_ticket/create_ticket(payload, lines)/start_ticket/add_line/update_kitchen_lines/set_payments_json/set_notes_alerts/set_overtime_exempt/close_ticket، مع _kids_db_row_to_ticket/row_to_line لتوحيد بنية النتائج (camelCase) المتوقعة من الواجهة.
+- هجرة لمرة واحدة في startup: **_kids_db_migrate_from_json_once** ينقل التذاكر القديمة من kids_tickets.json (تُحفظ كـ closed) ثم يُعيد تسمية الملف بإضافة .migrated.bak لتجنّب تكرار الهجرة.
+- _kids_enrich_ticket(t) أصبح يضيف:
+  - **countdown**: { applicable, totalSeconds, remainingSeconds, elapsedSeconds, elapsedRatio }
+  - **halfwayMealAlert**: { active, pendingMeals } (active إذا elapsedRatio ≥ 0.50 وعدد وجبات pending > 0).
+  - **endingSoonAlert**: { active, minutesLeft } (active إذا متبقّي ≤ 10 د و > 0).
+  - **overtime** (محتفظ به كما في 022).
+- Endpoints جديدة/مُعدّلة:
+  - POST /api/kids/tickets: ينشئ تذكرة بحالة eserved ويسجّل PaidAtBooking كأمانة في PaymentsJson — **لا فاتورة TBL022 الآن**.
+  - POST /api/kids/tickets/{id}/start: ينقل eserved → active ويحدّد ActualStartAt وExitExpectedAt.
+  - POST /api/kids/tickets/{id}/fire-kitchen: يطلق فقط بنود IsKitchen=1 AND KitchenStatus IN (NULL,'pending') لشاشة المطبخ ويضع KitchenStatus='sent'.
+  - POST /api/kids/tickets/{id}/add-line / /payment / /note / /exempt-overtime: نُقلت كلها لاستخدام جدولي SQL.
+  - POST /api/kids/tickets/{id}/settle: عند ctive يضيف بند الوقت الإضافي إن استحق (نفس صيغة 022)؛ ثم **هنا فقط** يُنشئ TBL022/023 موحّدة عبر _kids_create_open_invoice بـ DownPayment = paid_total + amountPaid، ثم _kids_settle_invoice_close لإقفالها فوراً، ثم يحفظ FinalInvoiceCardGuide/FinalBillNumber/FinalTotal/PaidTotal على التذكرة وينقلها إلى closed.
+  - GET /api/kids/tickets?status=open يجمع eserved + active.
+  - **PUT/DELETE/POST items** على /api/kids/packages/... لإدارة الباقات والبنود من صفحة الإعدادات (DELETE الباقة يخفي بنودها فقط بـ NotActive=1 ولا يُحذف من TBL007).
+
+**الواجهة — src/pages/KidsAreaPage.tsx** (إعادة كتابة كاملة):
+- نوع KTicket يدعم status: reserved | active | closed، ctualStartAt، paidAtBooking، countdown، halfwayMealAlert، endingSoonAlert.
+- loadTickets() يجلب ?status=open. مؤقت محلي setInterval(1s) يحدّث العرض فقط (الأرقام التنازلية)؛ polling السبع ثوانٍ يبقى للسيرفر.
+- شريحة **محجوزة** (لون بنفسجي): تُظهر «دفعة الحجز (أمانة)» + وقت الحجز + زر كبير **«🟢 بدء الجلسة»** يستدعي /start.
+- شريحة **نشطة** (لون سيان): عدّاد كبير HH:MM:SS + شريط تقدّم + شارات نابضة kids__pill--meal (نصف الوقت لطلب الوجبة) وkids__pill--call (10د قبل النهاية لاستدعاء الطفل) + إجمالي/مدفوع/متبقّي + شارة overtime.
+- computeLiveCountdown() يحسب الـ drift من lastSyncMs ⇒ يضمن دقة العدّاد بدون انتظار polling.
+
+**صفحة الإعدادات الجديدة — src/pages/settings/KidsAreaPackagesSettingsPage.tsx**:
+- بطاقة «＋ باقة جديدة» بإدخال البنود مباشرة (اسم/سعر/دقائق/مطبخ).
+- لكل باقة قائمة بنودها مع أزرار: تسمية الباقة، ＋ بند، حذف الباقة، تعديل بند، إخفاء بند.
+- مرتبطة بـ App.tsx على مساري **/app/manager/settings/kids-area-packages** و**/app/developer/settings/kids-area-packages**، ومعروضة في **SettingsLayout** ضمن قسم «التشغيل».
+
+**ملاحظات تشغيلية**:
+- بدون قيمة Hieght3 > 0 لبنود المدة، الباقة تُعرض في الواجهة بشارة تحذير أحمر «مدّة الباقة 0 — حدّد TBL007.Hieght3 لبند المدة»، ولا يُسمح ببدء الجلسة (/start يرفض بـ 409).
+- الفاتورة المالية الحقيقية (TBL022/TBL023) لا تُولَد إلا في الإقفال، ضامنةً عدم تشويش تقارير الفترة بفواتير «معلّقة».
+- الجدولان الجديدان يُنشآن تلقائياً عند startup (idempotent IF OBJECT_ID IS NULL).
+

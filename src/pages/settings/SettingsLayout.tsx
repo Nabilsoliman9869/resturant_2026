@@ -49,6 +49,7 @@ const OPERATIONAL_SECTIONS: { title: string; items: SettingsNavItem[] }[] = [
       { path: "role-schedule", label: "جدولة أدوار المستخدمين" },
       { path: "restaurant-ops", label: "إعدادات التشغيل الشاملة" },
       { path: "minimum-charge", label: "الميني موم تشارج" },
+      { path: "kids-area-packages", label: "باقات منطقة الأطفال" },
     ],
   },
 ];

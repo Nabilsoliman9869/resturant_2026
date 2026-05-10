@@ -29,11 +29,13 @@ type KLine = {
   unitPrice: number;
   isKitchen: boolean;
   kitchenStatus?: string | null;
-  kitchenSentAt?: string;
+  kitchenSentAt?: string | null;
   kitchenOrderId?: string;
   minutes: number;
-  addedAt: string;
+  addedAt: string | null;
   fromPackage: boolean;
+  isOvertime?: boolean;
+  overtimeMinutes?: number | null;
 };
 
 type KPayment = {
@@ -43,6 +45,7 @@ type KPayment = {
   method: string;
   at: string;
   note?: string;
+  by?: string;
 };
 
 type KAlert = { id: string; text: string; at: string; by?: string };
@@ -62,9 +65,19 @@ type KOvertime = {
   exitExpectedAt: string | null;
 };
 
+type KCountdown = {
+  applicable: boolean;
+  totalSeconds: number;
+  remainingSeconds: number;
+  elapsedSeconds: number;
+  elapsedRatio: number;
+};
+type KHalfway = { active: boolean; pendingMeals: number };
+type KEndingSoon = { active: boolean; minutesLeft: number };
+
 type KTicket = {
   id: string;
-  status: "active" | "closed" | string;
+  status: "reserved" | "active" | "closed" | string;
   childName: string;
   fatherName: string;
   phone: string;
@@ -73,26 +86,32 @@ type KTicket = {
   packageName: string;
   packageMinutes: number;
   packageTotal: number;
+  paidAtBooking: number;
+  paidTotal: number;
   companionsNote: string;
-  entryAt: string;
+  createdAt: string | null;
+  actualStartAt: string | null;
   exitExpectedAt: string | null;
-  exitAt: string | null;
-  lines: KLine[];
-  invoice: {
+  closedAt: string | null;
+  entryAt: string | null;
+  finalInvoiceCardGuide?: string;
+  finalBillNumber?: number;
+  finalTotal?: number | null;
+  invoice?: {
     cardGuide: string;
-    billNumber: number;
-    invoiceTypeGuide: string;
-    agentGuide: string;
-    costCenter: string | null;
+    billNumber?: number | null;
   };
+  lines: KLine[];
   payments: KPayment[];
   alerts: KAlert[];
   notes: KAlert[];
   overtime?: KOvertime;
   overtimeExempt?: boolean;
-  overtimeAppliedAt?: string;
-  overtimeMinutesApplied?: number;
-  overtimeChargeApplied?: number;
+  overtimeExemptBy?: string;
+  overtimeExemptReason?: string;
+  countdown?: KCountdown;
+  halfwayMealAlert?: KHalfway;
+  endingSoonAlert?: KEndingSoon;
 };
 
 const num = (v: unknown): number => {
@@ -113,20 +132,6 @@ function fmtTime(iso?: string | null): string {
     return "—";
   }
 }
-function fmtRemainingMinutes(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    const ms = new Date(iso).getTime() - Date.now();
-    const mins = Math.round(ms / 60000);
-    if (mins <= 0) return "انتهت المدة";
-    if (mins < 60) return `${mins} د`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m === 0 ? `${h} س` : `${h} س ${m} د`;
-  } catch {
-    return "—";
-  }
-}
 function fmtDuration(mins: number): string {
   if (!mins || mins <= 0) return "غير محدد";
   if (mins < 60) return `${mins} دقيقة`;
@@ -142,257 +147,202 @@ function fmtMinsCompact(mins: number): string {
   return m === 0 ? `${h} س` : `${h} س ${m} د`;
 }
 
+/** يحسب المتبقي من العدّاد التنازلي على المتصفح (للحظة الفعلية) اعتماداً على lastSyncMs. */
+function computeLiveCountdown(
+  cd: KCountdown | undefined,
+  lastSyncMs: number,
+  nowMs: number,
+): { totalSec: number; remainingSec: number; elapsedSec: number; ratio: number } | null {
+  if (!cd || !cd.applicable || !cd.totalSeconds) return null;
+  const drift = Math.max(0, Math.floor((nowMs - lastSyncMs) / 1000));
+  const remaining = Math.max(0, cd.remainingSeconds - drift);
+  const total = Math.max(1, cd.totalSeconds);
+  const elapsed = Math.min(total, total - remaining);
+  return { totalSec: total, remainingSec: remaining, elapsedSec: elapsed, ratio: elapsed / total };
+}
+
+function fmtHHMMSS(secs: number): string {
+  const s = Math.max(0, Math.floor(secs));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${pad(m)}:${pad(ss)}`;
+}
+
 /* ============================================================
-   نمط بصري موحد — يتناسق مع ثيم --bg/--surface/--accent
+   نمط بصري — ثيم المطاعم
    ============================================================ */
 const STYLES = `
-.kids {
-  --kpad: 16px;
-  font-family: var(--font);
-  direction: rtl;
-  padding: var(--kpad);
-  color: var(--text);
-}
-.kids__hdr {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 14px 18px;
-  border-radius: var(--radius);
+.kids { --kpad: 16px; font-family: var(--font); direction: rtl; padding: var(--kpad); color: var(--text); }
+.kids__hdr { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;
+  padding:14px 18px; border-radius:var(--radius);
   background: linear-gradient(135deg, rgba(249,115,22,0.18), rgba(34,211,238,0.10));
-  border: 1px solid var(--border);
-}
-.kids__hdr h2 { margin: 0; font-family: var(--display); font-size: 1.35rem; }
-.kids__hdr p  { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  border:1px solid var(--border); }
+.kids__hdr h2 { margin:0; font-family:var(--display); font-size:1.35rem; }
+.kids__hdr p  { margin:2px 0 0; color:var(--muted); font-size:13px; }
 
-.kids__alert {
-  padding: 10px 14px;
-  border-radius: 10px;
-  margin-bottom: 14px;
-  border: 1px solid var(--border);
-  font-weight: 600;
-}
-.kids__alert--ok  { background: rgba(52,211,153,0.12); color: var(--ok);    border-color: rgba(52,211,153,0.25); }
-.kids__alert--err { background: rgba(251,113,133,0.14); color: var(--danger); border-color: rgba(251,113,133,0.30); }
-.kids__alert--info{ background: rgba(34,211,238,0.10); color: var(--accent2); border-color: rgba(34,211,238,0.25); }
+.kids__alert { padding:10px 14px; border-radius:10px; margin-bottom:14px; border:1px solid var(--border); font-weight:600; }
+.kids__alert--ok  { background:rgba(52,211,153,0.12); color:var(--ok); border-color:rgba(52,211,153,0.25); }
+.kids__alert--err { background:rgba(251,113,133,0.14); color:var(--danger); border-color:rgba(251,113,133,0.30); }
+.kids__alert--info{ background:rgba(34,211,238,0.10); color:var(--accent2); border-color:rgba(34,211,238,0.25); }
 
-/* —— شبكة شرائح —— */
-.kids__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
-}
-.kids__empty {
-  padding: 28px 16px;
-  text-align: center;
-  border: 2px dashed var(--border);
-  border-radius: 14px;
-  color: var(--muted);
-}
+.kids__grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:14px; }
+.kids__empty { padding:28px 16px; text-align:center; border:2px dashed var(--border); border-radius:14px; color:var(--muted); }
 
-/* —— بطاقة تذكرة —— */
 .kids__card {
   background: linear-gradient(160deg, var(--surface), var(--surface2));
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  cursor: pointer;
-  transition: transform .12s ease, box-shadow .15s ease, border-color .15s ease;
+  border:1px solid var(--border); border-radius:14px; padding:14px;
+  display:flex; flex-direction:column; gap:10px;
+  cursor:pointer; transition: transform .12s ease, box-shadow .15s ease, border-color .15s ease;
 }
-.kids__card:hover { transform: translateY(-2px); border-color: rgba(34,211,238,0.35); box-shadow: 0 10px 28px rgba(0,0,0,0.30); }
-.kids__card.is-overdue { border-color: rgba(251,191,36,0.55); background: linear-gradient(160deg, rgba(251,191,36,0.10), var(--surface2)); }
-.kids__card.is-active  { box-shadow: 0 0 0 3px rgba(34,211,238,0.45); border-color: rgba(34,211,238,0.45); }
+.kids__card:hover { transform: translateY(-2px); border-color:rgba(34,211,238,0.35); box-shadow: 0 10px 28px rgba(0,0,0,0.30); }
+.kids__card.is-reserved { border-color:rgba(167,139,250,0.45); background: linear-gradient(160deg, rgba(167,139,250,0.08), var(--surface2)); }
+.kids__card.is-active   { border-color:rgba(34,211,238,0.45); }
+.kids__card.is-overdue  { border-color:rgba(249,115,22,0.55); background: linear-gradient(160deg, rgba(249,115,22,0.10), var(--surface2)); }
+.kids__card.is-selected { box-shadow: 0 0 0 3px rgba(34,211,238,0.45); }
 
 .kids__card-h { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-.kids__card-h .name { font-size: 1.05rem; font-weight: 800; color: var(--text); }
-.kids__card-h .age  { color: var(--muted); font-weight: 600; font-size: 12px; margin-inline-start: 4px; }
-.kids__bill-no { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,0.06); color: var(--muted); font-weight: 700; letter-spacing: .04em; }
+.kids__card-h .name { font-size:1.05rem; font-weight:800; color:var(--text); }
+.kids__card-h .age  { color:var(--muted); font-weight:600; font-size:12px; margin-inline-start:4px; }
+.kids__card-h .badge { font-size:10.5px; padding:3px 8px; border-radius:999px; font-weight:800; letter-spacing:.04em; }
+.kids__card-h .badge.reserved { background:rgba(167,139,250,0.18); color:#c4b5fd; }
+.kids__card-h .badge.active   { background:rgba(34,211,238,0.18); color:#67e8f9; }
 
-.kids__pkg-line { font-weight:700; color: var(--accent); font-size: 0.95rem; }
-.kids__meta { display:flex; justify-content:space-between; gap:8px; font-size: 12px; color: var(--muted); }
-.kids__meta b { color: var(--text); font-weight: 700; }
-.kids__remain { font-weight:700; }
-.kids__remain.ok    { color: var(--ok); }
-.kids__remain.warn  { color: var(--warn); }
+.kids__pkg-line { font-weight:700; color:var(--accent); font-size:0.95rem; }
+.kids__meta { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+.kids__meta b { color:var(--text); font-weight:700; }
 
-.kids__totals {
-  display:grid; grid-template-columns: repeat(3, 1fr);
-  gap: 6px; padding: 8px;
-  background: rgba(255,255,255,0.04);
-  border-radius: 10px;
-  font-size: 12px;
-  text-align: center;
+/* عدّاد تنازلي كبير للنشطة */
+.kids__cd {
+  background: rgba(34,211,238,0.08); border:1px solid rgba(34,211,238,0.22);
+  border-radius:12px; padding:10px 12px; display:flex; align-items:center; gap:12px;
 }
-.kids__totals span { color: var(--muted); }
-.kids__totals b { display:block; font-size: 14px; color: var(--text); font-weight:800; margin-top:2px; }
-.kids__totals .due  { color: var(--danger); }
-.kids__totals .paid { color: var(--ok); }
-
-.kids__pill {
-  padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight:700;
-  display:inline-flex; align-items:center; gap:5px;
-  border: 1px solid transparent;
+.kids__cd--late { background: rgba(249,115,22,0.10); border-color: rgba(249,115,22,0.35); }
+.kids__cd .num {
+  font-family: var(--display, inherit);
+  font-size: 1.8rem; font-weight: 800; letter-spacing: .04em;
+  color: var(--accent2); font-variant-numeric: tabular-nums;
 }
-.kids__pill--warn  { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.30); }
-.kids__pill--alert { background: rgba(251,113,133,0.14); color: var(--danger); border-color: rgba(251,113,133,0.30); }
-.kids__pill--ok    { background: rgba(52,211,153,0.14); color: var(--ok); border-color: rgba(52,211,153,0.30); }
-.kids__pill--ot    { background: rgba(249,115,22,0.14); color: var(--accent); border-color: rgba(249,115,22,0.35); }
+.kids__cd--late .num { color: var(--accent); }
+.kids__cd .lbl { font-size:11px; color:var(--muted); margin-bottom:2px; }
+.kids__progress { width:100%; height:6px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden; margin-top:6px; }
+.kids__progress > span { display:block; height:100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
 
-/* —— شريحة الوقت الإضافي —— */
-.kids__ot {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px; border-radius: 10px;
-  background: rgba(249,115,22,0.10);
-  border: 1px solid rgba(249,115,22,0.30);
-  font-size: 12.5px; color: var(--text);
+/* بطاقة الحجز قبل البدء */
+.kids__reserve {
+  background: rgba(167,139,250,0.10); border:1px solid rgba(167,139,250,0.30);
+  border-radius:12px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:10px;
 }
-.kids__ot.exempt { background: rgba(52,211,153,0.10); border-color: rgba(52,211,153,0.30); color: var(--ok); }
-.kids__ot.applied{ background: rgba(94,234,212,0.08); border-color: rgba(94,234,212,0.25); color: var(--accent2); }
-.kids__ot b { color: var(--accent); font-weight: 800; }
-.kids__ot.exempt b { color: var(--ok); }
-.kids__ot.applied b { color: var(--accent2); }
+.kids__reserve .lbl { font-size:11px; color:var(--muted); }
+.kids__reserve b { color:#c4b5fd; font-weight:800; font-size:1.1rem; }
 
-/* —— أزرار ثانوية —— */
-.kids__btn-row { display:flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.btn-warning { background: linear-gradient(135deg, var(--warn), #f59e0b); color: #0f172a; font-weight:700; }
-.btn-success { background: linear-gradient(135deg, var(--ok), #10b981); color: #0f172a; font-weight:700; }
-.btn-danger  { background: linear-gradient(135deg, var(--danger), #f43f5e); color: #0f172a; font-weight:700; }
+.kids__totals { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; padding:8px;
+  background:rgba(255,255,255,0.04); border-radius:10px; font-size:12px; text-align:center; }
+.kids__totals span { color:var(--muted); }
+.kids__totals b { display:block; font-size:14px; color:var(--text); font-weight:800; margin-top:2px; }
+.kids__totals .due  { color:var(--danger); }
+.kids__totals .paid { color:var(--ok); }
 
-/* —— Modal —— */
-.kids__modal-bg {
-  position: fixed; inset: 0;
-  background: rgba(2,6,15,0.78);
-  backdrop-filter: blur(4px);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 1000; padding: 20px;
-}
-.kids__modal {
-  width: min(1000px, 100%);
-  max-height: 92vh; overflow:auto;
+.kids__pill { padding:4px 10px; border-radius:999px; font-size:11.5px; font-weight:700;
+  display:inline-flex; align-items:center; gap:5px; border:1px solid transparent; }
+.kids__pill--warn  { background:rgba(251,191,36,0.14); color:var(--warn); border-color:rgba(251,191,36,0.30); }
+.kids__pill--alert { background:rgba(251,113,133,0.14); color:var(--danger); border-color:rgba(251,113,133,0.30); }
+.kids__pill--ok    { background:rgba(52,211,153,0.14); color:var(--ok); border-color:rgba(52,211,153,0.30); }
+.kids__pill--ot    { background:rgba(249,115,22,0.14); color:var(--accent); border-color:rgba(249,115,22,0.35); }
+.kids__pill--call  { background:rgba(244,63,94,0.18);  color:#fda4af;     border-color:rgba(244,63,94,0.40); animation: callPulse 1.4s ease-in-out infinite; }
+.kids__pill--meal  { background:rgba(251,191,36,0.18); color:#fde68a;     border-color:rgba(251,191,36,0.40); animation: callPulse 1.8s ease-in-out infinite; }
+
+@keyframes callPulse { 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.04); } }
+
+.kids__ot { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px;
+  background:rgba(249,115,22,0.10); border:1px solid rgba(249,115,22,0.30); font-size:12.5px; color:var(--text); }
+.kids__ot.exempt  { background:rgba(52,211,153,0.10); border-color:rgba(52,211,153,0.30); color:var(--ok); }
+.kids__ot.applied { background:rgba(94,234,212,0.08); border-color:rgba(94,234,212,0.25); color:var(--accent2); }
+.kids__ot b { color:var(--accent); font-weight:800; }
+.kids__ot.exempt  b { color:var(--ok); }
+.kids__ot.applied b { color:var(--accent2); }
+
+.kids__btn-row { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.btn-warning { background: linear-gradient(135deg, var(--warn), #f59e0b); color:#0f172a; font-weight:700; }
+.btn-success { background: linear-gradient(135deg, var(--ok), #10b981);  color:#0f172a; font-weight:700; }
+.btn-danger  { background: linear-gradient(135deg, var(--danger), #f43f5e); color:#0f172a; font-weight:700; }
+.btn-violet  { background: linear-gradient(135deg, #a78bfa, #8b5cf6);     color:#0f172a; font-weight:800; }
+.btn-block   { width:100%; padding:14px 18px; font-size:15px; }
+
+.kids__modal-bg { position:fixed; inset:0; background:rgba(2,6,15,0.78); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; z-index:1000; padding:20px; }
+.kids__modal { width:min(1000px, 100%); max-height:92vh; overflow:auto;
   background: linear-gradient(180deg, var(--surface), var(--surface2));
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 22px 22px 18px;
-  box-shadow: 0 30px 60px rgba(0,0,0,0.55);
-}
-.kids__modal-h { display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px; }
-.kids__modal-h h3 { margin: 0; font-family: var(--display); font-size: 1.2rem; }
-.kids__modal-sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  border:1px solid var(--border); border-radius:16px; padding:22px 22px 18px;
+  box-shadow: 0 30px 60px rgba(0,0,0,0.55); }
+.kids__modal-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.kids__modal-h h3 { margin:0; font-family:var(--display); font-size:1.2rem; }
+.kids__modal-sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
 
-/* —— خطوات —— */
-.kids__steps {
-  display:grid; grid-template-columns: repeat(3, 1fr);
-  gap: 8px; margin-bottom: 18px;
-}
-.kids__step {
-  text-align:center; padding: 10px 8px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  font-weight:700; font-size: 13px; color: var(--muted);
-}
-.kids__step.done { color: var(--ok); border-color: rgba(52,211,153,0.30); background: rgba(52,211,153,0.10); }
-.kids__step.cur  { color: var(--accent); border-color: rgba(249,115,22,0.45); background: rgba(249,115,22,0.10); }
-.kids__step b { display:block; font-size: 11px; opacity: 0.8; }
+.kids__steps { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:18px; }
+.kids__step { text-align:center; padding:10px 8px; border-radius:10px;
+  background:rgba(255,255,255,0.04); border:1px solid var(--border);
+  font-weight:700; font-size:13px; color:var(--muted); }
+.kids__step.done { color:var(--ok); border-color:rgba(52,211,153,0.30); background:rgba(52,211,153,0.10); }
+.kids__step.cur  { color:var(--accent); border-color:rgba(249,115,22,0.45); background:rgba(249,115,22,0.10); }
+.kids__step b { display:block; font-size:11px; opacity:.8; }
 
-/* —— شبكة الباقات —— */
-.kids__pkgs {
-  display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.kids__pkg {
-  background: var(--surface);
-  border: 2px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-  display:flex; flex-direction:column; gap: 8px;
-  cursor:pointer; text-align: right;
-  transition: transform .12s ease, border-color .15s ease, background .15s ease;
-}
-.kids__pkg:hover  { transform: translateY(-2px); border-color: rgba(34,211,238,0.35); }
-.kids__pkg.active { border-color: var(--accent); background: rgba(249,115,22,0.10); box-shadow: 0 8px 24px rgba(249,115,22,0.18); }
+.kids__pkgs { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; margin-bottom:18px; }
+.kids__pkg { background:var(--surface); border:2px solid var(--border); border-radius:14px; padding:14px;
+  display:flex; flex-direction:column; gap:8px; cursor:pointer; text-align:right;
+  transition: transform .12s ease, border-color .15s ease, background .15s ease; }
+.kids__pkg:hover  { transform: translateY(-2px); border-color:rgba(34,211,238,0.35); }
+.kids__pkg.active { border-color:var(--accent); background:rgba(249,115,22,0.10); box-shadow: 0 8px 24px rgba(249,115,22,0.18); }
 
-.kids__pkg-name { font-weight:800; font-size: 1.05rem; }
-.kids__pkg-latin{ color: var(--muted); font-size: 12px; }
+.kids__pkg-name { font-weight:800; font-size:1.05rem; }
+.kids__pkg-latin{ color:var(--muted); font-size:12px; }
 .kids__pkg-row  { display:flex; justify-content:space-between; align-items:center; }
-.kids__pkg-price{ font-size: 1.3rem; font-weight:800; color: var(--accent); }
-.kids__pkg-dur  { font-size: 13px; color: var(--accent2); font-weight:700; padding: 3px 8px; border-radius: 999px; background: rgba(34,211,238,0.10); }
-.kids__pkg-items{ display:flex; flex-direction:column; gap: 4px; margin-top:6px; padding-top:8px; border-top: 1px dashed var(--border); }
-.kids__pkg-item { display:flex; justify-content:space-between; align-items:center; font-size: 12.5px; color: var(--text); }
-.kids__pkg-item .ic { color: var(--muted); margin-inline-end: 6px; font-size: 11px; }
+.kids__pkg-price{ font-size:1.3rem; font-weight:800; color:var(--accent); }
+.kids__pkg-dur  { font-size:13px; color:var(--accent2); font-weight:700; padding:3px 8px; border-radius:999px; background:rgba(34,211,238,0.10); }
+.kids__pkg-items{ display:flex; flex-direction:column; gap:4px; margin-top:6px; padding-top:8px; border-top:1px dashed var(--border); }
+.kids__pkg-item { display:flex; justify-content:space-between; align-items:center; font-size:12.5px; color:var(--text); }
+.kids__pkg-item .ic { color:var(--muted); margin-inline-end:6px; font-size:11px; }
 
-/* —— نموذج بيانات الطفل —— */
-.kids__form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px 14px;
-  margin-bottom: 18px;
-}
-.kids__field { display:flex; flex-direction:column; gap: 6px; }
+.kids__form { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px 14px; margin-bottom:18px; }
+.kids__field { display:flex; flex-direction:column; gap:6px; }
 .kids__field.span2 { grid-column: span 2; }
-.kids__field label { font-weight: 700; font-size: 13px; color: var(--muted); }
-.kids__field label .req { color: var(--danger); margin-inline-start: 4px; }
-.kids__field input, .kids__field textarea {
-  width: 100%;
-  font-size: 14px;
-  padding: 10px 12px;
-}
+.kids__field label { font-weight:700; font-size:13px; color:var(--muted); }
+.kids__field label .req { color:var(--danger); margin-inline-start:4px; }
+.kids__field input, .kids__field textarea { width:100%; font-size:14px; padding:10px 12px; }
 
-/* —— ملخص الفاتورة قبل التأكيد —— */
-.kids__sum {
-  display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
-  padding: 14px;
-  border-radius: 12px;
-  background: rgba(34,211,238,0.06);
-  border: 1px solid rgba(34,211,238,0.20);
-  margin-bottom: 16px;
-}
-.kids__sum-row { display:flex; flex-direction:column; gap: 2px; }
-.kids__sum-row .k { color: var(--muted); font-size: 12px; }
-.kids__sum-row .v { color: var(--text); font-size: 1.05rem; font-weight: 800; }
-.kids__sum-row .v.accent { color: var(--accent); }
+.kids__sum { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px;
+  padding:14px; border-radius:12px; background:rgba(34,211,238,0.06); border:1px solid rgba(34,211,238,0.20); margin-bottom:16px; }
+.kids__sum-row { display:flex; flex-direction:column; gap:2px; }
+.kids__sum-row .k { color:var(--muted); font-size:12px; }
+.kids__sum-row .v { color:var(--text); font-size:1.05rem; font-weight:800; }
+.kids__sum-row .v.accent { color:var(--accent); }
 
-/* —— تفاصيل التذكرة (مودال) —— */
-.kids__detail-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px 12px; padding: 12px; background: rgba(255,255,255,0.04); border-radius: 10px; margin-bottom: 14px; font-size: 13.5px; }
+.kids__detail-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px 12px; padding:12px;
+  background:rgba(255,255,255,0.04); border-radius:10px; margin-bottom:14px; font-size:13.5px; }
 .kids__detail-grid .row { display:flex; justify-content:space-between; gap:8px; }
-.kids__detail-grid .row span:first-child { color: var(--muted); }
-.kids__detail-grid .row b { color: var(--text); font-weight: 700; }
+.kids__detail-grid .row span:first-child { color:var(--muted); }
+.kids__detail-grid .row b { color:var(--text); font-weight:700; }
 
-.kids__lines { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
-.kids__lines th, .kids__lines td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.kids__lines th { background: rgba(255,255,255,0.04); color: var(--muted); font-weight: 700; text-align: right; }
-.kids__lines td.num { text-align: left; font-variant-numeric: tabular-nums; }
-.kids__lines tr.kit-pending { background: rgba(251,191,36,0.06); }
-.kids__lines tr.kit-sent    { background: rgba(52,211,153,0.06); }
+.kids__lines { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
+.kids__lines th, .kids__lines td { padding:8px 10px; border-bottom:1px solid var(--border); }
+.kids__lines th { background:rgba(255,255,255,0.04); color:var(--muted); font-weight:700; text-align:right; }
+.kids__lines td.num { text-align:left; font-variant-numeric: tabular-nums; }
+.kids__lines tr.kit-pending { background:rgba(251,191,36,0.06); }
+.kids__lines tr.kit-sent    { background:rgba(52,211,153,0.06); }
 
-.kids__notes { display:flex; flex-direction:column; gap: 6px; margin-bottom: 14px; }
-.kids__note  { padding: 8px 12px; border-radius: 8px; font-size: 13px; }
-.kids__note.alert { background: rgba(251,113,133,0.12); border-inline-end: 3px solid var(--danger); }
-.kids__note.note  { background: rgba(34,211,238,0.10);  border-inline-end: 3px solid var(--accent2); }
-.kids__note .ts   { color: var(--muted); font-size: 11px; margin-inline-start: 8px; }
+.kids__notes { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+.kids__note  { padding:8px 12px; border-radius:8px; font-size:13px; }
+.kids__note.alert { background:rgba(251,113,133,0.12); border-inline-end:3px solid var(--danger); }
+.kids__note.note  { background:rgba(34,211,238,0.10);  border-inline-end:3px solid var(--accent2); }
+.kids__note .ts   { color:var(--muted); font-size:11px; margin-inline-start:8px; }
 
-/* —— زر CTA كبير —— */
-.kids__cta {
-  background: linear-gradient(135deg, var(--accent), #ea580c);
-  color: #0f172a; font-weight: 800;
-  padding: 14px 26px; font-size: 15px;
-  border-radius: 12px; border: none;
-  box-shadow: 0 10px 28px rgba(249,115,22,0.30);
-}
-.kids__cta:disabled { opacity: 0.45; cursor: not-allowed; box-shadow:none; }
+.kids__cta { background: linear-gradient(135deg, var(--accent), #ea580c); color:#0f172a; font-weight:800;
+  padding:14px 26px; font-size:15px; border-radius:12px; border:none;
+  box-shadow: 0 10px 28px rgba(249,115,22,0.30); }
+.kids__cta:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
 
-@media (max-width: 720px) {
-  .kids__steps { grid-template-columns: 1fr; }
-  .kids__detail-grid { grid-template-columns: 1fr; }
-  .kids__field.span2 { grid-column: span 1; }
-}
+@media (max-width:720px){ .kids__steps { grid-template-columns:1fr; } .kids__detail-grid { grid-template-columns:1fr; } .kids__field.span2 { grid-column: span 1; } }
 `;
 
 export default function KidsAreaPage() {
@@ -404,9 +354,11 @@ export default function KidsAreaPage() {
 
   const [packages, setPackages] = useState<KPackage[]>([]);
   const [tickets, setTickets] = useState<KTicket[]>([]);
+  const [lastSyncMs, setLastSyncMs] = useState<number>(Date.now());
   const [msg, setMsg] = useState<{ type: "info" | "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // نموذج الإنشاء
   const [showNew, setShowNew] = useState(false);
   const [pickedPkg, setPickedPkg] = useState<string>("");
   const [childName, setChildName] = useState("");
@@ -441,10 +393,12 @@ export default function KidsAreaPage() {
 
   const loadTickets = useCallback(async () => {
     try {
-      const r = await safeFetch(`${base}/api/kids/tickets?status=active`);
+      // open = reserved + active
+      const r = await safeFetch(`${base}/api/kids/tickets?status=open`);
       if (!r.ok) return;
       const j = await r.json();
       setTickets(Array.isArray(j?.tickets) ? j.tickets : []);
+      setLastSyncMs(Date.now());
     } catch {
       /* تجاهل */
     }
@@ -456,27 +410,19 @@ export default function KidsAreaPage() {
   }, [loadPackages, loadTickets]);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      void loadTickets();
-    }, 7000);
+    const id = window.setInterval(() => { void loadTickets(); }, 7000);
     return () => window.clearInterval(id);
   }, [loadTickets]);
 
-  // مؤشر تنبيه live: نُعيد رسم العدّاد كل 30 ثانية حتى لو لم يصل polling جديد
+  // عدّاد تنازلي حيّ كل ثانية (لتحديث HH:MM:SS فقط — الـ tickets تتحدّث كل 7ث من السيرفر)
   const [, setTickClock] = useState(0);
   useEffect(() => {
-    const id = window.setInterval(() => setTickClock((n) => n + 1), 30000);
+    const id = window.setInterval(() => setTickClock((n) => n + 1), 1000);
     return () => window.clearInterval(id);
   }, []);
 
   const resetNewForm = () => {
-    setPickedPkg("");
-    setChildName("");
-    setAge("");
-    setFatherName("");
-    setPhone("");
-    setCompanionsNote("");
-    setDownPaymentInput("");
+    setPickedPkg(""); setChildName(""); setAge(""); setFatherName(""); setPhone(""); setCompanionsNote(""); setDownPaymentInput("");
   };
 
   const pickedPkgObj = useMemo(
@@ -513,13 +459,32 @@ export default function KidsAreaPage() {
         return;
       }
       const tk = (await r.json()) as KTicket;
-      showMsg("ok", `فُتحت تذكرة #${tk.invoice?.billNumber ?? "—"} للطفل ${tk.childName}`);
+      showMsg("ok", `حُجزت تذكرة للطفل ${tk.childName} — اضغط «بدء الجلسة» عند دخوله`);
       resetNewForm();
       setShowNew(false);
       await loadTickets();
       setOpenTicketId(tk.id);
     } catch (e) {
       showMsg("err", `خطأ: ${String((e as Error)?.message || e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startTicket = async (t: KTicket) => {
+    if (!isCashier && role !== "kids_guard") return; // كلاهما يستطيع البدء
+    if (!window.confirm(`بدء جلسة الطفل ${t.childName}؟ سيُحتسب الوقت فوراً.`)) return;
+    setBusy(true);
+    try {
+      const r = await safeFetch(`${base}/api/kids/tickets/${t.id}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mat3amActor: actor }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { detail?: string };
+      if (!r.ok) return showMsg("err", j?.detail || `تعذّر بدء التذكرة (${r.status})`);
+      showMsg("ok", `بدأت جلسة ${t.childName} — العدّاد يعمل`);
+      await loadTickets();
     } finally {
       setBusy(false);
     }
@@ -554,7 +519,7 @@ export default function KidsAreaPage() {
       ? `\nسيُضاف وقت إضافي: ${fmtMinsCompact(ot!.billableMinutes)} = ${fmt(otCharge)} ج.م`
       : "";
     const input = window.prompt(
-      `تسوية تذكرة ${t.childName}\nالإجمالي قبل الإضافي: ${fmt(baseTotal)}${otNote}\nالإجمالي النهائي: ${fmt(finalTotal)}\nمدفوع: ${fmt(paid)}\nالمتبقي: ${fmt(remaining)}\n\nقيمة الدفعة الأخيرة (افتراضي = المتبقي):`,
+      `تسوية تذكرة ${t.childName}\nالإجمالي قبل الإضافي: ${fmt(baseTotal)}${otNote}\nالإجمالي النهائي: ${fmt(finalTotal)}\nمدفوع (دفعة الحجز + الجزئية): ${fmt(paid)}\nالمتبقي: ${fmt(remaining)}\n\nقيمة الدفعة الأخيرة (افتراضي = المتبقي):`,
       String(remaining.toFixed(2)),
     );
     if (input === null) return;
@@ -567,12 +532,17 @@ export default function KidsAreaPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amountPaid: amount, method: "cash", mat3amActor: actor }),
       });
-      const j = (await r.json().catch(() => ({}))) as { detail?: string; overtimeApplied?: { minutes: number; charge: number } };
+      const j = (await r.json().catch(() => ({}))) as {
+        detail?: string;
+        overtimeApplied?: { minutes: number; charge: number };
+        finalInvoice?: { cardGuide: string; billNumber: number };
+      };
       if (!r.ok) return showMsg("err", j?.detail || `فشل الإقفال (${r.status})`);
       const otMsg = j?.overtimeApplied
         ? ` (مع وقت إضافي ${j.overtimeApplied.minutes} د = ${fmt(j.overtimeApplied.charge)})`
         : "";
-      showMsg("ok", `تم إقفال التذكرة${otMsg}`);
+      const inv = j?.finalInvoice ? ` — فاتورة #${j.finalInvoice.billNumber}` : "";
+      showMsg("ok", `تم إقفال التذكرة${otMsg}${inv}`);
       await loadTickets();
       setOpenTicketId("");
     } finally {
@@ -658,7 +628,7 @@ export default function KidsAreaPage() {
       });
       const j = (await r.json().catch(() => ({}))) as { detail?: string };
       if (!r.ok) return showMsg("err", j?.detail || `تعذّرت الإضافة (${r.status})`);
-      showMsg("ok", "أُضيف الصنف للفاتورة");
+      showMsg("ok", "أُضيف الصنف للتذكرة");
       await loadTickets();
     } finally {
       setBusy(false);
@@ -672,6 +642,13 @@ export default function KidsAreaPage() {
   const pendingKitchenCount = (t: KTicket) =>
     (t.lines || []).filter((l) => l.isKitchen && (!l.kitchenStatus || l.kitchenStatus === "pending")).length;
 
+  // ترتيب: النشطة أولاً، ثم المحجوزة
+  const sortedTickets = useMemo(() => {
+    const active = tickets.filter((t) => t.status === "active");
+    const reserved = tickets.filter((t) => t.status === "reserved");
+    return [...active, ...reserved];
+  }, [tickets]);
+
   return (
     <div className="kids">
       <style>{STYLES}</style>
@@ -679,7 +656,7 @@ export default function KidsAreaPage() {
       <header className="kids__hdr">
         <div>
           <h2>منطقة الأطفال — التذاكر</h2>
-          <p>{isCashier ? "كاشير: افتح تذاكر، سجّل الدفعات، وأقفل عند الخروج." : "خدمة الكيدز: أرسل الوجبات للمطبخ + ملاحظات/تنبيهات."}</p>
+          <p>{isCashier ? "كاشير: حجز/تسوية + إدارة كاملة." : "خدمة الكيدز: بدء الجلسة + إرسال الوجبات + ملاحظات."}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button type="button" className="btn btn-ghost" onClick={() => void loadTickets()} disabled={busy}>تحديث</button>
@@ -700,23 +677,28 @@ export default function KidsAreaPage() {
         <div role="alert" className={`kids__alert kids__alert--${msg.type}`}>{msg.text}</div>
       ) : null}
 
-      {/* —— شبكة الشرائح —— */}
       <section className="kids__grid">
-        {tickets.length === 0 ? (
+        {sortedTickets.length === 0 ? (
           <div className="kids__empty" style={{ gridColumn: "1/-1" }}>
-            لا توجد تذاكر نشطة. {isCashier ? "اضغط «+ تذكرة جديدة» لفتح أول تذكرة." : ""}
+            لا توجد تذاكر مفتوحة. {isCashier ? "اضغط «+ تذكرة جديدة» لفتح أول تذكرة." : ""}
           </div>
         ) : null}
 
-        {tickets.map((t) => {
+        {sortedTickets.map((t) => {
+          const isReserved = t.status === "reserved";
+          const isActive = t.status === "active";
           const total = sumLines(t.lines);
           const paid = sumPayments(t.payments);
           const remaining = Math.max(0, total - paid);
           const pendingK = pendingKitchenCount(t);
-          const overdue = !!t.exitExpectedAt && new Date(t.exitExpectedAt).getTime() < Date.now();
+          const live = computeLiveCountdown(t.countdown, lastSyncMs, Date.now());
+          const overdue = !!live && live.remainingSec === 0;
           const cardCls = ["kids__card"];
+          if (isReserved) cardCls.push("is-reserved");
+          if (isActive) cardCls.push("is-active");
           if (overdue) cardCls.push("is-overdue");
-          if (openTicketId === t.id) cardCls.push("is-active");
+          if (openTicketId === t.id) cardCls.push("is-selected");
+
           return (
             <article key={t.id} className={cardCls.join(" ")} onClick={() => setOpenTicketId(t.id)}>
               <div className="kids__card-h">
@@ -724,7 +706,9 @@ export default function KidsAreaPage() {
                   <span className="name">{t.childName}</span>
                   {t.age ? <span className="age"> · {t.age} سنة</span> : null}
                 </div>
-                <span className="kids__bill-no">#{t.invoice?.billNumber ?? "—"}</span>
+                <span className={`badge ${isReserved ? "reserved" : "active"}`}>
+                  {isReserved ? "محجوزة" : "نشطة"}
+                </span>
               </div>
 
               <div className="kids__meta">
@@ -732,21 +716,77 @@ export default function KidsAreaPage() {
                 <span><b>هاتف:</b> {t.phone || "—"}</span>
               </div>
 
-              <div className="kids__pkg-line">{t.packageName}</div>
+              <div className="kids__pkg-line">{t.packageName} · {fmtDuration(t.packageMinutes)}</div>
 
-              <div className="kids__meta">
-                <span>دخول: <b>{fmtTime(t.entryAt)}</b></span>
-                <span>خروج: <b>{fmtTime(t.exitExpectedAt)}</b></span>
-                <span className={`kids__remain ${overdue ? "warn" : "ok"}`}>{fmtRemainingMinutes(t.exitExpectedAt)}</span>
-              </div>
+              {/* بطاقة الحجز (قبل البدء) */}
+              {isReserved ? (
+                <>
+                  <div className="kids__reserve">
+                    <div>
+                      <div className="lbl">دفعة الحجز (أمانة)</div>
+                      <b>{fmt(t.paidAtBooking)} ج.م</b>
+                    </div>
+                    <div style={{ textAlign: "left" }}>
+                      <div className="lbl">حُجزت</div>
+                      <b style={{ fontSize: ".95rem", color: "var(--muted)" }}>{fmtTime(t.createdAt)}</b>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-violet btn-block"
+                    onClick={(e) => { e.stopPropagation(); void startTicket(t); }}
+                    disabled={busy}
+                    title="ابدأ احتساب الوقت الفعلي للجلسة"
+                  >
+                    🟢 بدء الجلسة
+                  </button>
+                </>
+              ) : null}
 
-              <div className="kids__totals">
-                <div><span>إجمالي</span><b>{fmt(total)}</b></div>
-                <div><span>مدفوع</span><b className="paid">{fmt(paid)}</b></div>
-                <div><span>متبقي</span><b className={remaining > 0 ? "due" : "paid"}>{fmt(remaining)}</b></div>
-              </div>
+              {/* العدّاد + التنبيهات (للنشطة) */}
+              {isActive && live ? (
+                <>
+                  <div className={`kids__cd ${overdue ? "kids__cd--late" : ""}`}>
+                    <div>
+                      <div className="lbl">المتبقي</div>
+                      <div className="num">{overdue ? "00:00" : fmtHHMMSS(live.remainingSec)}</div>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div className="kids__meta" style={{ justifyContent: "space-between" }}>
+                        <span>بدأ {fmtTime(t.actualStartAt)}</span>
+                        <span>ينتهي {fmtTime(t.exitExpectedAt)}</span>
+                      </div>
+                      <div className="kids__progress">
+                        <span style={{ width: `${Math.min(100, Math.round(live.ratio * 100))}%` }} />
+                      </div>
+                    </div>
+                  </div>
 
-              {pendingK > 0 ? (
+                  {/* تنبيه استدعاء (10د قبل النهاية) */}
+                  {t.endingSoonAlert?.active ? (
+                    <span className="kids__pill kids__pill--call">
+                      📣 بقي {t.endingSoonAlert.minutesLeft} د — استدعِ الطفل
+                    </span>
+                  ) : null}
+
+                  {/* تنبيه طلب الوجبة (نصف الوقت + يوجد وجبات معلّقة) */}
+                  {t.halfwayMealAlert?.active ? (
+                    <span className="kids__pill kids__pill--meal">
+                      🍔 الوقت لطلب الوجبة — {t.halfwayMealAlert.pendingMeals} بانتظار الإرسال
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
+
+              {isActive ? (
+                <div className="kids__totals">
+                  <div><span>إجمالي</span><b>{fmt(total)}</b></div>
+                  <div><span>مدفوع</span><b className="paid">{fmt(paid)}</b></div>
+                  <div><span>متبقي</span><b className={remaining > 0 ? "due" : "paid"}>{fmt(remaining)}</b></div>
+                </div>
+              ) : null}
+
+              {pendingK > 0 && isActive && !t.halfwayMealAlert?.active ? (
                 <span className="kids__pill kids__pill--warn">🍽 {pendingK} وجبة بانتظار الإرسال</span>
               ) : null}
               {t.overtime?.exempt ? (
@@ -769,19 +809,20 @@ export default function KidsAreaPage() {
         <div className="kids__modal-bg" onClick={() => setShowNew(false)}>
           <div className="kids__modal" onClick={(e) => e.stopPropagation()}>
             <div className="kids__modal-h">
-              <h3>تذكرة جديدة — Kids Area</h3>
+              <h3>حجز تذكرة جديدة — Kids Area</h3>
               <button type="button" className="btn btn-ghost" onClick={() => setShowNew(false)}>إغلاق ✕</button>
             </div>
-            <p className="kids__modal-sub">اختر باقة، ثم سجّل بيانات الطفل ووالده، ثم اضغط «فتح التذكرة».</p>
+            <p className="kids__modal-sub">
+              التذكرة ستُحفَظ بحالة <b style={{ color: "#c4b5fd" }}>«محجوزة»</b> ولن يبدأ احتساب الوقت إلا بعد الضغط على «🟢 بدء الجلسة» في الشريحة.
+              تُسجَّل دفعة الحجز كأمانة وتُرحَّل لفاتورة TBL022 الموحّدة عند الإقفال فقط.
+            </p>
 
-            {/* خطوات */}
             <div className="kids__steps">
               <div className={`kids__step ${stepDone1 ? "done" : "cur"}`}><b>الخطوة 1</b>اختيار الباقة {stepDone1 ? "✓" : ""}</div>
               <div className={`kids__step ${stepDone2 ? "done" : stepDone1 ? "cur" : ""}`}><b>الخطوة 2</b>بيانات الطفل {stepDone2 ? "✓" : ""}</div>
-              <div className={`kids__step ${stepDone2 ? "cur" : ""}`}><b>الخطوة 3</b>تأكيد وفتح</div>
+              <div className={`kids__step ${stepDone2 ? "cur" : ""}`}><b>الخطوة 3</b>تأكيد وحجز</div>
             </div>
 
-            {/* —— شبكة الباقات —— */}
             <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--muted)" }}>الباقات المتاحة</h4>
             <div className="kids__pkgs">
               {packages.length === 0 ? (
@@ -814,6 +855,11 @@ export default function KidsAreaPage() {
                         لم تُسعَّر بعد — راجع TBL007.AgentPrice
                       </div>
                     ) : null}
+                    {p.durationMinutes <= 0 ? (
+                      <div className="kids__pill kids__pill--alert" style={{ alignSelf: "flex-start" }}>
+                        مدّة الباقة 0 — حدّد TBL007.Hieght3 لبند المدة
+                      </div>
+                    ) : null}
                     <div className="kids__pkg-items">
                       {p.items.map((it) => (
                         <div key={it.productGuide} className="kids__pkg-item">
@@ -830,7 +876,6 @@ export default function KidsAreaPage() {
               })}
             </div>
 
-            {/* —— حقول بيانات الطفل —— */}
             <h4 style={{ margin: "8px 0", fontSize: 14, color: "var(--muted)" }}>بيانات الطفل / الوالد</h4>
             <div className="kids__form">
               <div className="kids__field">
@@ -854,7 +899,7 @@ export default function KidsAreaPage() {
                 <input id="kid-notes" value={companionsNote} onChange={(e) => setCompanionsNote(e.target.value)} />
               </div>
               <div className="kids__field">
-                <label htmlFor="kid-down">دفعة الحجز</label>
+                <label htmlFor="kid-down">دفعة الحجز (أمانة)</label>
                 <input
                   id="kid-down"
                   inputMode="decimal"
@@ -865,12 +910,11 @@ export default function KidsAreaPage() {
               </div>
             </div>
 
-            {/* —— ملخص ما قبل التأكيد —— */}
             {pickedPkgObj ? (
               <div className="kids__sum">
                 <div className="kids__sum-row"><span className="k">الباقة</span><span className="v accent">{pickedPkgObj.packageName}</span></div>
                 <div className="kids__sum-row"><span className="k">المدة</span><span className="v">{fmtDuration(pickedPkgObj.durationMinutes)}</span></div>
-                <div className="kids__sum-row"><span className="k">الإجمالي</span><span className="v">{fmt(pickedPkgObj.totalPrice)} ج.م</span></div>
+                <div className="kids__sum-row"><span className="k">إجمالي</span><span className="v">{fmt(pickedPkgObj.totalPrice)} ج.م</span></div>
                 <div className="kids__sum-row">
                   <span className="k">دفعة الحجز</span>
                   <span className="v">{fmt(downPaymentInput === "" ? pickedPkgObj.totalPrice : Number(downPaymentInput) || 0)} ج.م</span>
@@ -883,7 +927,7 @@ export default function KidsAreaPage() {
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" className="btn btn-ghost" onClick={() => setShowNew(false)} disabled={busy}>إلغاء</button>
               <button type="button" className="kids__cta" onClick={() => void submitNewTicket()} disabled={!canSubmit}>
-                {busy ? "جارٍ الفتح…" : "فتح التذكرة"}
+                {busy ? "جارٍ الحجز…" : "حجز التذكرة"}
               </button>
             </div>
           </div>
@@ -895,9 +939,12 @@ export default function KidsAreaPage() {
            ============================================================ */}
       {openTicket ? (
         <div className="kids__modal-bg" onClick={() => setOpenTicketId("")}>
-          <div className="kids__modal" onClick={(e) => e.stopPropagation()} style={{ width: "min(800px, 100%)" }}>
+          <div className="kids__modal" onClick={(e) => e.stopPropagation()} style={{ width: "min(900px, 100%)" }}>
             <div className="kids__modal-h">
-              <h3>تذكرة #{openTicket.invoice?.billNumber ?? "—"} — {openTicket.childName}</h3>
+              <h3>
+                {openTicket.status === "reserved" ? "🎟 تذكرة محجوزة — " : "🎫 تذكرة نشطة — "}
+                {openTicket.childName}
+              </h3>
               <button type="button" className="btn btn-ghost" onClick={() => setOpenTicketId("")}>إغلاق ✕</button>
             </div>
 
@@ -906,11 +953,42 @@ export default function KidsAreaPage() {
               <div className="row"><span>الهاتف</span><b>{openTicket.phone || "—"}</b></div>
               <div className="row"><span>الباقة</span><b>{openTicket.packageName}</b></div>
               <div className="row"><span>المدة</span><b>{fmtDuration(openTicket.packageMinutes)}</b></div>
-              <div className="row"><span>الدخول</span><b>{fmtTime(openTicket.entryAt)}</b></div>
-              <div className="row"><span>الخروج المتوقّع</span><b>{fmtTime(openTicket.exitExpectedAt)} ({fmtRemainingMinutes(openTicket.exitExpectedAt)})</b></div>
+              <div className="row"><span>الحجز</span><b>{fmtTime(openTicket.createdAt)}</b></div>
+              <div className="row"><span>دفعة الحجز</span><b>{fmt(openTicket.paidAtBooking)} ج.م</b></div>
+              {openTicket.status === "active" ? (
+                <>
+                  <div className="row"><span>بدء الجلسة</span><b>{fmtTime(openTicket.actualStartAt)}</b></div>
+                  <div className="row"><span>الخروج المتوقّع</span><b>{fmtTime(openTicket.exitExpectedAt)}</b></div>
+                </>
+              ) : null}
+              {openTicket.companionsNote ? (
+                <div className="row" style={{ gridColumn: "1/-1" }}><span>ملاحظات</span><b>{openTicket.companionsNote}</b></div>
+              ) : null}
             </div>
 
-            <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--muted)" }}>بنود الفاتورة</h4>
+            {/* العدّاد التنازلي مكبَّر داخل المودال */}
+            {openTicket.status === "active" && openTicket.countdown ? (() => {
+              const live = computeLiveCountdown(openTicket.countdown, lastSyncMs, Date.now());
+              if (!live) return null;
+              const overdue = live.remainingSec === 0;
+              return (
+                <div className={`kids__cd ${overdue ? "kids__cd--late" : ""}`} style={{ marginBottom: 14 }}>
+                  <div>
+                    <div className="lbl">المتبقّي</div>
+                    <div className="num" style={{ fontSize: "2.4rem" }}>{overdue ? "00:00" : fmtHHMMSS(live.remainingSec)}</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="kids__meta" style={{ justifyContent: "space-between" }}>
+                      <span>منقضٍ {fmtMinsCompact(Math.floor(live.elapsedSec / 60))}</span>
+                      <span>إجمالي {fmtMinsCompact(Math.floor(live.totalSec / 60))}</span>
+                    </div>
+                    <div className="kids__progress"><span style={{ width: `${Math.min(100, Math.round(live.ratio * 100))}%` }} /></div>
+                  </div>
+                </div>
+              );
+            })() : null}
+
+            <h4 style={{ margin: "0 0 8px", fontSize: 14, color: "var(--muted)" }}>بنود التذكرة</h4>
             <table className="kids__lines">
               <thead>
                 <tr>
@@ -953,13 +1031,7 @@ export default function KidsAreaPage() {
               return (
                 <>
                   {ot?.exempt ? (
-                    <div className="kids__ot exempt" style={{ marginTop: 12 }}>
-                      ⏱ معفى من الوقت الإضافي ✓
-                    </div>
-                  ) : openTicket.overtimeAppliedAt ? (
-                    <div className="kids__ot applied" style={{ marginTop: 12 }}>
-                      ⏱ أُضيف للفاتورة: <b>{fmtMinsCompact(openTicket.overtimeMinutesApplied || 0)}</b> = <b>{fmt(openTicket.overtimeChargeApplied || 0)} ج.م</b>
-                    </div>
+                    <div className="kids__ot exempt" style={{ marginTop: 12 }}>⏱ معفى من الوقت الإضافي ✓</div>
                   ) : ot?.applicable ? (
                     <div className="kids__ot" style={{ marginTop: 12 }}>
                       ⏱ تجاوز خام <b>{fmtMinsCompact(ot.rawMinutes)}</b> · مهلة 5 د · يُحاسَب <b>{fmtMinsCompact(ot.billableMinutes)}</b> × {ot.ratePerMinute.toFixed(3)} ج.م/د = <b>{fmt(ot.charge)} ج.م</b>
@@ -990,32 +1062,39 @@ export default function KidsAreaPage() {
             ) : null}
 
             <div className="kids__btn-row" style={{ marginTop: 14 }}>
+              {openTicket.status === "reserved" ? (
+                <button type="button" className="btn btn-violet" onClick={() => void startTicket(openTicket)} disabled={busy}>
+                  🟢 بدء الجلسة
+                </button>
+              ) : null}
               <button type="button" className="btn btn-ghost" onClick={() => void addNote(openTicket, "note")} disabled={busy}>+ ملاحظة</button>
               <button type="button" className="btn btn-ghost" onClick={() => void addNote(openTicket, "alert")} disabled={busy}>+ تنبيه</button>
-              <button
-                type="button"
-                className="btn btn-warning"
-                onClick={() => void fireKitchen(openTicket)}
-                disabled={busy || pendingKitchenCount(openTicket) === 0}
-              >
-                🍽 اطلب الوجبة الآن ({pendingKitchenCount(openTicket)})
-              </button>
-              {(role === "manager" || role === "developer") && openTicket.overtime?.applicable ? (
+              {openTicket.status === "active" ? (
                 <button
                   type="button"
-                  className="btn btn-ghost"
-                  onClick={() => void exemptOvertime(openTicket)}
-                  disabled={busy}
-                  title="إعفاء التذكرة من الوقت الإضافي عند الإقفال"
+                  className="btn btn-warning"
+                  onClick={() => void fireKitchen(openTicket)}
+                  disabled={busy || pendingKitchenCount(openTicket) === 0}
                 >
+                  🍽 اطلب الوجبة الآن ({pendingKitchenCount(openTicket)})
+                </button>
+              ) : null}
+              {(role === "manager" || role === "developer") && openTicket.overtime?.applicable ? (
+                <button type="button" className="btn btn-ghost" onClick={() => void exemptOvertime(openTicket)} disabled={busy}>
                   ✓ إعفاء الوقت الإضافي
                 </button>
               ) : null}
               {isCashier ? (
                 <>
-                  <button type="button" className="btn btn-ghost" onClick={() => void addCustomLine(openTicket)} disabled={busy}>+ بند إضافي</button>
-                  <button type="button" className="btn btn-ghost" onClick={() => void addInterimPayment(openTicket)} disabled={busy}>دفعة جزئية</button>
-                  <button type="button" className="btn btn-success" onClick={() => void settleTicket(openTicket)} disabled={busy}>تسوية وإقفال</button>
+                  {openTicket.status === "active" ? (
+                    <>
+                      <button type="button" className="btn btn-ghost" onClick={() => void addCustomLine(openTicket)} disabled={busy}>+ بند إضافي</button>
+                      <button type="button" className="btn btn-ghost" onClick={() => void addInterimPayment(openTicket)} disabled={busy}>دفعة جزئية</button>
+                    </>
+                  ) : null}
+                  <button type="button" className="btn btn-success" onClick={() => void settleTicket(openTicket)} disabled={busy}>
+                    تسوية وإقفال
+                  </button>
                 </>
               ) : null}
             </div>
