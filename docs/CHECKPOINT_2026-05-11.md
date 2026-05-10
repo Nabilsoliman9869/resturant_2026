@@ -1,5 +1,25 @@
 # نقطة مرجعية — 2026-05-11
 
+## المراجع السريعة (بعد التثبيت)
+
+| ما | القيمة |
+|-----|--------|
+| **Commit** | `f8e07a8` |
+| **Tag** | `mat3am-checkpoint-2026-05-11` |
+| **الفرع المدفوع** | `dev-next-baseline-2026-05-05` → `origin` |
+| **لقطة ZIP محلية** | `backups/mat3am-snapshot-2026-05-11-src-backend-docs.zip` (~1.3 MB — مجلدات `src` + `backend` + `docs` فقط) |
+
+استعادة من التاج على جهازك:
+
+```bat
+git fetch origin tag mat3am-checkpoint-2026-05-11
+git checkout mat3am-checkpoint-2026-05-11
+```
+
+أو البقاء على الفرع الحالي: `git pull origin dev-next-baseline-2026-05-05`
+
+---
+
 ## ما الذي يُوثَّق هنا؟
 
 هذا الملف يشرح **أين وصل المشروع** قبل البدء بتوسعة تجربة الموبايل، حتى لا يضيع السياق أو يُفقد العمل.
