@@ -9,7 +9,7 @@
   "specialTableDefaultDiscountPct": "0.0",
   "specialTableDefaultPriceMode": "menu",
   "specialTableDefaultCostMarkupPct": "0.0",
-  "tableDefaultMinimumCharge": "0.0",
+  "tableDefaultMinimumCharge": "250.0",
   "tableCashierAlertPresetsJson": "[{\"id\":\"kitchen_rush\",\"type\":\"kitchen_urgent\",\"label\":\"استعجال المطبخ\"},{\"id\":\"tbl_quick_clean\",\"type\":\"quick_clean\",\"label\":\"نظافة سريعة\"},{\"id\":\"tbl_call_manager\",\"type\":\"call_manager\",\"label\":\"استدعاء مدير\"}]",
   "kidsAreaSeparateTickets": "on",
   "auditRetentionDays": "365",

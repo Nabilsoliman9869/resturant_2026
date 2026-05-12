@@ -339,4 +339,80 @@ eserved + active.
   - `@media (max-width: 768px)` لـ `.role-op.waiter-pos`: هوامش آمنة، تقليل حشوة المحتوى، شريط أدوات عمودي، زر تحديث بعرض كامل، أهداف لمس ≥44px، رأس الصفحة أخف، بطاقة الطاولة: صف أزرار عمودي، زر المطالبة بعرض كامل، شبكة الماليات ثلاثية → عمود واحد، تنبيه سريع + إرسال متكدسان، `safe-area` للشقوق.
 - **بدون** تعديل `WaiterTablesPage.tsx` أو API.
 
+### 029 — بطاقات الطاولات: إزالة زرّ داخل زر (validateDOMNesting) — `UTC 2026-05-11T07:35:00Z` — ID `fix-waiter-card-nested-btn`
+
+- **`src/pages/WaiterTablesPage.tsx`**: استبدال الغلاف الخارجي لبطاقة الطاولة من `<button>` إلى `<div>` مع نفس منطق النقر (`openOrderTakerForTable`)؛ إيقاف انتشار النقر من «تقرير سريع» ومن صف التذييل؛ `aria-label` للبطاقة — يزيل تحذير React في الكونسول ويصحّح HTML.
+
+### 030 — سايدبار AppShell قابل للطي (حافة + تخزين) — `UTC 2026-05-11T17:50:00Z` — ID `appshell-sidebar-rail`
+
+- **`src/components/AppShell.tsx`**: `sidebarOpen` + مفتاح `mat3am_shell_sidebar`؛ ≤960px سايدبار ثابت مع خلفية تعتيم؛ تبويب حافة (‹) لفتح وزر › لطي؛ إغلاق بعد اختيار رابط على الشاشة الضيقة.
+- **`src/styles/appShell.css`**: أنماط الغلاف والسكة والسايدبار والخلفية.
+- **`src/pages/WaiterTablesPage.tsx`**: نوع حدث `showTableReport` → `HTMLElement` ليتوافق مع `onContextMenu` على بطاقة `div`.
+
+### 031 — تمرير أفقي لمجموعات التصنيف (شريط جرسون) — `UTC 2026-05-11T18:15:00Z` — ID `waiter-cats-hscroll`
+
+- **`src/styles/operationalRoles.css`**: بطاقة التصنيفات في الشريط العلوي `overflow-x: auto`؛ حاوية `.waiter-pos__cats-inbar` داخلها `overflow-x: auto`؛ عند `max-width: 900px` صف `flex` nowrap + أزرار بعرض ~90px لتمكين السحب أفقياً (شبكة `1fr` كانت تمنع التمرير).
+
+### 032 — إصلاح تمدد أزرار التصنيف عمودياً (جوال) — `UTC 2026-05-11T18:40:00Z` — ID `waiter-cats-hscroll-fix`
+
+- **`src/styles/operationalRoles.css`**: استبدال `align-items: stretch` بـ `flex-start`، حدّ ارتفاع الشريط العلوي والتصنيفات على الجوال، أبعاد ثابتة للأزرار + `cat-wrap` بـ `height: auto`، اختصار نص التسمية بـ `-webkit-line-clamp` لتفادي الأعمدة الطويلة.
+
+### 033 — شريط أسفل الجوال: «إرسال الطلب» ظاهر دائماً — `UTC 2026-05-11T19:05:00Z` — ID `waiter-mb-sendbar`
+
+- **`src/pages/WaiterOrderPage.tsx`**: منطقة `waiter-pos__mb-sendbar` تحت البحث — ملخص السلة + نفس زر الإرسال.
+- **`src/styles/operationalRoles.css`**: شريط `fixed` أسفل الشاشة عند `max-width: 900px` + `padding-bottom` للمحتوى حتى لا يُحجب آخر البطاقات.
+
+### 034 — تجربة جوال «طلب للطاولة»: عمود واحد ترتيب مهام + رأس مبسّط — `UTC 2026-05-11T19:35:00Z` — ID `waiter-mobile-task-flow`
+
+- **`src/pages/WaiterOrderPage.tsx`**: صنف جذر `waiter-pos--order-taker` + غلافات `waiter-pos__hdr-*` لحقول الرأس.
+- **`src/styles/operationalRoles.css`**: الشريط العلوي يصبح عمودياً بترتيب: الطاولة ← التصنيف ← السلة ← المقاعد ← الإجماليات ← انتقل/خيارات؛ إخفاء إرسال مكرر من لوحة السلة (يبقى الشريط السفلي + قائمة السلفية)، ضبط بحث sticky، شبكة منتجات أوضح للمس، رأس جوال بدون عنوان مطلق يغطي الشاشة وإخفاء سطر حقوق على الجوال.
+
+### 036 — شريط أقسام جوال داخل «طلب للطاولة» (بدون التصنيف) — `UTC 2026-05-11T20:25:00Z` — ID `waiter-ot-section-rail`
+
+- **`src/pages/WaiterOrderPage.tsx`**: `WAITER_OT_RAIL_SECTIONS` + `<nav class="waiter-pos__ot-rail">` بأزرار `scrollIntoView` إلى معرفات الأقسام الثابتة (طاولة، قيد، توزيع، مرسل، حساب، خيارات، بحث، أصناف) — **استثناء** بطاقة «التصنيف - الفئة» من الشريط كما طُلب؛ معرفات `waiter-ot-sec-*` و`waiter-pos__ot-scroll-target` على الأهداف.
+- **`src/styles/operationalRoles.css`**: إظهار الشريط عند `max-width: 900px` فقط، تموضع `fixed` على `inline-end` فوق شريط الإرسال، `scroll-margin-top`، هامش `main` و`mb-sendbar` حتى لا يتداخل المحتوى مع الشريط.
+
+### 037 — توضيح توزيع المقاعد واسم الضيف على الشيك — `UTC 2026-05-11T21:05:00Z` — ID `waiter-seat-copy-clarity`
+
+- **`src/pages/WaiterOrderPage.tsx`**: تلميح نصي تحت أوضاع التوزيع؛ أزرار **حسب المقعد (١–١٢)** / **طلب عام (بدون مقعد)**؛ عرض افتراضي **مقعد N** و**١٣ — مشترك**؛ عناوين مساعدة و`placeholder` أوضح؛ نص مقعد ١٣ السفلي وشرح السبليت في خيارات الطاولة؛ مودال الإضافات يعرض «مقعد» بدل «كرسي» حيث ينطبق.
+- **`src/styles/operationalRoles.css`**: صنف `.waiter-pos__seat-panel-hint` لتنسيق التلميح.
+
+### 038 — إصلاح اختفاء صفوف المقاعد على الجوال — `UTC 2026-05-11T21:35:00Z` — ID `waiter-seatpanel-mobile-height`
+
+- **`src/styles/operationalRoles.css`**: داخل `@media (max-width: 900px)` — رفع `max-height` لبطاقة `seatpanel`، سقف ارتفاع للتلميح مع تمرير، و`min-height` + `flex` لمنطقة `.waiter-pos__seat-list-scroll--in-topbar` حتى لا تنهار إلى ارتفاع صفر بعد التلميح الطويل.
+
+### 041 — ترتيب شريط «طلب للطاولة» الأيسر حسب منطق الجرسون — `UTC 2026-05-11T23:15:00Z` — ID `waiter-ot-rail-order`
+
+- **`src/pages/WaiterOrderPage.tsx`**: إعادة ترتيب `WAITER_OT_RAIL_SECTIONS` (شريط `waiter-pos__ot-rail` داخل الصفحة فقط): طاولة → توزيع → فئات → بحث → أصناف → قيد → مرسل → حساب → خيارات؛ توضيح تعليق أنه **ليس** سايدبار التطبيق العام.
+
+### 042 — جوال: طيّ «قائمة الضيوف» بعد تأكيد الضيف + توست + سكربت التدفق — `UTC 2026-05-11T23:42:30Z` — ID `waiter-ot-seat-flow-mob`
+
+- **`src/pages/WaiterOrderPage.tsx`**: بعد ✓/«الفئات»/Enter في وضع ضيق — `afterSeatNameConfirmGoCategories` يطوي لوحة المقاعد وينتقل للفئات؛ زر الشريط «قائمة الضيوف» يعيد فتح اللوحة؛ توست قصير فوق شريط الإرسال مع إغلاق؛ ضغط صف مقعد يعيد فتح اللوحة على الجوال؛ رسائل التدفق أقصر.
+- **`src/styles/operationalRoles.css`**: `.waiter-pos__seatpanel--mob-collapsed`، `.waiter-pos__seatpanel-mob-expand`، `.waiter-pos__ot-flow-toast` (ثابت فوق الشريط السفلي مع هامش الشريط الجانبي).
+
+### 046 — جوال: شريط أقسام الطلب أوضح + تكبير (لمس أو زر +) + dock — `UTC 2026-05-12T04:05:00Z` — ID `mobile-nav-touch-zoom`
+
+- **`src/pages/WaiterOrderPage.tsx`**: زر **+ / −** أعلى الشريط لتثبيت التوسيع؛ صنف `waiter-pos--ot-rail-expanded` = لمس أو تثبيت؛ إنهاء اللمس على `window` بفقاعة (تجنّب إلغاء التكبير قبل الرسم)؛ تسميات أقصر على الأزرار (`طاولات`، `ضيوف`) مع `title` كامل.
+- **`src/styles/operationalRoles.css`**: عرض/خط أكبر افتراضاً؛ `expanded` بـ`!important` للعرض؛ `.waiter-pos__ot-rail__pin`؛ `z-index` أعلى للشريط.
+- **`src/components/AppShell.tsx`** + **`src/styles/appShell.css`**: تكبير `app-shell__dock` عند اللمس (شاشات الطاولات وغير order-taker) كما سبق.
+
+### 045 — عودة جرسون الموبايل من «طلب للطاولة» إلى قائمة الطاولات — `UTC 2026-05-12T02:10:00Z` — ID `waiter-order-exit-tables`
+
+- **`src/pages/WaiterOrderPage.tsx`**: مسار خروج موحّد `orderTakerExitPath` (جرسون → `/app/waiter/tables`، مدير/مطوّر → `captain-tables`، تضمين دليفري → لوحة الكاشير إن وُجد `backTo`)؛ الرأس يستخدم `backTo` دائماً بدل `onBack` المشروط الذي كان يُلغي الرجوع عند تمرير `backTo` فارغ؛ زر شريط جوال **«الطاولات»** أول الشريط للعودة.
+- **`src/styles/operationalRoles.css`**: زر رجوع أوضح على الجوال + `.waiter-pos__ot-rail__btn--home`.
+
+### 044 — تسجيل دخول: إلغاء انتظار ping الطويل + توضيح dev ولمحة waiter/123 — `UTC 2026-05-12T01:05:00Z` — ID `login-no-post-ping-block`
+
+- **`src/pages/LoginPage.tsx`**: بعد نجاح `POST /api/auth/login` يتم الدخول والتوجيه فوراً (كان ينتظر حتى ١٢ ثانية لـ`/api/ping` فيُعلّق على «جاري التحقق…»)؛ زر التجربة أصبح نصّه **«دخول تجريبي (حساب dev)»** مع `title` يوضح أنه ليس جرسوناً؛ تلميح افتراضي **waiter / 123**.
+
+### 043 — جوال: «قائمة الضيوف» + تبويبات الضيوف في الشريط (سلّة = مقعد) — `UTC 2026-05-12T00:15:00Z` — ID `waiter-ot-rail-guest-tabs`
+
+- **`src/pages/WaiterOrderPage.tsx`**: إعادة تسمية قسم التوزيع للمستخدم إلى **قائمة الضيوف** (عنوان البطاقة في وضع حسب المقعد، وزر الشريط، و`title` المقطع)؛ بعد «قائمة الضيوف» في الشريط على الجوال + حسب المقعد تُدرَج أزرار **١→١٢ ثم ١٣ مشترك** تعرض اسم الضيف أو «مقعد N»؛ اللمس يفعّل `selectedSeat`، يطوي لوحة الأسماء، وينتقل للفئات؛ تمييز المقعد النشط.
+- **`src/styles/operationalRoles.css`**: صنف `waiter-pos--ot-rail-guests` على الجذر لتوسيع هامش المحتوى والشريط قليلاً؛ `.waiter-pos__ot-rail__btn--guest` و`--active`.
+
+### 035 — شريط أيقونات جانبي للجوال (بدون تغيير سطح المكتب) — `UTC 2026-05-11T19:10:00Z` — ID `appshell-mobile-dock-rail`
+
+- **`src/components/AppShell.tsx`**: `isNavItemActive` + `NavDockGlyph` (SVG مضمّن لكل مفتاح مسار شائع)؛ عند العرض الضيق وظهور كروم السايدبار: شريط `.app-shell__dock` بأيقونات لكل بند القائمة + زر «قائمة» يفتح السايدبار (حساب، DB، خروج)؛ إخفاء الشريط عند فتح السايدبار؛ زر حافة `‹` يبقى للشاشات الأوسع عند طي السايدبار؛ `paddingInlineStart` على `<main>` عند ظهور الشريط.
+- **`src/styles/appShell.css`**: تموضع الشريط الثابت على بداية السطر (`inline-start`)، تمرير عمودي، أهداف لمس ~44px، تمييز الرابط النشط.
+
 

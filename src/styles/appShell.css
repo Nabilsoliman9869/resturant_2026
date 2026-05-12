@@ -1,0 +1,305 @@
+/* غلاف التطبيق — سايدبار قابل للطي (RTL: السايدبار عند inline-start = يمين الشاشة) */
+
+.app-shell {
+  display: flex;
+  min-height: 100%;
+  position: relative;
+}
+
+.app-shell__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(2, 6, 23, 0.48);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell__rail-tab {
+  touch-action: manipulation;
+  position: fixed;
+  top: 50%;
+  inset-inline-start: 0;
+  transform: translateY(-50%);
+  z-index: 1040;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 120px;
+  padding: 8px 4px;
+  margin: 0;
+  border: none;
+  border-radius: 0 10px 10px 0;
+  border-inline-start: none;
+  background: linear-gradient(180deg, #1e3a5f 0%, #0f172a 100%);
+  color: #e0f2fe;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: -4px 0 18px rgba(0, 0, 0, 0.35);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell__rail-tab:hover {
+  background: linear-gradient(180deg, #2563ab 0%, #172554 100%);
+  color: #fff;
+}
+
+.app-shell__rail-tab:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+/* شريط أيقونات جانبي للجوال فقط — يُدار من AppShell عبر showMobileDock */
+.app-shell__dock {
+  display: none;
+}
+
+.app-shell__dock-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-shell__dock-svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.app-shell__dock-link {
+  touch-action: manipulation;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+  text-decoration: none;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell__dock-link:hover {
+  background: rgba(51, 65, 85, 0.85);
+  color: #f1f5f9;
+}
+
+.app-shell__dock-link--active {
+  background: linear-gradient(180deg, #2563ab 0%, #1e3a8a 100%);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.45);
+}
+
+.app-shell__dock-link:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.app-shell__dock-more {
+  touch-action: manipulation;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 58, 95, 0.95);
+  color: #e0f2fe;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell__dock-more:hover {
+  background: rgba(37, 99, 235, 0.95);
+  color: #fff;
+}
+
+.app-shell__dock-more:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+@media (max-width: 960px) {
+  .app-shell__dock {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset-inline-start: 0;
+    top: max(0.35rem, env(safe-area-inset-top, 0px));
+    bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+    width: 52px;
+    z-index: 1042;
+    box-sizing: border-box;
+    transition: width 0.14s ease-out, padding 0.14s ease-out;
+  }
+
+  .app-shell--dock-touch-held .app-shell__dock {
+    width: 78px;
+    padding-inline: 5px;
+  }
+
+  .app-shell--dock-touch-held .app-shell__dock-svg {
+    width: 34px;
+    height: 34px;
+  }
+
+  .app-shell--dock-touch-held .app-shell__dock-link,
+  .app-shell--dock-touch-held .app-shell__dock-more {
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+  }
+
+  .app-shell--dock-touch-held .app-shell__main[data-order-taker-shell="0"] {
+    padding-inline-start: calc(1.5rem + 86px) !important;
+  }
+}
+
+.app-shell__aside {
+  flex-shrink: 0;
+  width: 240px;
+  overflow: hidden;
+  border-inline-start: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-family: var(--font);
+  box-sizing: border-box;
+  transition:
+    width 0.22s ease,
+    padding 0.22s ease,
+    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease;
+}
+
+.app-shell__aside.is-collapsed {
+  width: 0;
+  padding-inline: 0;
+  padding-block: 1.25rem 0;
+  border-inline-start-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-shell__aside.is-collapsed > * {
+  visibility: hidden;
+}
+
+.app-shell__aside-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.app-shell__aside-close {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.55);
+  color: #e2e8f0;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell__aside-close:hover {
+  background: rgba(51, 65, 85, 0.75);
+  color: #fff;
+}
+
+.app-shell__aside-brand {
+  min-width: 0;
+  flex: 1;
+}
+
+.app-shell__main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* شاشات ضيقة: سايدبار طبقة فوق المحتوى */
+@media (max-width: 960px) {
+  .app-shell__aside {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    width: min(280px, 88vw);
+    inset-inline-start: 0;
+    z-index: 1060;
+    padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.45);
+    opacity: 1;
+    border-inline-start: 1px solid var(--border);
+  }
+
+  .app-shell__aside.is-collapsed {
+    width: min(280px, 88vw);
+    padding-inline: 1.25rem;
+    opacity: 1;
+    pointer-events: none;
+    border-inline-start-width: 1px;
+  }
+
+  /* RTL: السايدبار يمين → يُدفع نحو خارج اليمين | LTR: يسار → خارج اليسار */
+  [dir="rtl"] .app-shell__aside.is-collapsed {
+    transform: translateX(100%);
+  }
+
+  [dir="ltr"] .app-shell__aside.is-collapsed {
+    transform: translateX(-100%);
+  }
+
+  .app-shell__aside.is-collapsed > * {
+    visibility: visible;
+  }
+
+  .app-shell__aside.is-open {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+}
+
+@media (min-width: 961px) {
+  .app-shell__aside {
+    transform: none !important;
+  }
+}

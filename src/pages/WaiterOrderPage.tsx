@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
@@ -12,6 +12,23 @@ import { useAuth } from "../auth/AuthContext";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
 import { safeFetch } from "../lib/safeFetch";
+
+/** عرض الجوال لسلوك التتابع (يتوافق مع operationalRoles @media max-width) */
+const WAITER_OT_NARROW_MAX_PX = 900;
+
+/** شريط الجوال الأيسر داخل «طلب للطاولة» فقط — ترتيب = تسلسل عمل الجرسون مع الطاولة (ليس قائمة التطبيق العامة) */
+const WAITER_OT_RAIL_SECTIONS: { id: string; label: string; title: string }[] = [
+  { id: "waiter-ot-nav-tables", label: "طاولات", title: "العودة لقائمة الطاولات (لوحة البداية)" },
+  { id: "waiter-ot-sec-table", label: "طاولة", title: "١) الطاولة والجلسة" },
+  { id: "waiter-ot-sec-distribute", label: "ضيوف", title: "قائمة الضيوف — أسماء على الشيك — كل اسم = سلّة هذا المقعد" },
+  { id: "waiter-ot-sec-categories", label: "فئات", title: "٣) مجموعة الأصناف" },
+  { id: "waiter-ot-sec-search", label: "بحث", title: "٤) بحث سريع عن صنف" },
+  { id: "waiter-ot-sec-grid", label: "أصناف", title: "٥) شبكة الأصناف" },
+  { id: "waiter-ot-sec-pending", label: "قيد", title: "٦) السلة قبل الإرسال" },
+  { id: "waiter-ot-sec-sent", label: "مرسل", title: "٧) طلبات مُرسلة (الجلسة)" },
+  { id: "waiter-ot-sec-totals", label: "حساب", title: "٨) الإجماليات والضرائب" },
+  { id: "waiter-ot-sec-navopts", label: "خيارات", title: "٩) تحويل، دمج، سبليت، تقرير، مطبخ" },
+];
 
 type Product = {
   CardGuide: string;
@@ -150,6 +167,19 @@ const SEAT_SLOT_COUNT = 12;
 /** كرسي وهمي: طلب مشترك يُقسّم على الشيكات عند «سبليت — فاتورة لكل مقعد» */
 const SHARED_SEAT_NO = 13;
 
+/** ترتيب تبويبات الضيوف في الشريط الجوال (١→١٢ ثم المشترك) — يطابق «مقعد ١…١٣ مشترك» كفلاتر سلّة */
+const WAITER_OT_RAIL_GUEST_SEAT_ORDER: readonly number[] = [
+  ...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1),
+  SHARED_SEAT_NO,
+];
+
+type WaiterOtRailRow =
+  | { kind: "section"; id: string; label: string; title: string }
+  | { kind: "guest"; seatNo: number };
+
+/** ترتيب «مقعد تالي» للجوال: ١→١٢ ثم ١٣ مشترك */
+const SEAT_MOBILE_NAV_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, SHARED_SEAT_NO] as const;
+
 function tableRefKey(raw: unknown): string {
   return String(raw ?? "").trim().toUpperCase();
 }
@@ -260,6 +290,19 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [orderTakerExclusiveTable, setOrderTakerExclusiveTable] = useState(false);
   const [captainGate, setCaptainGate] = useState<{ id: string; name: string } | null>(null);
 
+  const [narrowOtViewport, setNarrowOtViewport] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches : false,
+  );
+  /** جوال: إخفاء قائمة المقاعد بعد تأكيد الاسم للانتقال للفئات/الأصناف */
+  const [seatPanelMobCollapsed, setSeatPanelMobCollapsed] = useState(false);
+  const [mobileFlowToast, setMobileFlowToast] = useState("");
+  /** جوال: تكبير الشريط طالما الإصبع عليه، أو تثبيت التكبير بزر */
+  const [otRailTouchHeld, setOtRailTouchHeld] = useState(false);
+  const [otRailStickyWide, setOtRailStickyWide] = useState(false);
+  const mobileFlowToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const otRailRef = useRef<HTMLElement | null>(null);
+  const prevCategoryKeyRef = useRef(categoryKey);
+
   const normalizedGroups = useMemo(
     () => groups.map((g) => ({ ...g, GroupName: normalizeGroupName(g.GroupName) })),
     [groups]
@@ -279,12 +322,50 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const selectedTableStatus = normalizeTableStatus(String((selectedTable as any)?.status || ""));
   const selectedTableBlocked = selectedTableStatus === "dirty" || selectedTableStatus === "cleaning";
 
+  /** عودة واضحة من «طلب للطاولة» إلى شاشة اختيار الطاولة (أو مسار التضمين) */
+  const orderTakerExitPath = useMemo(() => {
+    const b = String(backTo || "").trim();
+    if (b) return b;
+    if (isDeliveryEmbedded) return "/app/cashier/dashboard";
+    const r = String(user?.role || "").trim().toLowerCase();
+    if (r === "manager") return "/app/manager/captain-tables";
+    if (r === "developer") return "/app/developer/captain-tables";
+    return "/app/waiter/tables";
+  }, [backTo, isDeliveryEmbedded, user?.role]);
+
   function seatGuestDisplay(seatIndex: number): string {
     const t = String(seatGuestLabels[seatIndex] ?? "").trim();
     if (t) return t;
-    if (seatIndex === SHARED_SEAT_NO) return `طلب مشترك (${SHARED_SEAT_NO})`;
-    return `كرسي ${seatIndex}`;
+    if (seatIndex === SHARED_SEAT_NO) return "١٣ — مشترك";
+    return `مقعد ${seatIndex}`;
   }
+
+  function seatHasCustomLabel(seatIndex: number): boolean {
+    return String(seatGuestLabels[seatIndex] ?? "").trim().length > 0;
+  }
+
+  function truncateRailGuestLabel(display: string, maxChars = 11): string {
+    const t = display.trim();
+    if (!t) return "؟";
+    if (t.length <= maxChars) return t;
+    return `${t.slice(0, Math.max(1, maxChars - 1))}…`;
+  }
+
+  const otRailRows = useMemo((): WaiterOtRailRow[] => {
+    if (!narrowOtViewport || assignmentMode !== "per_seat") {
+      return WAITER_OT_RAIL_SECTIONS.map((s) => ({ kind: "section" as const, id: s.id, label: s.label, title: s.title }));
+    }
+    const out: WaiterOtRailRow[] = [];
+    for (const s of WAITER_OT_RAIL_SECTIONS) {
+      out.push({ kind: "section", id: s.id, label: s.label, title: s.title });
+      if (s.id === "waiter-ot-sec-distribute") {
+        for (const seatNo of WAITER_OT_RAIL_GUEST_SEAT_ORDER) {
+          out.push({ kind: "guest", seatNo });
+        }
+      }
+    }
+    return out;
+  }, [narrowOtViewport, assignmentMode]);
 
   async function persistSeatGuestLabels(labels: Record<number, string>) {
     if (!activeSessionId) return;
@@ -1295,6 +1376,131 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }
 
+  const scrollToOtSection = useCallback((sectionId: string) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const prevAssignmentModeRef = useRef<"per_seat" | "general" | null>(null);
+
+  const clearMobileFlowToastTimer = useCallback(() => {
+    if (mobileFlowToastTimer.current) {
+      window.clearTimeout(mobileFlowToastTimer.current);
+      mobileFlowToastTimer.current = null;
+    }
+  }, []);
+
+  const showMobileFlowToast = useCallback(
+    (text: string, ms = 9000) => {
+      clearMobileFlowToastTimer();
+      setMobileFlowToast(text);
+      mobileFlowToastTimer.current = window.setTimeout(() => {
+        setMobileFlowToast("");
+        mobileFlowToastTimer.current = null;
+      }, ms);
+    },
+    [clearMobileFlowToastTimer],
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`);
+    const fn = () => setNarrowOtViewport(mq.matches);
+    fn();
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
+
+  useEffect(() => () => clearMobileFlowToastTimer(), [clearMobileFlowToastTimer]);
+
+  /** جوال / WebView: touch على الشريط + إنهاء في فقاعة المستند (لا capture على document حتى لا يُلغى قبل الرسم) */
+  useLayoutEffect(() => {
+    if (!narrowOtViewport) {
+      setOtRailTouchHeld(false);
+      return;
+    }
+    const el = otRailRef.current;
+    if (!el) return;
+    const begin = () => setOtRailTouchHeld(true);
+    const end = () => setOtRailTouchHeld(false);
+    el.addEventListener("touchstart", begin, { capture: true, passive: true });
+    el.addEventListener("pointerdown", begin, { capture: true });
+    window.addEventListener("touchend", end, false);
+    window.addEventListener("touchcancel", end, false);
+    window.addEventListener("pointerup", end, false);
+    window.addEventListener("pointercancel", end, false);
+    return () => {
+      el.removeEventListener("touchstart", begin, { capture: true } as AddEventListenerOptions);
+      el.removeEventListener("pointerdown", begin, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("touchend", end, false);
+      window.removeEventListener("touchcancel", end, false);
+      window.removeEventListener("pointerup", end, false);
+      window.removeEventListener("pointercancel", end, false);
+      setOtRailTouchHeld(false);
+    };
+  }, [narrowOtViewport]);
+
+  useEffect(() => {
+    if (!narrowOtViewport) {
+      setOtRailStickyWide(false);
+      setOtRailTouchHeld(false);
+    }
+  }, [narrowOtViewport]);
+
+  useEffect(() => {
+    const prev = prevCategoryKeyRef.current;
+    const changed = prev !== categoryKey;
+    prevCategoryKeyRef.current = categoryKey;
+    if (!narrowOtViewport || !changed) return;
+    const t = window.setTimeout(() => {
+      document.getElementById("waiter-ot-sec-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [categoryKey, narrowOtViewport]);
+
+  const goToNextSeatMobile = useCallback(() => {
+    setSeatNameEditorSeat(null);
+    setSeatPanelMobCollapsed(false);
+    setSelectedSeat((prev) => {
+      const idx = SEAT_MOBILE_NAV_ORDER.findIndex((x) => x === prev);
+      const i = idx < 0 ? 0 : (idx + 1) % SEAT_MOBILE_NAV_ORDER.length;
+      return SEAT_MOBILE_NAV_ORDER[i]!;
+    });
+    if (typeof window !== "undefined" && window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches) {
+      showMobileFlowToast("المقعد التالي: عدّل الاسم ثم ✓. أنهيت؟ راجع «قيد الإرسال» ثم أرسل.");
+      requestAnimationFrame(() => {
+        document.getElementById("waiter-ot-sec-distribute")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [showMobileFlowToast]);
+
+  const afterSeatNameConfirmGoCategories = useCallback(() => {
+    setSeatNameEditorSeat(null);
+    if (typeof window !== "undefined" && window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches) {
+      setSeatPanelMobCollapsed(true);
+      showMobileFlowToast("اختر الفئة — تفتح الأصناف مباشرة.");
+      requestAnimationFrame(() => {
+        document.getElementById("waiter-ot-sec-categories")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } else {
+      document.getElementById("waiter-ot-sec-categories")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [showMobileFlowToast]);
+
+  useEffect(() => {
+    const prev = prevAssignmentModeRef.current;
+    prevAssignmentModeRef.current = assignmentMode;
+    if (prev === null) return;
+    if (typeof window === "undefined") return;
+    if (!window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches) return;
+    setSeatPanelMobCollapsed(false);
+    requestAnimationFrame(() => {
+      if (assignmentMode === "general") {
+        document.getElementById("waiter-ot-sec-categories")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        document.getElementById("waiter-ot-sec-distribute")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }, [assignmentMode]);
+
   async function summonCashier() {
     setMsg("");
     if (!activeSessionId) {
@@ -1331,10 +1537,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }
 
   return (
-    <div className="role-op waiter-pos">
+    <div
+      className={`role-op waiter-pos waiter-pos--order-taker${narrowOtViewport && assignmentMode === "per_seat" ? " waiter-pos--ot-rail-guests" : ""}${
+        narrowOtViewport && (otRailTouchHeld || otRailStickyWide) ? " waiter-pos--ot-rail-expanded" : ""
+      }`}
+    >
       <OperationalRoleHeader
         roleTitle={pageTitle?.trim() ? pageTitle : "✦ OYA Resturant ✦"}
-        backTo={backTo}
+        backTo={orderTakerExitPath}
         hideUser
         titleStyle={{
           fontSize: "2rem",
@@ -1354,14 +1564,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           whiteSpace: "nowrap",
           zIndex: 2,
         }}
-        onBack={backTo ? undefined : () => navigate("/app/waiter/tables")}
         rightSlot={
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, direction: "ltr", minWidth: 0, width: "100%", justifyContent: "flex-end" }}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, minWidth: 280 }}>
-              <span style={{ fontSize: "0.68rem", fontWeight: 900, color: "#fb923c", textShadow: "0 0 8px rgba(251,146,60,0.7)", whiteSpace: "nowrap", lineHeight: 1 }}>
+          <div className="waiter-pos__hdr-tools" style={{ display: "flex", alignItems: "flex-end", gap: 8, direction: "ltr", minWidth: 0, width: "100%", justifyContent: "flex-end" }}>
+            <div className="waiter-pos__hdr-tools-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, minWidth: 280 }}>
+              <span className="waiter-pos__hdr-copy" style={{ fontSize: "0.68rem", fontWeight: 900, color: "#fb923c", textShadow: "0 0 8px rgba(251,146,60,0.7)", whiteSpace: "nowrap", lineHeight: 1 }}>
                 © 2026 جميع الحقوق محفوظة لشركة Sir Consult for Information Technology
               </span>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, width: "100%", transform: "translateY(3mm)" }}>
+              <div className="waiter-pos__hdr-tools-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, width: "100%", transform: "translateY(3mm)" }}>
                 <select
                   className="waiter-pos__select"
                   value={selectedAgentGuid}
@@ -1574,7 +1783,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       <div className="waiter-pos__body">
         <main className="waiter-pos__main">
           <div className="waiter-pos__topbar">
-            <div className="waiter-pos__top-card waiter-pos__top-card--categories" style={{ gridColumn: "span 3" }}>
+            <div
+              id="waiter-ot-sec-categories"
+              className="waiter-pos__top-card waiter-pos__top-card--categories waiter-pos__ot-scroll-target"
+              style={{ gridColumn: "span 3" }}
+            >
               <h3 style={{ marginTop: 0 }}>التصنيف - الفئة</h3>
               <div className="waiter-pos__cats waiter-pos__cats-inbar" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}>
                 <button
@@ -1605,7 +1818,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               </div>
             </div>
 
-            <div className="waiter-pos__top-card waiter-pos__top-card--navopts" style={{ gridColumn: "span 2" }}>
+            <div
+              id="waiter-ot-sec-navopts"
+              className="waiter-pos__top-card waiter-pos__top-card--navopts waiter-pos__ot-scroll-target"
+              style={{ gridColumn: "span 2" }}
+            >
               <h3 style={{ marginTop: 0 }}>انتقل إلى</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/dashboard")}>
@@ -1646,7 +1863,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   </div>
                   <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 2 }}>
                     <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
-                    سبليت — فاتورة لكل ضيف (مقعد ١–١٢)؛ ما يُرسَل على «١٣» يُقسَّم بالتساوي على الشيكات
+                    سبليت — فاتورة لكل ضيف (مقاعد ١–١٢)؛ ما يُرسَل على <strong>مقعد ١٣ «مشترك»</strong> يُقسَّم بالتساوي على شيكات المقاعد
                   </label>
                 </div>
               </div>
@@ -1705,7 +1922,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               ) : null}
             </div>
 
-            <div className="waiter-pos__top-card waiter-pos__top-card--tablemeta" style={{ order: 99 }}>
+            <div
+              id="waiter-ot-sec-table"
+              className="waiter-pos__top-card waiter-pos__top-card--tablemeta waiter-pos__ot-scroll-target"
+              style={{ order: 99 }}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ fontWeight: 900 }}>{selectedTable?.name ?? "طاولة"}</div>
               </div>
@@ -1717,7 +1938,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               ) : null}
             </div>
 
-            <div className="waiter-pos__top-card waiter-pos__top-card--flexcol">
+            <div
+              id="waiter-ot-sec-pending"
+              className="waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__ot-scroll-target"
+            >
               <h3 style={{ marginTop: 0 }}>قيد الإرسال</h3>
               <div className="waiter-pos__order-box">
                 {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
@@ -1746,30 +1970,43 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   padding: "10px 12px",
                   fontSize: "1rem",
                   fontWeight: 900,
-                  background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                  background:
+                    cart.length === 0
+                      ? "linear-gradient(180deg, #64748b 0%, #475569 100%)"
+                      : "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
                   color: "#fff",
-                  border: "1px solid #15803d",
+                  border: cart.length === 0 ? "1px solid #64748b" : "1px solid #15803d",
                   opacity: loading || billingLocked ? 0.65 : 1,
-                  cursor: loading || billingLocked ? "not-allowed" : "pointer",
+                  cursor: loading || billingLocked || cart.length === 0 ? "not-allowed" : "pointer",
                 }}
-                disabled={loading || billingLocked}
+                disabled={loading || billingLocked || cart.length === 0}
                 onClick={() => void submitSale()}
               >
                 {loading ? "جاري الإرسال…" : "إرسال الطلب"}
               </button>
             </div>
 
-            <div className="waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__top-card--seatpanel">
-              <h3 style={{ marginTop: 0 }}>توزيع الطلب</h3>
+            <div
+              id="waiter-ot-sec-distribute"
+              className={`waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__top-card--seatpanel waiter-pos__ot-scroll-target${
+                narrowOtViewport && seatPanelMobCollapsed && assignmentMode === "per_seat" ? " waiter-pos__seatpanel--mob-collapsed" : ""
+              }`}
+            >
+              <h3 style={{ marginTop: 0 }}>{assignmentMode === "per_seat" ? "قائمة الضيوف" : "توزيع الطلب"}</h3>
               <div className="waiter-pos__toggle-row">
                 <button type="button" className={`waiter-pos__toggle ${assignmentMode === "per_seat" ? "waiter-pos__toggle--on" : ""}`} onClick={() => setAssignmentMode("per_seat")}>
-                  لكل كرسي
+                  حسب المقعد (١–١٢)
                 </button>
                 <button type="button" className={`waiter-pos__toggle ${assignmentMode === "general" ? "waiter-pos__toggle--on" : ""}`} onClick={() => setAssignmentMode("general")}>
-                  طلب عام (للجميع)
+                  طلب عام (بدون مقعد)
                 </button>
               </div>
               {assignmentMode === "per_seat" ? (
+                narrowOtViewport && seatPanelMobCollapsed ? (
+                  <button type="button" className="waiter-pos__seatpanel-mob-expand" onClick={() => setSeatPanelMobCollapsed(false)}>
+                    عرض قائمة الضيوف
+                  </button>
+                ) : (
                 <>
                   <div
                     className="waiter-pos__seat-list-scroll waiter-pos__dropdown-wrap waiter-pos__seat-list-scroll--in-topbar"
@@ -1787,6 +2024,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                             className={`waiter-pos__seat-slot waiter-pos__seat-slot--compact-row ${sharedRow ? "waiter-pos__seat-slot--shared" : ""} ${selectedSeat === n ? "waiter-pos__seat-slot--active-order" : ""}`}
                             onClick={() => {
                               if (billingLocked) return;
+                              if (narrowOtViewport) setSeatPanelMobCollapsed(false);
                               setSelectedSeat(n);
                               if (seatNameEditorSeat != null && seatNameEditorSeat !== n) setSeatNameEditorSeat(null);
                             }}
@@ -1797,7 +2035,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                 className={`waiter-pos__seat-slot-no ${sharedRow ? "waiter-pos__seat-slot-no--shared" : ""}`}
                                 title={
                                   sharedRow
-                                    ? "كرسي ١٣ — طلب مشترك؛ يُقسَّم بالتساوي على الشيكات عند السبليت"
+                                    ? "مقعد ١٣ — طلب يُقسَّم بالتساوي على شيكات المقاعد عند تفعيل «سبليت — فاتورة لكل ضيف» في خيارات الطاولة"
                                     : `مقعد ${n}`
                                 }
                               >
@@ -1816,7 +2054,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                   dir="rtl"
                                   autoFocus
                                   className={`waiter-pos__seat-slot-input waiter-pos__seat-slot-input--compact ${selectedSeat === n ? "waiter-pos__seat-slot-input--sel" : ""}`}
-                                  placeholder={sharedRow ? "ملاحظة (اختياري)" : "اسم على الشيك"}
+                                  placeholder={sharedRow ? "ملاحظة للمطبخ (اختياري)" : "اسم الضيف على الشيك"}
                                   value={String(seatGuestLabels[n] ?? "")}
                                   onFocus={() => setSelectedSeat(n)}
                                   onClick={(e) => e.stopPropagation()}
@@ -1829,13 +2067,17 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                     }
                                     if (e.key === "Enter") {
                                       e.preventDefault();
-                                      setSeatNameEditorSeat(null);
-                                      (e.target as HTMLInputElement).blur();
+                                      if (narrowOtViewport) {
+                                        afterSeatNameConfirmGoCategories();
+                                      } else {
+                                        setSeatNameEditorSeat(null);
+                                        (e.target as HTMLInputElement).blur();
+                                      }
                                     }
                                   }}
                                   onChange={(e) => onSeatGuestInputChange(n, e.target.value)}
                                   disabled={billingLocked}
-                                  aria-label={sharedRow ? `ملاحظة الطلب المشترك (${n})` : `تحرير نص مقعد ${n} للطباعة على الشيك`}
+                                  aria-label={sharedRow ? `ملاحظة اختيارية للطلب المشترك (مقعد ${n})` : `اسم الضيف على الشيك — مقعد ${n}`}
                                   maxLength={120}
                                 />
                               ) : (
@@ -1845,9 +2087,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                   className={`waiter-pos__seat-slot-labelbtn waiter-pos__seat-slot-labelbtn--compact ${selectedSeat === n ? "waiter-pos__seat-slot-labelbtn--active" : ""}`}
                                   title={
                                     sharedRow
-                                      ? `${dn}${String(seatGuestLabels[n] ?? "").trim() ? "" : " — ملاحظة اختيارية"}`
-                                      : dn === `كرسي ${n}`
-                                        ? `مقعد ${n} — اضغط لاسم على الشيك`
+                                      ? `${dn}${seatHasCustomLabel(n) ? "" : " — ملاحظة اختيارية للمطبخ"}`
+                                      : !seatHasCustomLabel(n)
+                                        ? "اضغط ثم اكتب اسم الضيف على الشيك (اختياري)"
                                         : `${dn} — مقعد ${n}`
                                   }
                                   disabled={billingLocked}
@@ -1880,31 +2122,31 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                 </button>
                               ) : null}
                             </div>
-                            {sharedRow ? (
-                              <div
-                                style={{
-                                  marginTop: 4,
-                                  color: "var(--wp-muted)",
-                                  fontSize: "0.68rem",
-                                  fontWeight: 700,
-                                  lineHeight: 1.3,
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                اختر الصف ثم أضف الأصناف — يُقسَّم على شيكات السبليت بالتساوي.
-                              </div>
-                            ) : null}
                           </div>
                         );
                       })}
                     </div>
+                    {seatNameEditorSeat != null ? (
+                      <div className="waiter-pos__seat-mob-actions" role="toolbar" aria-label="تأكيد اسم المقعد">
+                        <button type="button" className="waiter-pos__seat-mob-actions__btn waiter-pos__seat-mob-actions__btn--primary" onClick={afterSeatNameConfirmGoCategories}>
+                          ✓ تم
+                        </button>
+                        <button type="button" className="waiter-pos__seat-mob-actions__btn" onClick={afterSeatNameConfirmGoCategories}>
+                          الفئات
+                        </button>
+                        <button type="button" className="waiter-pos__seat-mob-actions__btn" onClick={goToNextSeatMobile}>
+                          التالي
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </>
+                )
               ) : null}
             </div>
 
             <div className="waiter-pos__top-card">
-              <div className="waiter-pos__sent">
+              <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__ot-scroll-target">
                 <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>طلبات مُرسلة (هذه الجلسة)</h4>
                 {ordersBusy && !sessionOrders.length ? (
                   <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>جاري التحميل…</div>
@@ -1925,7 +2167,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   </ul>
                 )}
               </div>
-              <div className="waiter-pos__footer-totals">
+              <div id="waiter-ot-sec-totals" className="waiter-pos__footer-totals waiter-pos__ot-scroll-target">
                 {billingTotals.ownerTpl ? (
                   <div style={{ color: "#b45309", fontSize: "0.86rem", fontWeight: 800 }}>
                     سياسة مالك/VIP ({String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}) · عميل القالب مُعرَّف على الجلسة
@@ -2025,7 +2267,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               </div>
             </div>
           </div>
-          <div className="waiter-pos__search-wrap" style={{ marginBottom: "0.5rem" }}>
+          <div
+            id="waiter-ot-sec-search"
+            className="waiter-pos__search-wrap waiter-pos__ot-scroll-target"
+            style={{ marginBottom: "0.5rem" }}
+          >
             <SmartProductSearch
               onSelect={(hit) =>
                 beginAddProduct(
@@ -2040,9 +2286,41 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
             />
           </div>
+          {narrowOtViewport && mobileFlowToast.trim() ? (
+            <div className="waiter-pos__ot-flow-toast" role="status" aria-live="polite">
+              <span className="waiter-pos__ot-flow-toast__text">{mobileFlowToast}</span>
+              <button
+                type="button"
+                className="waiter-pos__ot-flow-toast__dismiss"
+                aria-label="إغلاق التلميح"
+                onClick={() => {
+                  clearMobileFlowToastTimer();
+                  setMobileFlowToast("");
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+          <div className="waiter-pos__mb-sendbar" role="region" aria-label="إرسال الطلب للمطبخ">
+            <div className="waiter-pos__mb-sendbar__meta">
+              <span className="waiter-pos__mb-sendbar__title">قيد الإرسال</span>
+              <span className="waiter-pos__mb-sendbar__sub">
+                {itemCount} صنف · ~{gross.toFixed(0)} ج
+              </span>
+            </div>
+            <button
+              type="button"
+              className={`waiter-pos__mb-sendbar__btn${cart.length === 0 ? " waiter-pos__mb-sendbar__btn--blocked" : ""}`}
+              disabled={loading || billingLocked || cart.length === 0}
+              onClick={() => void submitSale()}
+            >
+              {loading ? "جاري الإرسال…" : "إرسال الطلب"}
+            </button>
+          </div>
           <div className="waiter-pos__section-divider" />
 
-          <div className="waiter-pos__grid">
+          <div id="waiter-ot-sec-grid" className="waiter-pos__grid waiter-pos__ot-scroll-target">
             {filteredProducts.map((p) => {
               const stopped = kitchenStoppedMap.has(p.CardGuide);
               const stopNote = kitchenStoppedMap.get(p.CardGuide) || "نفد من المطبخ";
@@ -2093,6 +2371,63 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         </main>
       </div>
 
+      <nav
+        ref={otRailRef}
+        className="waiter-pos__ot-rail"
+        aria-label="تنقّل سريع في شاشة الطاولة (طلب للطاولة)"
+      >
+        {narrowOtViewport ? (
+          <button
+            type="button"
+            className="waiter-pos__ot-rail__pin"
+            aria-pressed={otRailStickyWide}
+            title={otRailStickyWide ? "إيقاف التكبير الثابت للشريط" : "تكبير الشريط ويبقى (اضغط مرة أخرى للإيقاف)"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOtRailStickyWide((v) => !v);
+            }}
+          >
+            {otRailStickyWide ? "−" : "+"}
+          </button>
+        ) : null}
+        {otRailRows.map((row) =>
+          row.kind === "section" ? (
+            <button
+              key={row.id}
+              type="button"
+              className={`waiter-pos__ot-rail__btn${row.id === "waiter-ot-nav-tables" ? " waiter-pos__ot-rail__btn--home" : ""}`}
+              title={row.title}
+              onClick={() => {
+                if (row.id === "waiter-ot-nav-tables") {
+                  navigate(orderTakerExitPath);
+                  return;
+                }
+                if (row.id === "waiter-ot-sec-distribute") setSeatPanelMobCollapsed(false);
+                scrollToOtSection(row.id);
+              }}
+            >
+              {row.label}
+            </button>
+          ) : (
+            <button
+              key={`rail-seat-${row.seatNo}`}
+              type="button"
+              className={`waiter-pos__ot-rail__btn waiter-pos__ot-rail__btn--guest${selectedSeat === row.seatNo ? " waiter-pos__ot-rail__btn--active" : ""}`}
+              title={`سلة ${seatGuestDisplay(row.seatNo)} — اختيار الفئة ثم الأصناف`}
+              aria-label={`تفعيل سلّة ${seatGuestDisplay(row.seatNo)} والانتقال للفئات`}
+              onClick={() => {
+                setSelectedSeat(row.seatNo);
+                setSeatNameEditorSeat(null);
+                setSeatPanelMobCollapsed(true);
+                requestAnimationFrame(() => scrollToOtSection("waiter-ot-sec-categories"));
+              }}
+            >
+              {truncateRailGuestLabel(seatGuestDisplay(row.seatNo))}
+            </button>
+          ),
+        )}
+      </nav>
+
       {addonPickerProduct ? (
         <div
           role="presentation"
@@ -2109,7 +2444,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               <h3 id="addon-picker-title">مكونات الصنف (إجابة العميل)</h3>
               <div className="waiter-addon-modal__product">{addonPickerProduct.ProductName}</div>
               <div className="waiter-addon-modal__sub">
-                {assignmentMode === "general" ? "طلب عام" : `كرسي ${selectedSeat}`} · سعر البطاقة: {addonPreview.base.toFixed(2)} ج.م
+                {assignmentMode === "general" ? "طلب عام" : selectedSeat === SHARED_SEAT_NO ? "مقعد ١٣ مشترك" : `مقعد ${selectedSeat}`} · سعر البطاقة: {addonPreview.base.toFixed(2)} ج.م
               </div>
             </div>
             <div className="waiter-addon-modal__empty">

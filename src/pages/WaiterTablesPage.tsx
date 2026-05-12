@@ -673,7 +673,7 @@ export default function WaiterTablesPage() {
     },
     [orders],
   );
-  const showTableReport = (t: RestTable, ev: ReactMouseEvent<HTMLButtonElement>) => {
+  const showTableReport = (t: RestTable, ev: ReactMouseEvent<HTMLElement>) => {
     ev.preventDefault();
     const tid = String(t.id);
     const session = sessions.find((s) => String(s?.tableId || "") === tid && String(s?.status || "").toLowerCase() === "active") || null;
@@ -782,34 +782,35 @@ export default function WaiterTablesPage() {
             const alertPick = alertPickByTable[String(t.id)] ?? "";
             const alertBusy = Boolean(alertBusyByTable[String(t.id)]);
             const canEditMin = user?.role === "manager" || user?.role === "developer";
+            const openOrderTakerForTable = () => {
+              if (notReady) {
+                setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
+                return;
+              }
+              if (
+                exclusiveOn &&
+                capId &&
+                user?.id &&
+                String(capId) !== String(user.id) &&
+                user.role !== "manager" &&
+                user.role !== "developer"
+              ) {
+                const nm = captainLabel || "كابتن آخر";
+                setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
+                return;
+              }
+              const q =
+                `tableId=${encodeURIComponent(t.id)}` + (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
+              navigate(`${orderTakerBase}/order-taker?${q}`);
+            };
+
             return (
               <div key={t.id} className="waiter-tables-card-wrap">
-              <button
-                type="button"
+              <div
                 className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}`}
-                onClick={() => {
-                  if (notReady) {
-                    setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
-                    return;
-                  }
-                  if (
-                    exclusiveOn &&
-                    capId &&
-                    user?.id &&
-                    String(capId) !== String(user.id) &&
-                    user.role !== "manager" &&
-                    user.role !== "developer"
-                  ) {
-                    const nm = captainLabel || "كابتن آخر";
-                    setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
-                    return;
-                  }
-                  const q =
-                    `tableId=${encodeURIComponent(t.id)}` +
-                    (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
-                  navigate(`${orderTakerBase}/order-taker?${q}`);
-                }}
+                onClick={openOrderTakerForTable}
                 onContextMenu={(ev) => showTableReport(t, ev)}
+                aria-label={`بطاقة طاولة ${num}`}
               >
                 <div className="waiter-tblcard__spec-top">
                   <div className="waiter-tblcard__spec-id">
@@ -986,24 +987,7 @@ export default function WaiterTablesPage() {
                     className="waiter-tblcard__open-order"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (notReady) {
-                        setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
-                        return;
-                      }
-                      if (
-                        exclusiveOn &&
-                        capId &&
-                        user?.id &&
-                        String(capId) !== String(user.id) &&
-                        user.role !== "manager" &&
-                        user.role !== "developer"
-                      ) {
-                        const nm = captainLabel || "كابتن آخر";
-                        setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
-                        return;
-                      }
-                      const q = `tableId=${encodeURIComponent(t.id)}` + (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
-                      navigate(`${orderTakerBase}/order-taker?${q}`);
+                      openOrderTakerForTable();
                     }}
                   >
                     فتح الطلب
@@ -1077,8 +1061,15 @@ export default function WaiterTablesPage() {
                   </select>
                 </div>
 
-                <div className="waiter-tblcard__spec-footer">
-                  <button type="button" className="waiter-tblcard__report" onClick={(e) => showTableReport(t, e as any)}>
+                <div className="waiter-tblcard__spec-footer" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="waiter-tblcard__report"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showTableReport(t, e);
+                    }}
+                  >
                     تقرير سريع
                   </button>
                   {tStatus === "dirty" ? (
@@ -1106,7 +1097,7 @@ export default function WaiterTablesPage() {
                     </button>
                   ) : null}
                 </div>
-              </button>
+              </div>
               </div>
             );
           })}

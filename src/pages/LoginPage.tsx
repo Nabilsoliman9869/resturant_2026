@@ -4,7 +4,6 @@ import { useAuth } from "../auth/AuthContext";
 import { ROLE_ROUTES, type RoleId } from "../auth/roles";
 import type { SessionUser } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
-import { checkApiReadyAfterLogin } from "../lib/postLoginHealth";
 import { DbConnectionBar } from "../components/DbConnectionBar";
 
 const ROLE_SET = new Set<RoleId>([
@@ -27,11 +26,6 @@ export default function LoginPage() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [pendingSession, setPendingSession] = useState<{
-    user: SessionUser;
-    route: string;
-  } | null>(null);
-  const [verifyFailed, setVerifyFailed] = useState(false);
 
   if (user) {
     return <Navigate to={ROLE_ROUTES[user.role]} replace />;
@@ -76,45 +70,10 @@ export default function LoginPage() {
         role,
       };
       const route = ROLE_ROUTES[role];
-      setPendingSession({ user: sessionUser, route });
-      setVerifyFailed(false);
-      const healthy = await checkApiReadyAfterLogin(12_000);
-      if (healthy) {
-        login(sessionUser);
-        nav(route, { replace: true });
-        setPendingSession(null);
-      } else {
-        setVerifyFailed(true);
-      }
+      login(sessionUser);
+      nav(route, { replace: true });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function finishLoginDespiteVerify() {
-    if (!pendingSession) return;
-    login(pendingSession.user);
-    nav(pendingSession.route, { replace: true });
-    setPendingSession(null);
-    setVerifyFailed(false);
-  }
-
-  async function retryVerifyAfterLogin() {
-    if (!pendingSession) return;
-    setBusy(true);
-    setErr("");
-    try {
-      const healthy = await checkApiReadyAfterLogin(12_000);
-      if (healthy) {
-        login(pendingSession.user);
-        nav(pendingSession.route, { replace: true });
-        setPendingSession(null);
-        setVerifyFailed(false);
-      } else {
-        setVerifyFailed(true);
-      }
     } finally {
       setBusy(false);
     }
@@ -155,7 +114,6 @@ export default function LoginPage() {
               onChange={(e) => setLoginName(e.target.value)}
               autoComplete="username"
               style={{ width: "100%" }}
-              disabled={!!pendingSession}
             />
           </div>
           <div>
@@ -166,59 +124,31 @@ export default function LoginPage() {
               type="password"
               autoComplete="current-password"
               style={{ width: "100%" }}
-              disabled={!!pendingSession}
             />
+            <div style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.4 }}>
+              إن لم تغيّرها بعد التثبيت: المستخدم <strong>waiter</strong> عادةً برمز <strong>123</strong> (من إعدادات الخادم الافتراضية).
+            </div>
           </div>
           {err && (
             <div style={{ color: "var(--danger)", fontSize: "0.9rem", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{err}</div>
           )}
-          {pendingSession && verifyFailed && (
-            <div
-              style={{
-                padding: "0.85rem",
-                borderRadius: 8,
-                border: "1px solid rgba(249, 115, 22, 0.45)",
-                background: "rgba(249, 115, 22, 0.08)",
-                fontSize: "0.9rem",
-              }}
-            >
-              تعذّر التحقق من جاهزية الخادم.
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
-                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void retryVerifyAfterLogin()}>
-                  {busy ? "…" : "إعادة المحاولة"}
-                </button>
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={finishLoginDespiteVerify}>
-                  متابعة
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    setPendingSession(null);
-                    setVerifyFailed(false);
-                  }}
-                >
-                  إلغاء
-                </button>
-              </div>
-            </div>
-          )}
 
-          <button type="submit" className="btn btn-primary" disabled={busy || !!pendingSession}>
-            {busy && !verifyFailed ? "جاري التحقق…" : busy ? "…" : "دخول"}
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? "جاري الدخول…" : "دخول"}
           </button>
           <button
             type="button"
             className="btn btn-ghost"
-            disabled={busy || !!pendingSession}
+            style={{ fontSize: "0.82rem" }}
+            title="اختصار للمطوّر فقط: يملأ الحقول بـ dev / dev@123 ويُرسل — ليس دور «جرسون»"
+            disabled={busy}
             onClick={() => {
               setLoginName("dev");
               setPin("dev@123");
               void attemptLogin("dev", "dev@123");
             }}
           >
-            مطوّر
+            دخول تجريبي (حساب dev)
           </button>
         </form>
       </div>

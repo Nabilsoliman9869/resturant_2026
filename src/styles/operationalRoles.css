@@ -1,4 +1,4 @@
-/* واجهات الأدوار التشغيلية — نمط موحّد (فاتح، أخضر، بطاقات) */
+  /* واجهات الأدوار التشغيلية — نمط موحّد (فاتح، أخضر، بطاقات) */
 .role-op,
 .waiter-pos {
   /* خط يدعم العربية — لا تعتمد على Syne/system فقط */
@@ -616,6 +616,14 @@
   overflow-y: auto;
 }
 
+.waiter-pos__topbar > .waiter-pos__top-card--categories {
+  overflow-x: auto;
+  min-width: 0;
+  -webkit-overflow-scrolling: touch;
+  margin-inline-start: clamp(18px, 2.8vw, 36px);
+  box-sizing: border-box;
+}
+
 /* باقي الأعمدة: التمرير داخل الحقل الفرعي فقط */
 .waiter-pos__topbar > .waiter-pos__top-card--categories,
 .waiter-pos__topbar > .waiter-pos__top-card--tablemeta,
@@ -629,18 +637,14 @@
   min-height: 0;
 }
 
-/* هامش من حافة النافذة (بداية السطر في RTL) حتى لا يلصق عمود التصنيف — span 3 في TS بدون تقييد عرض الشبكة */
-.waiter-pos__topbar > .waiter-pos__top-card--categories {
-  margin-inline-start: clamp(18px, 2.8vw, 36px);
-  box-sizing: border-box;
-}
-
 .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar {
   flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   max-height: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 .waiter-pos__top-card--flexcol {
@@ -734,6 +738,10 @@
 .waiter-pos__toggle-row {
   display: flex;
   gap: 0.5rem;
+}
+
+.waiter-pos__seat-mob-actions {
+  display: none;
 }
 
 .waiter-pos__toggle {
@@ -1211,6 +1219,193 @@
 
 .waiter-pos__cats-inbar .waiter-pos__cat:nth-child(6n + 6) .waiter-pos__cat-noimg {
   background: linear-gradient(135deg, #fb7185 0%, #f43f5e 100%);
+}
+
+/* جوال — طلب للطاولة: عمود واحد وترتيب مهام؛ تصنيفات أفقية قابلة للسحب */
+@media (max-width: 900px) {
+  .waiter-pos__topbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: visible;
+    gap: 0.55rem;
+    padding: 0.35rem 0.45rem 0.65rem;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    grid-column: unset !important;
+    flex: 0 0 auto;
+  }
+
+  /* سياق الطاولة أولاً ثم التصنيف ثم السلة والمقاعد ثم الملخص ثم أدوات ثانوية */
+  .waiter-pos__topbar > .waiter-pos__top-card--tablemeta {
+    order: 1 !important;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card--categories {
+    order: 2;
+    margin-inline-start: 4px;
+    max-height: none;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card--flexcol:not(.waiter-pos__top-card--seatpanel) {
+    order: 3;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card--seatpanel {
+    order: 4;
+    /* مساحة لقائمة المقاعد + شريط التأكيد على الجوال */
+    max-height: min(72vh, 560px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card--seatpanel .waiter-pos__seat-list-scroll--in-topbar {
+    flex: 1 1 auto;
+    min-height: 12rem;
+    overflow-y: auto !important;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card--seatpanel.waiter-pos__seatpanel--mob-collapsed {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .waiter-pos__seatpanel-mob-expand {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 4px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px dashed rgba(148, 163, 184, 0.45);
+    background: rgba(30, 41, 59, 0.72);
+    color: #e2e8f0;
+    font-size: 0.82rem;
+    font-weight: 800;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .waiter-pos__seat-mob-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.28);
+    justify-content: flex-end;
+  }
+
+  .waiter-pos__seat-mob-actions__btn {
+    flex: 1 1 auto;
+    min-height: 42px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    background: rgba(30, 41, 59, 0.92);
+    color: #e2e8f0;
+    font-size: 0.78rem;
+    font-weight: 800;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .waiter-pos__seat-mob-actions__btn--primary {
+    flex: 0 0 auto;
+    min-width: 3.5rem;
+    background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+    border-color: #15803d;
+    color: #fff;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card:last-child {
+    order: 5;
+    max-height: min(40vh, 320px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .waiter-pos__topbar > .waiter-pos__top-card--navopts {
+    order: 60;
+    max-height: min(48vh, 380px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* زر الإرسال الثابت أسفل الشاشة يكفي — لا تكرار في اللوحة العلوية */
+  .waiter-pos__topbar .waiter-pos__top-card--flexcol:not(.waiter-pos__top-card--seatpanel) > button.waiter-pos__btn:last-of-type {
+    display: none;
+  }
+
+  .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    flex: 0 1 auto !important;
+    grid-template-columns: unset !important;
+    grid-auto-rows: unset !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    align-items: flex-start;
+    align-content: flex-start;
+    max-height: 128px;
+    gap: 6px;
+    padding: 4px 2px 8px;
+    touch-action: pan-x pan-y;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar > .waiter-pos__cat {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    width: 102px;
+    min-width: 102px;
+    max-width: 102px;
+    min-height: 72px;
+    max-height: 118px;
+    height: auto;
+    overflow: hidden;
+  }
+
+  .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar > .waiter-pos__cat .waiter-pos__cat-wrap {
+    height: auto;
+    min-height: 0;
+    justify-content: flex-start;
+  }
+
+  .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar > .waiter-pos__cat .waiter-pos__cat-noimg {
+    min-height: 18px;
+    flex-shrink: 0;
+  }
+
+  .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar > .waiter-pos__cat .waiter-pos__cat-label {
+    font-size: 0.6rem;
+    line-height: 1.15;
+    max-height: 3.6em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+
+  .waiter-pos__grid {
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 0.55rem;
+  }
 }
 
 .waiter-pos__cat--active .waiter-pos__cat-noimg {
@@ -2918,5 +3113,393 @@
       padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
       padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
     }
+  }
+}
+
+/* شريط أقسام «طلب للطاولة» — جوال فقط (بدون التصنيف والفئة) */
+.waiter-pos__ot-rail {
+  display: none;
+}
+
+/* شريط أسفل الجوال: «إرسال الطلب» — الأصل داخل الشريط العلوي الأفقي فيختفي عن الشاشة */
+.waiter-pos__mb-sendbar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  /* رأس «طلب للطاولة»: عنوان مقروء + حقول عملية بدون إهدار مساحة */
+  .waiter-pos--order-taker .waiter-pos__header {
+    padding: 0.55rem 0.45rem 0.45rem;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__header__row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__header-left {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.35rem;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__title {
+    position: static !important;
+    transform: none !important;
+    left: auto !important;
+    top: auto !important;
+    font-size: clamp(1rem, 4.2vw, 1.35rem) !important;
+    white-space: normal !important;
+    text-align: center;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    padding-bottom: 4px !important;
+    line-height: 1.25 !important;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__header-right {
+    width: 100%;
+    margin-inline-start: 0 !important;
+    justify-content: stretch !important;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__hdr-copy {
+    display: none;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__hdr-tools {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 8px;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__hdr-tools-col {
+    min-width: 0 !important;
+    width: 100%;
+    align-items: stretch !important;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__hdr-tools-grid {
+    grid-template-columns: 1fr !important;
+    transform: none !important;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__back {
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
+    align-self: flex-start;
+    background: rgba(15, 23, 42, 0.88);
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    color: #f8fafc;
+    z-index: 10;
+    position: relative;
+    font-weight: 900;
+  }
+
+  .waiter-pos__main .waiter-pos__search-wrap {
+    top: 4px !important;
+    z-index: 18;
+    padding-top: 2px;
+  }
+
+  .waiter-pos__main {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    padding-inline: 0.35rem;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests .waiter-pos__main {
+    padding-inline-end: calc(0.35rem + 66px);
+    transition: padding-inline-end 0.16s ease-out;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests .waiter-pos__ot-rail {
+    width: 62px;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests .waiter-pos__ot-flow-toast {
+    margin-inline-end: calc(0.35rem + 66px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests .waiter-pos__mb-sendbar {
+    padding-inline-end: calc(12px + 62px);
+  }
+
+  .waiter-pos__ot-rail__btn--guest {
+    font-size: 0.68rem;
+    font-weight: 900;
+    min-height: 40px;
+    line-height: 1.12;
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(71, 85, 105, 0.65);
+  }
+
+  .waiter-pos__ot-rail__btn--guest.waiter-pos__ot-rail__btn--active {
+    background: rgba(22, 101, 52, 0.35);
+    border-color: rgba(34, 197, 94, 0.85);
+    color: #bbf7d0;
+    box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.35);
+  }
+
+  .waiter-pos--order-taker .waiter-pos__main {
+    padding-inline-end: calc(0.35rem + 58px);
+    transition: padding-inline-end 0.16s ease-out;
+  }
+
+  .waiter-pos--order-taker .waiter-pos__ot-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    position: fixed;
+    inset-inline-end: 0;
+    top: max(64px, env(safe-area-inset-top, 0px));
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    width: 56px;
+    z-index: 70;
+    padding: 8px 5px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.88) 100%);
+    border-inline-start: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: -4px 0 18px rgba(0, 0, 0, 0.2);
+    transition: width 0.16s ease-out, padding 0.16s ease-out;
+  }
+
+  .waiter-pos__ot-rail__pin {
+    flex-shrink: 0;
+    width: 100%;
+    min-height: 34px;
+    margin: 0 0 4px;
+    padding: 2px 4px;
+    border-radius: 10px;
+    border: 1px solid rgba(56, 189, 248, 0.55);
+    background: rgba(30, 58, 95, 0.95);
+    color: #e0f2fe;
+    font-size: 1.1rem;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .waiter-pos__ot-rail__pin[aria-pressed="true"] {
+    background: rgba(22, 101, 52, 0.45);
+    border-color: rgba(34, 197, 94, 0.65);
+    color: #ecfccb;
+  }
+
+  .waiter-pos__ot-rail__btn {
+    flex-shrink: 0;
+    width: 42px;
+    min-height: 40px;
+    padding: 4px 3px;
+    margin: 0;
+    border: none;
+    border-radius: 10px;
+    background: rgba(30, 41, 59, 0.95);
+    color: #e2e8f0;
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.15;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    text-align: center;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    transition: transform 0.12s ease-out, font-size 0.16s ease-out, min-height 0.16s ease-out;
+  }
+
+  .waiter-pos__ot-rail__btn:active {
+    transform: scale(1.07);
+    z-index: 12;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail {
+    width: 82px !important;
+    padding: 8px 7px;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail {
+    width: 98px !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-expanded:not(.waiter-pos--ot-rail-guests) .waiter-pos__main {
+    padding-inline-end: calc(0.35rem + 86px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__main {
+    padding-inline-end: calc(0.35rem + 102px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-expanded:not(.waiter-pos--ot-rail-guests) .waiter-pos__ot-flow-toast {
+    margin-inline-end: calc(0.35rem + 86px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__ot-flow-toast {
+    margin-inline-end: calc(0.35rem + 102px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-expanded:not(.waiter-pos--ot-rail-guests) .waiter-pos__mb-sendbar {
+    padding-inline-end: calc(12px + 82px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__mb-sendbar {
+    padding-inline-end: calc(12px + 98px);
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail__btn,
+  .waiter-pos--order-taker.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail__btn--guest {
+    font-size: 1rem !important;
+    line-height: 1.08 !important;
+    min-height: 50px;
+  }
+
+  .waiter-pos__ot-rail__btn--home {
+    background: rgba(180, 83, 9, 0.38) !important;
+    border: 1px solid rgba(251, 191, 36, 0.6) !important;
+    color: #fffbeb !important;
+  }
+
+  .waiter-pos__ot-rail__btn:hover {
+    background: rgba(51, 65, 85, 0.98);
+    color: #fff;
+  }
+
+  .waiter-pos__ot-rail__btn:focus-visible {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+  }
+
+  .waiter-pos__ot-scroll-target {
+    scroll-margin-top: 6.5rem;
+  }
+
+  .waiter-pos__ot-flow-toast {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    position: fixed;
+    inset-inline: 0;
+    bottom: calc(4.35rem + env(safe-area-inset-bottom, 0px));
+    z-index: 59;
+    margin-inline: 0.35rem;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    background: rgba(15, 23, 42, 0.96);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .waiter-pos--order-taker .waiter-pos__ot-flow-toast {
+    margin-inline-end: calc(0.35rem + 58px);
+  }
+
+  .waiter-pos__ot-flow-toast__text {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #e0f2fe;
+  }
+
+  .waiter-pos__ot-flow-toast__dismiss {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: rgba(51, 65, 85, 0.95);
+    color: #cbd5e1;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .waiter-pos__mb-sendbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 60;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, #0f172a 100%);
+    border-top: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.22);
+  }
+
+  .waiter-pos--order-taker .waiter-pos__mb-sendbar {
+    padding-inline-end: calc(12px + 56px);
+  }
+
+  .waiter-pos__mb-sendbar__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    text-align: right;
+  }
+
+  .waiter-pos__mb-sendbar__title {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #94a3b8;
+  }
+
+  .waiter-pos__mb-sendbar__sub {
+    font-size: 0.88rem;
+    font-weight: 900;
+    color: #f8fafc;
+  }
+
+  .waiter-pos__mb-sendbar__btn {
+    flex-shrink: 0;
+    min-height: 48px;
+    padding: 10px 18px;
+    font-size: 1rem;
+    font-weight: 900;
+    border-radius: 12px;
+    border: 1px solid #15803d;
+    background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+    color: #fff;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .waiter-pos__mb-sendbar__btn:disabled,
+  .waiter-pos__mb-sendbar__btn.waiter-pos__mb-sendbar__btn--blocked:disabled {
+    opacity: 1;
+    cursor: not-allowed;
+    pointer-events: none;
+    background: linear-gradient(180deg, #475569 0%, #334155 100%);
+    border-color: #64748b;
+    color: #cbd5e1;
+    box-shadow: none;
+    filter: none;
+  }
+
+  .waiter-pos__mb-sendbar__btn.waiter-pos__mb-sendbar__btn--blocked {
+    background: linear-gradient(180deg, #475569 0%, #334155 100%);
+    border-color: #64748b;
+    color: #94a3b8;
+    opacity: 0.92;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 }

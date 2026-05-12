@@ -98,7 +98,7 @@
     "id": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
     "status": "occupied",
     "name": "T10",
-    "statusUpdatedAt": "2026-05-08T01:33:12.873728",
+    "statusUpdatedAt": "2026-05-12T01:58:33.531064",
     "dirtyAt": null,
     "cleaningStartedAt": null,
     "readyAt": "2026-05-07T21:56:44.867612"
@@ -203,5 +203,11 @@
       "vipSection": true,
       "zone": "VIP"
     }
+  },
+  {
+    "id": "10B7C06D-A4EA-4C57-88E3-17484F7E617B",
+    "status": "occupied",
+    "name": "T11",
+    "statusUpdatedAt": "2026-05-09T15:28:36.247714"
   }
 ]
