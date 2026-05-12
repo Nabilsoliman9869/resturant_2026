@@ -415,4 +415,9 @@ eserved + active.
 - **`src/components/AppShell.tsx`**: `isNavItemActive` + `NavDockGlyph` (SVG مضمّن لكل مفتاح مسار شائع)؛ عند العرض الضيق وظهور كروم السايدبار: شريط `.app-shell__dock` بأيقونات لكل بند القائمة + زر «قائمة» يفتح السايدبار (حساب، DB، خروج)؛ إخفاء الشريط عند فتح السايدبار؛ زر حافة `‹` يبقى للشاشات الأوسع عند طي السايدبار؛ `paddingInlineStart` على `<main>` عند ظهور الشريط.
 - **`src/styles/appShell.css`**: تموضع الشريط الثابت على بداية السطر (`inline-start`)، تمرير عمودي، أهداف لمس ~44px، تمييز الرابط النشط.
 
+### 047 — رفع GitHub + نسخة exe محلية Mat3amPOS021 — `UTC 2026-05-12T12:50:00Z` — ID `gitpush-mat3am021`
+
+- **`git push`** الفرع `dev-next-baseline-2026-05-05` → `origin` (`Nabilsoliman9869/resturant_2026`) عند commit **`52e9d82`** (جرسون/AppShell/تسجيل/CSS + `config/restaurant` المتتبَّع + `appShell.css`).
+- **`dist/Mat3amPOS021.exe`**: نسخ محلي من `dist/Mat3amPOS.exe` (مجلد `dist/` في `.gitignore` ولا يُرفع). لم يُشغَّل `scripts/prepare_mat3am_exe_build.py` لعدم توفر `python`/`py` في PATH على الجهاز.
+
 
