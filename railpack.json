@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "packages": {
+    "node": "22",
+    "python": "3.13"
+  },
+  "steps": {
+    "build": {
+      "commands": ["...", "pip install -r backend/requirements.txt"]
+    }
+  }
+}

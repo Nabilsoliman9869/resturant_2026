@@ -1,8 +1,6 @@
-# إعدادات Railway — تُقرأ تلقائياً من الجذر (لا حاجة لأزرار «تفعيل» في لوحة التحكم)
+# Railpack يشغّل npm ci و npm run build تلقائياً — لا تكرار npm ci هنا (يسبب EBUSY على node_modules/.vite)
+# Python + pip: railpack.json
 # Docs: https://docs.railway.com/guides/config-as-code
-
-[build]
-buildCommand = "npm ci && npm run build && pip install -r backend/requirements.txt"
 
 [deploy]
 startCommand = "cd backend && python api_server.py"
