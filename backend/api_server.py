@@ -196,7 +196,14 @@ def whoami():
         f"API_FILE_PATH={os.path.abspath(__file__)}\n"
         f"DATA_DIR={_root}\n"
         + (f"EXE_BUILD={stamp}\n" if stamp else "")
+        + (f"RAILWAY_GIT={os.environ.get('RAILWAY_GIT_COMMIT_SHA', '')}\n")
     )
+    try:
+        from odbc_driver import MAT3AM_ODBC_BUILD
+
+        body += f"ODBC_BUILD={MAT3AM_ODBC_BUILD}\n"
+    except Exception:
+        pass
     return PlainTextResponse(body)
 
 

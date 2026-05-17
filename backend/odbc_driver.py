@@ -1,7 +1,12 @@
 """اختيار Microsoft ODBC المناسب (18 ثم 17 ثم 13) وبناء سلسلة الاتصال."""
 from __future__ import annotations
 
+import os
+
 import pyodbc
+
+# يظهر في /__whoami__ للتأكد أن Railway يشغّل آخر نشر
+MAT3AM_ODBC_BUILD = "2026-05-18-tcp-multi-tls"
 
 ODBC_DRIVER_CANDIDATES = (
     "ODBC Driver 18 for SQL Server",
@@ -31,9 +36,11 @@ def sql_server_host(server: str, port: int | None) -> str:
     s = (server or "").strip()
     if not s:
         return s
+    if s.lower().startswith("tcp:"):
+        return s
     if port is not None:
-        return f"{s},{port}"
-    return s
+        return f"tcp:{s},{port}"
+    return f"tcp:{s}"
 
 
 def _tls_extra_variants(driver: str) -> list[str]:
