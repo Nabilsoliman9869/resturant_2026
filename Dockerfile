@@ -22,6 +22,19 @@ RUN apt-get update \
   && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
   && rm -rf /var/lib/apt/lists/*
 
+# OpenSSL 3: السماح بخوارزميات TLS القديمة لبعض SQL Server على الشبكة العامة
+RUN printf '%s\n' \
+  '[openssl_init]' \
+  'ssl_conf = ssl_sect' \
+  '' \
+  '[ssl_sect]' \
+  'system_default = system_default_sect' \
+  '' \
+  '[system_default_sect]' \
+  'CipherString = DEFAULT@SECLEVEL=1' \
+  > /etc/ssl/openssl_mat3am.cnf
+ENV OPENSSL_CONF=/etc/ssl/openssl_mat3am.cnf
+
 WORKDIR /app
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt

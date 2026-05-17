@@ -36,14 +36,17 @@ def sql_server_host(server: str, port: int | None) -> str:
     return s
 
 
-def _driver_tls_extras(driver: str) -> str:
-    """Driver 18 + OpenSSL 3 على Linux يرفض خوارزميات TLS القديمة على SQL Server القديم."""
+def _tls_extra_variants(driver: str) -> list[str]:
+    """ترتيب المحاولات — SQL Server القديم على 41.x غالباً يحتاج Encrypt=no."""
     if "18" in driver:
-        # Encrypt=no يتجنب: SSL Provider legacy sigalg disallowed
-        return ";Encrypt=no;TrustServerCertificate=yes"
+        return [
+            ";Encrypt=no;TrustServerCertificate=yes",
+            ";Encrypt=optional;TrustServerCertificate=yes",
+            ";Encrypt=yes;TrustServerCertificate=yes",
+        ]
     if "17" in driver:
-        return ";Encrypt=no"
-    return ""
+        return [";Encrypt=no", ";Encrypt=yes;TrustServerCertificate=yes"]
+    return [""]
 
 
 def odbc_connection_string(
@@ -52,10 +55,37 @@ def odbc_connection_string(
     database: str,
     uid: str,
     pwd: str,
+    *,
+    tls_variant_index: int = 0,
 ) -> str:
     driver = pick_odbc_driver_name()
     host = sql_server_host(server, port)
-    extras = _driver_tls_extras(driver)
+    variants = _tls_extra_variants(driver)
+    extras = variants[min(tls_variant_index, len(variants) - 1)]
     return (
         f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}{extras}"
     )
+
+
+def pyodbc_connect_compat(
+    server: str,
+    port: int | None,
+    database: str,
+    uid: str,
+    pwd: str,
+    *,
+    timeout: int = 10,
+) -> pyodbc.Connection:
+    """يجرب عدة خيارات TLS حتى ينجح الاتصال (Railway ↔ SQL Server قديم)."""
+    driver = pick_odbc_driver_name()
+    host = sql_server_host(server, port)
+    last_err: Exception | None = None
+    for extras in _tls_extra_variants(driver):
+        cs = f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}{extras}"
+        try:
+            return pyodbc.connect(cs, timeout=timeout)
+        except Exception as e:
+            last_err = e
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("فشل إنشاء اتصال ODBC")

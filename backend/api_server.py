@@ -842,13 +842,13 @@ def _settings_test_connection_sync(body: dict) -> dict:
     if not uid:
         return {"ok": False, "detail": "اسم المستخدم مطلوب"}
     try:
-        conn_str = _odbc_connection_string(s, port, db, uid, pwd)
-    except RuntimeError as e:
-        return {"ok": False, "detail": str(e)}
-    try:
-        conn = pyodbc.connect(conn_str, timeout=6)
+        from odbc_driver import pyodbc_connect_compat
+
+        conn = pyodbc_connect_compat(s, port, db, uid, pwd, timeout=6)
         conn.close()
         return {"ok": True}
+    except RuntimeError as e:
+        return {"ok": False, "detail": str(e)}
     except Exception as e:
         err = str(e)
         if "Login failed" in err or "بيانات غير صحيحة" in err or "incorrect" in err.lower():
@@ -868,7 +868,11 @@ def _settings_test_connection_sync(body: dict) -> dict:
         if "legacy sigalg" in err.lower() or "ssl provider" in err.lower():
             return {
                 "ok": False,
-                "detail": "رفض SSL/TLS بين Railway وSQL Server (خوارزمية قديمة). تم ضبط Encrypt=no في الكود — أعد نشر آخر نسخة ثم جرّب الاختبار مرة أخرى.",
+                "detail": (
+                    "فشل SSL/TLS مع SQL Server (خوارزمية قديمة) بعد تجربة Encrypt=no وoptional. "
+                    "حدّث TLS على SQL Server أو افتح المنفذ 1477 من الإنترنت. التفاصيل: "
+                    + err[:220]
+                ),
             }
         return {"ok": False, "detail": err}
 
@@ -1048,6 +1052,21 @@ def _audit_log(cursor, action: str, entity: str, entity_id: Optional[str], actor
 # Database Connection — يفضّل إعدادات config/settings.json إن وُجدت
 def get_connection():
     """الاتصال بقاعدة البيانات"""
+    if os.path.exists(_settings_path):
+        try:
+            with open(_settings_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            s = (d.get("server") or "").strip()
+            port = _normalize_sql_port(d.get("port"))
+            db = (d.get("database") or "").strip()
+            uid = (d.get("uid") or "").strip()
+            pwd = d.get("password") or ""
+            if s and db and uid:
+                from odbc_driver import pyodbc_connect_compat
+
+                return pyodbc_connect_compat(s, port, db, uid, pwd, timeout=10)
+        except Exception as e:
+            print(f"[DB] فشل الاتصال من settings.json: {e}")
     conn_str = _get_connection_string_from_settings()
     if conn_str:
         try:
