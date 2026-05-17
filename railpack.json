@@ -2,12 +2,15 @@
   "$schema": "https://schema.railpack.com",
   "packages": {
     "node": "22",
-    "python": "3.13"
+    "python": "3.12"
   },
-  "buildAptPackages": ["unixodbc-dev"],
+  "buildAptPackages": ["unixodbc-dev", "g++", "build-essential"],
+  "deploy": {
+    "aptPackages": ["unixodbc", "libodbc1"]
+  },
   "steps": {
     "build": {
-      "commands": ["...", "pip install -r backend/requirements.txt"]
+      "commands": ["...", "pip install --prefer-binary --no-cache-dir -r backend/requirements.txt"]
     }
   }
 }

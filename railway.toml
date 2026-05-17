@@ -1,9 +1,9 @@
-# Railpack يشغّل npm ci و npm run build تلقائياً — لا تكرار npm ci هنا (يسبب EBUSY على node_modules/.vite)
-# Python + pip: railpack.json
-# Docs: https://docs.railway.com/guides/config-as-code
+# Dockerfile = بناء موثوق (pyodbc + sql.h). Railpack يبقى احتياطياً عبر railpack.json.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "cd backend && python api_server.py"
 healthcheckPath = "/api/ping"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"

@@ -1,0 +1,8 @@
+node_modules
+.git
+.cursor
+config/restaurant
+!P!
+ui/restaurant/assets
+*.md
+terminals
