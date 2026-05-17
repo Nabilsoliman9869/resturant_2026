@@ -1,8 +1,6 @@
 """اختيار Microsoft ODBC المناسب (18 ثم 17 ثم 13) وبناء سلسلة الاتصال."""
 from __future__ import annotations
 
-import os
-
 import pyodbc
 
 # يظهر في /__whoami__ للتأكد أن Railway يشغّل آخر نشر
@@ -70,7 +68,8 @@ def odbc_connection_string(
     variants = _tls_extra_variants(driver)
     extras = variants[min(tls_variant_index, len(variants) - 1)]
     return (
-        f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}{extras}"
+        f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}"
+        f";Connection Timeout=15{extras}"
     )
 
 
@@ -88,7 +87,10 @@ def pyodbc_connect_compat(
     host = sql_server_host(server, port)
     last_err: Exception | None = None
     for extras in _tls_extra_variants(driver):
-        cs = f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}{extras}"
+        cs = (
+            f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}"
+            f";Connection Timeout=15{extras}"
+        )
         try:
             return pyodbc.connect(cs, timeout=timeout)
         except Exception as e:
