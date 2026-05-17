@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
+import { sessionDisplayName } from "../auth/displayUser";
 import { dispositionLabel } from "../lib/guestReturnCatalog";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
@@ -69,7 +70,7 @@ export default function GuestReturnsManagerPage() {
           action,
           reviewedBy: {
             userId: user?.id != null ? String(user.id) : "",
-            name: user?.displayName || user?.username || "مدير",
+            name: sessionDisplayName(user) || "مدير",
             role: user?.role || "manager",
           },
           managerNote: action === "reject" ? "مرفوض من المدير" : "",

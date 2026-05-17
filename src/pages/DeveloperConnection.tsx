@@ -227,6 +227,25 @@ export default function DeveloperConnection() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+    const ping = async () => {
+      const t0 = performance.now();
+      try {
+        const r = await fetch(`${getApiBase()}/api/ping`, { cache: "no-store" });
+        if (!cancelled) setApiPing({ ok: r.ok, ms: Math.round(performance.now() - t0) });
+      } catch {
+        if (!cancelled) setApiPing({ ok: false, ms: Math.round(performance.now() - t0) });
+      }
+    };
+    void ping();
+    const pingId = window.setInterval(() => void ping(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(pingId);
+    };
+  }, []);
+
+  useEffect(() => {
     fetch(`${getApiBase()}/__whoami__`)
       .then((r) => (r.ok ? r.text() : Promise.resolve("")))
       .then((t) => setWhoamiText((t || "").trim()))
