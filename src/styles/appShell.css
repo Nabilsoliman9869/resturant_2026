@@ -159,24 +159,25 @@
   }
 
   .app-shell--dock-touch-held .app-shell__dock {
-    width: 78px;
-    padding-inline: 5px;
+    width: 88px;
+    padding-inline: 6px;
   }
 
   .app-shell--dock-touch-held .app-shell__dock-svg {
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
   }
 
   .app-shell--dock-touch-held .app-shell__dock-link,
   .app-shell--dock-touch-held .app-shell__dock-more {
-    width: 60px;
-    height: 60px;
-    border-radius: 14px;
+    width: 68px;
+    height: 68px;
+    border-radius: 16px;
+    transform: scale(1.02);
   }
 
   .app-shell--dock-touch-held .app-shell__main[data-order-taker-shell="0"] {
-    padding-inline-start: calc(1.5rem + 86px) !important;
+    padding-inline-start: calc(1.5rem + 92px) !important;
   }
 }
 

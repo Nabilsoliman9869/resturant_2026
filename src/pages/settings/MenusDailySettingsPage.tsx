@@ -8,6 +8,7 @@ import {
   type DailyMenuScheduleEntry,
 } from "../../lib/dailyMenuSettings";
 import { getApiBase } from "../../lib/apiBase";
+import { tryParseJson } from "../../lib/tryParseJson";
 
 export default function MenusDailySettingsPage() {
   const base = getApiBase();
@@ -19,6 +20,8 @@ export default function MenusDailySettingsPage() {
   const [searchResults, setSearchResults] = useState<Array<{ CardGuide: string; ProductName: string }>>([]);
   const [rangeItems, setRangeItems] = useState<Array<{ ProductGuide: string; ProductName: string }>>([]);
   const [schedMsg, setSchedMsg] = useState("");
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [schedLoadBusy, setSchedLoadBusy] = useState(true);
 
   const persist = useCallback((next: DailyMenuState) => {
     setState(next);
@@ -28,8 +31,16 @@ export default function MenusDailySettingsPage() {
   useEffect(() => {
     let cancel = false;
     void (async () => {
-      const sched = await fetchDailyMenuSchedule();
-      if (!cancel) setEntries(sched);
+      setSchedLoadBusy(true);
+      try {
+        const sched = await fetchDailyMenuSchedule();
+        if (!cancel) {
+          setEntries(sched.entries);
+          if (sched.error) setSchedMsg(sched.error);
+        }
+      } finally {
+        if (!cancel) setSchedLoadBusy(false);
+      }
     })();
     return () => {
       cancel = true;
@@ -43,14 +54,55 @@ export default function MenusDailySettingsPage() {
       setSearchResults([]);
       return;
     }
+    setSearchBusy(true);
     try {
-      const r = await fetch(`${base}/api/products/search?search_text=${encodeURIComponent(q)}`);
-      const j = await r.json();
+      const urls = [
+        `${base}/api/products/search?search_text=${encodeURIComponent(q)}&menuPicker=1`,
+        `${base}/api/restaurant/products/search-menu?search_text=${encodeURIComponent(q)}`,
+        `${base}/api/products/search?search_text=${encodeURIComponent(q)}`,
+      ];
+      let lastText = "";
+      let lastStatus = 0;
+      let j: { products?: unknown[] } | null = null;
+      for (const url of urls) {
+        const r = await fetch(url, { cache: "no-store" });
+        lastText = await r.text();
+        lastStatus = r.status;
+        if (r.status === 404) continue;
+        if (!r.ok) break;
+        j = tryParseJson<{ products?: unknown[] }>(lastText);
+        if (j) break;
+      }
+      if (!j) {
+        setSearchResults([]);
+        if (lastStatus === 404) {
+          setSchedMsg(
+            "مسار البحث غير موجود على الخادم — أوقف MAT3AM-API ثم شغّل run_api.bat من جديد (بعد تحديث الكود).",
+          );
+        } else if (lastText.trim()) {
+          setSchedMsg(lastText.trim().slice(0, 240));
+        } else {
+          setSchedMsg("استجابة فارغة — شغّل run_full_stack.bat ثم http://127.0.0.1:2288/api/ping");
+        }
+        return;
+      }
       const arr = Array.isArray(j.products) ? j.products : [];
-      setSearchResults(arr.map((p: any) => ({ CardGuide: String(p.CardGuide), ProductName: String(p.ProductName || "") })));
+      setSearchResults(
+        arr.map((p) => {
+          const row = p as Record<string, unknown>;
+          return { CardGuide: String(row.CardGuide ?? ""), ProductName: String(row.ProductName || "") };
+        }),
+      );
     } catch (e) {
       setSearchResults([]);
-      setSchedMsg(String(e));
+      const s = String(e);
+      setSchedMsg(
+        /failed to fetch|networkerror/i.test(s)
+          ? `لا اتصال بـ API (${base}) — شغّل run_full_stack.bat`
+          : s,
+      );
+    } finally {
+      setSearchBusy(false);
     }
   }, [base, searchText]);
 
@@ -112,7 +164,9 @@ export default function MenusDailySettingsPage() {
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
               />
-              <button type="button" className="btn btn-ghost" onClick={() => void searchProducts()}>بحث</button>
+              <button type="button" className="btn btn-ghost" onClick={() => void searchProducts()} disabled={searchBusy}>
+                {searchBusy ? "جارٍ…" : "بحث"}
+              </button>
             </div>
             <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 6 }}>
               {searchResults.map((p) => (
@@ -147,7 +201,9 @@ export default function MenusDailySettingsPage() {
       </div>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0 }}>الجدول الحالي ({entries.length})</h3>
+        <h3 style={{ marginTop: 0 }}>
+          الجدول الحالي ({entries.length}){schedLoadBusy ? " — جارٍ التحميل…" : ""}
+        </h3>
         <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0,1fr) 160px", gap: "0.5rem", alignItems: "start" }}>
           <div style={{ fontWeight: 700 }}>المدى</div>
           <div style={{ fontWeight: 700 }}>الأصناف</div>

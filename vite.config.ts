@@ -17,8 +17,18 @@ export default defineConfig({
       "Cache-Control": "no-store",
     },
     proxy: {
-      "/__whoami__": { target: "http://127.0.0.1:2288", changeOrigin: true },
-      "/api": { target: "http://127.0.0.1:2288", changeOrigin: true },
+      "/__whoami__": {
+        target: "http://127.0.0.1:2288",
+        changeOrigin: true,
+        timeout: 120_000,
+        proxyTimeout: 120_000,
+      },
+      "/api": {
+        target: "http://127.0.0.1:2288",
+        changeOrigin: true,
+        timeout: 120_000,
+        proxyTimeout: 120_000,
+      },
       "/static": { target: "http://127.0.0.1:2288", changeOrigin: true },
       "/modules": { target: "http://127.0.0.1:2288", changeOrigin: true },
       "/app-settings": { target: "http://127.0.0.1:2288", changeOrigin: true },

@@ -22,6 +22,7 @@ import SpeedOrderPage from "./pages/SpeedOrderPage";
 import RunnerPage from "./pages/RunnerPage";
 import WaiterOrderPage from "./pages/WaiterOrderPage";
 import WaiterTablesPage from "./pages/WaiterTablesPage";
+import GuestReturnsManagerPage from "./pages/GuestReturnsManagerPage";
 import ServerTablesPage from "./pages/ServerTablesPage";
 import SettingsLayout from "./pages/settings/SettingsLayout";
 import VenueFloorSettingsPage from "./pages/settings/VenueFloorSettingsPage";
@@ -55,6 +56,7 @@ import SharedTerminalSettingsPage from "./pages/settings/SharedTerminalSettingsP
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
 import DeliveryManagementPage from "./pages/DeliveryManagementPage";
+import WaiterUiPreviewPage from "./lab/waiterUiPreview/WaiterUiPreviewPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
   const { user } = useAuth();
@@ -67,6 +69,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/preview/waiter-order-ui" element={<WaiterUiPreviewPage />} />
       <Route path="/" element={<Navigate to="/app/developer/settings/connection" replace />} />
 
       <Route
@@ -130,6 +133,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
@@ -206,6 +210,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="runner" element={<RunnerPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
       </Route>
@@ -261,6 +266,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="pos" element={<PosPlaceholder />} />

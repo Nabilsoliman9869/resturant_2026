@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { CashierAlertsBar } from "./CashierAlertsBar";
 import { RestaurantDualBells } from "./RestaurantDualBells";
 import { DbConnectionBar } from "./DbConnectionBar";
@@ -11,6 +11,15 @@ import { useDbEpoch } from "../context/DbSettingsRefreshContext";
 import { TerminalLockProvider } from "../context/TerminalLockContext";
 import { venueBrandTitle } from "../lib/venueType";
 import type { RoleId } from "../auth/roles";
+import { ROLE_LABELS } from "../auth/roles";
+import { WaiterUiStylePrompt } from "./WaiterUiStylePrompt";
+import {
+  isWaiterUiPromptDoneThisSession,
+  roleUsesWaiterOrderUiStyle,
+  saveWaiterLastPath,
+  waiterPathAfterStylePick,
+  type OrderTakerMobileUi,
+} from "../lib/waiterOrderUiPrefs";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import "../styles/appShell.css";
 
@@ -260,6 +269,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "dashboard", label: "داشبورد" },
     { to: "captain-tables", label: "شريحات الطاولات" },
     { to: "order-taker", label: "طلب للطاولة" },
+    { to: "guest-returns", label: "مرتجعات الضيوف" },
     { to: "call-center", label: "Call Center (دليفري)" },
     { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "settings", label: "إعدادات التشغيل" },
@@ -273,6 +283,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "dashboard", label: "داشبورد" },
     { to: "captain-tables", label: "شريحات الطاولات" },
     { to: "order-taker", label: "طلب للطاولة" },
+    { to: "guest-returns", label: "مرتجعات الضيوف" },
     { to: "call-center", label: "Call Center (دليفري)" },
     { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "settings", label: "إعدادات" },
@@ -323,10 +334,30 @@ export function AppShell({ role }: { role: RoleId }) {
   const { venueType } = useVenue();
   const dbEpoch = useDbEpoch();
   const location = useLocation();
+  const navigate = useNavigate();
   const base = `/app/${role}`;
+  const [uiStylePromptOpen, setUiStylePromptOpen] = useState(
+    () => roleUsesWaiterOrderUiStyle(role) && !isWaiterUiPromptDoneThisSession(),
+  );
+
+  const handleWaiterUiStyleDone = useCallback(
+    (_choice: OrderTakerMobileUi) => {
+      setUiStylePromptOpen(false);
+      if (role === "waiter") {
+        navigate(waiterPathAfterStylePick(), { replace: true });
+      }
+    },
+    [role, base, navigate],
+  );
   const isWaiterOrderTaker =
     (role === "waiter" || role === "manager" || role === "developer") &&
     location.pathname.startsWith(`${base}/order-taker`);
+
+  useEffect(() => {
+    if (role === "waiter") {
+      saveWaiterLastPath(location.pathname, location.search);
+    }
+  }, [role, location.pathname, location.search]);
 
   const [narrowViewport, setNarrowViewport] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia(`(max-width: ${NARROW_MAX_PX}px)`).matches : false,
@@ -395,21 +426,35 @@ export function AppShell({ role }: { role: RoleId }) {
     }
     const el = dockNavRef.current;
     if (!el) return;
-    const begin = () => setDockTouchHeld(true);
-    const end = () => setDockTouchHeld(false);
+    let endTimer: ReturnType<typeof setTimeout> | null = null;
+    const begin = () => {
+      if (endTimer) {
+        window.clearTimeout(endTimer);
+        endTimer = null;
+      }
+      setDockTouchHeld(true);
+    };
+    const scheduleEnd = () => {
+      if (endTimer) window.clearTimeout(endTimer);
+      endTimer = window.setTimeout(() => {
+        setDockTouchHeld(false);
+        endTimer = null;
+      }, 280);
+    };
     el.addEventListener("touchstart", begin, { capture: true, passive: true });
     el.addEventListener("pointerdown", begin, { capture: true });
-    window.addEventListener("touchend", end, false);
-    window.addEventListener("touchcancel", end, false);
-    window.addEventListener("pointerup", end, false);
-    window.addEventListener("pointercancel", end, false);
+    window.addEventListener("touchend", scheduleEnd, false);
+    window.addEventListener("touchcancel", scheduleEnd, false);
+    window.addEventListener("pointerup", scheduleEnd, false);
+    window.addEventListener("pointercancel", scheduleEnd, false);
     return () => {
+      if (endTimer) window.clearTimeout(endTimer);
       el.removeEventListener("touchstart", begin, { capture: true } as AddEventListenerOptions);
       el.removeEventListener("pointerdown", begin, { capture: true } as AddEventListenerOptions);
-      window.removeEventListener("touchend", end, false);
-      window.removeEventListener("touchcancel", end, false);
-      window.removeEventListener("pointerup", end, false);
-      window.removeEventListener("pointercancel", end, false);
+      window.removeEventListener("touchend", scheduleEnd, false);
+      window.removeEventListener("touchcancel", scheduleEnd, false);
+      window.removeEventListener("pointerup", scheduleEnd, false);
+      window.removeEventListener("pointercancel", scheduleEnd, false);
       setDockTouchHeld(false);
     };
   }, [showMobileDock]);
@@ -543,6 +588,9 @@ export function AppShell({ role }: { role: RoleId }) {
           <Outlet key={dbEpoch} />
         </main>
         <PinOverlay />
+        {uiStylePromptOpen && roleUsesWaiterOrderUiStyle(role) ? (
+          <WaiterUiStylePrompt roleLabel={ROLE_LABELS[role]} onDone={handleWaiterUiStyleDone} />
+        ) : null}
       </div>
     </TerminalLockProvider>
   );

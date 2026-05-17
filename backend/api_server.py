@@ -4,6 +4,7 @@ FastAPI Backend - متصل بقاعدة البيانات SQL Server
 """
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel, model_validator
@@ -29,7 +30,7 @@ except ValueError:
     XTRA_API_PORT = 2288
 
 # يزيد عند تغيير قائمة فحوص GET /api/dev/seed-default-data/verify أو جداول التهيئة — للتمييز عن عمليات api_server قديمة
-MAT3AM_VERIFY_SCHEMA_REVISION = 10
+MAT3AM_VERIFY_SCHEMA_REVISION = 11
 
 # جداول MAT3AM التي يفترض أن تنشئها _ensure_mat3am_dev_schema — للتشخيص فقط (OBJECT_ID + COUNT)
 MAT3AM_DDL_TABLE_NAMES: Tuple[str, ...] = (
@@ -190,6 +191,7 @@ def whoami():
         "MAT3AM_API=1 DEV_LOGIN_ALWAYS=1\n"
         f"API_FILE_MTIME_UNIX={_mt}\n"
         f"VERIFY_SCHEMA_REVISION={MAT3AM_VERIFY_SCHEMA_REVISION}\n"
+        "FEATURE_GUEST_RETURNS=1\n"
         f"API_FILE_PATH={os.path.abspath(__file__)}\n"
         f"DATA_DIR={_root}\n"
         + (f"EXE_BUILD={stamp}\n" if stamp else "")
@@ -328,29 +330,59 @@ _product_images_dir_path = str(BASE_DIR / "config" / "restaurant" / "product_ima
 _product_images_manifest_path = str(BASE_DIR / "config" / "restaurant" / "product_images.json")
 _group_images_dir_path = str(BASE_DIR / "config" / "restaurant" / "group_images")
 _group_images_manifest_path = str(BASE_DIR / "config" / "restaurant" / "group_images.json")
+
+# تخزين مؤقت لملفات manifest الصور — كان يُعاد قراءة JSON من القرص لكل صنف (بطء شديد على /api/products وبحث القائمة اليومية)
+_product_images_manifest_cache: Optional[dict] = None
+_product_images_manifest_mtime: float = 0.0
+_group_images_manifest_cache: Optional[dict] = None
+_group_images_manifest_mtime: float = 0.0
+
+
 def _product_images_dir() -> str:
     os.makedirs(_product_images_dir_path, exist_ok=True)
     return _product_images_dir_path
 
 
-def _product_images_manifest_load() -> dict:
+def _json_images_manifest_load(path: str, cache_box: list) -> dict:
+    """cache_box = [data_dict|None, mtime_float] — يُحدَّث عند الحفظ."""
     try:
-        if os.path.isfile(_product_images_manifest_path):
-            with open(_product_images_manifest_path, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict):
-                imgs = d.get("images")
-                if isinstance(imgs, dict):
-                    return {"images": imgs}
+        if not os.path.isfile(path):
+            cache_box[0] = {"images": {}}
+            cache_box[1] = 0.0
+            return cache_box[0]
+        mt = os.path.getmtime(path)
+        if cache_box[0] is not None and cache_box[1] == mt:
+            return cache_box[0]
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        imgs = d.get("images") if isinstance(d, dict) and isinstance(d.get("images"), dict) else {}
+        cache_box[0] = {"images": imgs}
+        cache_box[1] = mt
+        return cache_box[0]
     except Exception:
-        pass
-    return {"images": {}}
+        cache_box[0] = {"images": {}}
+        cache_box[1] = 0.0
+        return cache_box[0]
+
+
+def _invalidate_json_images_manifest_cache(cache_box: list) -> None:
+    cache_box[0] = None
+    cache_box[1] = 0.0
+
+
+_product_manifest_cache_box: list = [None, 0.0]
+_group_manifest_cache_box: list = [None, 0.0]
+
+
+def _product_images_manifest_load() -> dict:
+    return _json_images_manifest_load(_product_images_manifest_path, _product_manifest_cache_box)
 
 
 def _product_images_manifest_save(d: dict) -> None:
     os.makedirs(os.path.dirname(_product_images_manifest_path), exist_ok=True)
     with open(_product_images_manifest_path, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=2)
+    _invalidate_json_images_manifest_cache(_product_manifest_cache_box)
 
 
 def _product_images_manifest_set(card_guide: str, image_url: str) -> None:
@@ -386,23 +418,14 @@ def _group_images_dir() -> str:
 
 
 def _group_images_manifest_load() -> dict:
-    try:
-        if os.path.isfile(_group_images_manifest_path):
-            with open(_group_images_manifest_path, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict):
-                imgs = d.get("images")
-                if isinstance(imgs, dict):
-                    return {"images": imgs}
-    except Exception:
-        pass
-    return {"images": {}}
+    return _json_images_manifest_load(_group_images_manifest_path, _group_manifest_cache_box)
 
 
 def _group_images_manifest_save(d: dict) -> None:
     os.makedirs(os.path.dirname(_group_images_manifest_path), exist_ok=True)
     with open(_group_images_manifest_path, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=2)
+    _invalidate_json_images_manifest_cache(_group_manifest_cache_box)
 
 
 def _group_images_manifest_set(card_guide: str, image_url: str) -> None:
@@ -430,6 +453,17 @@ def _group_images_manifest_get(card_guide: str) -> Optional[str]:
         if v:
             return str(v)
     return None
+
+
+def _image_url_db_first(db_val, manifest_val, fallback: str) -> str:
+    """عند تحميل المنيو: TBL006/TBL007 أولاً، ثم group_images.json / product_images.json."""
+    d = str(db_val or "").strip()
+    if d:
+        return d
+    m = str(manifest_val or "").strip()
+    if m:
+        return m
+    return fallback
 
 
 def _ensure_menu_tables(cursor) -> None:
@@ -799,9 +833,8 @@ def api_settings_connection_put(body: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/settings/test-connection")
-def api_settings_test_connection(body: dict):
-    """اختبار الاتصال بقاعدة البيانات بالمعاملات المرسلة"""
+def _settings_test_connection_sync(body: dict) -> dict:
+    """اختبار ODBC — يُستدعى من thread pool حتى لا يجمّد حلقة FastAPI."""
     s = (body.get("server") or "").strip()
     port = _normalize_sql_port(body.get("port"))
     db = (body.get("database") or "").strip()
@@ -813,7 +846,7 @@ def api_settings_test_connection(body: dict):
         return {"ok": False, "detail": "اسم المستخدم مطلوب"}
     conn_str = _odbc_connection_string(s, port, db, uid, pwd)
     try:
-        conn = pyodbc.connect(conn_str, timeout=10)
+        conn = pyodbc.connect(conn_str, timeout=6)
         conn.close()
         return {"ok": True}
     except Exception as e:
@@ -825,7 +858,7 @@ def api_settings_test_connection(body: dict):
         if "Timeout" in err or "258" in err or "10060" in err:
             return {
                 "ok": False,
-                "detail": "انتهت المهلة أو رفض الاتصال — تأكد أن خدمة SQL Server تعمل، وأن TCP/IP مفعّل، وأن المنفذ 1477 (أو المنفذ الفعلي في SQL Server Configuration Manager) مفتوح في الجدار الناري. جرّب أيضاً السيرفر 127.0.0.1 بدل localhost.",
+                "detail": "انتهت المهلة أو رفض الاتصال — تأكد أن خدمة SQL Server تعمل، وأن TCP/IP مفعّل، وأن المنفذ 1477 (أو المنفذ الفعلي في SQL Server Configuration Manager) مفتوح في الجدار الناري. جرّب أيضاً السيرفر 127.0.0.1 بدل .",
             }
         if "IM002" in err or "ODBC Driver" in err and "not found" in err.lower():
             return {
@@ -833,6 +866,12 @@ def api_settings_test_connection(body: dict):
                 "detail": "تعذر العثور على ODBC Driver 17 for SQL Server — ثبّت «Microsoft ODBC Driver 17 for SQL Server» من موقع مايكروسوفت.",
             }
         return {"ok": False, "detail": err}
+
+
+@app.post("/api/settings/test-connection")
+async def api_settings_test_connection(body: dict):
+    """اختبار الاتصال بقاعدة البيانات بالمعاملات المرسلة (غير حاجب للحلقة الرئيسية)."""
+    return await run_in_threadpool(_settings_test_connection_sync, body)
 
 # CORS - للسماح للـ HTML بالاتصال
 app.add_middleware(
@@ -858,22 +897,78 @@ ALLOWED_ROLE_CODES = {
 }
 
 
-def _resolve_effective_role_code(cursor, user_id: str, base_role: str) -> str:
-    """دور الدخول الفعّال: إن وُجدت جدولة تغطي «اليوم» على السيرفر تُستخدم، وإلا RoleCode الأساسي من MAT3AM_APP_USERS."""
+def _login_body_calendar_iso(body: object) -> Optional[str]:
+    """تاريخ YYYY-MM-DD من جسم POST /api/auth/login ليطابق عمود «اليوم» في واجهة الجدولة (تقويم المحلي، وليس UTC)."""
+    if not isinstance(body, dict):
+        return None
+    for key in ("localDate", "calendarDate", "clientToday"):
+        v = str(body.get(key) or "").strip()[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            return v
+    return None
+
+
+def _login_calendar_iso_from_request(request: Request, body: object) -> Optional[str]:
+    """تاريخ اليوم للجدولة: JSON ثم رأس HTTP (للعملاء القدامى أو البروكسي)."""
+    d = _login_body_calendar_iso(body)
+    if d:
+        return d
+    try:
+        h = request.headers.get("x-mat3am-local-date") or request.headers.get("X-Mat3am-Local-Date")
+        v = str(h or "").strip()[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            return v
+    except Exception:
+        pass
+    return None
+
+
+def _enforce_role_schedule_shift_active() -> bool:
+    """تفعيل إلزام جدولة الوردية: متغير بيئة للاختبار ثم إعدادات التشغيل."""
+    ev = str(os.environ.get("MAT3AM_ENFORCE_SHIFT", "") or "").strip().lower()
+    if ev in ("1", "true", "yes", "on"):
+        return True
+    try:
+        ops = _restaurant_read_ops_storage()
+        v = str((ops or {}).get("enforceRoleScheduleForShift") or "").strip().lower()
+        return v in ("on", "1", "true", "yes")
+    except Exception:
+        return False
+
+
+def _mat3am_schedule_day_predicate_sql(calendar_iso: Optional[str]) -> Tuple[str, Tuple[Any, ...]]:
+    """جزء شرط «اليوم» لجدولة MAT3AM_USER_ROLE_SCHEDULE + معاملات إضافية بعد UserId."""
+    s = (calendar_iso or "").strip()[:10]
+    if s and re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return (
+            "CAST(? AS DATE) >= CAST(ValidFrom AS DATE) AND CAST(? AS DATE) <= CAST(ValidTo AS DATE)",
+            (s, s),
+        )
+    return (
+        "CAST(SYSDATETIME() AS DATE) >= CAST(ValidFrom AS DATE) AND CAST(SYSDATETIME() AS DATE) <= CAST(ValidTo AS DATE)",
+        (),
+    )
+
+
+def _resolve_effective_role_code(cursor, user_id: str, base_role: str, calendar_iso: Optional[str] = None) -> str:
+    """دور الدخول الفعّال: إن وُجدت جدولة تغطي «اليوم» تُستخدم، وإلا RoleCode الأساسي.
+
+    calendar_iso: YYYY-MM-DD من الواجهة عند الدخول؛ إن غاب يُستخدم تاريخ خادم SQL المحلي (SYSDATETIME) وليس UTC.
+    """
     uid = (user_id or "").strip()
     base = (base_role or "").strip().lower()
     if not uid:
         return base
     try:
+        frag, extra = _mat3am_schedule_day_predicate_sql(calendar_iso)
         cursor.execute(
-            """
+            f"""
             SELECT TOP 1 RoleCode FROM dbo.MAT3AM_USER_ROLE_SCHEDULE
             WHERE UserId = CAST(? AS uniqueidentifier)
-              AND CAST(SYSUTCDATETIME() AS DATE) >= ValidFrom
-              AND CAST(SYSUTCDATETIME() AS DATE) <= ValidTo
+              AND {frag}
             ORDER BY CreatedAt DESC, Id DESC
             """,
-            (uid,),
+            (uid,) + extra,
         )
         row = cursor.fetchone()
         if not row:
@@ -882,6 +977,26 @@ def _resolve_effective_role_code(cursor, user_id: str, base_role: str) -> str:
         return r if r in ALLOWED_ROLE_CODES else base
     except Exception:
         return base
+
+
+def _user_has_role_schedule_covering_today(cursor, user_id: str, calendar_iso: Optional[str] = None) -> bool:
+    """هل للمستخدم فترة في MAT3AM_USER_ROLE_SCHEDULE تغطّي «اليوم» (نفس تعريف calendar_iso أعلاه)."""
+    uid = (user_id or "").strip()
+    if not uid:
+        return False
+    try:
+        frag, extra = _mat3am_schedule_day_predicate_sql(calendar_iso)
+        cursor.execute(
+            f"""
+            SELECT 1 FROM dbo.MAT3AM_USER_ROLE_SCHEDULE
+            WHERE UserId = CAST(? AS uniqueidentifier)
+              AND {frag}
+            """,
+            (uid,) + extra,
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        return False
 
 
 def _audit_log(cursor, action: str, entity: str, entity_id: Optional[str], actor: Optional[str], details: Optional[str]):
@@ -1282,6 +1397,7 @@ async def api_auth_login(request: Request):
         raw = await request.json()
     except Exception:
         raw = {}
+    cal_iso = _login_calendar_iso_from_request(request, raw)
     lo, pw = _parse_login_from_json_body(raw)
     login_name = _strip_invisible_chars(lo.strip())
     pin = _strip_invisible_chars(pw.strip())
@@ -1315,7 +1431,7 @@ async def api_auth_login(request: Request):
             """
             SELECT TOP 1 Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
             FROM dbo.MAT3AM_APP_USERS
-            WHERE LoginName = ?
+            WHERE LOWER(LTRIM(RTRIM(CAST(LoginName AS NVARCHAR(256))))) = LOWER(LTRIM(RTRIM(?)))
             ORDER BY CreatedAt DESC
             """,
             (login_name,),
@@ -1343,7 +1459,7 @@ async def api_auth_login(request: Request):
                         """
                         SELECT TOP 1 Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
                         FROM dbo.MAT3AM_APP_USERS
-                        WHERE LoginName = ?
+                        WHERE LOWER(LTRIM(RTRIM(CAST(LoginName AS NVARCHAR(256))))) = LOWER(LTRIM(RTRIM(?)))
                         ORDER BY CreatedAt DESC
                         """,
                         (login_name,),
@@ -1384,7 +1500,13 @@ async def api_auth_login(request: Request):
         role_code = str(row[3] or "").strip().lower()
         if role_code not in ALLOWED_ROLE_CODES:
             raise HTTPException(status_code=403, detail=f"الدور غير مدعوم: {role_code}")
-        effective_role = _resolve_effective_role_code(cursor, str(row[0]), role_code)
+        effective_role = _resolve_effective_role_code(cursor, str(row[0]), role_code, cal_iso)
+        enforce_shift = _enforce_role_schedule_shift_active()
+        floor_shift_roles = {"waiter", "host", "server", "speed_order"}
+        needs_shift = role_code in floor_shift_roles or effective_role in floor_shift_roles
+        if enforce_shift and needs_shift:
+            if not _user_has_role_schedule_covering_today(cursor, str(row[0]), cal_iso):
+                raise HTTPException(status_code=403, detail="أنت لست ضمن فريق العمل اليوم")
         _audit_log(
             cursor,
             "LOGIN_OK",
@@ -3426,7 +3548,7 @@ def _mat3am_db_probe_for_ready() -> dict:
 
 
 @app.get("/api/ready")
-def api_ready(check_db: int = 0):
+async def api_ready(check_db: int = 0):
     """
     جاهزية خفيفة للإقلاع: لا تتصل بقاعدة البيانات افتراضياً (تفادي تعليق أو بطء عند عدم ربط SQL).
     للفحص الاختياري: ?check_db=1
@@ -3440,7 +3562,7 @@ def api_ready(check_db: int = 0):
         "restaurant": {"floor_plan": os.path.isfile(fp)},
     }
     if check_db:
-        payload["database"] = _mat3am_db_probe_for_ready()
+        payload["database"] = await run_in_threadpool(_mat3am_db_probe_for_ready)
     else:
         payload["database"] = {"status": "not_checked", "detail": None}
     return payload
@@ -4212,10 +4334,14 @@ def get_products(group_guide: Optional[str] = None):
             """
             cursor.execute(query)
         
+        img_manifest_data = _product_images_manifest_load()
+        imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
         products = []
         for row in cursor.fetchall():
             guid = str(row[0])
-            img_manifest = _product_images_manifest_get(guid)
+            guid_u = guid.upper()
+            rec = imgs_map.get(guid_u) if isinstance(imgs_map, dict) else None
+            img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
             img_db = str(row[6]) if len(row) > 6 and row[6] else None
             products.append({
                 "CardGuide": guid,
@@ -4225,7 +4351,7 @@ def get_products(group_guide: Optional[str] = None):
                 "AgentPrice": float(row[4]) if row[4] else 0.0,
                 "GroupGuid": str(row[5]) if row[5] else None,
                 "image": f"/api/products/{guid}/image",
-                "imageUrl": img_manifest or img_db or f"/api/products/{guid}/image",
+                "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
                 "PrepMinutes": float(row[7]) if len(row) > 7 and row[7] is not None else 0.0,
                 "Hieght3": float(row[7]) if len(row) > 7 and row[7] is not None else 0.0,
             })
@@ -4319,29 +4445,89 @@ def put_product_prep_minutes(card_guide: str, body: dict):
             pass
 
 
+@app.get("/api/restaurant/products/search-menu")
+def restaurant_search_products_for_menu(search_text: str = Query(..., min_length=1)):
+    """بحث خفيف لصفحة «القائمة اليومية» — CardGuide + ProductName فقط (بدون manifest صور)."""
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    q = str(search_text or "").strip()
+    if not q:
+        return {"products": []}
+    try:
+        cursor = conn.cursor()
+        pattern = f"%{q}%"
+        cursor.execute(
+            """
+            SELECT TOP 80 CardGuide, ProductName
+            FROM dbo.TBL007
+            WHERE ProductName LIKE ? AND (NotActive = 0 OR NotActive IS NULL)
+            ORDER BY ProductName
+            """,
+            (pattern,),
+        )
+        return {
+            "products": [
+                {"CardGuide": str(row[0]), "ProductName": str(row[1] or "")}
+                for row in cursor.fetchall()
+                if row and row[0]
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.get("/api/products/search")
-def search_products(search_text: str):
-    """البحث عن المنتجات"""
+def search_products(search_text: str, menu_picker: bool = Query(False, alias="menuPicker")):
+    """البحث عن المنتجات — menuPicker=1 لصفحة القائمة اليومية (خفيف، بدون manifest صور)."""
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     
     try:
         cursor = conn.cursor()
-        _ensure_menu_tables(cursor)
-        search_pattern = f"%{search_text}%"
-        query = """
-        SELECT TOP 100 CardGuide, ProductName, AgentPrice, ProductImageUrl, Hieght3
+        q = str(search_text or "").strip()
+        if not q:
+            return {"products": []}
+        if not menu_picker:
+            _ensure_menu_tables(cursor)
+        search_pattern = f"%{q}%"
+        top_n = 80 if menu_picker else 100
+        if menu_picker:
+            query = f"""
+            SELECT TOP ({top_n}) CardGuide, ProductName
+            FROM dbo.TBL007
+            WHERE ProductName LIKE ? AND (NotActive = 0 OR NotActive IS NULL)
+            ORDER BY ProductName
+            """
+            cursor.execute(query, search_pattern)
+            return {
+                "products": [
+                    {"CardGuide": str(row[0]), "ProductName": str(row[1] or "")}
+                    for row in cursor.fetchall()
+                    if row and row[0]
+                ]
+            }
+        query = f"""
+        SELECT TOP ({top_n}) CardGuide, ProductName, AgentPrice, ProductImageUrl, Hieght3
         FROM TBL007
         WHERE ProductName LIKE ? AND NotActive = 0
         ORDER BY ProductName
         """
         cursor.execute(query, search_pattern)
-        
+
+        img_manifest_data = _product_images_manifest_load()
+        imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
         products = []
         for row in cursor.fetchall():
             guid = str(row[0])
-            img_manifest = _product_images_manifest_get(guid)
+            rec = imgs_map.get(guid.upper()) if isinstance(imgs_map, dict) else None
+            img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
             img_db = str(row[3]) if len(row) > 3 and row[3] else None
             products.append({
                 "CardGuide": guid,
@@ -4349,7 +4535,7 @@ def search_products(search_text: str):
                 "Price": float(row[2]) if row[2] else 0.0,
                 "AgentPrice": float(row[2]) if row[2] else 0.0,
                 "image": f"/api/products/{guid}/image",
-                "imageUrl": img_manifest or img_db or f"/api/products/{guid}/image",
+                "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
                 "PrepMinutes": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
                 "Hieght3": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
             })
@@ -4386,10 +4572,13 @@ def products_picks_under_price(
         ORDER BY AgentPrice ASC, ProductName ASC
         """
         cursor.execute(query, (float(max_price),))
+        img_manifest_data = _product_images_manifest_load()
+        imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
         products = []
         for row in cursor.fetchall():
             guid = str(row[0])
-            img_manifest = _product_images_manifest_get(guid)
+            rec = imgs_map.get(guid.upper()) if isinstance(imgs_map, dict) else None
+            img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
             img_db = str(row[3]) if len(row) > 3 and row[3] else None
             products.append(
                 {
@@ -4398,7 +4587,7 @@ def products_picks_under_price(
                     "Price": float(row[2]) if row[2] else 0.0,
                     "AgentPrice": float(row[2]) if row[2] else 0.0,
                     "image": f"/api/products/{guid}/image",
-                    "imageUrl": img_manifest or img_db or f"/api/products/{guid}/image",
+                    "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
                     "PrepMinutes": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
                     "Hieght3": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
                 }
@@ -4733,10 +4922,48 @@ def post_xtra_bundle_upsert(body: dict):
 
 @app.get("/api/products/{card_guide}/image")
 def get_product_image(card_guide: str, request: Request):
-    """إرجاع صورة الصنف من ملف محلي إن وُجد، وإلا من TBL007.CardImage.
+    """صورة الصنف: TBL007.CardImage إن وُجد، وإلا ملف product_images/ (مرآة للرفع).
     يدعم ETag وCache-Control.
     """
     try:
+        conn = get_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                _ensure_menu_tables(cursor)
+                cursor.execute(
+                    "SELECT TOP 1 CardImage FROM TBL007 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    card_guide,
+                )
+                row = cursor.fetchone()
+                if row and row[0] is not None:
+                    blob = row[0]
+                    try:
+                        data = bytes(blob)
+                    except Exception:
+                        data = blob
+                    import hashlib
+                    etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+                    inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+                    if inm and inm == etag:
+                        return Response(status_code=304)
+                    ctype = "application/octet-stream"
+                    if data.startswith(b"\xFF\xD8\xFF"):
+                        ctype = "image/jpeg"
+                    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+                        ctype = "image/png"
+                    elif data.startswith(b"GIF8"):
+                        ctype = "image/gif"
+                    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                        ctype = "image/webp"
+                    headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+                    return Response(content=data, media_type=ctype, headers=headers)
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
         fp, ctype_hint = _find_product_image_file(card_guide)
         if fp:
             with open(fp, "rb") as f:
@@ -4749,55 +4976,12 @@ def get_product_image(card_guide: str, request: Request):
             headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
             return Response(content=data, media_type=ctype_hint or "application/octet-stream", headers=headers)
 
-        conn = get_connection()
-        if not conn:
-            raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-        cursor = conn.cursor()
-        _ensure_menu_tables(cursor)
-        cursor.execute("SELECT TOP 1 CardImage FROM TBL007 WHERE CardGuide = CAST(? AS uniqueidentifier)", card_guide)
-        row = cursor.fetchone()
-        if not row or row[0] is None:
-            raise HTTPException(status_code=404, detail="لا توجد صورة لهذا الصنف")
-        blob = row[0]
-        try:
-            data = bytes(blob)
-        except Exception:
-            data = blob
-
-        # ETag
-        import hashlib
-        etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
-        inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
-        if inm and inm == etag:
-            return Response(status_code=304)
-
-        # Sniff content type
-        ctype = "application/octet-stream"
-        if data.startswith(b"\xFF\xD8\xFF"):
-            ctype = "image/jpeg"
-        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
-            ctype = "image/png"
-        elif data.startswith(b"GIF8"):
-            ctype = "image/gif"
-        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-            ctype = "image/webp"
-
-        headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
-        return Response(content=data, media_type=ctype, headers=headers)
+        raise HTTPException(status_code=404, detail="لا توجد صورة لهذا الصنف")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        try:
-            conn  # may be undefined if file path existed
-        except NameError:
-            return
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+
 
 @app.post("/api/products/{card_guide}/image")
 async def upload_product_image(card_guide: str, file: UploadFile = File(...)):
@@ -4980,7 +5164,7 @@ def get_product_groups():
                 "LatinName": row[2] or "",
                 "GroupName": row[3],
                 "image": f"/api/product-groups/{gid}/image",
-                "imageUrl": img_manifest or img_db or f"/api/product-groups/{gid}/image-auto",
+                "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/product-groups/{gid}/image-auto"),
             })
         return {"groups": groups}
     except Exception as e:
@@ -5022,7 +5206,46 @@ def create_product_group(body: dict):
 
 @app.get("/api/product-groups/{group_guide}/image")
 def get_product_group_image(group_guide: str, request: Request):
+    """صورة المجموعة: TBL006.CardImage إن وُجد، وإلا ملف group_images/."""
     try:
+        conn = get_connection()
+        if conn:
+            try:
+                cur = conn.cursor()
+                _ensure_menu_tables(cur)
+                cur.execute(
+                    "SELECT TOP 1 CardImage FROM TBL006 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    group_guide,
+                )
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    blob = row[0]
+                    try:
+                        data = bytes(blob)
+                    except Exception:
+                        data = blob
+                    import hashlib
+                    etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
+                    inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
+                    if inm and inm == etag:
+                        return Response(status_code=304)
+                    ctype = "application/octet-stream"
+                    if data.startswith(b"\xFF\xD8\xFF"):
+                        ctype = "image/jpeg"
+                    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+                        ctype = "image/png"
+                    elif data.startswith(b"GIF8"):
+                        ctype = "image/gif"
+                    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                        ctype = "image/webp"
+                    headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+                    return Response(content=data, media_type=ctype, headers=headers)
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
         fp, ctype_hint = _find_group_image_file(group_guide)
         if fp:
             with open(fp, "rb") as f:
@@ -5034,50 +5257,12 @@ def get_product_group_image(group_guide: str, request: Request):
                 return Response(status_code=304)
             headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
             return Response(content=data, media_type=ctype_hint or "application/octet-stream", headers=headers)
-        conn = get_connection()
-        if not conn:
-            raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-        cur = conn.cursor()
-        _ensure_menu_tables(cur)
-        cur.execute("SELECT TOP 1 CardImage FROM TBL006 WHERE CardGuide = CAST(? AS uniqueidentifier)", group_guide)
-        row = cur.fetchone()
-        if not row or row[0] is None:
-            raise HTTPException(status_code=404, detail="لا توجد صورة لهذه المجموعة")
-        blob = row[0]
-        try:
-            data = bytes(blob)
-        except Exception:
-            data = blob
-        import hashlib
-        etag = 'W/"' + hashlib.sha1(data).hexdigest() + '"'
-        inm = request.headers.get("if-none-match") or request.headers.get("If-None-Match")
-        if inm and inm == etag:
-            return Response(status_code=304)
-        ctype = "application/octet-stream"
-        if data.startswith(b"\xFF\xD8\xFF"):
-            ctype = "image/jpeg"
-        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
-            ctype = "image/png"
-        elif data.startswith(b"GIF8"):
-            ctype = "image/gif"
-        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-            ctype = "image/webp"
-        headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
-        return Response(content=data, media_type=ctype, headers=headers)
+
+        raise HTTPException(status_code=404, detail="لا توجد صورة لهذه المجموعة")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        try:
-            conn
-        except NameError:
-            return
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
 
 
 @app.get("/api/product-groups/{group_guide}/image-auto")
@@ -5163,13 +5348,30 @@ def product_group_image_link_set(group_guide: str, body: dict):
     _group_images_manifest_set(gid, image_url)
     conn = get_connection()
     if not conn:
-        return {"ok": True, "imageUrl": image_url, "dbUpdated": False}
+        return {
+            "ok": True,
+            "imageUrl": image_url,
+            "dbUpdated": False,
+            "rowsUpdated": 0,
+            "manifestSaved": True,
+            "detail": "حُفظ في group_images.json فقط — لا اتصال SQL. راجع إعدادات الاتصال ثم أعد «حفظ الرابط» أو «مزامنة JSON → TBL006».",
+        }
     try:
         cur = conn.cursor()
         _ensure_menu_tables(cur)
         cur.execute("UPDATE TBL006 SET GroupImageUrl = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (image_url, gid))
+        rows = int(cur.rowcount or 0)
         conn.commit()
-        return {"ok": True, "imageUrl": image_url, "dbUpdated": True}
+        if rows < 1:
+            return {
+                "ok": True,
+                "imageUrl": image_url,
+                "dbUpdated": False,
+                "rowsUpdated": 0,
+                "manifestSaved": True,
+                "detail": f"لم يُحدَّث أي صف في TBL006 لهذا CardGuide ({gid}) — تحقق أن المجموعة موجودة في القاعدة المتصلة (oya_Mohandessin).",
+            }
+        return {"ok": True, "imageUrl": image_url, "dbUpdated": True, "rowsUpdated": rows, "manifestSaved": True}
     except Exception as e:
         try:
             conn.rollback()
@@ -10812,6 +11014,8 @@ _RESTAURANT_SQL_KEYS = frozenset(
         "daily_menu_schedule",
         # كتالوج إضافات الأصناف — صفحة الإعدادات والجرسون (يُجرِّب SQL ثم احتياطي JSON)
         "catalog_addons",
+        "guest_return_reasons",
+        "guest_return_requests",
     }
 )
 _restaurant_sql_table_ready = False
@@ -12799,6 +13003,8 @@ def _restaurant_ops_default() -> dict:
         "deliveryChannelStrictFinancialModes": "on",  # on | off
         # قوالب الملاك/VIP — مصفوفة JSON (id, agentGuid, label, سياسة فوترة)
         "vipOwnerTemplatesJson": "[]",
+        # عند التفعيل: جرسون/استقبال/مناولة/طلبات سريعة لا يدخلون إلا إن لهم صف جدولة يغطي اليوم
+        "enforceRoleScheduleForShift": "off",  # on | off
     }
 
 
@@ -12831,7 +13037,15 @@ def _restaurant_normalize_ops(raw: dict) -> dict:
         cur["kitchenPrintTicketMode"] = "batch_only"
     else:
         cur["kitchenPrintTicketMode"] = kpm
-    for bkey in ("kitchenPrintShowTableChip", "specialTableDefaultNoService", "specialTableDefaultNoVat", "kidsAreaSeparateTickets", "auditLogClientActions", "deliveryChannelStrictFinancialModes"):
+    for bkey in (
+        "kitchenPrintShowTableChip",
+        "specialTableDefaultNoService",
+        "specialTableDefaultNoVat",
+        "kidsAreaSeparateTickets",
+        "auditLogClientActions",
+        "deliveryChannelStrictFinancialModes",
+        "enforceRoleScheduleForShift",
+    ):
         bv = str(cur.get(bkey) or "").strip().lower()
         cur[bkey] = "on" if bv in ("on", "1", "true", "yes") else "off"
     spm = str(cur.get("specialTableDefaultPriceMode") or "").strip().lower()
@@ -12950,25 +13164,48 @@ def _workflow_settings_key_set() -> frozenset:
 
 
 def _restaurant_read_ops_storage() -> dict:
-    """إعدادات تشغيل المطعم فقط — MAT3AM_RESTAURANT_OPS_SETTINGS + restaurant_ops_settings.json (بدون دمج workflow)."""
+    """إعدادات تشغيل المطعم فقط — دمج: افتراضيات ← SQL (SettingsKey=default) ← ملف restaurant_ops_settings.json.
+
+    الملف يُطبَّق بعد SQL حتى يعكس «حفظ الكل» مباشرة حتى لو تأخّر أو تعذّر تحديث SQL، ويُفسّر تعارض القراءة بين المسارين.
+    """
     d = _restaurant_ops_default()
+    merged: dict = dict(d)
     sql_obj = _ops_sql_read()
+    sql_missing = not isinstance(sql_obj, dict)
+
+    def _apply_ops_partial(src: dict) -> None:
+        for k in list(merged.keys()):
+            if k not in src:
+                continue
+            vr = src.get(k)
+            if vr is None:
+                continue
+            vs = str(vr).strip()
+            if not vs:
+                continue
+            merged[k] = vs
+
     if isinstance(sql_obj, dict):
-        return _restaurant_normalize_ops({**d, **sql_obj})
+        _apply_ops_partial(sql_obj)
+
     p = _restaurant_ops_settings_path()
-    if not os.path.exists(p):
-        return _restaurant_normalize_ops(d)
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            j = json.load(f)
-        if isinstance(j, dict):
-            for k in d.keys():
-                if k in j and str(j.get(k) or "").strip():
-                    d[k] = str(j.get(k)).strip()
-            _ops_sql_write(_restaurant_normalize_ops(d), updated_by="json_migration")
-    except Exception:
-        pass
-    return _restaurant_normalize_ops(d)
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                j = json.load(f)
+            if isinstance(j, dict):
+                _apply_ops_partial(j)
+                if sql_missing:
+                    try:
+                        _ops_sql_write(_restaurant_normalize_ops(dict(merged)), updated_by="json_migration")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    elif sql_missing:
+        return _restaurant_normalize_ops(merged)
+
+    return _restaurant_normalize_ops(merged)
 
 
 def _restaurant_read_ops() -> dict:
@@ -13477,6 +13714,276 @@ def restaurant_kitchen_item_stops_toggle(body: dict):
         found["resumedAt"] = now
     _restaurant_write_kitchen_item_stops(raw)
     return {"ok": True, "item": found}
+
+
+# --- Guest returns (مرتجع ضيف — جرسون يطلب، مدير يعتمد) ---
+_GUEST_RETURN_DISPOSITIONS = (
+    ("deduct_waiter", "تخصم على الويتر"),
+    ("deduct_kitchen", "تخصم على المطبخ"),
+    ("shift_charge", "تحميل على الشيفت"),
+    ("stock_return", "ترجع للمخزون"),
+)
+_GUEST_RETURN_DISPOSITION_CODES = {c for c, _ in _GUEST_RETURN_DISPOSITIONS}
+
+_DEFAULT_GUEST_RETURN_REASONS = [
+    {"code": "bad_taste", "label": "الطعم سيئ", "category": "جودة الطعام"},
+    {"code": "food_cold", "label": "الطعام بارد", "category": "جودة الطعام"},
+    {"code": "food_burnt", "label": "الطعام محروق", "category": "جودة الطعام"},
+    {"code": "order_delay", "label": "تأخير الطلب", "category": "خدمة وتوقيت"},
+    {"code": "wrong_order", "label": "الطلب خاطئ", "category": "خدمة وتوقيت"},
+    {"code": "missing_addons", "label": "نقص إضافات", "category": "جودة الطعام"},
+    {"code": "small_portion", "label": "حجم الوجبة صغير", "category": "جودة الطعام"},
+    {"code": "poor_ingredients", "label": "جودة المكونات ضعيفة", "category": "جودة الطعام"},
+    {"code": "too_salty_spicy", "label": "زيادة الملح أو البهارات", "category": "جودة الطعام"},
+    {"code": "too_greasy", "label": "الوجبة دهنية جدًا", "category": "جودة الطعام"},
+    {"code": "bad_plating", "label": "شكل الطبق غير جيد", "category": "جودة الطعام"},
+    {"code": "bad_smell", "label": "رائحة غير مقبولة", "category": "نظافة وسلامة"},
+    {"code": "undercooked", "label": "عدم نضج الطعام", "category": "جودة الطعام"},
+    {"code": "waiter_mistreatment", "label": "سوء معاملة الويتر", "category": "سلوك الموظف"},
+    {"code": "messy_arrival", "label": "وصول الطعام مبعثر", "category": "جودة الطعام"},
+    {"code": "inconsistent_quality", "label": "اختلاف الجودة بين الزيارات", "category": "جودة الطعام"},
+    {"code": "price_quality", "label": "السعر لا يناسب الجودة", "category": "فوترة ومنيو"},
+    {"code": "dirty_dish", "label": "النظافة سيئة للوجبة", "category": "نظافة وسلامة"},
+    {"code": "foreign_object", "label": "وجود شعر أو جسم غريب", "category": "نظافة وسلامة"},
+    {"code": "special_request_error", "label": "خطأ في الطلبات الخاصة", "category": "خدمة وتوقيت"},
+    {"code": "delivery_delay", "label": "التأخير في التوصيل", "category": "خدمة وتوقيت"},
+    {"code": "drinks_not_fresh", "label": "العصائر أو المشروبات غير طازجة", "category": "مشروبات"},
+    {"code": "fries_cold", "label": "البطاطس أو المقليات باردة", "category": "جودة الطعام"},
+    {"code": "stale_bread", "label": "الخبز قديم", "category": "جودة الطعام"},
+    {"code": "low_cheese_sauce", "label": "الجبن أو الصوص قليل", "category": "جودة الطعام"},
+    {"code": "staff_rude", "label": "سوء تعامل الموظف", "category": "سلوك الموظف"},
+    {"code": "dirty_table", "label": "الطاولة أو الأدوات غير نظيفة", "category": "نظافة وسلامة"},
+    {"code": "wrong_bill", "label": "الفاتورة خاطئة", "category": "فوترة ومنيو"},
+    {"code": "not_like_menu_photo", "label": "الوجبة لا تشبه الصورة في المنيو", "category": "فوترة ومنيو"},
+    {"code": "unused_drink", "label": "مشروب غير مستخدم (إرجاع كامل)", "category": "مشروبات"},
+]
+
+
+def _guest_return_reasons_list() -> List[dict]:
+    d = _restaurant_load("guest_return_reasons", {})
+    raw = d.get("reasons") if isinstance(d, dict) else None
+    if isinstance(raw, list) and raw:
+        out = []
+        for r in raw:
+            if not isinstance(r, dict):
+                continue
+            code = str(r.get("code") or "").strip()
+            label = str(r.get("label") or "").strip()
+            if not code or not label:
+                continue
+            out.append(
+                {
+                    "code": code[:64],
+                    "label": label[:200],
+                    "category": str(r.get("category") or "أخرى")[:80],
+                }
+            )
+        if out:
+            return out
+    return [dict(x) for x in _DEFAULT_GUEST_RETURN_REASONS]
+
+
+def _guest_return_reason_map() -> dict:
+    return {str(r["code"]): r for r in _guest_return_reasons_list()}
+
+
+@app.get("/api/restaurant/guest-return-reasons")
+def restaurant_guest_return_reasons_get():
+    reasons = _guest_return_reasons_list()
+    dispositions = [{"code": c, "label": lb} for c, lb in _GUEST_RETURN_DISPOSITIONS]
+    return {"reasons": reasons, "dispositions": dispositions}
+
+
+@app.put("/api/restaurant/guest-return-reasons")
+def restaurant_guest_return_reasons_put(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    raw = body.get("reasons")
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="reasons مطلوبة")
+    norm = []
+    for r in raw[:80]:
+        if not isinstance(r, dict):
+            continue
+        code = str(r.get("code") or "").strip()
+        label = str(r.get("label") or "").strip()
+        if not code or not label:
+            continue
+        norm.append(
+            {
+                "code": code[:64],
+                "label": label[:200],
+                "category": str(r.get("category") or "أخرى")[:80],
+            }
+        )
+    if not norm:
+        raise HTTPException(status_code=400, detail="قائمة الأسباب فارغة")
+    _restaurant_save("guest_return_reasons", {"reasons": norm})
+    return {"ok": True, "reasons": norm}
+
+
+def _guest_return_requests_load() -> list:
+    raw = _restaurant_load("guest_return_requests", [])
+    return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+
+def _guest_return_requests_save(data: list) -> None:
+    _restaurant_save("guest_return_requests", data[:500])
+
+
+@app.get("/api/restaurant/guest-returns")
+def restaurant_guest_returns_get(
+    sessionId: Optional[str] = None,
+    status: Optional[str] = None,
+    tableId: Optional[str] = None,
+):
+    data = _guest_return_requests_load()
+    if sessionId:
+        data = [x for x in data if str(x.get("sessionId") or "") == str(sessionId)]
+    if tableId:
+        data = [x for x in data if str(x.get("tableId") or "") == str(tableId)]
+    if status:
+        st = str(status).strip().lower()
+        data = [x for x in data if str(x.get("status") or "").lower() == st]
+    data.sort(key=lambda x: str(x.get("requestedAt") or x.get("createdAt") or ""), reverse=True)
+    return {"requests": data}
+
+
+@app.post("/api/restaurant/guest-returns")
+def restaurant_guest_returns_post(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    session_id = str(body.get("sessionId") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="sessionId مطلوب")
+    lines_in = body.get("lines")
+    if not isinstance(lines_in, list) or not lines_in:
+        raise HTTPException(status_code=400, detail="lines مطلوبة (بند واحد على الأقل)")
+    reason_map = _guest_return_reason_map()
+    norm_lines = []
+    for ln in lines_in[:40]:
+        if not isinstance(ln, dict):
+            continue
+        order_id = str(ln.get("orderId") or "").strip()
+        line_id = str(ln.get("lineId") or "").strip()
+        if not order_id or not line_id:
+            continue
+        rc = str(ln.get("reasonCode") or "").strip()
+        if rc not in reason_map:
+            raise HTTPException(status_code=400, detail=f"سبب غير معروف: {rc}")
+        disp = str(ln.get("proposedDisposition") or ln.get("disposition") or "").strip()
+        if disp and disp not in _GUEST_RETURN_DISPOSITION_CODES:
+            raise HTTPException(status_code=400, detail=f"معالجة غير مدعومة: {disp}")
+        try:
+            rq = float(ln.get("returnQty") or ln.get("quantity") or 0)
+        except (TypeError, ValueError):
+            rq = 0
+        if rq <= 0:
+            continue
+        rr = reason_map[rc]
+        norm_lines.append(
+            {
+                "orderId": order_id[:80],
+                "lineId": line_id[:80],
+                "productGuide": str(ln.get("productGuide") or "")[:80],
+                "name": str(ln.get("name") or "")[:300],
+                "quantity": float(ln.get("quantity") or rq),
+                "returnQty": rq,
+                "unitPrice": float(ln.get("unitPrice") or 0),
+                "seatNo": ln.get("seatNo"),
+                "reasonCode": rc,
+                "reasonLabel": str(rr.get("label") or rc)[:200],
+                "reasonCategory": str(rr.get("category") or "")[:80],
+                "proposedDisposition": disp or None,
+                "finalDisposition": None,
+                "waiterNote": str(ln.get("waiterNote") or "")[:400],
+            }
+        )
+    if not norm_lines:
+        raise HTTPException(status_code=400, detail="لا بنود صالحة")
+    actor = body.get("requestedBy") if isinstance(body.get("requestedBy"), dict) else {}
+    now_iso = datetime.now().isoformat()
+    rec = {
+        "id": str(uuid.uuid4()),
+        "sessionId": session_id,
+        "tableId": str(body.get("tableId") or "")[:80],
+        "tableLabel": str(body.get("tableLabel") or "")[:120],
+        "status": "pending_manager",
+        "requestedAt": now_iso,
+        "requestedBy": {
+            "userId": str(actor.get("userId") or body.get("userId") or "")[:64],
+            "name": str(actor.get("name") or body.get("userName") or "")[:120],
+            "role": str(actor.get("role") or "")[:32],
+        },
+        "lines": norm_lines,
+        "managerNote": "",
+        "managerReview": None,
+    }
+    data = _guest_return_requests_load()
+    data.append(rec)
+    _guest_return_requests_save(data)
+    return {"ok": True, "request": rec}
+
+
+@app.patch("/api/restaurant/guest-returns/{request_id}")
+def restaurant_guest_returns_patch(request_id: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    action = str(body.get("action") or "").strip().lower()
+    data = _guest_return_requests_load()
+    target = None
+    for r in data:
+        if str(r.get("id") or "") == str(request_id):
+            target = r
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="طلب المرتجع غير موجود")
+    now_iso = datetime.now().isoformat()
+    reviewer = body.get("reviewedBy") if isinstance(body.get("reviewedBy"), dict) else {}
+    if action == "reject":
+        target["status"] = "rejected"
+        target["managerNote"] = str(body.get("managerNote") or "")[:2000]
+        target["managerReview"] = {
+            "userId": str(reviewer.get("userId") or "")[:64],
+            "name": str(reviewer.get("name") or "")[:120],
+            "at": now_iso,
+        }
+        _guest_return_requests_save(data)
+        return {"ok": True, "request": target}
+    if action in ("approve", "approve_lines"):
+        if str(target.get("status") or "").lower() not in ("pending_manager",):
+            raise HTTPException(status_code=409, detail="الطلب ليس بانتظار المدير")
+        line_updates = body.get("lines")
+        if isinstance(line_updates, list):
+            by_lid = {str(x.get("lineId") or ""): x for x in line_updates if isinstance(x, dict)}
+            for ln in target.get("lines") or []:
+                if not isinstance(ln, dict):
+                    continue
+                lid = str(ln.get("lineId") or "")
+                upd = by_lid.get(lid)
+                if not upd:
+                    continue
+                fd = str(upd.get("finalDisposition") or upd.get("disposition") or "").strip()
+                if fd and fd not in _GUEST_RETURN_DISPOSITION_CODES:
+                    raise HTTPException(status_code=400, detail=f"معالجة غير مدعومة: {fd}")
+                if fd:
+                    ln["finalDisposition"] = fd
+                elif ln.get("proposedDisposition"):
+                    ln["finalDisposition"] = ln.get("proposedDisposition")
+        else:
+            for ln in target.get("lines") or []:
+                if isinstance(ln, dict) and ln.get("proposedDisposition") and not ln.get("finalDisposition"):
+                    ln["finalDisposition"] = ln.get("proposedDisposition")
+        target["status"] = "approved"
+        target["managerNote"] = str(body.get("managerNote") or target.get("managerNote") or "")[:2000]
+        target["managerReview"] = {
+            "userId": str(reviewer.get("userId") or "")[:64],
+            "name": str(reviewer.get("name") or "")[:120],
+            "at": now_iso,
+        }
+        _guest_return_requests_save(data)
+        return {"ok": True, "request": target}
+    raise HTTPException(status_code=400, detail="action غير مدعوم: approve | reject")
 
 
 def _floor_plan_table_id_to_label() -> dict:
@@ -14979,6 +15486,17 @@ def _mat3am_guid_norm(s: Optional[str]) -> str:
     return str(s or "").strip().replace("{", "").replace("}", "").upper()
 
 
+def _restaurant_table_ids_equal(a: object, b: object) -> bool:
+    """مطابقة tableId بين الجلسة والواجهة (GUID قد يختلف الحرف/الأقواس)."""
+    sa = str(a or "").strip()
+    sb = str(b or "").strip()
+    if not sa or not sb:
+        return False
+    if sa == sb:
+        return True
+    return _mat3am_guid_norm(sa) == _mat3am_guid_norm(sb)
+
+
 def _captain_transfer_requests_load() -> List[dict]:
     raw = _restaurant_load("captain_transfer_requests", [])
     return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
@@ -15922,11 +16440,31 @@ def restaurant_patch_session(session_id: str, body: dict):
 
     new_table = str(body.get("tableId") or "").strip()
     if new_table:
+        for s in data:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("id") or "").strip() == sid:
+                continue
+            if str(s.get("status") or "").lower() != "active":
+                continue
+            if _restaurant_table_ids_equal(s.get("tableId"), new_table):
+                raise HTTPException(
+                    status_code=409,
+                    detail="الطاولة الهدف لها جلسة نشطة أخرى. اختر طاولة فارغة أو أغلق الجلسة هناك أولاً.",
+                )
         did = True
         old_table = found.get("tableId")
         found["tableId"] = new_table
+        actor = _mat3am_actor_from_body(body)
+        aid = str(actor.get("id") or "").strip()
+        if aid and not str(found.get("captainUserId") or "").strip():
+            now_iso = datetime.now().isoformat()
+            found["captainUserId"] = aid
+            found["captainName"] = str(actor.get("name") or actor.get("login") or "")[:200]
+            found["captainLogin"] = str(actor.get("login") or "")[:120]
+            found["captainClaimedAt"] = now_iso
         try:
-            if old_table and str(old_table).strip() and str(old_table).strip() != new_table:
+            if old_table and str(old_table).strip() and not _restaurant_table_ids_equal(old_table, new_table):
                 restaurant_update_table_status(str(old_table).strip(), {"status": "ready"})
         except Exception:
             pass
@@ -15974,7 +16512,7 @@ def restaurant_merge_session(session_id: str, body: dict):
             continue
         if str(s.get("id") or "") == str(session_id):
             src = s
-        if str(s.get("tableId") or "") == target_table_id and str(s.get("status") or "").lower() == "active":
+        if str(s.get("status") or "").lower() == "active" and _restaurant_table_ids_equal(s.get("tableId"), target_table_id):
             dst = s
     if not src:
         raise HTTPException(status_code=404, detail="الجلسة المصدر غير موجودة")
@@ -15984,6 +16522,20 @@ def restaurant_merge_session(session_id: str, body: dict):
         raise HTTPException(status_code=404, detail="لا توجد جلسة نشطة للطاولة الهدف")
     if str(dst.get("id") or "") == str(session_id):
         raise HTTPException(status_code=400, detail="لا يمكن دمج الجلسة مع نفسها")
+    src_cap = str(src.get("captainUserId") or "").strip()
+    dst_cap = str(dst.get("captainUserId") or "").strip()
+    if src_cap and dst_cap and _mat3am_guid_norm(dst_cap) != _mat3am_guid_norm(src_cap):
+        raise HTTPException(
+            status_code=409,
+            detail="الدمج مسموح فقط بين جلسات لنفس مسند الطلب (الكابتن).",
+        )
+    # جلسة الهدف بلا كابتن: نورّث مسند المصدر حتى يبقى الدمج تحت نفس «الساكن»
+    if src_cap and not dst_cap:
+        now_iso = datetime.now().isoformat()
+        dst["captainUserId"] = src_cap
+        dst["captainName"] = str(src.get("captainName") or src.get("captainLogin") or "")[:200]
+        dst["captainLogin"] = str(src.get("captainLogin") or "")[:120]
+        dst.setdefault("captainClaimedAt", now_iso)
     orders = _restaurant_load("orders", [])
     if not isinstance(orders, list):
         orders = []
@@ -21284,14 +21836,12 @@ def _mat3am_schema_probe_payload() -> dict:
 
 
 @app.get("/api/dev/mat3am-schema-probe")
-def api_dev_mat3am_schema_probe():
+async def api_dev_mat3am_schema_probe():
     """تشخيص صريح: مسار الملف، الإعدادات، DB_NAME()، ووجود كل جدول — لاكتشاف عملية API قديمة أو قاعدة خاطئة."""
-    return _mat3am_schema_probe_payload()
+    return await run_in_threadpool(_mat3am_schema_probe_payload)
 
 
-@app.post("/api/dev/mat3am-schema-ensure")
-def api_dev_mat3am_schema_ensure():
-    """ينفّذ نفس DDL التهيئة ثم يعيد التشخيص — عندما تكون الجداول ناقصة رغم تشغيل خادم حديث."""
+def _mat3am_schema_ensure_sync() -> dict:
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="لا اتصال بقاعدة البيانات — احفظ الإعدادات أولاً")
@@ -21299,6 +21849,8 @@ def api_dev_mat3am_schema_ensure():
         cursor = conn.cursor()
         _ensure_mat3am_dev_schema(cursor)
         conn.commit()
+    except HTTPException:
+        raise
     except Exception as e:
         try:
             conn.rollback()
@@ -21311,6 +21863,12 @@ def api_dev_mat3am_schema_ensure():
         except Exception:
             pass
     return _mat3am_schema_probe_payload()
+
+
+@app.post("/api/dev/mat3am-schema-ensure")
+async def api_dev_mat3am_schema_ensure():
+    """ينفّذ نفس DDL التهيئة ثم يعيد التشخيص — عندما تكون الجداول ناقصة رغم تشغيل خادم حديث."""
+    return await run_in_threadpool(_mat3am_schema_ensure_sync)
 
 
 @app.post("/api/dev/error-logs")

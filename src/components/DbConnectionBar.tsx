@@ -18,8 +18,10 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
   const [pending, setPending] = useState(true);
   const [ok, setOk] = useState(false);
   const [dbName, setDbName] = useState<string | null>(null);
+  const [cfgDb, setCfgDb] = useState<string | null>(null);
   const [serverLabel, setServerLabel] = useState<string | null>(null);
   const [apiDown, setApiDown] = useState(false);
+  const [dbDetail, setDbDetail] = useState<string | null>(null);
   const [probeBusy, setProbeBusy] = useState(false);
   const [probeText, setProbeText] = useState<string | null>(null);
 
@@ -81,7 +83,10 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
           safeFetch(`${base}/api/ping`),
           safeFetch(`${base}/api/settings/connection`),
         ]);
-        const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : networkErrorResponse());
+        const { cfgDb: cfgDbParsed, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : networkErrorResponse());
+        if (!cancelled) {
+          setCfgDb(cfgDbParsed);
+        }
 
         let apiAlive = false;
         if (rPing.ok) {
@@ -97,8 +102,9 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
           if (!cancelled) {
             setApiDown(true);
             setOk(false);
-            setDbName(cfgDb);
+            setDbName(cfgDbParsed);
             setServerLabel(cfgServer);
+            setDbDetail(null);
           }
           return;
         }
@@ -109,8 +115,9 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
         if (cancelled) return;
         if (!rReady.ok) {
           setOk(false);
-          setDbName(cfgDb);
+          setDbName(cfgDbParsed);
           setServerLabel(cfgServer);
+          setDbDetail("تعذر فحص SQL");
           return;
         }
         const j = (await rReady.json()) as { database?: ReadyDb };
@@ -118,15 +125,18 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
         const st = db?.status;
         setOk(st === "ok");
         const liveName = db?.databaseName?.trim() || null;
-        setDbName(liveName || cfgDb);
+        setDbName(liveName || cfgDbParsed);
         setServerLabel(db?.serverLabel?.trim() || cfgServer);
+        setDbDetail(st === "ok" ? null : db?.detail?.trim() || st || null);
       } catch {
         try {
           const rCfg = await safeFetch(`${base}/api/settings/connection`);
-          const { cfgDb, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : networkErrorResponse());
+          const { cfgDb: cfgDbParsed, cfgServer } = await parseConnectionCfg(rCfg.ok ? rCfg : networkErrorResponse());
           if (!cancelled) {
-            setDbName(cfgDb);
+            setCfgDb(cfgDbParsed);
+            setDbName(cfgDbParsed);
             setServerLabel(cfgServer);
+            setDbDetail(null);
           }
         } catch {
           if (!cancelled) {
@@ -152,12 +162,14 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
   }, []);
 
   const label = apiDown
-    ? "لا تستجيب (المنافذ 2288/9999)"
-    : dbName
-      ? dbName
-      : "لم تُحفَظ إعدادات القاعدة — افتح «اتصال القاعدة» واضغط حفظ";
+    ? "API متوقف — شغّل run_full_stack.bat (2288 + 9999)"
+    : ok
+      ? dbName || cfgDb || "متصل"
+      : cfgDb
+        ? `SQL غير متصل (${cfgDb})`
+        : "لم تُحفَظ إعدادات القاعدة — اتصال القاعدة → حفظ";
 
-  const sub = serverLabel ? serverLabel : null;
+  const sub = apiDown ? "http://127.0.0.1:2288/api/ping" : dbDetail || serverLabel || null;
 
   return (
     <div

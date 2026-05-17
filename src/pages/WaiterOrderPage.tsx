@@ -3,31 +3,48 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
-import { fetchDailyMenuFromApi, isProductOnDailyMenu, loadDailyMenuState, type DailyMenuState } from "../lib/dailyMenuSettings";
+import {
+  fetchDailyMenuFromApi,
+  fetchDailyMenuSchedule,
+  isProductAllowedOnWaiterMenu,
+  loadDailyMenuState,
+  scheduleRestrictionForDate,
+  todayYmd,
+  type DailyMenuScheduleEntry,
+  type DailyMenuState,
+} from "../lib/dailyMenuSettings";
 import { applyPromotions, type Promotion } from "../lib/posPromotions";
 import { buildSegmentedTablesFromFloorPlan } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 import SmartProductSearch from "../components/SmartProductSearch";
+import GuestReturnRequestModal, { type GuestReturnOrderLine } from "../components/GuestReturnRequestModal";
 import { useAuth } from "../auth/AuthContext";
+import { sessionDisplayName } from "../auth/displayUser";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
-import { safeFetch } from "../lib/safeFetch";
+import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
+import {
+  ORDER_TAKER_UI_STORAGE_KEY,
+  readOrderTakerMobileUi,
+  saveOrderTakerMobileUi,
+  type OrderTakerMobileUi,
+} from "../lib/waiterOrderUiPrefs";
 
 /** عرض الجوال لسلوك التتابع (يتوافق مع operationalRoles @media max-width) */
 const WAITER_OT_NARROW_MAX_PX = 900;
 
-/** شريط الجوال الأيسر داخل «طلب للطاولة» فقط — ترتيب = تسلسل عمل الجرسون مع الطاولة (ليس قائمة التطبيق العامة) */
+/** شريط الجوال داخل «طلب للطاولة» — يبدأ بالعودة للصالة ثم تعريف الضيوف ثم باقي التسلسل */
 const WAITER_OT_RAIL_SECTIONS: { id: string; label: string; title: string }[] = [
   { id: "waiter-ot-nav-tables", label: "طاولات", title: "العودة لقائمة الطاولات (لوحة البداية)" },
-  { id: "waiter-ot-sec-table", label: "طاولة", title: "١) الطاولة والجلسة" },
-  { id: "waiter-ot-sec-distribute", label: "ضيوف", title: "قائمة الضيوف — أسماء على الشيك — كل اسم = سلّة هذا المقعد" },
-  { id: "waiter-ot-sec-categories", label: "فئات", title: "٣) مجموعة الأصناف" },
-  { id: "waiter-ot-sec-search", label: "بحث", title: "٤) بحث سريع عن صنف" },
-  { id: "waiter-ot-sec-grid", label: "أصناف", title: "٥) شبكة الأصناف" },
-  { id: "waiter-ot-sec-pending", label: "قيد", title: "٦) السلة قبل الإرسال" },
-  { id: "waiter-ot-sec-sent", label: "مرسل", title: "٧) طلبات مُرسلة (الجلسة)" },
-  { id: "waiter-ot-sec-totals", label: "حساب", title: "٨) الإجماليات والضرائب" },
-  { id: "waiter-ot-sec-navopts", label: "خيارات", title: "٩) تحويل، دمج، سبليت، تقرير، مطبخ" },
+  { id: "waiter-ot-sec-distribute", label: "تعريف ضيوف", title: "تعريف الضيوف — طلب عام أو اسم على كل كرسي؛ كل اسم = سلّة هذا المقعد" },
+  { id: "waiter-ot-sec-table", label: "طاولة", title: "الطاولة والجلسة" },
+  { id: "waiter-ot-sec-categories", label: "فئات", title: "مجموعة الأصناف" },
+  { id: "waiter-ot-sec-search", label: "بحث", title: "بحث سريع عن صنف" },
+  { id: "waiter-ot-sec-grid", label: "أصناف", title: "شبكة الأصناف (يُعرض البحث فوقها على الشاشة)" },
+  { id: "waiter-ot-sec-pending", label: "قيد", title: "السلة قبل الإرسال" },
+  { id: "waiter-ot-sec-sent", label: "مرسل", title: "طلبات مُرسلة (الجلسة)" },
+  { id: "waiter-ot-sec-totals", label: "حساب", title: "الإجماليات والضرائب" },
+  { id: "waiter-ot-sec-navopts", label: "خيارات", title: "تحويل، دمج، سبليت، تقرير، مطبخ" },
 ];
 
 type Product = {
@@ -70,6 +87,24 @@ type RestTable = {
   minimumCharge?: number;
 };
 
+function matchesTablePickQuery(t: RestTable, rawQuery: string): boolean {
+  const s = rawQuery.trim().toLowerCase();
+  if (!s) return true;
+  const name = String(t.name || "").toLowerCase().replace(/\s+/g, " ");
+  const num = t.number != null ? String(t.number) : "";
+  const id = String(t.id || "").toLowerCase();
+  if (name.includes(s) || num.includes(s) || id.includes(s)) return true;
+  const compact = s.replace(/\s+/g, "");
+  const m = /^t(\d+)$|^(\d+)$/.exec(compact);
+  const n = m ? Number(m[1] || m[2]) : NaN;
+  if (Number.isFinite(n) && n > 0) {
+    if (t.number != null && Number(t.number) === n) return true;
+    const boundary = new RegExp(`(?:^|[^0-9])${n}(?:[^0-9]|$)`);
+    if (boundary.test(name) || boundary.test(id)) return true;
+  }
+  return false;
+}
+
 type CartLine = {
   id: string;
   productGuide: string;
@@ -87,15 +122,73 @@ type CartLine = {
 
 type CatalogAddonRow = { id: number; label: string; price: number; sortOrder: number; isActive: boolean };
 
+type ServerOrderItem = {
+  lineId?: string;
+  name?: string;
+  quantity?: number;
+  unitPrice?: number;
+  seatNo?: number | null;
+  lineStatus?: string;
+  cancelled?: boolean;
+  productGuide?: string;
+};
+
 type ServerOrder = {
   id: string;
   sessionId?: string;
   tableId?: string;
   status?: string;
-  items?: { name?: string; quantity?: number; seatNo?: number }[];
+  items?: ServerOrderItem[];
   generalOrder?: boolean;
   createdAt?: string;
+  updatedAt?: string;
 };
+
+const ORDER_STATUS_AR: Record<string, string> = {
+  pending: "انتظار المطبخ",
+  preparing: "قيد التحضير",
+  ready: "جاهز",
+  served: "مُقدَّم",
+  paid: "مدفوع",
+  cancelled: "ملغى",
+};
+
+function orderStatusLabelAr(st: string): string {
+  const k = (st || "").toLowerCase();
+  return ORDER_STATUS_AR[k] || st || "—";
+}
+
+function activeOrderItems(o: ServerOrder): ServerOrderItem[] {
+  return (o.items || []).filter((i) => !i.cancelled && Number(i.quantity ?? 0) > 0);
+}
+
+function formatOrderItemLine(i: ServerOrderItem): string {
+  const q = Number(i.quantity ?? 1) || 1;
+  const seat = i.seatNo != null && Number(i.seatNo) >= 1 ? ` · ك${i.seatNo}` : "";
+  const price = Number(i.unitPrice ?? 0) > 0 ? ` — ${Math.round(Number(i.unitPrice))} ج` : "";
+  return `${i.name || "صنف"} ×${q}${seat}${price}`;
+}
+
+function flattenSessionLinesForReturn(orders: ServerOrder[]): GuestReturnOrderLine[] {
+  const out: GuestReturnOrderLine[] = [];
+  for (const o of orders) {
+    if ((o.status || "").toLowerCase() === "cancelled") continue;
+    for (const it of activeOrderItems(o)) {
+      const lid = String(it.lineId || "").trim();
+      if (!lid) continue;
+      out.push({
+        orderId: o.id,
+        lineId: lid,
+        productGuide: String(it.productGuide || ""),
+        name: String(it.name || "صنف"),
+        quantity: Number(it.quantity ?? 1) || 1,
+        unitPrice: Number(it.unitPrice ?? 0) || 0,
+        seatNo: it.seatNo,
+      });
+    }
+  }
+  return out;
+}
 
 type PosPolicy = {
   servicePercent: number;
@@ -184,6 +277,51 @@ function tableRefKey(raw: unknown): string {
   return String(raw ?? "").trim().toUpperCase();
 }
 
+/** مطابقة معرف طاولة بين المخطط (T14) والجلسة (GUID) */
+function restaurantTableIdsEqual(a: unknown, b: unknown): boolean {
+  const sa = String(a ?? "").trim();
+  const sb = String(b ?? "").trim();
+  if (!sa || !sb) return false;
+  if (sa === sb) return true;
+  const norm = (s: string) => s.replace(/[{}]/g, "").toUpperCase();
+  return norm(sa) === norm(sb);
+}
+
+/** فهرس جلسات نشطة: مفتاح = مرجع طاولة من الجلسة، ثم يُملأ تحت مرجع كل صف في المخطط يشير لنفس الطاولة */
+function buildSessionByTableRef(sess: unknown[], catalog?: RestTable[]): Record<string, { id: string; captainUserId: string }> {
+  const out: Record<string, { id: string; captainUserId: string }> = {};
+  for (const x of sess) {
+    if (!x || typeof x !== "object") continue;
+    const o = x as { id?: string; tableId?: unknown; status?: string; captainUserId?: string };
+    if (String(o.status || "").toLowerCase() !== "active") continue;
+    const tid = tableRefKey(o.tableId);
+    if (!tid) continue;
+    out[tid] = { id: String(o.id || "").trim(), captainUserId: String(o.captainUserId || "").trim() };
+  }
+  if (catalog?.length) {
+    for (const t of catalog) {
+      const k = tableRefKey(t.id);
+      if (out[k]?.id) continue;
+      for (const x of sess) {
+        if (!x || typeof x !== "object") continue;
+        const o = x as { id?: string; tableId?: unknown; status?: string; captainUserId?: string };
+        if (String(o.status || "").toLowerCase() !== "active") continue;
+        if (!restaurantTableIdsEqual(t.id, o.tableId)) continue;
+        out[k] = { id: String(o.id || "").trim(), captainUserId: String(o.captainUserId || "").trim() };
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** مطابقة معرف مستخدم/GUID بين الجلسة وواجهة الكابتن */
+function mat3amGuidNormEq(a: string, b: string): boolean {
+  const x = String(a || "").trim().replace(/[{}]/g, "").toUpperCase();
+  const y = String(b || "").trim().replace(/[{}]/g, "").toUpperCase();
+  return x.length > 0 && y.length > 0 && x === y;
+}
+
 function seatNoFromLine(l: CartLine): number | null {
   if (l.seatNo != null && Number.isFinite(l.seatNo)) return l.seatNo;
   const m = /كرسي\s*(\d+)/.exec(String(l.seatLabel || ""));
@@ -225,7 +363,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     return `${base}${raw.startsWith("/") ? "" : "/"}${raw}`;
   };
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const terminalLock = useTerminalLock();
 
@@ -254,10 +392,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [dailyMenuState, setDailyMenuState] = useState<DailyMenuState | null>(null);
+  const [dailyMenuScheduleEntries, setDailyMenuScheduleEntries] = useState<DailyMenuScheduleEntry[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [sessionOrders, setSessionOrders] = useState<ServerOrder[]>([]);
   const [ordersBusy, setOrdersBusy] = useState(false);
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnModalLines, setReturnModalLines] = useState<GuestReturnOrderLine[]>([]);
   const [catalogAddons, setCatalogAddons] = useState<CatalogAddonRow[]>([]);
   /** بعد أول محاولة جلب — يُمنع ضغطة سريقة قبل اكتمال التحميل (كانت تتخطّى المودال) */
   const [catalogAddonsReady, setCatalogAddonsReady] = useState(false);
@@ -273,6 +414,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [splitBySeat, setSplitBySeat] = useState(false);
   const [transferTargetTableId, setTransferTargetTableId] = useState("");
   const [mergeTargetTableId, setMergeTargetTableId] = useState("");
+  const [transferPickQuery, setTransferPickQuery] = useState("");
+  const [mergePickQuery, setMergePickQuery] = useState("");
+  /** نتائج «بحث» — null = لم يُنفَّذ بحث بعد (لا تُعرض قائمة تحت الحقل) */
+  const [transferSearchResults, setTransferSearchResults] = useState<RestTable[] | null>(null);
+  const [mergeSearchResults, setMergeSearchResults] = useState<RestTable[] | null>(null);
+  /** كل الطاولات (المخطط) لاختيار التحويل/الدمج — لا تُصفّى بمسند الكابتن */
+  const [tablesMoveCatalog, setTablesMoveCatalog] = useState<RestTable[]>([]);
+  /** جلسة نشطة واحدة لكل tableId (مرجع موحّد) */
+  const [sessionByTableRef, setSessionByTableRef] = useState<Record<string, { id: string; captainUserId: string }>>({});
   const [sessionMoveBusy, setSessionMoveBusy] = useState(false);
   /** اسم للعرض/الطباعة على الشيك — نصّي على الجلسة وليس عميلاً منفصلاً في TBL016 */
   const [seatGuestLabels, setSeatGuestLabels] = useState<Record<number, string>>({});
@@ -293,6 +443,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [narrowOtViewport, setNarrowOtViewport] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches : false,
   );
+  const [orderTakerMobileUi, setOrderTakerMobileUi] = useState<OrderTakerMobileUi>(readOrderTakerMobileUi);
+  /** نموذج ٢: القسم الظاهر في منطقة المحتوى (تبويب واحد — لا تكديس) */
+  const [otTabsPanelId, setOtTabsPanelId] = useState<string>("waiter-ot-sec-categories");
   /** جوال: إخفاء قائمة المقاعد بعد تأكيد الاسم للانتقال للفئات/الأصناف */
   const [seatPanelMobCollapsed, setSeatPanelMobCollapsed] = useState(false);
   const [mobileFlowToast, setMobileFlowToast] = useState("");
@@ -318,6 +471,62 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     () => tables.find((t) => t.id === selectedTableId) || null,
     [tables, selectedTableId]
   );
+
+  const transferPickBase = useMemo(() => {
+    return tablesMoveCatalog.filter((t) => {
+      if (String(t.id) === String(selectedTableId)) return false;
+      const ref = tableRefKey(t.id);
+      const occ = sessionByTableRef[ref];
+      if (occ?.id) return false;
+      const tst = normalizeTableStatus(String(t.status || ""));
+      if (tst === "dirty" || tst === "cleaning") return false;
+      return true;
+    });
+  }, [tablesMoveCatalog, sessionByTableRef, selectedTableId]);
+
+  const mergePickBase = useMemo(() => {
+    const capId = String(captainGate?.id || "").trim();
+    return tablesMoveCatalog.filter((t) => {
+      if (String(t.id) === String(selectedTableId)) return false;
+      const ref = tableRefKey(t.id);
+      const occ = sessionByTableRef[ref];
+      if (!occ?.id) return false;
+      if (String(occ.id) === String(activeSessionId || "")) return false;
+      if (capId) {
+        const oc = String(occ.captainUserId || "").trim();
+        if (oc && !mat3amGuidNormEq(oc, capId)) return false;
+      }
+      return true;
+    });
+  }, [tablesMoveCatalog, sessionByTableRef, selectedTableId, captainGate?.id, activeSessionId]);
+
+  const runTransferTableSearch = useCallback(() => {
+    const q = transferPickQuery.trim();
+    const list = q ? transferPickBase.filter((t) => matchesTablePickQuery(t, q)) : transferPickBase.slice(0, 80);
+    setTransferSearchResults(list);
+  }, [transferPickQuery, transferPickBase]);
+
+  const runMergeTableSearch = useCallback(() => {
+    const q = mergePickQuery.trim();
+    const list = q ? mergePickBase.filter((t) => matchesTablePickQuery(t, q)) : mergePickBase.slice(0, 80);
+    setMergeSearchResults(list);
+  }, [mergePickQuery, mergePickBase]);
+
+  useEffect(() => {
+    setTransferSearchResults(null);
+    setMergeSearchResults(null);
+  }, [selectedTableId]);
+
+  useEffect(() => {
+    setTransferSearchResults(null);
+    setTransferTargetTableId("");
+  }, [transferPickQuery]);
+
+  useEffect(() => {
+    setMergeSearchResults(null);
+    setMergeTargetTableId("");
+  }, [mergePickQuery]);
+
   const isDeliveryEmbedded = String(embeddedChannel || "").trim().toLowerCase() === "delivery";
   const selectedTableStatus = normalizeTableStatus(String((selectedTable as any)?.status || ""));
   const selectedTableBlocked = selectedTableStatus === "dirty" || selectedTableStatus === "cleaning";
@@ -359,13 +568,35 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     for (const s of WAITER_OT_RAIL_SECTIONS) {
       out.push({ kind: "section", id: s.id, label: s.label, title: s.title });
       if (s.id === "waiter-ot-sec-distribute") {
-        for (const seatNo of WAITER_OT_RAIL_GUEST_SEAT_ORDER) {
+        const labeledSeatNos = WAITER_OT_RAIL_GUEST_SEAT_ORDER.filter(
+          (n) => n !== SHARED_SEAT_NO && String(seatGuestLabels[n] ?? "").trim().length > 0,
+        );
+        for (const seatNo of labeledSeatNos) {
           out.push({ kind: "guest", seatNo });
         }
+        out.push({ kind: "guest", seatNo: SHARED_SEAT_NO });
       }
     }
     return out;
-  }, [narrowOtViewport, assignmentMode]);
+  }, [narrowOtViewport, assignmentMode, seatGuestLabels]);
+
+  const useOtTabsUi = narrowOtViewport && orderTakerMobileUi === "tabs";
+
+  const otTabRowIsActive = useCallback(
+    (row: WaiterOtRailRow) => {
+      if (!useOtTabsUi) return false;
+      if (row.kind === "guest") {
+        return otTabsPanelId === "waiter-ot-sec-categories" && selectedSeat === row.seatNo;
+      }
+      return otTabsPanelId === row.id;
+    },
+    [useOtTabsUi, otTabsPanelId, selectedSeat],
+  );
+
+  const setOrderTakerMobileUiPersist = useCallback((v: OrderTakerMobileUi) => {
+    setOrderTakerMobileUi(v);
+    saveOrderTakerMobileUi(v);
+  }, []);
 
   async function persistSeatGuestLabels(labels: Record<number, string>) {
     if (!activeSessionId) return;
@@ -400,18 +631,44 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const loadAll = useCallback(async () => {
     setMsg("");
     try {
-      const [pr, gr, fp, tb, rss, pol, promo, dmRemote, ar, ks] = await Promise.all([
-        fetch(`${base}/api/products`),
-        fetch(`${base}/api/product-groups`),
-        fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
-        fetch(`${base}/api/restaurant/tables`),
-        fetch(`${base}/api/restaurant/table-sessions?status=active`),
-        fetch(`${base}/api/pos/policy`),
-        fetch(`${base}/api/pos/promotions?active_only=true`),
+      const pingR = await safeFetch(`${base}/api/ping`);
+      if (!pingR.ok || pingR.status === 0) {
+        setMsg(briefNetworkHint("Failed to fetch"));
+        return;
+      }
+      try {
+        const pingJ = (await pingR.json()) as { ok?: boolean };
+        if (!pingJ?.ok) {
+          setMsg("خادم API لا يستجيب بشكل صحيح — أعد تشغيل run_full_stack.bat من مجلد مطاعم.");
+          return;
+        }
+      } catch {
+        setMsg(briefNetworkHint("Failed to fetch"));
+        return;
+      }
+
+      const [pr, gr, fp, tb, rss, pol, promo, dmRemote, dmSched, ar, ks] = await Promise.all([
+        safeFetch(`${base}/api/products`),
+        safeFetch(`${base}/api/product-groups`),
+        safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
+        safeFetch(`${base}/api/restaurant/tables`),
+        safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
+        safeFetch(`${base}/api/pos/policy`),
+        safeFetch(`${base}/api/pos/promotions?active_only=true`),
         fetchDailyMenuFromApi(),
-        fetch(`${base}/api/agents`),
-        fetch(`${base}/api/restaurant/kitchen/item-stops?active_only=true`),
+        fetchDailyMenuSchedule(),
+        safeFetch(`${base}/api/agents`),
+        safeFetch(`${base}/api/restaurant/kitchen/item-stops?active_only=true`),
       ]);
+
+      if (tb.status === 0 || !tb.ok) {
+        setMsg(
+          tb.status === 0
+            ? briefNetworkHint("Failed to fetch")
+            : `تعذر تحميل الطاولات (HTTP ${tb.status}) — تحقق من SQL ثم TBL005.`,
+        );
+        return;
+      }
       const pj = tryParseJson<{ products?: unknown }>(await pr.text()) ?? {};
       const gj = tryParseJson<{ groups?: unknown }>(await gr.text()) ?? {};
       const fpj = tryParseJson<{ plan?: unknown }>(await fp.text()) ?? {};
@@ -451,6 +708,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
       const outFiltered = mgrDev ? outList : outList.filter((t: any) => allowedTableKeys.has(tableRefKey(t.id)));
 
+      setSessionByTableRef(buildSessionByTableRef(sessList as unknown[], outList));
+      setTablesMoveCatalog(outList);
+
       const fromUrl = searchParams.get("tableId");
       setTables(outFiltered);
 
@@ -460,6 +720,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         if (prev && arr.some((x: any) => x.id === prev)) return prev;
         return arr.length ? arr[0].id : "";
       });
+
+      if (outFiltered.length === 0) {
+        if (outList.length === 0) {
+          setMsg(
+            "لا توجد طاولات في المخطط — من المطوّر: تهيئة TBL005 + floor_plan.json أو افتح الطاولة من «لوحة الطاولات» أولاً.",
+          );
+        } else if (!mgrDev) {
+          setMsg(
+            "لا توجد طاولة مسندة لجلسة نشطة لحسابك. افتح «لوحة الطاولات» → ابدأ التسكين على طاولة، ثم ارجع لطلب للطاولة.",
+          );
+        }
+      }
 
       setPolicy({
         servicePercent: toNum(polj.servicePercent, 12),
@@ -473,13 +745,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const sm = new Map<string, string>();
       for (const s of stopRows) {
         if (!s || !s.productGuide || !s.stopped) continue;
-        sm.set(String(s.productGuide), String(s.note || "نفد من المطبخ"));
+        sm.set(String(s.productGuide).trim().toUpperCase(), String(s.note || "نفد من المطبخ"));
       }
       setKitchenStoppedMap(sm);
+      setDailyMenuScheduleEntries(dmSched.entries || []);
       setAgents(alist);
       try {
-        const opResp = await fetch(`${base}/api/restaurant/ops-settings?t=${Date.now()}`, {
-          cache: "no-store",
+        const opResp = await safeFetch(`${base}/api/restaurant/ops-settings?t=${Date.now()}`, {
           headers: { "Cache-Control": "no-cache" },
         });
         const opTxt = await opResp.text();
@@ -501,13 +773,75 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       });
       setDailyMenuState(dmRemote ?? loadDailyMenuState());
     } catch (e) {
-      setMsg(`تعذر تحميل البيانات: ${String(e)}`);
+      setMsg(`تعذر تحميل البيانات: ${briefNetworkHint(e)}`);
     }
   }, [base, searchParams, user?.id, user?.role]);
 
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const refreshKitchenStops = useCallback(async () => {
+    try {
+      const ks = await safeFetch(`${base}/api/restaurant/kitchen/item-stops?active_only=true`);
+      const ksj = tryParseJson<{ items?: unknown }>(await ks.text()) ?? {};
+      const stopRows = Array.isArray(ksj.items) ? (ksj.items as KitchenStopRow[]) : [];
+      const sm = new Map<string, string>();
+      for (const s of stopRows) {
+        if (!s || !s.productGuide || !s.stopped) continue;
+        sm.set(String(s.productGuide).trim().toUpperCase(), String(s.note || "نفد من المطبخ"));
+      }
+      setKitchenStoppedMap(sm);
+    } catch {
+      /* ignore */
+    }
+  }, [base]);
+
+  useEffect(() => {
+    void refreshKitchenStops();
+    const id = window.setInterval(() => void refreshKitchenStops(), 15000);
+    return () => window.clearInterval(id);
+  }, [refreshKitchenStops]);
+
+  const menuScheduleRestriction = useMemo(
+    () => scheduleRestrictionForDate(dailyMenuScheduleEntries, todayYmd()),
+    [dailyMenuScheduleEntries],
+  );
+
+  const isOnWaiterMenu = useCallback(
+    (productGuide: string, productName: string) =>
+      isProductAllowedOnWaiterMenu(productGuide, productName, dailyMenuState, menuScheduleRestriction),
+    [dailyMenuState, menuScheduleRestriction],
+  );
+
+  const isKitchenStopped = useCallback(
+    (productGuide: string) => kitchenStoppedMap.has(String(productGuide || "").trim().toUpperCase()),
+    [kitchenStoppedMap],
+  );
+
+  const kitchenStopNote = useCallback(
+    (productGuide: string) => kitchenStoppedMap.get(String(productGuide || "").trim().toUpperCase()) || "نفد من المطبخ",
+    [kitchenStoppedMap],
+  );
+
+  const menuEligibleProducts = useMemo(
+    () => products.filter((p) => isOnWaiterMenu(p.CardGuide, p.ProductName || "")),
+    [products, isOnWaiterMenu],
+  );
+
+  const returnableLines = useMemo(
+    () => flattenSessionLinesForReturn(sessionOrders),
+    [sessionOrders],
+  );
+
+  const waiterMenuGroups = useMemo(() => {
+    const groupIds = new Set<string>();
+    for (const p of menuEligibleProducts) {
+      const g = String(p.GroupGuid || "").trim();
+      if (g) groupIds.add(g);
+    }
+    return normalizedGroups.filter((g) => groupIds.has(g.CardGuide));
+  }, [menuEligibleProducts, normalizedGroups]);
 
   useEffect(() => {
     let stop = false;
@@ -524,6 +858,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }
         const sj = await sr.json().catch(() => ({}));
         const sess = Array.isArray((sj as { sessions?: unknown }).sessions) ? (sj as { sessions: unknown[] }).sessions : [];
+        setSessionByTableRef(buildSessionByTableRef(sess, tablesMoveCatalog));
         if (!activeSessionId) {
           if (!stop) {
             setCaptainGate(null);
@@ -573,7 +908,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       stop = true;
       window.clearInterval(id);
     };
-  }, [base, activeSessionId]);
+  }, [base, activeSessionId, tablesMoveCatalog]);
 
   const orderTakingLocked = useMemo(() => {
     if (!orderTakerExclusiveTable) return false;
@@ -848,16 +1183,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }, [loadSessionOrders]);
 
   const filteredProducts = useMemo(() => {
-    let list = products;
+    let list = menuEligibleProducts;
     if (categoryKey !== "all") {
       list = list.filter((p) => (p.GroupGuid || "") === categoryKey);
     }
-    const dm = dailyMenuState;
-    if (dm && dm.allowedTokens.map((t) => t.trim()).filter(Boolean).length > 0) {
-      list = list.filter((p) => isProductOnDailyMenu(p.CardGuide, p.ProductName, dm));
-    }
     return list;
-  }, [products, categoryKey, dailyMenuState]);
+  }, [menuEligibleProducts, categoryKey]);
+
+  useEffect(() => {
+    if (categoryKey === "all") return;
+    if (waiterMenuGroups.some((g) => g.CardGuide === categoryKey)) return;
+    setCategoryKey("all");
+  }, [categoryKey, waiterMenuGroups]);
 
   const cartForPromo = useMemo(
     () => cart.map((l) => ({ id: l.id, productGuide: l.productGuide, name: l.name, qty: l.qty, unitPrice: l.unitPrice })),
@@ -983,7 +1320,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             AgentPrice: Number(p.AgentPrice ?? p.Price ?? 0) || 0,
           });
         }
-        if (!cancelled) setGapPickHits(mapped);
+        if (!cancelled) setGapPickHits(mapped.filter((p) => isOnWaiterMenu(p.CardGuide, p.ProductName || "")));
       } catch {
         if (!cancelled) setGapPickHits([]);
       } finally {
@@ -993,7 +1330,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [base, minimumChargeDelta, isDeliveryEmbedded, billingLocked, orderTakingLocked]);
+  }, [base, minimumChargeDelta, isDeliveryEmbedded, billingLocked, orderTakingLocked, isOnWaiterMenu]);
 
   const addonPreview = useMemo(() => {
     if (!addonPickerProduct) {
@@ -1027,8 +1364,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
       return;
     }
-    const stopNote = kitchenStoppedMap.get(p.CardGuide);
-    if (stopNote) {
+    if (!isOnWaiterMenu(p.CardGuide, p.ProductName || "")) {
+      setMsg("هذا الصنف خارج القائمة اليومية — راجع إعدادات «المنيو والقائمة اليومية».");
+      return;
+    }
+    const stopNote = kitchenStopNote(p.CardGuide);
+    if (isKitchenStopped(p.CardGuide)) {
       setMsg(`الصنف غير متاح الآن من المطبخ: ${p.ProductName}${stopNote ? ` — ${stopNote}` : ""}`);
       return;
     }
@@ -1089,8 +1430,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
       return;
     }
-    const stopNote = kitchenStoppedMap.get(p.CardGuide);
-    if (stopNote) {
+    if (!isOnWaiterMenu(p.CardGuide, p.ProductName || "")) {
+      setMsg("هذا الصنف خارج القائمة اليومية — راجع إعدادات «المنيو والقائمة اليومية».");
+      return;
+    }
+    if (isKitchenStopped(p.CardGuide)) {
+      const stopNote = kitchenStopNote(p.CardGuide);
       setMsg(`الصنف غير متاح الآن من المطبخ: ${p.ProductName}${stopNote ? ` — ${stopNote}` : ""}`);
       return;
     }
@@ -1332,13 +1677,17 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: transferTargetTableId, actor: "waiter" }),
+        body: JSON.stringify({ tableId: transferTargetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
       setSelectedTableId(transferTargetTableId);
+      setTransferTargetTableId("");
+      setTransferPickQuery("");
+      setTransferSearchResults(null);
       setMsg("تم تحويل الجلسة إلى الطاولة الجديدة.");
       void loadSessionOrders();
+      void loadAll();
     } catch (e) {
       setMsg(String(e));
     } finally {
@@ -1362,13 +1711,17 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}/merge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetTableId: mergeTargetTableId, actor: "waiter" }),
+        body: JSON.stringify({ targetTableId: mergeTargetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
       setSelectedTableId(mergeTargetTableId);
+      setMergeTargetTableId("");
+      setMergePickQuery("");
+      setMergeSearchResults(null);
       setMsg("تم دمج الطاولة الحالية مع الطاولة الهدف ونقل الطلبات للجلسة الهدف.");
       void loadSessionOrders();
+      void loadAll();
     } catch (e) {
       setMsg(String(e));
     } finally {
@@ -1379,6 +1732,40 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const scrollToOtSection = useCallback((sectionId: string) => {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+
+  const onOtRailRowActivate = useCallback(
+    (row: WaiterOtRailRow) => {
+      if (row.kind === "section") {
+        const rowId = row.id;
+        if (rowId === "waiter-ot-nav-tables") {
+          navigate(orderTakerExitPath);
+          return;
+        }
+        if (useOtTabsUi) {
+          if (rowId === "waiter-ot-sec-distribute") setSeatPanelMobCollapsed(false);
+          setOtTabsPanelId(rowId);
+          return;
+        }
+        if (rowId === "waiter-ot-sec-distribute") setSeatPanelMobCollapsed(false);
+        if (rowId === "waiter-ot-sec-grid") {
+          scrollToOtSection("waiter-ot-sec-search");
+          window.setTimeout(() => scrollToOtSection("waiter-ot-sec-grid"), 120);
+          return;
+        }
+        scrollToOtSection(rowId);
+        return;
+      }
+      setSelectedSeat(row.seatNo);
+      setSeatNameEditorSeat(null);
+      setSeatPanelMobCollapsed(true);
+      if (useOtTabsUi) {
+        setOtTabsPanelId("waiter-ot-sec-categories");
+        return;
+      }
+      requestAnimationFrame(() => scrollToOtSection("waiter-ot-sec-categories"));
+    },
+    [navigate, orderTakerExitPath, scrollToOtSection, useOtTabsUi],
+  );
 
   const prevAssignmentModeRef = useRef<"per_seat" | "general" | null>(null);
 
@@ -1409,34 +1796,63 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     return () => mq.removeEventListener("change", fn);
   }, []);
 
+  /** إزالة `orderUi` من عنوان الصفحة بعد قراءته (يبقى التفضيل في التخزين المحلي) */
+  useEffect(() => {
+    const q = searchParams.get("orderUi");
+    if (q !== "tabs" && q !== "classic") return;
+    try {
+      localStorage.setItem(ORDER_TAKER_UI_STORAGE_KEY, q);
+      setOrderTakerMobileUi(q);
+    } catch {
+      /* ignore */
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("orderUi");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   useEffect(() => () => clearMobileFlowToastTimer(), [clearMobileFlowToastTimer]);
 
-  /** جوال / WebView: touch على الشريط + إنهاء في فقاعة المستند (لا capture على document حتى لا يُلغى قبل الرسم) */
+  /** جوال: لمس الشريط يُكبّر الأزرار ويبقى التكبير قصيراً بعد رفع الإصبع ليُرى بوضوح */
   useLayoutEffect(() => {
-    if (!narrowOtViewport) {
+    if (!narrowOtViewport || useOtTabsUi) {
       setOtRailTouchHeld(false);
       return;
     }
     const el = otRailRef.current;
     if (!el) return;
-    const begin = () => setOtRailTouchHeld(true);
-    const end = () => setOtRailTouchHeld(false);
+    let endTimer: ReturnType<typeof setTimeout> | null = null;
+    const begin = () => {
+      if (endTimer) {
+        window.clearTimeout(endTimer);
+        endTimer = null;
+      }
+      setOtRailTouchHeld(true);
+    };
+    const scheduleEnd = () => {
+      if (endTimer) window.clearTimeout(endTimer);
+      endTimer = window.setTimeout(() => {
+        setOtRailTouchHeld(false);
+        endTimer = null;
+      }, 300);
+    };
     el.addEventListener("touchstart", begin, { capture: true, passive: true });
     el.addEventListener("pointerdown", begin, { capture: true });
-    window.addEventListener("touchend", end, false);
-    window.addEventListener("touchcancel", end, false);
-    window.addEventListener("pointerup", end, false);
-    window.addEventListener("pointercancel", end, false);
+    window.addEventListener("touchend", scheduleEnd, false);
+    window.addEventListener("touchcancel", scheduleEnd, false);
+    window.addEventListener("pointerup", scheduleEnd, false);
+    window.addEventListener("pointercancel", scheduleEnd, false);
     return () => {
+      if (endTimer) window.clearTimeout(endTimer);
       el.removeEventListener("touchstart", begin, { capture: true } as AddEventListenerOptions);
       el.removeEventListener("pointerdown", begin, { capture: true } as AddEventListenerOptions);
-      window.removeEventListener("touchend", end, false);
-      window.removeEventListener("touchcancel", end, false);
-      window.removeEventListener("pointerup", end, false);
-      window.removeEventListener("pointercancel", end, false);
+      window.removeEventListener("touchend", scheduleEnd, false);
+      window.removeEventListener("touchcancel", scheduleEnd, false);
+      window.removeEventListener("pointerup", scheduleEnd, false);
+      window.removeEventListener("pointercancel", scheduleEnd, false);
       setOtRailTouchHeld(false);
     };
-  }, [narrowOtViewport]);
+  }, [narrowOtViewport, useOtTabsUi]);
 
   useEffect(() => {
     if (!narrowOtViewport) {
@@ -1446,15 +1862,27 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }, [narrowOtViewport]);
 
   useEffect(() => {
+    if (useOtTabsUi) {
+      setOtRailStickyWide(false);
+      setOtRailTouchHeld(false);
+      setOtTabsPanelId("waiter-ot-sec-categories");
+    }
+  }, [useOtTabsUi]);
+
+  useEffect(() => {
     const prev = prevCategoryKeyRef.current;
     const changed = prev !== categoryKey;
     prevCategoryKeyRef.current = categoryKey;
     if (!narrowOtViewport || !changed) return;
+    if (useOtTabsUi) {
+      setOtTabsPanelId("waiter-ot-sec-grid");
+      return;
+    }
     const t = window.setTimeout(() => {
       document.getElementById("waiter-ot-sec-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
     return () => window.clearTimeout(t);
-  }, [categoryKey, narrowOtViewport]);
+  }, [categoryKey, narrowOtViewport, useOtTabsUi]);
 
   const goToNextSeatMobile = useCallback(() => {
     setSeatNameEditorSeat(null);
@@ -1466,24 +1894,32 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     });
     if (typeof window !== "undefined" && window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches) {
       showMobileFlowToast("المقعد التالي: عدّل الاسم ثم ✓. أنهيت؟ راجع «قيد الإرسال» ثم أرسل.");
-      requestAnimationFrame(() => {
-        document.getElementById("waiter-ot-sec-distribute")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      if (useOtTabsUi) {
+        setOtTabsPanelId("waiter-ot-sec-distribute");
+      } else {
+        requestAnimationFrame(() => {
+          document.getElementById("waiter-ot-sec-distribute")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
     }
-  }, [showMobileFlowToast]);
+  }, [showMobileFlowToast, useOtTabsUi]);
 
   const afterSeatNameConfirmGoCategories = useCallback(() => {
     setSeatNameEditorSeat(null);
     if (typeof window !== "undefined" && window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches) {
       setSeatPanelMobCollapsed(true);
-      showMobileFlowToast("اختر الفئة — تفتح الأصناف مباشرة.");
+      showMobileFlowToast("اختر الفئة — ثم تبويب «أصناف» للشبكة.");
+      if (useOtTabsUi) {
+        setOtTabsPanelId("waiter-ot-sec-categories");
+        return;
+      }
       requestAnimationFrame(() => {
         document.getElementById("waiter-ot-sec-categories")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     } else {
       document.getElementById("waiter-ot-sec-categories")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [showMobileFlowToast]);
+  }, [showMobileFlowToast, useOtTabsUi]);
 
   useEffect(() => {
     const prev = prevAssignmentModeRef.current;
@@ -1539,8 +1975,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   return (
     <div
       className={`role-op waiter-pos waiter-pos--order-taker${narrowOtViewport && assignmentMode === "per_seat" ? " waiter-pos--ot-rail-guests" : ""}${
-        narrowOtViewport && (otRailTouchHeld || otRailStickyWide) ? " waiter-pos--ot-rail-expanded" : ""
-      }`}
+        narrowOtViewport && !useOtTabsUi && (otRailTouchHeld || otRailStickyWide) ? " waiter-pos--ot-rail-expanded" : ""
+      }${useOtTabsUi ? " waiter-pos--ot-ui-tabs" : ""}`}
+      {...(useOtTabsUi ? { "data-ot-panel": otTabsPanelId } : {})}
     >
       <OperationalRoleHeader
         roleTitle={pageTitle?.trim() ? pageTitle : "✦ OYA Resturant ✦"}
@@ -1567,6 +2004,21 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         rightSlot={
           <div className="waiter-pos__hdr-tools" style={{ display: "flex", alignItems: "flex-end", gap: 8, direction: "ltr", minWidth: 0, width: "100%", justifyContent: "flex-end" }}>
             <div className="waiter-pos__hdr-tools-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, minWidth: 280 }}>
+              {narrowOtViewport ? (
+                <label className="waiter-pos__ot-ui-switch" style={{ fontSize: "0.68rem", fontWeight: 900, color: "#e2e8f0", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  تنقّل الجوال
+                  <select
+                    className="waiter-pos__select"
+                    value={orderTakerMobileUi}
+                    onChange={(e) => setOrderTakerMobileUiPersist(e.target.value as OrderTakerMobileUi)}
+                    aria-label="شكل تنقّل أقسام الطلب على الجوال"
+                    style={{ fontSize: "0.78rem", fontWeight: 800, padding: "0.35rem 0.55rem", borderRadius: 8, maxWidth: 160 }}
+                  >
+                    <option value="classic">شريط جانبي</option>
+                    <option value="tabs">تبويبات سفلية (نموذج ٢)</option>
+                  </select>
+                </label>
+              ) : null}
               <span className="waiter-pos__hdr-copy" style={{ fontSize: "0.68rem", fontWeight: 900, color: "#fb923c", textShadow: "0 0 8px rgba(251,146,60,0.7)", whiteSpace: "nowrap", lineHeight: 1 }}>
                 © 2026 جميع الحقوق محفوظة لشركة Sir Consult for Information Technology
               </span>
@@ -1695,13 +2147,17 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             background:
               /تم إرسال|تم تحويل|تم طلب|تم إخطار|تم إلغاء|تم دمج/.test(String(msg))
                 ? "rgba(22, 163, 74, 0.12)"
-                : /فشل|تعذر|لا يمكن|مسند|قفل|غير جاهز|الطلب فارغ|اختر طاولة/.test(String(msg))
+                : /فشل|تعذر|لا يمكن|مسند|قفل|غير جاهز|الطلب فارغ|اختر طاولة|لا يوجد اتصال|Failed to fetch|API متوقف|SQL غير|لا توجد طاولة/.test(
+                    String(msg),
+                  )
                   ? "rgba(185, 28, 28, 0.1)"
                   : "rgba(30, 64, 175, 0.08)",
             border:
               /تم إرسال|تم تحويل|تم طلب|تم إخطار|تم إلغاء|تم دمج/.test(String(msg))
                 ? "1px solid rgba(22, 163, 74, 0.45)"
-                : /فشل|تعذر|لا يمكن|مسند|قفل|غير جاهز|الطلب فارغ|اختر طاولة/.test(String(msg))
+                : /فشل|تعذر|لا يمكن|مسند|قفل|غير جاهز|الطلب فارغ|اختر طاولة|لا يوجد اتصال|Failed to fetch|API متوقف|SQL غير|لا توجد طاولة/.test(
+                    String(msg),
+                  )
                   ? "1px solid rgba(185, 28, 28, 0.4)"
                   : "1px solid rgba(59, 130, 246, 0.35)",
             color: "#0f172a",
@@ -1711,7 +2167,17 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             textAlign: "right",
           }}
         >
-          {msg}
+          <div style={{ whiteSpace: "pre-wrap" }}>{msg}</div>
+          {/failed to fetch|لا يوجد اتصال|API متوقف|run_full_stack/i.test(String(msg)) ? (
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-primary" onClick={() => void loadAll()}>
+                إعادة المحاولة
+              </button>
+              <a className="btn btn-ghost" href="http://127.0.0.1:2288/api/ping" target="_blank" rel="noreferrer">
+                فحص API (2288)
+              </a>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1752,7 +2218,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   .reverse()
                   .map((o) => {
                     const st = String(o.status || "").toLowerCase();
-                    const items = (o.items || []).map((i) => `${i.name || "صنف"} ×${i.quantity ?? 1}`).slice(0, 3);
+                    const lines = activeOrderItems(o).map(formatOrderItemLine);
+                    const canCancel = st === "pending";
                     return (
                       <div
                         key={`sum-${o.id}`}
@@ -1765,12 +2232,35 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                           background: "#f8fbff",
                         }}
                       >
-                        <div style={{ fontSize: "0.84rem", fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>
-                          {o.id.slice(0, 8)} · {st} {o.generalOrder ? "· عام" : ""}
+                        <div
+                          style={{
+                            fontSize: "0.84rem",
+                            fontWeight: 800,
+                            marginBottom: 6,
+                            color: "#0f172a",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 6,
+                          }}
+                        >
+                          <span>
+                            طلب #{o.id.slice(0, 8)} · {orderStatusLabelAr(st)}
+                            {o.generalOrder ? " · عام" : ""}
+                          </span>
+                          {canCancel ? (
+                            <button
+                              type="button"
+                              className="waiter-pos__btn waiter-pos__btn--ghost"
+                              style={{ fontSize: "0.72rem", padding: "2px 6px" }}
+                              onClick={() => void cancelServerOrder(o.id)}
+                            >
+                              إلغاء
+                            </button>
+                          ) : null}
                         </div>
-                        <div style={{ fontSize: "0.9rem", color: "#334155", lineHeight: 1.6 }}>
-                          {items.length ? items.join(" · ") : "بدون تفاصيل بنود"}
-                        </div>
+                        <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: "0.88rem", color: "#334155", lineHeight: 1.55 }}>
+                          {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-${idx}`}>{ln}</li>) : <li>بدون بنود نشطة</li>}
+                        </ul>
                       </div>
                     );
                   })}
@@ -1801,7 +2291,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     <span className="waiter-pos__cat-label">الكل</span>
                   </div>
                 </button>
-                {normalizedGroups.map((g) => (
+                {waiterMenuGroups.map((g) => (
                   <button
                     key={`side-${g.CardGuide}`}
                     type="button"
@@ -1838,29 +2328,161 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   طلب سريع (بار)
                 </button>
               </div>
+              <div style={{ marginTop: 8, marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="waiter-pos__btn waiter-pos__btn--ghost"
+                  style={{ width: "100%", fontWeight: 800 }}
+                  disabled={!activeSessionId || returnableLines.length === 0}
+                  onClick={() => {
+                    setReturnModalLines(returnableLines);
+                    setReturnModalOpen(true);
+                  }}
+                >
+                  طلب مرتجع ضيف
+                </button>
+              </div>
               <h3 style={{ marginTop: 6, marginBottom: 0 }}>خيارات الطاولات</h3>
               <div className="waiter-pos__split-box">
-                <div className="waiter-pos__dropdown-wrap" style={{ display: "grid", gap: 6 }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <select className="waiter-pos__select" value={transferTargetTableId} onChange={(e) => setTransferTargetTableId(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
-                      {tables.filter((t) => t.id !== selectedTableId).map((t) => (
-                        <option key={`tr-top-${t.id}`} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                    <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTable()}>
-                      تحويل
+                <div className="waiter-pos__field-stack waiter-pos__field-stack--table-pick" style={{ display: "grid", gap: 10 }}>
+                  <div className="waiter-pos__table-move-block">
+                    <div className="waiter-pos__table-move-block__title">
+                      تحويل الجلسة — طاولات بلا جلسة نشطة (يبقى مسند الطلب كما هو على نفس الجلسة)
+                    </div>
+                    <div className="waiter-pos__table-pick-search-row">
+                      <input
+                        type="search"
+                        enterKeyHint="search"
+                        className="waiter-pos__table-pick-search"
+                        value={transferPickQuery}
+                        onChange={(e) => setTransferPickQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            runTransferTableSearch();
+                          }
+                        }}
+                        placeholder="ابحث برقم أو اسم الطاولة…"
+                        autoComplete="off"
+                        aria-label="بحث طاولة للتحويل"
+                      />
+                      <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runTransferTableSearch()}>
+                        بحث
+                      </button>
+                    </div>
+                    {transferSearchResults === null ? (
+                      <div className="waiter-pos__table-pick-hint">اضغط «بحث» أو Enter لعرض الطاولات الفارغة المتاحة (حد أقصى ٨٠ نتيجة).</div>
+                    ) : transferSearchResults.length === 0 ? (
+                      <div className="waiter-pos__table-pick-empty">لا توجد طاولة فارغة مطابقة (بلا جلسة نشطة، وليست متسخة/قيد التنظيف). جرّب بحثاً آخر ثم «بحث».</div>
+                    ) : (
+                      <div className="waiter-pos__table-pick-list" role="listbox" aria-label="طاولات للتحويل">
+                        {transferSearchResults.map((t) => (
+                          <button
+                            key={`tr-pick-${t.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={transferTargetTableId === t.id}
+                            className={`waiter-pos__table-pick-row${transferTargetTableId === t.id ? " is-selected" : ""}`}
+                            onClick={() => setTransferTargetTableId(t.id)}
+                          >
+                            {t.name}
+                            {t.number != null ? ` · ${t.number}` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {transferTargetTableId ? (
+                      <div className="waiter-pos__table-pick-selected">
+                        <span>
+                          المختار: <strong>{tablesMoveCatalog.find((x) => x.id === transferTargetTableId)?.name ?? transferTargetTableId}</strong>
+                        </span>
+                        <button type="button" className="waiter-pos__table-pick-clear" onClick={() => setTransferTargetTableId("")}>
+                          مسح
+                        </button>
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
+                      disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId}
+                      onClick={() => void transferTable()}
+                    >
+                      تنفيذ التحويل
                     </button>
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <select className="waiter-pos__select" value={mergeTargetTableId} onChange={(e) => setMergeTargetTableId(e.target.value)} style={{ flex: 1, maxWidth: "none" }}>
-                      {tables.filter((t) => t.id !== selectedTableId).map((t) => (
-                        <option key={`mg-top-${t.id}`} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                    <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId} onClick={() => void mergeIntoTable()}>
-                      دمج
+
+                  <div className="waiter-pos__table-move-block">
+                    <div className="waiter-pos__table-move-block__title">
+                      دمج مع طاولة لها جلسة نشطة لنفس مسند الطلب (الكابتن) — الفوترة من جلسة الهدف
+                    </div>
+                    <div className="waiter-pos__table-pick-search-row">
+                      <input
+                        type="search"
+                        enterKeyHint="search"
+                        className="waiter-pos__table-pick-search"
+                        value={mergePickQuery}
+                        onChange={(e) => setMergePickQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            runMergeTableSearch();
+                          }
+                        }}
+                        placeholder="ابحث برقم أو اسم طاولة الهدف…"
+                        autoComplete="off"
+                        aria-label="بحث طاولة للدمج"
+                      />
+                      <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runMergeTableSearch()}>
+                        بحث
+                      </button>
+                    </div>
+                    {mergeSearchResults === null ? (
+                      <div className="waiter-pos__table-pick-hint">
+                        اضغط «بحث» أو Enter لعرض طاولات الدمج المسموحة (جلسة نشطة لنفس الكابتن، حد أقصى ٨٠). إن لم يظهر شيء بعد البحث، استخدم «التحويل» إلى طاولة فارغة.
+                      </div>
+                    ) : mergeSearchResults.length === 0 ? (
+                      <div className="waiter-pos__table-pick-empty">
+                        {mergePickBase.length === 0
+                          ? "الدمج يحتاج طاولة أخرى عليها جلسة نشطة لنفس مسند الطلب. إن لم توجد جلسة ثانية أو اختلف المسند، استخدم «التحويل» إلى طاولة فارغة."
+                          : "لا نتائج للبحث — جرّب رقم الطاولة (مثل 14 أو t14) أو اسم العرض، أو امسح الحقل ثم «بحث» لعرض كل الأهداف المتاحة."}
+                      </div>
+                    ) : (
+                      <div className="waiter-pos__table-pick-list" role="listbox" aria-label="طاولات للدمج">
+                        {mergeSearchResults.map((t) => (
+                          <button
+                            key={`mg-pick-${t.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={mergeTargetTableId === t.id}
+                            className={`waiter-pos__table-pick-row${mergeTargetTableId === t.id ? " is-selected" : ""}`}
+                            onClick={() => setMergeTargetTableId(t.id)}
+                          >
+                            {t.name}
+                            {t.number != null ? ` · ${t.number}` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {mergeTargetTableId ? (
+                      <div className="waiter-pos__table-pick-selected">
+                        <span>
+                          المختار: <strong>{tablesMoveCatalog.find((x) => x.id === mergeTargetTableId)?.name ?? mergeTargetTableId}</strong>
+                        </span>
+                        <button type="button" className="waiter-pos__table-pick-clear" onClick={() => setMergeTargetTableId("")}>
+                          مسح
+                        </button>
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
+                      disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId}
+                      onClick={() => void mergeIntoTable()}
+                    >
+                      تنفيذ الدمج
                     </button>
                   </div>
+
                   <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 2 }}>
                     <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
                     سبليت — فاتورة لكل ضيف (مقاعد ١–١٢)؛ ما يُرسَل على <strong>مقعد ١٣ «مشترك»</strong> يُقسَّم بالتساوي على شيكات المقاعد
@@ -1992,7 +2614,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 narrowOtViewport && seatPanelMobCollapsed && assignmentMode === "per_seat" ? " waiter-pos__seatpanel--mob-collapsed" : ""
               }`}
             >
-              <h3 style={{ marginTop: 0 }}>{assignmentMode === "per_seat" ? "قائمة الضيوف" : "توزيع الطلب"}</h3>
+              <h3 style={{ marginTop: 0 }}>{assignmentMode === "per_seat" ? "تعريف الضيوف" : "توزيع الطلب"}</h3>
               <div className="waiter-pos__toggle-row">
                 <button type="button" className={`waiter-pos__toggle ${assignmentMode === "per_seat" ? "waiter-pos__toggle--on" : ""}`} onClick={() => setAssignmentMode("per_seat")}>
                   حسب المقعد (١–١٢)
@@ -2004,7 +2626,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               {assignmentMode === "per_seat" ? (
                 narrowOtViewport && seatPanelMobCollapsed ? (
                   <button type="button" className="waiter-pos__seatpanel-mob-expand" onClick={() => setSeatPanelMobCollapsed(false)}>
-                    عرض قائمة الضيوف
+                    عرض تعريف الضيوف
                   </button>
                 ) : (
                 <>
@@ -2157,10 +2779,16 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
                       const st = (o.status || "").toLowerCase();
                       const canCancel = st === "pending";
+                      const lines = activeOrderItems(o).map(formatOrderItemLine);
                       return (
-                        <li key={`sent-top-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "6px 0", fontSize: "0.82rem", display: "flex", justifyContent: "space-between", gap: 8, color: "#cbd5e1" }}>
-                          <span><strong style={{ color: "#fff" }}>{o.id.slice(0, 8)}</strong> · {st}</span>
-                          {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
+                        <li key={`sent-top-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "8px 0", fontSize: "0.82rem", color: "#e2e8f0" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                            <span><strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong> · {orderStatusLabelAr(st)}</span>
+                            {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
+                          </div>
+                          <ul style={{ margin: 0, paddingInlineStart: 16, color: "#cbd5e1", lineHeight: 1.45 }}>
+                            {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-ln-${idx}`}>{ln}</li>) : <li>بدون بنود</li>}
+                          </ul>
                         </li>
                       );
                     })}
@@ -2272,6 +2900,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             className="waiter-pos__search-wrap waiter-pos__ot-scroll-target"
             style={{ marginBottom: "0.5rem" }}
           >
+            {menuScheduleRestriction.limited ? (
+              <p style={{ margin: "0 0 0.5rem", fontSize: "0.88rem", color: "var(--wp-muted)" }}>
+                القائمة اليومية: {menuEligibleProducts.length} صنفًا مسموحًا اليوم ({todayYmd()})
+              </p>
+            ) : null}
             <SmartProductSearch
               onSelect={(hit) =>
                 beginAddProduct(
@@ -2283,6 +2916,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   },
                 )
               }
+              filterHit={(hit) => isOnWaiterMenu(hit.CardGuide, hit.ProductName)}
+              isOutOfStock={(hit) => isKitchenStopped(hit.CardGuide)}
               placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
             />
           </div>
@@ -2321,9 +2956,16 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           <div className="waiter-pos__section-divider" />
 
           <div id="waiter-ot-sec-grid" className="waiter-pos__grid waiter-pos__ot-scroll-target">
+            {filteredProducts.length === 0 ? (
+              <div style={{ gridColumn: "1 / -1", padding: "1rem", color: "var(--wp-muted)", textAlign: "center" }}>
+                {menuScheduleRestriction.limited
+                  ? "لا أصناف في القائمة اليومية لهذا اليوم — راجع إعدادات «المنيو والقائمة اليومية»."
+                  : "لا أصناف في هذه الفئة."}
+              </div>
+            ) : null}
             {filteredProducts.map((p) => {
-              const stopped = kitchenStoppedMap.has(p.CardGuide);
-              const stopNote = kitchenStoppedMap.get(p.CardGuide) || "نفد من المطبخ";
+              const stopped = isKitchenStopped(p.CardGuide);
+              const stopNote = kitchenStopNote(p.CardGuide);
               const hue = hashHue(p.CardGuide);
               const bg = `linear-gradient(135deg, hsl(${hue}, 55%, 42%) 0%, hsl(${(hue + 40) % 360}, 45%, 32%) 100%)`;
               const initial = (p.ProductName || "?").trim().charAt(0);
@@ -2371,62 +3013,83 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         </main>
       </div>
 
-      <nav
-        ref={otRailRef}
-        className="waiter-pos__ot-rail"
-        aria-label="تنقّل سريع في شاشة الطاولة (طلب للطاولة)"
-      >
-        {narrowOtViewport ? (
-          <button
-            type="button"
-            className="waiter-pos__ot-rail__pin"
-            aria-pressed={otRailStickyWide}
-            title={otRailStickyWide ? "إيقاف التكبير الثابت للشريط" : "تكبير الشريط ويبقى (اضغط مرة أخرى للإيقاف)"}
-            onClick={(e) => {
-              e.stopPropagation();
-              setOtRailStickyWide((v) => !v);
-            }}
-          >
-            {otRailStickyWide ? "−" : "+"}
-          </button>
-        ) : null}
-        {otRailRows.map((row) =>
-          row.kind === "section" ? (
+      {!useOtTabsUi ? (
+        <nav
+          ref={otRailRef}
+          className="waiter-pos__ot-rail"
+          aria-label="تنقّل سريع في شاشة الطاولة (طلب للطاولة)"
+        >
+          {narrowOtViewport ? (
             <button
-              key={row.id}
               type="button"
-              className={`waiter-pos__ot-rail__btn${row.id === "waiter-ot-nav-tables" ? " waiter-pos__ot-rail__btn--home" : ""}`}
-              title={row.title}
-              onClick={() => {
-                if (row.id === "waiter-ot-nav-tables") {
-                  navigate(orderTakerExitPath);
-                  return;
-                }
-                if (row.id === "waiter-ot-sec-distribute") setSeatPanelMobCollapsed(false);
-                scrollToOtSection(row.id);
+              className="waiter-pos__ot-rail__pin"
+              aria-pressed={otRailStickyWide}
+              title={otRailStickyWide ? "إيقاف التكبير الثابت للشريط" : "تكبير الشريط ويبقى (اضغط مرة أخرى للإيقاف)"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOtRailStickyWide((v) => !v);
               }}
             >
-              {row.label}
+              {otRailStickyWide ? "−" : "+"}
             </button>
-          ) : (
-            <button
-              key={`rail-seat-${row.seatNo}`}
-              type="button"
-              className={`waiter-pos__ot-rail__btn waiter-pos__ot-rail__btn--guest${selectedSeat === row.seatNo ? " waiter-pos__ot-rail__btn--active" : ""}`}
-              title={`سلة ${seatGuestDisplay(row.seatNo)} — اختيار الفئة ثم الأصناف`}
-              aria-label={`تفعيل سلّة ${seatGuestDisplay(row.seatNo)} والانتقال للفئات`}
-              onClick={() => {
-                setSelectedSeat(row.seatNo);
-                setSeatNameEditorSeat(null);
-                setSeatPanelMobCollapsed(true);
-                requestAnimationFrame(() => scrollToOtSection("waiter-ot-sec-categories"));
-              }}
-            >
-              {truncateRailGuestLabel(seatGuestDisplay(row.seatNo))}
-            </button>
-          ),
-        )}
-      </nav>
+          ) : null}
+          {otRailRows.map((row) =>
+            row.kind === "section" ? (
+              <button
+                key={row.id}
+                type="button"
+                className={`waiter-pos__ot-rail__btn${row.id === "waiter-ot-nav-tables" ? " waiter-pos__ot-rail__btn--home" : ""}`}
+                title={row.title}
+                onClick={() => onOtRailRowActivate(row)}
+              >
+                {row.label}
+              </button>
+            ) : (
+              <button
+                key={`rail-seat-${row.seatNo}`}
+                type="button"
+                className={`waiter-pos__ot-rail__btn waiter-pos__ot-rail__btn--guest${selectedSeat === row.seatNo ? " waiter-pos__ot-rail__btn--active" : ""}`}
+                title={`سلة ${seatGuestDisplay(row.seatNo)} — اختيار الفئة ثم الأصناف`}
+                aria-label={`تفعيل سلّة ${seatGuestDisplay(row.seatNo)} والانتقال للفئات`}
+                onClick={() => onOtRailRowActivate(row)}
+              >
+                {truncateRailGuestLabel(seatGuestDisplay(row.seatNo))}
+              </button>
+            ),
+          )}
+        </nav>
+      ) : (
+        <nav className="waiter-pos__ot-tabbar" aria-label="تبويبات أقسام طلب الطاولة (جوال)">
+          <div className="waiter-pos__ot-tabbar__scroll">
+            {otRailRows.map((row) =>
+              row.kind === "section" ? (
+                <button
+                  key={`tab-${row.id}`}
+                  type="button"
+                  className={`waiter-pos__ot-tabbar__btn${row.id === "waiter-ot-nav-tables" ? " waiter-pos__ot-tabbar__btn--home" : ""}${otTabRowIsActive(row) ? " waiter-pos__ot-tabbar__btn--active" : ""}`}
+                  title={row.title}
+                  aria-current={otTabRowIsActive(row) ? "page" : undefined}
+                  onClick={() => onOtRailRowActivate(row)}
+                >
+                  {row.label}
+                </button>
+              ) : (
+                <button
+                  key={`tab-seat-${row.seatNo}`}
+                  type="button"
+                  className={`waiter-pos__ot-tabbar__btn waiter-pos__ot-tabbar__btn--guest${otTabRowIsActive(row) ? " waiter-pos__ot-tabbar__btn--active" : ""}`}
+                  title={`سلة ${seatGuestDisplay(row.seatNo)} — اختيار الفئة ثم الأصناف`}
+                  aria-label={`تفعيل سلّة ${seatGuestDisplay(row.seatNo)} والانتقال للفئات`}
+                  aria-current={otTabRowIsActive(row) ? "page" : undefined}
+                  onClick={() => onOtRailRowActivate(row)}
+                >
+                  {truncateRailGuestLabel(seatGuestDisplay(row.seatNo))}
+                </button>
+              ),
+            )}
+          </div>
+        </nav>
+      )}
 
       {addonPickerProduct ? (
         <div
@@ -2539,6 +3202,26 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           </div>
         </div>
       ) : null}
+      <GuestReturnRequestModal
+        open={returnModalOpen}
+        onClose={() => setReturnModalOpen(false)}
+        sessionId={activeSessionId || ""}
+        tableId={selectedTableId}
+        tableLabel={selectedTable?.name || selectedTableId}
+        lines={returnModalLines}
+        actor={{
+          userId: user?.id != null ? String(user.id) : "",
+          name: sessionDisplayName(user),
+          role: user?.role || "waiter",
+        }}
+        onSubmitted={(requestId) =>
+          setMsg(
+            requestId
+              ? `تم إرسال طلب المرتجع للمدير (${requestId.slice(0, 8)}…) — بانتظار الاعتماد.`
+              : "تم إرسال طلب المرتجع للمدير — بانتظار الاعتماد.",
+          )
+        }
+      />
     </div>
   );
 }

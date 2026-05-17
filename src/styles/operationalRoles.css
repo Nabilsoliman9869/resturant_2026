@@ -601,6 +601,12 @@
   box-sizing: border-box;
 }
 
+/* سطح رسم قائمة <select> قد يمتد تحت الشريط — على الشاشات الواسعة كان overflow-y:hidden يقصّها */
+.waiter-pos__topbar:has(.waiter-pos__field-stack:focus-within) {
+  overflow-y: visible;
+  z-index: 55;
+}
+
 .waiter-pos__topbar > .waiter-pos__top-card {
   max-height: 100%;
   min-height: 0;
@@ -611,9 +617,14 @@
   gap: 0.38rem;
 }
 
-/* أعمدة بمحتوى طويل: تمرير اللوحة كاملة */
+/* أعمدة بمحتوى طويل: تمرير اللوحة كاملة — عند التركيز على select داخل field-stack نسمح بالامتداد فوق الطبقات */
 .waiter-pos__topbar > .waiter-pos__top-card--navopts {
   overflow-y: auto;
+}
+
+.waiter-pos__topbar > .waiter-pos__top-card--navopts:has(.waiter-pos__field-stack:focus-within) {
+  overflow: visible;
+  z-index: 50;
 }
 
 .waiter-pos__topbar > .waiter-pos__top-card--categories {
@@ -689,6 +700,160 @@
   padding: 0.45rem;
   max-height: 220px;
   overflow: auto;
+}
+
+/* قوائم <select> + أزرار: بدون overflow — وإلا تُقصّ قائمة المتصفح/الويبفيو إلى شريط رفيع على الجوال */
+.waiter-pos__field-stack {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  padding: 0.45rem;
+  max-height: none;
+  overflow: visible;
+}
+
+/* تحويل/دمج: بحث + أزرار (بدل <select>) — القائمة تُمرَّر داخل الصندوق فقط */
+.waiter-pos__field-stack--table-pick {
+  padding: 0.5rem;
+}
+
+.waiter-pos__table-move-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.waiter-pos__table-move-block + .waiter-pos__table-move-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(51, 65, 85, 0.65);
+}
+
+.waiter-pos__table-move-block__title {
+  font-size: 0.76rem;
+  font-weight: 850;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.waiter-pos__table-pick-search {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: #fff;
+  color: #0f172a;
+  padding: 8px 12px;
+  font-size: 1rem;
+  font-weight: 650;
+  text-align: right;
+  font-family: inherit;
+}
+
+.waiter-pos__table-pick-search-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.waiter-pos__table-pick-search-row .waiter-pos__table-pick-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.waiter-pos__table-pick-search-btn {
+  flex-shrink: 0;
+  min-width: 72px;
+  min-height: 44px;
+  padding: 8px 14px !important;
+  font-weight: 850 !important;
+  font-size: 0.95rem !important;
+  border-radius: 10px !important;
+  touch-action: manipulation;
+}
+
+.waiter-pos__table-pick-hint {
+  font-size: 0.74rem;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.4;
+  padding: 6px 4px;
+}
+
+.waiter-pos__table-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(32vh, 220px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0;
+}
+
+.waiter-pos__table-pick-row {
+  width: 100%;
+  text-align: right;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.75);
+  color: #e2e8f0;
+  font-weight: 750;
+  font-size: 0.88rem;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
+}
+
+.waiter-pos__table-pick-row.is-selected {
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.28);
+  background: rgba(8, 47, 73, 0.55);
+  color: #f0f9ff;
+}
+
+.waiter-pos__table-pick-empty {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  text-align: center;
+  padding: 6px 4px;
+}
+
+.waiter-pos__table-pick-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #bae6fd;
+  line-height: 1.35;
+}
+
+.waiter-pos__table-pick-clear {
+  border: none;
+  background: rgba(248, 113, 113, 0.15);
+  color: #fecaca;
+  font-weight: 800;
+  font-size: 0.76rem;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  touch-action: manipulation;
+}
+
+.waiter-pos__table-move-action {
+  width: 100%;
+  min-height: 44px;
+  font-weight: 850 !important;
 }
 
 .waiter-pos__top-card {
@@ -1338,10 +1503,10 @@
 
   .waiter-pos__topbar > .waiter-pos__top-card--navopts {
     order: 60;
-    max-height: min(48vh, 380px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
+    /* لا max-height + scroll هنا — يقصّان قائمة <select> (تحويل/دمج) على الجوال */
+    max-height: none;
+    overflow: visible;
+    overflow-x: hidden;
   }
 
   /* زر الإرسال الثابت أسفل الشاشة يكفي — لا تكرار في اللوحة العلوية */
@@ -1577,7 +1742,11 @@
   border-radius: 8px;
   border: 1px solid var(--wp-border);
   font-size: 0.85rem;
-  max-width: 200px;
+  /* جوال/شبكات: لا تُقصّ عرض القائمة — كان max-width:200px يُقصّ النص ويُفهم كأن الدروب داون «فارغ» */
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .waiter-pos__coupon {
@@ -1740,6 +1909,39 @@
 
 .waiter-tables-toolbar h2 {
   margin: 0;
+}
+
+.waiter-tables-toolbar__jump {
+  display: flex;
+  flex: 1 1 240px;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: min(100%, 200px);
+}
+
+.waiter-tables-toolbar__jump-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.waiter-tables-card-wrap--jump-highlight .role-op__pick-card {
+  animation: waiter-table-jump-flash 1.15s ease-out 1;
+}
+
+@keyframes waiter-table-jump-flash {
+  0% {
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.95), 0 10px 28px rgba(2, 6, 23, 0.22);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0), 0 6px 16px rgba(2, 6, 23, 0.08);
+  }
 }
 
 .waiter-tables-floor-band {
@@ -2453,6 +2655,9 @@
   font-size: 0.82rem;
   padding: 0 10px;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.35);
@@ -2998,6 +3203,12 @@
     justify-content: center;
   }
 
+  .waiter-tables-toolbar__jump .btn {
+    width: auto;
+    min-width: 92px;
+    flex-shrink: 0;
+  }
+
   .role-op__section-title {
     font-size: clamp(1.05rem, 4.2vw, 1.2rem);
   }
@@ -3104,6 +3315,9 @@
 
   .waiter-pos__select {
     min-height: 44px;
+    /* 16px يقلّل تكبير iOS عند الفتح ويُحسّن قراءة الخيار المعروض */
+    font-size: max(16px, 0.9rem);
+    line-height: 1.25;
   }
 }
 
@@ -3316,49 +3530,51 @@
   }
 
   .waiter-pos__ot-rail__btn:active {
-    transform: scale(1.07);
+    transform: scale(1.22);
     z-index: 12;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail {
-    width: 82px !important;
-    padding: 8px 7px;
+    width: 96px !important;
+    padding: 10px 8px;
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail {
-    width: 98px !important;
+    width: 112px !important;
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-expanded:not(.waiter-pos--ot-rail-guests) .waiter-pos__main {
-    padding-inline-end: calc(0.35rem + 86px);
+    padding-inline-end: calc(0.35rem + 100px);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__main {
-    padding-inline-end: calc(0.35rem + 102px);
+    padding-inline-end: calc(0.35rem + 118px);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-expanded:not(.waiter-pos--ot-rail-guests) .waiter-pos__ot-flow-toast {
-    margin-inline-end: calc(0.35rem + 86px);
+    margin-inline-end: calc(0.35rem + 100px);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__ot-flow-toast {
-    margin-inline-end: calc(0.35rem + 102px);
+    margin-inline-end: calc(0.35rem + 118px);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-expanded:not(.waiter-pos--ot-rail-guests) .waiter-pos__mb-sendbar {
-    padding-inline-end: calc(12px + 82px);
+    padding-inline-end: calc(12px + 96px);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-guests.waiter-pos--ot-rail-expanded .waiter-pos__mb-sendbar {
-    padding-inline-end: calc(12px + 98px);
+    padding-inline-end: calc(12px + 112px);
   }
 
   .waiter-pos--order-taker.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail__btn,
   .waiter-pos--order-taker.waiter-pos--ot-rail-expanded .waiter-pos__ot-rail__btn--guest {
-    font-size: 1rem !important;
+    font-size: 1.08rem !important;
     line-height: 1.08 !important;
-    min-height: 50px;
+    min-height: 54px;
+    width: 100%;
+    max-width: 100%;
   }
 
   .waiter-pos__ot-rail__btn--home {
@@ -3501,5 +3717,200 @@
     opacity: 0.92;
     cursor: not-allowed;
     pointer-events: none;
+  }
+
+  /* «نموذج ٢»: تبويب سفلي = قسم واحد ظاهر (لا تكديس + تمرير فقط) */
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs {
+    --waiter-ot-tab-stack: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__main {
+    padding-inline-end: 0.35rem !important;
+    padding-bottom: calc(4.5rem + 56px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__ot-scroll-target {
+    display: none !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__topbar > .waiter-pos__top-card {
+    display: none !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__search-wrap,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__grid,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__section-divider {
+    display: none !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__topbar {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-content: start;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-categories"] #waiter-ot-sec-categories,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-categories"] .waiter-pos__top-card--categories {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-table"] #waiter-ot-sec-table,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-table"] .waiter-pos__top-card--tablemeta {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-distribute"] #waiter-ot-sec-distribute,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-distribute"] .waiter-pos__top-card--seatpanel {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-pending"] #waiter-ot-sec-pending,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-pending"]
+    .waiter-pos__top-card--flexcol:has(#waiter-ot-sec-pending) {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-navopts"] #waiter-ot-sec-navopts,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-navopts"] .waiter-pos__top-card--navopts {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-sent"] .waiter-pos__top-card:has(#waiter-ot-sec-sent),
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-sent"] #waiter-ot-sec-sent {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-sent"] #waiter-ot-sec-totals {
+    display: none !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-totals"] .waiter-pos__top-card:has(#waiter-ot-sec-totals),
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-totals"] #waiter-ot-sec-totals {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-totals"] #waiter-ot-sec-sent {
+    display: none !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-grid"] .waiter-pos__topbar {
+    display: none !important;
+    flex: 0 0 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-grid"] #waiter-ot-sec-search,
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-grid"] #waiter-ot-sec-grid {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-grid"] #waiter-ot-sec-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-content: start;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs[data-ot-panel="waiter-ot-sec-search"] #waiter-ot-sec-search {
+    display: block !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs.waiter-pos--ot-rail-guests .waiter-pos__main {
+    padding-inline-end: 0.35rem !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__mb-sendbar {
+    bottom: var(--waiter-ot-tab-stack);
+    padding-inline-end: 12px !important;
+  }
+
+  .waiter-pos--order-taker.waiter-pos--ot-ui-tabs .waiter-pos__ot-flow-toast {
+    bottom: calc(56px + 4.35rem + env(safe-area-inset-bottom, 0px));
+    margin-inline-end: 0.35rem !important;
+  }
+
+  .waiter-pos__ot-tabbar {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 58;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    min-height: var(--waiter-ot-tab-stack, calc(56px + env(safe-area-inset-bottom, 0px)));
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, #0f172a 100%);
+    border-top: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.22);
+  }
+
+  .waiter-pos__ot-tabbar__scroll {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 2px;
+  }
+
+  .waiter-pos__ot-tabbar__btn {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(71, 85, 105, 0.75);
+    background: rgba(30, 41, 59, 0.96);
+    color: #f8fafc;
+    font-size: 0.78rem;
+    font-weight: 900;
+    line-height: 1.15;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+  }
+
+  .waiter-pos__ot-tabbar__btn--home {
+    background: rgba(180, 83, 9, 0.38) !important;
+    border: 1px solid rgba(251, 191, 36, 0.6) !important;
+    color: #fffbeb !important;
+  }
+
+  .waiter-pos__ot-tabbar__btn--guest {
+    font-size: 0.68rem;
+    max-width: 118px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .waiter-pos__ot-tabbar__btn--active,
+  .waiter-pos__ot-tabbar__btn--guest.waiter-pos__ot-tabbar__btn--active {
+    background: rgba(14, 165, 233, 0.38) !important;
+    border-color: rgba(56, 189, 248, 0.9) !important;
+    color: #e0f2fe !important;
+    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.4);
+  }
+
+  .waiter-pos__ot-tabbar__btn--guest.waiter-pos__ot-tabbar__btn--active {
+    background: rgba(22, 101, 52, 0.35) !important;
+    border-color: rgba(34, 197, 94, 0.85) !important;
+    color: #bbf7d0 !important;
+    box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.35);
+  }
+
+  .waiter-pos__ot-tabbar__btn:focus-visible {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
   }
 }

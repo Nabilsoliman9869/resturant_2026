@@ -16,9 +16,9 @@ export function getApiBase(): string {
 
   const isLocal = hostname === "127.0.0.1" || hostname === "localhost";
   const p = port || "";
-  /** منافذ التطوير التي يمرّر فيها Vite طلبات /api إلى الخلفية */
+  /** منافذ Vite — دائماً نفس المنشأ (بروكسي /api) حتى من جوال على 192.168.x.x:9999 */
   const viteProxyPorts = new Set(["9999", "5290"]);
-  if (isLocal && viteProxyPorts.has(p)) {
+  if (viteProxyPorts.has(p)) {
     return window.location.origin.replace(/\/$/, "");
   }
   if (fromEnv) return fromEnv;

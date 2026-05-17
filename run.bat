@@ -7,6 +7,8 @@ if not exist "node_modules" (
 )
 echo.
 echo مطاعم XTRA — الواجهة: http://127.0.0.1:9999  (من vite.config.ts)
+echo تنبيه: run.bat = الواجهة فقط. بدون API لن تُحمّل الطاولات.
+echo شغّل run_full_stack.bat (موصى به) أو run_api.bat في نافذة ثانية ثم تحقق: http://127.0.0.1:2288/api/ping
 echo لرؤية آخر كود: أغلق Vite القديم ثم npm run dev:fresh  أو  restart_from_zero.bat
 echo الخادم المحلي: run_api.bat أو run_full_stack.bat أو restart_from_zero.bat لإيقاف المنفذين وإعادة التشغيل
 echo.

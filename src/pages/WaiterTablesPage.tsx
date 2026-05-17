@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
@@ -87,6 +87,9 @@ export default function WaiterTablesPage() {
   const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
   const [vipBusySessionId, setVipBusySessionId] = useState<string>("");
   const [captainTransferBusySessionId, setCaptainTransferBusySessionId] = useState<string>("");
+  const [tableJumpQuery, setTableJumpQuery] = useState("");
+  const [tableJumpHighlightId, setTableJumpHighlightId] = useState<string | null>(null);
+  const tableCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   /**
    * قالب صالح للعرض = مفعّل **و** عنده ما يميّزه (اسم محدد أو عميل مربوط).
@@ -131,6 +134,48 @@ export default function WaiterTablesPage() {
     return Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
   }
 
+  const jumpToTableCard = useCallback(() => {
+    const raw = tableJumpQuery.trim();
+    if (!raw) {
+      setMsg("اكتب رقم الطاولة أو جزءاً من اسمها للانتقال.");
+      return;
+    }
+    const q = raw.toLowerCase();
+    let found: RestTable | null = null;
+    for (const row of tables) {
+      if (row.isSeparator) continue;
+      const name = String(row.name || "").trim().toLowerCase();
+      const numStr = row.number != null ? String(row.number).trim() : "";
+      if (name && (name === q || name.includes(q))) {
+        found = row;
+        break;
+      }
+      if (numStr) {
+        if (q === numStr.toLowerCase()) {
+          found = row;
+          break;
+        }
+        const hash = `#${numStr}`.toLowerCase();
+        if (q === hash || (raw.startsWith("#") && q.slice(1) === numStr.toLowerCase())) {
+          found = row;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      setMsg(`لا طاولة مطابقة لـ «${raw}». جرّب الرقم أو الاسم الظاهر على الشريحة.`);
+      return;
+    }
+    setMsg("");
+    const id = String(found.id);
+    const el = tableCardRefs.current.get(id);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTableJumpHighlightId(id);
+    window.setTimeout(() => {
+      setTableJumpHighlightId((cur) => (cur === id ? null : cur));
+    }, 1400);
+  }, [tableJumpQuery, tables]);
+
   function normalizeTableStatus(raw: string): "ready" | "occupied" | "reserved" | "dirty" | "cleaning" {
     const s = String(raw || "").toLowerCase().trim();
     if (["available", "free", "open", "ready", "متاحة", "جاهزة"].includes(s)) return "ready";
@@ -167,9 +212,12 @@ export default function WaiterTablesPage() {
       if (!wf.ok) bad.push(httpLabel(wf, "إعداد المسند"));
       if (!ops.ok) bad.push(httpLabel(ops, "إعدادات Owner/VIP"));
       if (bad.length) {
-        setMsg(
-          `تعذّر تحميل البيانات: ${bad.join(" · ")}. إن ظهر «لا اتصال» فشغّل run_api.bat ثم افتح http://127.0.0.1:2288/api/ping`,
-        );
+        const allNet =
+          [fp, rt, rs, ro, wf, ops].every((r) => r.status === 0);
+        const tail = allNet
+          ? "الواجهة (9999) تعمل لكن API (2288) غير متصل — شغّل run_api.bat أو run_full_stack.bat وانتظر «Uvicorn running» في نافذة MAT3AM-API، ثم افتح http://127.0.0.1:2288/api/ping (يجب ok:true) وحدّث الصفحة."
+          : "إن ظهر «لا اتصال» فشغّل run_api.bat ثم افتح http://127.0.0.1:2288/api/ping";
+        setMsg(`تعذّر تحميل البيانات: ${bad.join(" · ")}. ${tail}`);
         setTables([]);
         setSessionByTable(new Map());
         setSessions([]);
@@ -736,6 +784,26 @@ export default function WaiterTablesPage() {
       <div className="role-op__main">
         <div className="waiter-tables-toolbar">
           <h2 className="role-op__section-title">اختر الطاولة</h2>
+          <div className="waiter-tables-toolbar__jump">
+            <input
+              type="search"
+              enterKeyHint="go"
+              value={tableJumpQuery}
+              onChange={(e) => setTableJumpQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  jumpToTableCard();
+                }
+              }}
+              placeholder="انتقال سريع: رقم أو اسم الطاولة…"
+              aria-label="بحث عن طاولة للانتقال إليها في القائمة"
+              className="waiter-tables-toolbar__jump-input"
+            />
+            <button type="button" className="btn btn-primary" onClick={() => jumpToTableCard()} style={{ fontWeight: 800 }}>
+              انتقل
+            </button>
+          </div>
           <button type="button" className="btn btn-ghost" onClick={() => void loadTables()} style={{ fontWeight: 800 }}>
             تحديث القائمة
           </button>
@@ -805,7 +873,15 @@ export default function WaiterTablesPage() {
             };
 
             return (
-              <div key={t.id} className="waiter-tables-card-wrap">
+              <div
+                key={t.id}
+                className={`waiter-tables-card-wrap${tableJumpHighlightId === String(t.id) ? " waiter-tables-card-wrap--jump-highlight" : ""}`}
+                ref={(node) => {
+                  const tid = String(t.id);
+                  if (node) tableCardRefs.current.set(tid, node);
+                  else tableCardRefs.current.delete(tid);
+                }}
+              >
               <div
                 className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}`}
                 onClick={openOrderTakerForTable}

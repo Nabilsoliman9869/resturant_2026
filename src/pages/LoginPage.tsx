@@ -19,6 +19,15 @@ const ROLE_SET = new Set<RoleId>([
   "kids_guard",
 ]);
 
+/** نفس تعريف «اليوم» في صفحة جدولة الأدوار — تقويم المتصفح المحلي (ليس UTC). */
+function browserLocalDateISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function LoginPage() {
   const { user, login } = useAuth();
   const nav = useNavigate();
@@ -41,10 +50,14 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
+      const ld = browserLocalDateISO();
       const r = await fetch(`${getApiBase()}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login: L, pin: P }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Mat3am-Local-Date": ld,
+        },
+        body: JSON.stringify({ login: L, pin: P, localDate: ld }),
       });
       const j = await r.json().catch(
         () => ({} as { detail?: string | unknown; user?: { id: string; name: string; login?: string; role: RoleId } }),

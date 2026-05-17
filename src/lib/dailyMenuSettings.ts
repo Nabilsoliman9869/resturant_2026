@@ -81,6 +81,29 @@ export function isProductOnDailyMenu(
   return false;
 }
 
+export type DailyMenuScheduleRestriction = {
+  limited: boolean;
+  allowedGuides: Set<string>;
+};
+
+/** هل الصنف ضمن القائمة اليومية (جدول المدى + رموز allowedTokens إن وُجدت) — للجرسون/POS */
+export function isProductAllowedOnWaiterMenu(
+  productGuide: string,
+  productName: string,
+  dailyMenuState: DailyMenuState | null,
+  restriction: DailyMenuScheduleRestriction
+): boolean {
+  if (restriction.limited) {
+    const g = String(productGuide || "").trim().toUpperCase();
+    if (!g || !restriction.allowedGuides.has(g)) return false;
+  }
+  const dm = dailyMenuState;
+  if (dm && dm.allowedTokens.map((t) => t.trim()).filter(Boolean).length > 0) {
+    return isProductOnDailyMenu(productGuide, productName, dm);
+  }
+  return true;
+}
+
 export async function fetchDailyMenuFromApi(): Promise<DailyMenuState | null> {
   try {
     const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu`);
@@ -115,15 +138,29 @@ export async function pushDailyMenuToApi(state: DailyMenuState): Promise<{ ok: b
   }
 }
 
-export async function fetchDailyMenuSchedule(): Promise<DailyMenuScheduleEntry[]> {
+export async function fetchDailyMenuSchedule(): Promise<{
+  entries: DailyMenuScheduleEntry[];
+  error?: string;
+}> {
   try {
-    const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu-schedule`);
-    if (!r.ok) return [];
-    const j = (await r.json()) as DailyMenuScheduleResponse;
-    if (!j || !Array.isArray(j.entries)) return [];
-    return j.entries;
-  } catch {
-    return [];
+    const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu-schedule`, { cache: "no-store" });
+    const text = await r.text();
+    if (!r.ok) {
+      return { entries: [], error: text.trim() || `HTTP ${r.status}` };
+    }
+    const j = tryParseJson<DailyMenuScheduleResponse>(text);
+    if (!j) {
+      return {
+        entries: [],
+        error: text.trim()
+          ? "استجابة غير صالحة من الخادم"
+          : "استجابة فارغة — شغّل run_api.bat ثم http://127.0.0.1:2288/api/ping",
+      };
+    }
+    if (!Array.isArray(j.entries)) return { entries: [] };
+    return { entries: j.entries };
+  } catch (e) {
+    return { entries: [], error: String(e) };
   }
 }
 

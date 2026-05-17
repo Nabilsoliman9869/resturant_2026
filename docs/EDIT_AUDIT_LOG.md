@@ -420,4 +420,105 @@ eserved + active.
 - **`git push`** الفرع `dev-next-baseline-2026-05-05` → `origin` (`Nabilsoliman9869/resturant_2026`) عند commit **`52e9d82`** (جرسون/AppShell/تسجيل/CSS + `config/restaurant` المتتبَّع + `appShell.css`).
 - **`dist/Mat3amPOS021.exe`**: نسخ محلي من `dist/Mat3amPOS.exe` (مجلد `dist/` في `.gitignore` ولا يُرفع). لم يُشغَّل `scripts/prepare_mat3am_exe_build.py` لعدم توفر `python`/`py` في PATH على الجهاز.
 
+### 048 — جوال: تعريف ضيوف أولاً، شريط مقاعد مُصفّى، بحث طاولة، جدولة يومية اختيارية — `UTC 2026-05-12T14:20:00Z` — ID `mobile-ot-guests-schedule-jump`
 
+- **`backend/api_server.py`**: `_user_has_role_schedule_covering_today` + مفتاح **`enforceRoleScheduleForShift`** في `restaurant_ops`؛ عند التفعيل يرفض `POST /api/auth/login` أدوار الصالة (`waiter`/`host`/`server`/`speed_order`) بدون صف جدولة يغطي اليوم برسالة **«أنت لست ضمن فريق العمل اليوم»**؛ تعطيل افتراضي؛ عطل استعلام الجدولة لا يُسقِط الدخول (`True` عند خطأ SQL).
+- **`src/pages/settings/RestaurantOpsSettingsPage.tsx`**: بطاقة **الوردية وجدولة الأدوار** + حفظ المفتاح.
+- **`src/pages/WaiterOrderPage.tsx`**: ترتيب شريط الجوال يضع **تعريف ضيوف** بعد **طاولات**؛ أزرار المقاعد في الشريط = **المقاعد المُسمّاة فقط + ١٣ مشترك**؛ زر **أصناف** يمرّر العرض على **البحث** ثم الشبكة؛ تكبير لمس الشريط يبقى ~300ms بعد رفع الإصبع.
+- **`src/pages/WaiterTablesPage.tsx`**: حقل **انتقال سريع** + زر **انتقل** + `scrollIntoView` ووميض على الشريحة.
+- **`src/components/AppShell.tsx`** + **`src/styles/appShell.css`**: تأخير إطفاء تكبير الـ dock بعد اللمس؛ أيقونات أكبر عند التوسيع.
+- **`src/styles/operationalRoles.css`**: أدوات شريط الطاولات، وميض الانتقال، وتكبير أوضح لشريط أقسام الطلب.
+
+### 049 — إصلاح قراءة «إلزام الجدولة»: دمج ملف ops فوق SQL — `UTC 2026-05-12T15:05:00Z` — ID `enforce-schedule-read-merge`
+
+- **`backend/api_server.py`**: `_restaurant_read_ops_storage` يطبّق **`restaurant_ops_settings.json` بعد SQL**؛ تسجيل الدخول يقرأ `enforceRoleScheduleForShift` من هذا الدمج؛ مقارنة الجدولة بـ **`CAST(ValidFrom/ValidTo AS DATE)`**.
+- **`src/pages/settings/RestaurantOpsSettingsPage.tsx`**: ملاحظة أن **إعادة تشغيل الـ API ليست شرطاً** بعد الحفظ.
+
+### 050 — إلزام الجدولة: توحيد «اليوم» مع الواجهة (localDate + SYSDATETIME) — `UTC 2026-05-12T15:40:00Z` — ID `schedule-today-local-align`
+
+- **`backend/api_server.py`**: فحص الجدولة ودور الدخول الفعّال يستخدمان **`localDate` / `calendarDate` / `clientToday`** من جسم تسجيل الدخول عند توفرها؛ وإلا **`CAST(SYSDATETIME() AS DATE)`** (وقت خادم SQL المحلي) بدل **`SYSUTCDATETIME()`** (UTC) الذي كان يُبقي أسامة «ضمن الجدولة» بعد انتهاء اليوم في الواجهة؛ `_user_has_role_schedule_covering_today` عند خطأ SQL ترجع **False** بدل السماح للجميع.
+- **`src/pages/LoginPage.tsx`**: إرسال **`localDate`** بنفس منطق صفحة الجدولة (تقويم المتصفح المحلي).
+
+### 051 — إلزام الوردية: رأس التاريخ + الدور الأساسي + تطبيع اسم الدخول — `UTC 2026-05-12T16:15:00Z` — ID `shift-enforce-header-base-role`
+
+- **`backend/api_server.py`**: `_login_calendar_iso_from_request` (JSON + **`X-Mat3am-Local-Date`**)، و**`_enforce_role_schedule_shift_active()`** (يشمل **`MAT3AM_ENFORCE_SHIFT=1`** للاختبار السريع)؛ الإلزام يُطبَّق إن كان **الدور الأساسي أو الفعّال** من أدوار الصالة؛ مطابقة **`LoginName`** بدون حساسية لحالة الأحرف.
+- **`src/pages/LoginPage.tsx`**: إرسال رأس **`X-Mat3am-Local-Date`** مع **`localDate`**.
+
+### 052 — جوال: عرض قوائم `<select>` (عرض كامل + خط 16px) — `UTC 2026-05-12T20:10:00Z` — ID `mob-select-width-16px`
+
+- **`src/styles/operationalRoles.css`**: `.waiter-pos__select` — إزالة سقف **`max-width: 200px`** لصالح **`max-width: 100%`** و**`min-width: 0`** و**`width: 100%`**؛ `.waiter-tblcard__alert-select` — **`min-width: 0`** و**`max-width: 100%`**؛ في `@media (max-width: 768px)` زيادة **`font-size: max(16px, 0.9rem)`** لـ `.waiter-pos__select` لتقليل تكبير iOS وتحسين قراءة الخيار.
+- **`src/index.css`**: قاعدة عامة **`@media (max-width: 768px)`** لـ **`select`** (عرض كامل للحاوية، **`min-height: 44px`**, **`font-size: max(16px, 1em)`**).
+
+### 053 — إصلاح قصّ قائمة تحويل/دمج داخل «خيارات الطاولات» (overflow) — `UTC 2026-05-12T21:05:00Z` — ID `ot-select-overflow-navopts`
+
+- **`src/pages/WaiterOrderPage.tsx`**: استبدال **`waiter-pos__dropdown-wrap`** حول حقول **تحويل/دمج** بـ **`waiter-pos__field-stack`** (لا `max-height` ولا `overflow:auto` على الحاوية).
+- **`src/styles/operationalRoles.css`**: تعريف **`.waiter-pos__field-stack`**؛ **`navopts`** على الجوال (`max-width:900px`) بدون **`max-height`/`overflow-y:auto`**؛ **`navopts:has(.waiter-pos__field-stack:focus-within)`** + **`topbar:has(...)`** لرفع **`overflow-y`** عند فتح القائمة على الشاشات الواسعة.
+
+### 054 — تحويل/دمج: بحث + أزرار بدل `<select>` — `UTC 2026-05-12T22:15:00Z` — ID `ot-transfer-merge-search-pick`
+
+- **`src/pages/WaiterOrderPage.tsx`**: **`transferPickQuery`** / **`mergePickQuery`** + **`matchesTablePickQuery`**؛ قائمة مرشّحين حتى 60 طاولة؛ اختيار بضغطة صف؛ **تنفيذ التحويل** / **تنفيذ الدمج**؛ مسح الاختيار والاستعلام بعد نجاح العملية.
+- **`src/styles/operationalRoles.css`**: أصناف **`.waiter-pos__table-pick-*`** و**`.waiter-pos__table-move-block`** لحقل البحث والقائمة القابلة للتمرير داخل الصندوق.
+
+### 055 — تحويل/دمج: طاولات فارغة + دمج بنفس الكابتن + API — `UTC 2026-05-12T23:20:00Z` — ID `ot-move-empty-same-captain`
+
+- **`src/pages/WaiterOrderPage.tsx`**: **`tablesMoveCatalog`** (كل الطاولات من المخطط) و**`sessionByTableRef`** من الجلسات النشطة؛ التحويل يعرض **طاولات بلا جلسة** (ويستبعد متسخة/تنظيف)؛ الدمج يعرض طاولات **لها جلسة لنفس `captainGate`**؛ تحديث الخريطة كل 12 ثانية مع الاستطلاع؛ **`mat3amActor`** في PATCH/merge؛ **`loadAll()`** بعد نجاح النقل.
+- **`backend/api_server.py`**: **`PATCH …/table-sessions`** — رفض النقل إن وُجدت جلسة نشطة أخرى على طاولة الهدف؛ تعبئة **مسند الطلب** من **`mat3amActor`** إن كانت الجلسة بلا كابتن؛ **`POST …/merge`** — رفض الدمج إن اختلف **كابتن** المصدر والهدف عند وجود كابتن على المصدر.
+
+### 056 — إصلاح الدمج: مطابقة tableId + وراثة كابتن الهدف — `UTC 2026-05-13T00:05:00Z` — ID `merge-tableid-captain-inherit`
+
+- **`backend/api_server.py`**: **`_restaurant_table_ids_equal`** لمطابقة **`tableId`** مع **`targetTableId`** (GUID) في **`POST …/merge`** وفي فحص التحويل؛ عند الدمج إن كانت جلسة **الهدف بلا `captainUserId`** يُنسَخ المسند من **المصدر**؛ رفض الدمج فقط عند تعارض كابتنين **غير فارغين**.
+- **`src/pages/WaiterOrderPage.tsx`**: **`mat3amGuidNormEq`** لعرض أهداف الدمج؛ السماح بجلسات الهدف **بلا كابتن** عندما المستخدم مسند (`captainGate`).
+
+### 057 — دمج/فراغ الطاولة: فهرس الجلسة تحت مرجع المخطط (T14 vs GUID) — `UTC 2026-05-13T00:35:00Z` — ID `session-map-catalog-tableid`
+
+- **`src/pages/WaiterOrderPage.tsx`**: **`restaurantTableIdsEqual`** + **`buildSessionByTableRef(sess, catalog)`** — بعد الفهرسة بـ `session.tableId` يُربط كل صف مخطط بنفس الجلسة إن تطابقت المعرفات؛ يُحدَّث الاستطلاع كل 12 ثانية بمرور **`tablesMoveCatalog`** حتى يعمل الدمج بعد التحميل.
+
+### 058 — بحث الدمج: `t14`/`14` + رسالتان (لا أهداف / لا نتائج بحث) — `UTC 2026-05-13T01:00:00Z` — ID `merge-search-t14-messages`
+
+- **`src/pages/WaiterOrderPage.tsx`**: **`matchesTablePickQuery`** يدعم **`t14`/`14`** مع **`t.number`** وحدود رقم في الاسم؛ **`mergePickBase`** منفصل؛ رسالتان للفراغ؛ **`tablesMoveCatalog`** لعرض اسم المختار في التحويل/الدمج.
+
+### 059 — تحويل/دمج: قائمة فقط بعد «بحث» أو Enter — `UTC 2026-05-13T02:45:00Z` — ID `table-pick-explicit-search`
+
+- **`src/pages/WaiterOrderPage.tsx`**: **`transferSearchResults`** / **`mergeSearchResults`** (`null` قبل التشغيل)؛ **`runTransferTableSearch`** / **`runMergeTableSearch`**؛ صف حقل + زر **«بحث»**؛ لا تُعرض الطاولات تحت الحقل حتى البحث؛ إعادة تعيين النتائج والاختيار عند تغيير الاستعلام أو **`selectedTableId`**.
+- **`src/styles/operationalRoles.css`**: **`.waiter-pos__table-pick-search-row`**، **`.waiter-pos__table-pick-search-btn`**، **`.waiter-pos__table-pick-hint`**.
+
+### 060 — معاينة واجهة الجرسون Style 1/2 للعرض على الفريق — `UTC 2026-05-15T12:00:00Z` — ID `waiter-ui-preview-lab`
+
+- **`src/lab/waiterUiPreview/`**: صفحة معاينة ببيانات وهمية، تبديل Style 1 (كلاسيك) / Style 2 (سهل)، حقل ملاحظات + نسخ.
+- **`src/styles/waiterUiEase.css`**: تخطيط Style 2 (تبويبات، فئات أفقية، شبكة بطاقات، شريط إرسال).
+- **`src/App.tsx`**: مسار **`/preview/waiter-order-ui`** بدون تسجيل دخول.
+
+### 061 — مقارنة نماذج Stitch (HTML) مع طلب للطاولة الإنتاجي — `UTC 2026-05-15T14:30:00Z` — ID `stitch-html-gap-notes`
+
+- **`docs/design-reference/STITCH_HTML_VS_WAITER_ORDER_PAGE.txt`**: فجوات المسميات (شريط الأقسام، البحث، المودال، سبْليت، مقعد ١٣) مقابل **`WaiterOrderPage.tsx`**؛ توجيه استخدام HTML كمرجع بصري مع تصحيح النصوص قبل دمج Style 2.
+
+### 062 — تحديث مقارنة Stitch بعد النسخة الثانية من HTML — `UTC 2026-05-15T16:00:00Z` — ID `stitch-html-revision-2`
+
+- **`docs/design-reference/STITCH_HTML_VS_WAITER_ORDER_PAGE.txt`**: قسم **مراجعة ثانية** — تقييم التحسينات (معرفات الشريط، نصوص المقعد، placeholder، سبْليت الطويل في النموذج ج) وبقاء الفجوات (تحويل/دمج كاملين، سبْليت النموذج أ، أزرار غير موجودة في النموذج ج، توحيد «إرسال الطلب»).
+
+### 063 — مراجعة ثالثة لنماذج Stitch (دُفعة HTML جديدة) — `UTC 2026-05-15T18:00:00Z` — ID `stitch-html-revision-3`
+
+- **`docs/design-reference/STITCH_HTML_VS_WAITER_ORDER_PAGE.txt`**: قسم **مراجعة ثالثة** — الكلاسيك (تحويل/دمج منفصلان، مودال محسّن، تعارض محتمل بين زر «إرسال الطلب» وزر «مرسل» بالشريط)؛ التبويبي (أسماء ضيوف لكل مقعد، سبْليت كامل، قيد، خيارات موسعة)؛ الدرج (طلب الحساب، إرسال الطلب) وبقيّة «تحويل أصناف» / «طباعة فاتورة».
+
+### 064 — سياسة التصاميم المرشحة vs الفجوات التقنية — `UTC 2026-05-15T19:00:00Z` — ID `design-mocks-internal-policy`
+
+- **`docs/design-reference/STITCH_HTML_VS_WAITER_ORDER_PAGE.txt`**: فقرة **سياسة الاستخدام** أعلى الملف + مسؤولية التطوير — المرشحات لمظهر/توزيع فقط؛ حسم الفروقات عند دمج React؛ الملف مذكرة داخلية وليس قائمة إلزامية على جهة التصميم.
+
+### 065 — «نموذج ٢»: تنقّل جوال بتبويبات سفلية بديل الشريط الجانبي — `UTC 2026-05-15T22:00:00Z` — ID `waiter-ot-ui-tabs-model2`
+
+- **`src/pages/WaiterOrderPage.tsx`**: تفضيل **`classic` \| `tabs`** على الجوال فقط (`narrowOtViewport`)؛ تخزين **`localStorage`** (`mat3am_order_taker_ui_v1`)؛ معامل **`?orderUi=tabs|classic`** يُطبَّق ثم يُزال من عنوان الصفحة؛ **`onOtRailRowActivate`** موحّد بين الشريط والتبويبات؛ شريط **`waiter-pos__ot-tabbar`** بديل DOM للشريط الجانبي عند **`tabs`**؛ قائمة هيدر «تنقّل الجوال».
+- **`src/styles/operationalRoles.css`**: مُعدّل **`waiter-pos--ot-ui-tabs`** — إزالة هامش المحتوى الخاص بالشريط، رفع **`mb-sendbar`** و**`ot-flow-toast`** فوق الشريط السفلي، **`padding-bottom`** إضافي للمحتوى، أنماط أزرار التبويب.
+
+### 067 — نقطة أساس قبل خدمات الإنتاج: مرتجعات ضيف + ستايل جرسون + منيو يومي — `UTC 2026-05-17T02:30:00Z` — ID `feat-guest-return-waiter-ui-baseline`
+
+- **`backend/api_server.py`**: مسارات **`guest-return-reasons`** / **`guest-returns`** (GET/POST/PATCH)؛ **`VERIFY_SCHEMA_REVISION=11`** و**`FEATURE_GUEST_RETURNS=1`** في **`/__whoami__`**.
+- **`src/components/GuestReturnRequestModal.tsx`**, **`GuestReturnsManagerPage.tsx`**, **`guestReturnCatalog.ts`**, **`guestReturnApi.ts`**: مسار مرتجع الضيف (جرسون → مدير) مع لقطة بنود ثابتة وشاشة نجاح بعد POST.
+- **`src/lib/waiterOrderUiPrefs.ts`**, **`WaiterUiStylePrompt.tsx`**, **`AppShell.tsx`**, **`AuthContext.tsx`**: اختيار ستايل ١/٢ بعد كل دخول (تجريبي)؛ حفظ **`mat3am_order_taker_ui_v1`** و**`mat3am_waiter_last_path_v1`**؛ فتح آخر مسار للجرسون.
+- **`src/pages/WaiterOrderPage.tsx`**: القائمة اليومية + Out of Stock؛ عرض بنود الطلبات المُرسلة؛ نموذج ٢ (تبويبات).
+- **`run_api.bat`**: توجيه التحقق من **`FEATURE_GUEST_RETURNS`** عند إعادة تشغيل API.
+
+### 066 — استقرار API: ODBC غير حاجب + بروكسي وخطوة اتصال — `UTC 2026-05-16T06:30:00Z` — ID `api-sql-nonblocking-devconn`
+
+- **`backend/api_server.py`**: **`test-connection`** و**`/api/ready?check_db=1`** و**`mat3am-schema-probe/ensure`** عبر **`run_in_threadpool`**؛ مهلة اختبار ODBC **6** ثوانٍ.
+- **`vite.config.ts`**: **`timeout`/`proxyTimeout`** 120s لـ **`/__whoami__`** و**`/api`**.
+- **`src/pages/DeveloperConnection.tsx`**: مؤشر حي **`/api/ping`** كل 3s؛ رسائل **`Failed to fetch`** أوضح؛ مهلة 25s لاختبار SQL؛ تعطيل أزرار الخطوة ١ إذا API غير حي.

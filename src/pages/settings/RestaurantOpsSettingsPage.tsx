@@ -22,6 +22,8 @@ export type RestaurantOpsSettings = {
   auditRetentionDays: string;
   auditLogClientActions: string;
   deliveryChannelStrictFinancialModes: string;
+  /** عند on: جرسون/استقبال/مناولة/طلبات سريعة يُرفض دخولهم بدون صف جدولة دور يغطي اليوم */
+  enforceRoleScheduleForShift: string;
   vipOwnerTemplatesJson: string;
 };
 
@@ -42,6 +44,7 @@ const OPS_DEFAULTS: RestaurantOpsSettings = {
   auditRetentionDays: "365",
   auditLogClientActions: "on",
   deliveryChannelStrictFinancialModes: "on",
+  enforceRoleScheduleForShift: "off",
   vipOwnerTemplatesJson: "[]",
 };
 
@@ -626,6 +629,25 @@ export default function RestaurantOpsSettingsPage() {
             <summary style={{ cursor: "pointer" }}>عرض JSON الحالي</summary>
             <pre style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{String(s.vipOwnerTemplatesJson || "[]")}</pre>
           </details>
+        </div>
+
+        <div className="card">
+          <h4 style={{ marginTop: 0 }}>الوردية وجدولة الأدوار</h4>
+          <p style={{ marginTop: 0, color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.45 }}>
+            عند التفعيل، لا يُسمح بتسجيل الدخول لأدوار الصالة (جرسون الطلبات، الاستقبال، المناولة، الطلبات السريعة) إلا إذا وُجد لهذا المستخدم{" "}
+            <strong>صف في «جدولة أدوار المستخدمين»</strong> يغطي تاريخ اليوم. وإلا تظهر رسالة: «أنت لست ضمن فريق العمل اليوم».
+            <br />
+            <span style={{ color: "#0f766e", fontWeight: 700 }}>بعد «حفظ الكل» يكفي طلب تسجيل دخول جديد</span> — يُقرأ الإعداد من الملف مباشرة دون إعادة تشغيل الخادم (مع الدمج مع قاعدة البيانات).
+          </p>
+          <label style={{ display: "block", fontWeight: 700, marginBottom: 4 }}>إلزام وجود جدولة لليوم قبل الدخول</label>
+          <select
+            value={s.enforceRoleScheduleForShift}
+            onChange={(e) => setS((x) => ({ ...x, enforceRoleScheduleForShift: e.target.value }))}
+            style={{ width: "100%" }}
+          >
+            <option value="off">معطّل (الافتراضي)</option>
+            <option value="on">مفعّل</option>
+          </select>
         </div>
 
         <div className="card">
