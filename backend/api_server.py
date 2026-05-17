@@ -25,7 +25,8 @@ from pathlib import Path
 from config import get_connection_string, get_connection_string_driver13, DATABASE
 
 try:
-    XTRA_API_PORT = int(os.environ.get("XTRA_API_PORT", "2288"))
+    # Railway يضع PORT — نفس الخدمة تخدم الواجهة والـ API
+    XTRA_API_PORT = int(os.environ.get("PORT") or os.environ.get("XTRA_API_PORT") or "2288")
 except ValueError:
     XTRA_API_PORT = 2288
 
