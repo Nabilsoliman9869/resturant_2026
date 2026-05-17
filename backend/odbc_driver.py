@@ -36,6 +36,16 @@ def sql_server_host(server: str, port: int | None) -> str:
     return s
 
 
+def _driver_tls_extras(driver: str) -> str:
+    """Driver 18 + OpenSSL 3 على Linux يرفض خوارزميات TLS القديمة على SQL Server القديم."""
+    if "18" in driver:
+        # Encrypt=no يتجنب: SSL Provider legacy sigalg disallowed
+        return ";Encrypt=no;TrustServerCertificate=yes"
+    if "17" in driver:
+        return ";Encrypt=no"
+    return ""
+
+
 def odbc_connection_string(
     server: str,
     port: int | None,
@@ -45,11 +55,7 @@ def odbc_connection_string(
 ) -> str:
     driver = pick_odbc_driver_name()
     host = sql_server_host(server, port)
-    extras = ""
-    if "18" in driver:
-        extras = ";Encrypt=yes;TrustServerCertificate=yes"
-    elif "17" in driver:
-        extras = ";Encrypt=no"
+    extras = _driver_tls_extras(driver)
     return (
         f"DRIVER={{{driver}}};SERVER={host};DATABASE={database};UID={uid};PWD={pwd}{extras}"
     )

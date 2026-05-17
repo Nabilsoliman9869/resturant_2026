@@ -865,6 +865,11 @@ def _settings_test_connection_sync(body: dict) -> dict:
                 "ok": False,
                 "detail": "تعذر العثور على Microsoft ODBC Driver (17/18) على الخادم — أعد نشر Railway بعد تحديث Dockerfile (msodbcsql18).",
             }
+        if "legacy sigalg" in err.lower() or "ssl provider" in err.lower():
+            return {
+                "ok": False,
+                "detail": "رفض SSL/TLS بين Railway وSQL Server (خوارزمية قديمة). تم ضبط Encrypt=no في الكود — أعد نشر آخر نسخة ثم جرّب الاختبار مرة أخرى.",
+            }
         return {"ok": False, "detail": err}
 
 
