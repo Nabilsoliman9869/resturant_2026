@@ -841,7 +841,10 @@ def _settings_test_connection_sync(body: dict) -> dict:
         return {"ok": False, "detail": "السيرفر وقاعدة البيانات مطلوبان"}
     if not uid:
         return {"ok": False, "detail": "اسم المستخدم مطلوب"}
-    conn_str = _odbc_connection_string(s, port, db, uid, pwd)
+    try:
+        conn_str = _odbc_connection_string(s, port, db, uid, pwd)
+    except RuntimeError as e:
+        return {"ok": False, "detail": str(e)}
     try:
         conn = pyodbc.connect(conn_str, timeout=6)
         conn.close()
@@ -863,6 +866,24 @@ def _settings_test_connection_sync(body: dict) -> dict:
                 "detail": "تعذر العثور على Microsoft ODBC Driver (17/18) على الخادم — أعد نشر Railway بعد تحديث Dockerfile (msodbcsql18).",
             }
         return {"ok": False, "detail": err}
+
+
+@app.get("/api/dev/odbc-drivers")
+def api_dev_odbc_drivers():
+    """تشخيص: هل Microsoft ODBC مثبت على الحاوية (Railway)؟"""
+    from odbc_driver import installed_odbc_drivers, pick_odbc_driver_name
+
+    installed = sorted(installed_odbc_drivers())
+    try:
+        picked = pick_odbc_driver_name()
+    except RuntimeError:
+        picked = None
+    return {
+        "ok": picked is not None,
+        "drivers": installed,
+        "picked": picked,
+        "hint": "يجب أن يظهر ODBC Driver 18 for SQL Server بعد نشر Dockerfile مع msodbcsql18",
+    }
 
 
 @app.post("/api/settings/test-connection")
@@ -10999,6 +11020,17 @@ def _bootstrap_mat3am_runtime() -> None:
 @app.on_event("startup")
 def _mat3am_startup_bootstrap():
     _bootstrap_mat3am_runtime()
+    try:
+        from odbc_driver import installed_odbc_drivers, pick_odbc_driver_name
+
+        names = sorted(installed_odbc_drivers())
+        print(f"[mat3am] ODBC drivers: {names}", flush=True)
+        try:
+            print(f"[mat3am] ODBC picked: {pick_odbc_driver_name()}", flush=True)
+        except RuntimeError as e:
+            print(f"[mat3am] ODBC WARNING: {e}", flush=True)
+    except Exception as e:
+        print(f"[mat3am] ODBC probe failed: {e}", flush=True)
 
 
 _RESTAURANT_SQL_KEYS = frozenset(
