@@ -233,19 +233,15 @@ def _normalize_sql_port(port) -> Optional[int]:
 
 
 def _sql_server_host(server: str, port: Optional[int]) -> str:
-    s = (server or "").strip()
-    if not s:
-        return s
-    if port is not None:
-        return f"{s},{port}"
-    return s
+    from odbc_driver import sql_server_host as _host
+
+    return _host(server, port)
 
 
 def _odbc_connection_string(server: str, port: Optional[int], db: str, uid: str, pwd: str) -> str:
-    host = _sql_server_host(server, port)
-    return (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={host};DATABASE={db};UID={uid};PWD={pwd};"
-    )
+    from odbc_driver import odbc_connection_string as _cs
+
+    return _cs(server, port, db, uid, pwd)
 
 
 def _get_connection_string_from_settings():
@@ -861,10 +857,10 @@ def _settings_test_connection_sync(body: dict) -> dict:
                 "ok": False,
                 "detail": "انتهت المهلة أو رفض الاتصال — تأكد أن خدمة SQL Server تعمل، وأن TCP/IP مفعّل، وأن المنفذ 1477 (أو المنفذ الفعلي في SQL Server Configuration Manager) مفتوح في الجدار الناري. جرّب أيضاً السيرفر 127.0.0.1 بدل .",
             }
-        if "IM002" in err or "ODBC Driver" in err and "not found" in err.lower():
+        if "IM002" in err or ("ODBC Driver" in err and "not found" in err.lower()):
             return {
                 "ok": False,
-                "detail": "تعذر العثور على ODBC Driver 17 for SQL Server — ثبّت «Microsoft ODBC Driver 17 for SQL Server» من موقع مايكروسوفت.",
+                "detail": "تعذر العثور على Microsoft ODBC Driver (17/18) على الخادم — أعد نشر Railway بعد تحديث Dockerfile (msodbcsql18).",
             }
         return {"ok": False, "detail": err}
 
