@@ -17,6 +17,7 @@ import {
 import { useAuth, type SessionUser } from "../auth/AuthContext";
 import type { RoleId } from "../auth/roles";
 import { getApiBase } from "../lib/apiBase";
+import { isSharedTerminalPinExempt } from "../lib/terminalPinPolicy";
 
 type TerminalSettings = {
   sharedTerminalEnabled: boolean;
@@ -126,7 +127,8 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     lockoutUntilEpoch: null,
   });
 
-  const enabled = !!settings.sharedTerminalEnabled;
+  const pinExempt = isSharedTerminalPinExempt(user?.role);
+  const enabled = !!settings.sharedTerminalEnabled && !pinExempt;
   const lastTokenIssuedAtRef = useRef<number>(0); // متى أُصدر آخر terminalToken (epoch sec)
   const idleTimerRef = useRef<number | null>(null);
   const hardLogoutTimerRef = useRef<number | null>(null);
@@ -148,7 +150,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
 
   // عند تفعيل الوضع لأول مرة (أو دخول مستخدم) ولا يوجد token: ارفع overlay
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || pinExempt) {
       clearTerminalToken();
       lastTokenIssuedAtRef.current = 0;
       setLockState((s) => (s.locked ? { ...s, locked: false, reason: null } : s));
@@ -157,7 +159,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     if (user?.id) {
       setLockState((s) => (s.locked ? s : { ...s, locked: true, reason: "boot" }));
     }
-  }, [enabled, user?.id]);
+  }, [enabled, pinExempt, user?.id]);
 
   // مؤقّت الخمول الأساسي (sliding window)
   const restartIdleTimer = useCallback(() => {

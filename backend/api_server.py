@@ -12642,15 +12642,23 @@ def _terminal_get_settings_cached() -> dict:
         except Exception: pass
 
 
+def _terminal_role_pin_exempt(role: Optional[str]) -> bool:
+    """المطوّر معفى من PIN المشترك — للتهيئة وإعداد SQL دون حظر overlay."""
+    return str(role or "").strip().lower() == "developer"
+
+
 def _terminal_require_user(actor: Optional[dict]) -> Optional[dict]:
     """يُستدعى من endpoints الحسّاسة:
     - لو SharedTerminalEnabled=False ⇒ يعيد actor كما هو (لا تغيير في السلوك القديم).
     - لو True ⇒ يجب أن يحوي actor.terminalToken صالحاً، وإلا HTTPException(401).
       عند النجاح يُرجع dict {id, login, role, name, terminalId, exp} المستخرَج من الـtoken.
+    - دور developer معفى دائماً (تهيئة أولية حتى بدون PinHash).
     """
     st = _terminal_get_settings_cached()
     if not st.get("sharedTerminalEnabled"):
         return actor if isinstance(actor, dict) else None
+    if isinstance(actor, dict) and _terminal_role_pin_exempt(actor.get("role")):
+        return actor
     if not isinstance(actor, dict):
         raise HTTPException(status_code=401, detail="Shared Terminal Mode مفعّل: أرسل mat3amActor مع terminalToken صادر بعد التحقق بـ PIN.")
     tok = str(actor.get("terminalToken") or "").strip()

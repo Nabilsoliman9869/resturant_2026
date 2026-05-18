@@ -149,6 +149,21 @@ export default function SharedTerminalSettingsPage() {
         تتحكم في وضع <strong>الجهاز المشترك</strong> ونمط القفل (هجين منزلق أو قفل بعد كل عملية).
         الجهاز الحالي: <code>{tid}</code>
       </div>
+      <div
+        style={{
+          marginBottom: 14,
+          padding: "0.75rem 1rem",
+          borderRadius: 8,
+          background: "rgba(80,160,255,0.08)",
+          border: "1px solid rgba(80,160,255,0.35)",
+          fontSize: ".88rem",
+          color: "var(--text)",
+        }}
+      >
+        <strong>ملاحظة — دور المطوّر:</strong> لا يُعرض overlay الـ PIN ولا يُطلب{" "}
+        <code>terminalToken</code> على السيرفر (للتهيئة: اتصال SQL، الجداول، المستخدمين).
+        باقي الأدوار تحتاج PIN في <strong>إدارة المستخدمين</strong> عند تفعيل «جهاز مشترك».
+      </div>
 
       <section style={card}>
         <h3 style={h3}>1) طريقة استخدام نقطة البيع</h3>
