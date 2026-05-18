@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { normalizeFloorPlanDocument } from "../lib/floorPlanDocument";
+import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
 import { type FloorPlan, type FloorTable, type TableLiveMap, type TableLiveStatus } from "../lib/floorPlanModel";
 import { FloorPlanSvgView } from "./FloorPlanSvgView";
 
@@ -223,62 +224,37 @@ export default function FloorPlanLive() {
   const [live, setLive] = useState<TableLiveMap>({});
   const [planStatus, setPlanStatus] = useState<PlanStatus>("missing");
   const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setMsg("");
-    try {
-      const safeJson = async (res: Response) => {
-        try {
-          const txt = await res.text();
-          if (!txt) return {} as any;
-          return JSON.parse(txt);
-        } catch {
-          return {} as any;
-        }
-      };
-      const fetchSafe = async (url: string) => {
-        try {
-          const response = await fetch(url);
-          const body = await safeJson(response);
-          return { ok: response.ok, status: response.status, body };
-        } catch (error) {
-          return { ok: false, status: 0, body: null as any, error: String(error) };
-        }
-      };
-      const [fpRes, tRes, sRes, oRes] = await Promise.all([
-        fetchSafe(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
-        fetchSafe(`${base}/api/restaurant/tables`),
-        fetchSafe(`${base}/api/restaurant/table-sessions`),
-        fetchSafe(`${base}/api/restaurant/orders`),
-      ]);
-
-      const rawPlan = fpRes.ok ? fpRes.body?.plan : null;
-      const norm = rawPlan != null ? normalizeFloorPlanDocument(rawPlan) : null;
+  const applySnapshot = useCallback(
+    (snap: NonNullable<Awaited<ReturnType<typeof fetchOperationalSnapshot>>["data"]>) => {
+      const fpRaw = snap.floorPlan;
+      const fpObj =
+        fpRaw && typeof fpRaw === "object" && "plan" in (fpRaw as object)
+          ? (fpRaw as { plan?: unknown }).plan
+          : fpRaw;
+      const norm = fpObj != null ? normalizeFloorPlanDocument(fpObj) : null;
       const flist = norm?.floors ?? [];
-      if (fpRes.ok) {
-        setFloors(flist);
-        setActiveFloorId((cur) => {
-          if (!flist.length) return null;
-          if (cur && flist.some((f) => f.id === cur)) return cur;
-          return norm?.activeFloorId ?? flist[0].id;
-        });
-        if (rawPlan == null) {
-          setPlanStatus("missing");
-        } else if (!norm) {
-          setPlanStatus("invalid");
-          setMsg("تم العثور على floor_plan.json لكن بنيته غير صالحة للعرض.");
-        } else {
-          setPlanStatus("api");
-        }
+      setFloors(flist);
+      setActiveFloorId((cur) => {
+        if (!flist.length) return null;
+        if (cur && flist.some((f) => f.id === cur)) return cur;
+        return norm?.activeFloorId ?? flist[0].id;
+      });
+      if (fpObj == null) {
+        setPlanStatus("missing");
+      } else if (!norm) {
+        setPlanStatus("invalid");
+        setMsg("مخطط الصالة غير صالح للعرض.");
       } else {
-        setPlanStatus("unavailable");
-        setMsg(fpRes.error || `تعذر الوصول إلى API الخاص بالمخطط (HTTP ${fpRes.status || 0}). تأكد من تشغيل الخادم الخلفي على 127.0.0.1:2288.`);
+        setPlanStatus("api");
+        setMsg("");
       }
 
-      const tl = Array.isArray(tRes.body?.tables) ? tRes.body.tables : [];
+      const tl = Array.isArray(snap.tables) ? (snap.tables as TableRec[]) : [];
       setTables(tl);
-      const sessions: SessionRec[] = Array.isArray(sRes.body?.sessions) ? sRes.body.sessions : [];
-      const orders: OrderRec[] = Array.isArray(oRes.body?.orders) ? oRes.body.orders : [];
+      const sessions = (Array.isArray(snap.sessions) ? snap.sessions : []) as SessionRec[];
+      const orders = (Array.isArray(snap.orders) ? snap.orders : []) as OrderRec[];
 
       const busy = new Set<string>();
       for (const s of sessions) {
@@ -296,14 +272,45 @@ export default function FloorPlanLive() {
       } else {
         setLive({});
       }
+    },
+    [],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const snapRes = await fetchOperationalSnapshot(base, { includeUsers: false });
+      if (snapRes.ok && snapRes.data) {
+        applySnapshot(snapRes.data);
+        const err = snapRes.data.tableDataSource?.error;
+        if (err) setMsg(`تحذير SQL: ${err}`);
+        return;
+      }
+
+      const r = await fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`);
+      const fpj = await r.json().catch(() => ({}));
+      const rawPlan = fpj?.plan ?? null;
+      const norm = rawPlan != null ? normalizeFloorPlanDocument(rawPlan) : null;
+      const flist = norm?.floors ?? [];
+      setFloors(flist);
+      setPlanStatus(r.ok ? (norm ? "api" : "invalid") : "unavailable");
+      if (!r.ok) setMsg(`تعذر تحميل المخطط (HTTP ${r.status})`);
+      const tr = await fetch(`${base}/api/restaurant/tables`);
+      const tj = await tr.json().catch(() => ({}));
+      const tl = Array.isArray(tj.tables) ? tj.tables : [];
+      setTables(tl);
+      setLive({});
     } catch (e) {
       setMsg(String(e));
+      setPlanStatus("unavailable");
+    } finally {
+      setLoading(false);
     }
-  }, [base]);
+  }, [base, applySnapshot]);
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => void load(), 7000);
+    const id = window.setInterval(() => void load(), RESTAURANT_POLL_MS);
     return () => window.clearInterval(id);
   }, [load]);
 
@@ -351,6 +358,9 @@ export default function FloorPlanLive() {
       )}
       {planStatus === "invalid" && (
         <p style={{ color: "var(--danger)", fontSize: "0.88rem", marginTop: "0.35rem" }}>مخطط غير صالح.</p>
+      )}
+      {loading && tables.length === 0 && (
+        <p style={{ color: "var(--muted)", fontSize: "0.88rem", marginTop: "0.35rem" }}>جاري تحميل الخريطة من الخادم…</p>
       )}
       {msg && <p style={{ color: "var(--danger)", fontSize: "0.88rem" }}>{msg}</p>}
       {plan && plan.tables.length === 0 && tables.length > 0 && (

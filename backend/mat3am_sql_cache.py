@@ -17,8 +17,18 @@ _MIRROR_DIR: Optional[str] = None
 _TBL005: dict = {"rows": None, "fetched_at": 0.0, "error": None, "from_mirror": False}
 _USERS: dict = {"users": None, "fetched_at": 0.0, "error": None}
 
-TBL005_TTL_SEC = 90.0
-USERS_TTL_SEC = 60.0
+def _ttl_sec(name: str, default: float) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(15.0, min(600.0, float(raw)))
+    except ValueError:
+        return default
+
+
+TBL005_TTL_SEC = _ttl_sec("MAT3AM_TBL005_CACHE_TTL", 120.0)
+USERS_TTL_SEC = _ttl_sec("MAT3AM_USERS_CACHE_TTL", 90.0)
 
 ConnectionFactory = Callable[[], Any]
 

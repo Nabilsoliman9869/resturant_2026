@@ -8,6 +8,7 @@ import { InlinePinConfirm } from "../components/InlinePinConfirm";
 import { tryParseJson } from "../lib/tryParseJson";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
+import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
 import "../styles/operationalRoles.css";
 
 type RestTable = SegmentedTableRow;
@@ -298,11 +299,9 @@ export default function WaiterTablesPage() {
     };
 
     try {
-      const snapRes = await safeFetch(
-        `${base}/api/restaurant/operational-snapshot?includeUsers=${needUsers ? "1" : "0"}&t=${Date.now()}`,
-      );
-      if (snapRes.ok) {
-        const snap = (tryParseJson(await snapRes.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const snapRes = await fetchOperationalSnapshot(base, { includeUsers: needUsers });
+      if (snapRes.ok && snapRes.data) {
+        const snap = snapRes.data as Record<string, unknown>;
         const sessionsRaw = Array.isArray(snap.sessions) ? snap.sessions : [];
         const sessionsActive = sessionsRaw.filter(
           (s) =>
@@ -394,7 +393,7 @@ export default function WaiterTablesPage() {
       await loadTables();
     };
     void tick();
-    const id = window.setInterval(() => void tick(), 7000);
+    const id = window.setInterval(() => void tick(), RESTAURANT_POLL_MS);
     return () => {
       stop = true;
       window.clearInterval(id);

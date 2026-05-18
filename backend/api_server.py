@@ -13723,6 +13723,12 @@ def restaurant_floor_plan_sync_cost_centers():
                 json.dump(plan, f, ensure_ascii=False, indent=2)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+    try:
+        from mat3am_sql_cache import invalidate_tbl005
+
+        invalidate_tbl005()
+    except Exception:
+        pass
     return {"ok": True, "changed": sync_res["changed"], "syncedTables": sync_res["synced"]}
 
 
