@@ -873,12 +873,18 @@ def _settings_test_connection_sync(body: dict) -> dict:
                 "detail": "تعذر العثور على Microsoft ODBC Driver (17/18) على الخادم — أعد نشر Railway بعد تحديث Dockerfile (msodbcsql18).",
             }
         if "legacy sigalg" in err.lower() or "ssl provider" in err.lower():
+            from odbc_driver import drivers_to_try, installed_odbc_drivers
+
+            tried = drivers_to_try()
             return {
                 "ok": False,
                 "detail": (
-                    "فشل SSL/TLS مع SQL Server (خوارزمية قديمة) بعد تجربة Encrypt=no وoptional. "
-                    "حدّث TLS على SQL Server أو افتح المنفذ 1477 من الإنترنت. التفاصيل: "
-                    + err[:220]
+                    "فشل SSL/TLS (خوارزمية قديمة) بعد تجربة ODBC 17/18 وEncrypt=no. "
+                    f"السائقات المثبتة: {', '.join(sorted(installed_odbc_drivers())) or 'لا شيء'} — "
+                    f"المُجرَّبة: {', '.join(tried) or 'لا شيء'}. "
+                    "على سيرفر SQL: فعّل TLS 1.2+ أو افتح المنفذ 1477. بعد نشر Dockerfile (msodbcsql17) أعد الاختبار. "
+                    "التفاصيل: "
+                    + err[:180]
                 ),
             }
         return {"ok": False, "detail": err}
@@ -898,7 +904,7 @@ def api_dev_odbc_drivers():
         "ok": picked is not None,
         "drivers": installed,
         "picked": picked,
-        "hint": "يجب أن يظهر ODBC Driver 18 for SQL Server بعد نشر Dockerfile مع msodbcsql18",
+        "hint": "يُفضّل ظهور ODBC Driver 17 و18 — Dockerfile يثبّت msodbcsql17 و18",
     }
 
 

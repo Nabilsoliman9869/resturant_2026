@@ -19,19 +19,33 @@ RUN apt-get update \
   && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
     > /etc/apt/sources.list.d/mssql-release.list \
   && apt-get update \
-  && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+  && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql17 msodbcsql18 \
   && rm -rf /var/lib/apt/lists/*
 
-# OpenSSL 3: السماح بخوارزميات TLS القديمة لبعض SQL Server على الشبكة العامة
+# OpenSSL 3: legacy sigalg + TLS قديم لـ SQL Server على 41.x (Railway ↔ ODBC 18)
 RUN printf '%s\n' \
+  'openssl_conf = openssl_init' \
+  '' \
   '[openssl_init]' \
+  'providers = provider_sect' \
   'ssl_conf = ssl_sect' \
+  '' \
+  '[provider_sect]' \
+  'default = default_sect' \
+  'legacy = legacy_sect' \
+  '' \
+  '[default_sect]' \
+  'activate = 1' \
+  '' \
+  '[legacy_sect]' \
+  'activate = 1' \
   '' \
   '[ssl_sect]' \
   'system_default = system_default_sect' \
   '' \
   '[system_default_sect]' \
-  'CipherString = DEFAULT@SECLEVEL=1' \
+  'MinProtocol = TLSv1' \
+  'CipherString = DEFAULT@SECLEVEL=0' \
   > /etc/ssl/openssl_mat3am.cnf
 ENV OPENSSL_CONF=/etc/ssl/openssl_mat3am.cnf
 
