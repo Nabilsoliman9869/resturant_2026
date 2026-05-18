@@ -187,44 +187,18 @@ export default function WaiterTablesPage() {
   }
 
   const loadTables = useCallback(async () => {
-    try {
-      const [fp, rt, rs, ro, wf, ops] = await Promise.all([
-        safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
-        safeFetch(`${base}/api/restaurant/tables`),
-        safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
-        safeFetch(`${base}/api/restaurant/orders`),
-        safeFetch(`${base}/api/restaurant/workflow-settings`),
-        safeFetch(`${base}/api/restaurant/ops-settings`),
-      ]);
-      const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
-      const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
-      const js = (tryParseJson(await rs.text().catch(() => "")) ?? {}) as Record<string, unknown>;
-      const oj = (tryParseJson(await ro.text().catch(() => "")) ?? {}) as Record<string, unknown>;
-      const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
-      const opsj = (tryParseJson(await ops.text().catch(() => "")) ?? {}) as Record<string, unknown>;
-      const httpLabel = (r: Response, nameAr: string) =>
-        `${nameAr} (${r.status === 0 ? "لا اتصال — شغّل API 2288" : `HTTP ${r.status}`})`;
-      const bad: string[] = [];
-      if (!fp.ok) bad.push(httpLabel(fp, "خريطة الصالة"));
-      if (!rt.ok) bad.push(httpLabel(rt, "الطاولات"));
-      if (!rs.ok) bad.push(httpLabel(rs, "الجلسات"));
-      if (!ro.ok) bad.push(httpLabel(ro, "الطلبات"));
-      if (!wf.ok) bad.push(httpLabel(wf, "إعداد المسند"));
-      if (!ops.ok) bad.push(httpLabel(ops, "إعدادات Owner/VIP"));
-      if (bad.length) {
-        const allNet =
-          [fp, rt, rs, ro, wf, ops].every((r) => r.status === 0);
-        const tail = allNet
-          ? "الواجهة (9999) تعمل لكن API (2288) غير متصل — شغّل run_api.bat أو run_full_stack.bat وانتظر «Uvicorn running» في نافذة MAT3AM-API، ثم افتح http://127.0.0.1:2288/api/ping (يجب ok:true) وحدّث الصفحة."
-          : "إن ظهر «لا اتصال» فشغّل run_api.bat ثم افتح http://127.0.0.1:2288/api/ping";
-        setMsg(`تعذّر تحميل البيانات: ${bad.join(" · ")}. ${tail}`);
-        setTables([]);
-        setSessionByTable(new Map());
-        setSessions([]);
-        setOrders([]);
-        return;
-      }
-      setMsg("");
+    const needUsers = user?.role === "manager" || user?.role === "developer";
+
+    const applyLoadedPayload = (
+      fpj: Record<string, unknown>,
+      jt: Record<string, unknown>,
+      js: Record<string, unknown>,
+      oj: Record<string, unknown>,
+      wfj: Record<string, unknown>,
+      opsj: Record<string, unknown>,
+      hint?: string,
+    ) => {
+      setMsg(hint || "");
       const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
       setExclusiveOn(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
 
@@ -321,10 +295,97 @@ export default function WaiterTablesPage() {
       }
       setBusyIds(busy);
       setBillReqIds(billreq);
+    };
+
+    try {
+      const snapRes = await safeFetch(
+        `${base}/api/restaurant/operational-snapshot?includeUsers=${needUsers ? "1" : "0"}&t=${Date.now()}`,
+      );
+      if (snapRes.ok) {
+        const snap = (tryParseJson(await snapRes.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+        const sessionsRaw = Array.isArray(snap.sessions) ? snap.sessions : [];
+        const sessionsActive = sessionsRaw.filter(
+          (s) =>
+            s &&
+            typeof s === "object" &&
+            String((s as TableSession).status || "")
+              .toLowerCase()
+              .trim() === "active",
+        );
+        const ordersRaw = Array.isArray(snap.orders) ? snap.orders : [];
+        const fpj =
+          snap.floorPlan && typeof snap.floorPlan === "object"
+            ? (snap.floorPlan as Record<string, unknown>)
+            : {};
+        const jt = { tables: Array.isArray(snap.tables) ? snap.tables : [] };
+        const js = { sessions: sessionsActive };
+        const oj = { orders: ordersRaw };
+        const wfj =
+          snap.workflowSettings && typeof snap.workflowSettings === "object"
+            ? (snap.workflowSettings as Record<string, unknown>)
+            : {};
+        const opsj =
+          snap.opsSettings && typeof snap.opsSettings === "object" ? (snap.opsSettings as Record<string, unknown>) : {};
+        const tblDs = snap.tableDataSource as { error?: string; source?: string; fromMirror?: boolean } | undefined;
+        const src = snap.sources as Record<string, string> | undefined;
+        let hint = "";
+        if (tblDs?.error) hint = `تحذير SQL (الطاولات): ${tblDs.error}`;
+        else if (src?.tables === "sql" || tblDs?.source === "sql") hint = "";
+        else if (tblDs?.fromMirror) hint = "عرض طاولات من نسخة JSON احتياطية — تحقق من اتصال SQL.";
+        applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, hint);
+        if (needUsers) {
+          const u = Array.isArray(snap.users) ? (snap.users as StaffUser[]) : [];
+          if (u.length) {
+            setStaffUsers(
+              u.filter((x) => ["waiter", "host"].includes(String(x.role || "").toLowerCase()) && x.isActive !== false),
+            );
+          }
+        }
+        return;
+      }
+
+      const [fp, rt, rs, ro, wf, ops] = await Promise.all([
+        safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
+        safeFetch(`${base}/api/restaurant/tables`),
+        safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
+        safeFetch(`${base}/api/restaurant/orders`),
+        safeFetch(`${base}/api/restaurant/workflow-settings`),
+        safeFetch(`${base}/api/restaurant/ops-settings`),
+      ]);
+      const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const js = (tryParseJson(await rs.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const oj = (tryParseJson(await ro.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const opsj = (tryParseJson(await ops.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const httpLabel = (r: Response, nameAr: string) =>
+        `${nameAr} (${r.status === 0 ? "لا اتصال بالخادم" : `HTTP ${r.status}`})`;
+      const bad: string[] = [];
+      if (!fp.ok) bad.push(httpLabel(fp, "خريطة الصالة"));
+      if (!rt.ok) bad.push(httpLabel(rt, "الطاولات"));
+      if (!rs.ok) bad.push(httpLabel(rs, "الجلسات"));
+      if (!ro.ok) bad.push(httpLabel(ro, "الطلبات"));
+      if (!wf.ok) bad.push(httpLabel(wf, "إعداد المسند"));
+      if (!ops.ok) bad.push(httpLabel(ops, "إعدادات Owner/VIP"));
+      if (bad.length) {
+        const allNet = [fp, rt, rs, ro, wf, ops].every((r) => r.status === 0);
+        const tail = allNet
+          ? "تحقق من /api/ping على نفس عنوان الموقع ثم حدّث الصفحة."
+          : "راجع سجلات Railway واتصال SQL في إعدادات المطوّر.";
+        setMsg(`تعذّر تحميل البيانات: ${bad.join(" · ")}. ${tail}`);
+        setTables([]);
+        setSessionByTable(new Map());
+        setSessions([]);
+        setOrders([]);
+        return;
+      }
+      const rtDs = (jt as { dataSource?: { error?: string } }).dataSource;
+      const sqlHint = rtDs?.error ? `تحذير SQL: ${rtDs.error}` : "";
+      applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, sqlHint);
     } catch (e) {
       setMsg(briefNetworkHint(e));
     }
-  }, [base]);
+  }, [base, user?.role]);
 
   useEffect(() => {
     let stop = false;

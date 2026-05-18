@@ -89,22 +89,27 @@ export function mapTablesToFloorPlanLabels<T extends TableLike>(planRaw: unknown
   });
 }
 
+function apiTablesToSegmentedRows(base: TableLike[]): SegmentedTableRow[] {
+  return base.map((table) => ({
+    id: String(table.id),
+    name: String(table.name || "طاولة"),
+    seats: table.seats,
+    number: table.number,
+    status: table.status,
+    features: (table as { features?: SegmentedTableRow["features"] }).features,
+  }));
+}
+
 export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: TableLike[]): SegmentedTableRow[] {
   const base = normalizeApiTables(apiTables);
   const norm = normalizeFloorPlanDocument(planRaw);
   if (!norm?.floors.length) {
-    return base.map((table) => ({
-      id: String(table.id),
-      name: String(table.name || "طاولة"),
-      seats: table.seats,
-      number: table.number,
-      status: table.status,
-      features: (table as { features?: SegmentedTableRow["features"] }).features,
-    }));
+    return apiTablesToSegmentedRows(base);
   }
 
   const apiById = new Map(base.map((table) => [tableKey(table.id), table]));
   const out: SegmentedTableRow[] = [];
+  let planTableCount = 0;
 
   norm.floors.forEach((floor, floorIndex) => {
     out.push({
@@ -126,6 +131,7 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
       const apiMatch = apiById.get(key);
       const code = tableCode(prefix, tableIndex);
       const label = planTableLabel(table as { label?: string }, code);
+      planTableCount += 1;
       out.push({
         id: apiId,
         name: label,
@@ -138,6 +144,11 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
       });
     });
   });
+
+  // مخطط موجود لكن tables: [] (شائع على Railway) — كان يُعرض «Main Hall» فقط ويُخفى كل API.
+  if (planTableCount === 0 && base.length > 0) {
+    return apiTablesToSegmentedRows(base);
+  }
 
   return out;
 }

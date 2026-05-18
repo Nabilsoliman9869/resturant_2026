@@ -167,6 +167,13 @@ try:
 except Exception:
     pass
 
+try:
+    from mat3am_sql_cache import configure_mirror_dir, warm as _sql_cache_warm
+
+    configure_mirror_dir(str(DATA_DIR))
+except Exception as _sql_cache_cfg_err:
+    print(f"[mat3am] sql_cache configure warning: {_sql_cache_cfg_err}", flush=True)
+
 
 def _mat3am_exe_build_stamp_for_whoami() -> str:
     """طابع بناء الـ EXE (config/mat3am_exe_build.txt داخل الحزمة)."""
@@ -1639,46 +1646,31 @@ def api_auth_users(include_role_schedule: bool = Query(False, alias="includeRole
 
     عند includeRoleSchedule=1 تُعاد أيضاً roleSchedule من نفس الاستعلام (بدون مسار إضافي) لتفادي 404 مع خادم قديم لا يعرّف /api/auth/role-schedule.
     """
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-    try:
-        cursor = conn.cursor()
-        _ensure_mat3am_dev_schema(cursor)
-        cursor.execute(
-            """
-            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt
-            FROM dbo.MAT3AM_APP_USERS
-            ORDER BY CreatedAt DESC
-            """
-        )
-        rows = cursor.fetchall()
-        users = []
-        for r in rows:
-            users.append(
-                {
-                    "id": str(r[0]),
-                    "login": str(r[1] or ""),
-                    "name": str(r[2] or r[1] or ""),
-                    "role": str(r[3] or "").lower(),
-                    "isActive": bool(r[4]) if r[4] is not None else True,
-                    "createdAt": str(r[5]) if r[5] else "",
-                }
-            )
-        out: dict = {"users": users}
-        if include_role_schedule:
+    from mat3am_sql_cache import get_app_users
+
+    users, meta = get_app_users(get_connection)
+    if not users:
+        err = meta.get("error") or "فشل الاتصال بقاعدة البيانات"
+        raise HTTPException(status_code=500, detail=f"تعذر قراءة المستخدمين: {err}")
+    out: dict = {"users": users, "dataSource": meta}
+    if include_role_schedule:
+        conn = get_connection()
+        if conn:
             try:
+                cursor = conn.cursor()
+                if not _restaurant_sql_table_ready:
+                    _ensure_mat3am_dev_schema(cursor)
                 out["roleSchedule"] = _mat3am_role_schedule_entries_list(cursor)
             except Exception:
                 out["roleSchedule"] = []
-        return out
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"تعذر قراءة المستخدمين: {str(e)}")
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        else:
+            out["roleSchedule"] = []
+    return out
 
 
 @app.post("/api/auth/users")
@@ -11124,6 +11116,13 @@ def _mat3am_startup_ensure_restaurant_state_sql():
         conn.commit()
         _restaurant_sql_table_ready = True
         print("[mat3am] MAT3AM: تم التأكد من جداول التطبيق (تهيئة كاملة مثل bootstrap)", flush=True)
+        try:
+            from mat3am_sql_cache import warm as _sql_cache_warm_run
+
+            _sql_cache_warm_run(get_connection)
+            print("[mat3am] sql_cache: تم تسخين TBL005 و MAT3AM_APP_USERS", flush=True)
+        except Exception as warm_err:
+            print(f"[mat3am] sql_cache warm warning: {warm_err}", flush=True)
     except Exception as e:
         print(f"[mat3am] MAT3AM schema: {e}", flush=True)
         try:
@@ -11233,6 +11232,40 @@ def _restaurant_sql_set(key: str, data) -> bool:
             conn.close()
         except Exception:
             pass
+
+
+def _restaurant_sql_get_bulk(keys: list) -> dict:
+    """قراءة عدة مفاتيح من MAT3AM_RESTAURANT_STATE في اتصال ODBC واحد."""
+    wanted = [k for k in keys if k in _RESTAURANT_SQL_KEYS]
+    if not wanted or not _restaurant_sql_ready():
+        return {}
+    conn = get_connection()
+    if not conn:
+        return {}
+    out: dict = {}
+    try:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(wanted))
+        cursor.execute(
+            f"SELECT StateKey, PayloadJson FROM dbo.MAT3AM_RESTAURANT_STATE WHERE StateKey IN ({placeholders})",
+            tuple(wanted),
+        )
+        for row in cursor.fetchall() or []:
+            sk = str(row[0] or "").strip()
+            if not sk or row[1] is None:
+                continue
+            try:
+                out[sk] = json.loads(str(row[1]))
+            except Exception:
+                continue
+    except Exception:
+        return {}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return out
 
 
 def _restaurant_load(name: str, default: Any):
@@ -14361,6 +14394,72 @@ def _mark_session_first_order_delay(session_id: str) -> None:
     if changed:
         _restaurant_save("table_sessions", sessions)
 
+@app.get("/api/mat3am/sql-cache/status", include_in_schema=False)
+def mat3am_sql_cache_status():
+    """تشخيص كاش SQL (TBL005 / مستخدمي التطبيق) — للمطوّر."""
+    from mat3am_sql_cache import status as cache_status
+
+    return {"ok": True, "cache": cache_status(), "restaurantSqlReady": _restaurant_sql_ready()}
+
+
+def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
+    """لقطة واحدة: SQL (طاولات) + حالة تشغيل (جلسات/طلبات من SQL أو JSON) + إعدادات."""
+    bulk = _restaurant_sql_get_bulk(["table_sessions", "orders"])
+    sessions_raw = bulk.get("table_sessions")
+    orders_raw = bulk.get("orders")
+    sessions_src = "sql" if sessions_raw is not None else "json"
+    orders_src = "sql" if orders_raw is not None else "json"
+    if sessions_raw is None:
+        sessions_raw = _restaurant_load("table_sessions", [])
+    if orders_raw is None:
+        orders_raw = _restaurant_load("orders", [])
+    if not isinstance(sessions_raw, list):
+        sessions_raw = []
+    if not isinstance(orders_raw, list):
+        orders_raw = []
+
+    tables_payload = restaurant_get_tables()
+    fp_raw = _restaurant_load("floor_plan", {})
+    try:
+        wf_raw = _restaurant_read_workflow()
+    except Exception:
+        wf_raw = {}
+
+    ops_raw = _restaurant_read_ops_storage()
+
+    from mat3am_sql_cache import status as cache_status
+
+    out: dict = {
+        "ok": True,
+        "floorPlan": fp_raw,
+        "tables": tables_payload.get("tables") if isinstance(tables_payload, dict) else [],
+        "tableDataSource": tables_payload.get("dataSource") if isinstance(tables_payload, dict) else {},
+        "sessions": sessions_raw,
+        "orders": orders_raw,
+        "workflowSettings": wf_raw,
+        "opsSettings": ops_raw if isinstance(ops_raw, dict) else {},
+        "sources": {
+            "table_sessions": sessions_src,
+            "orders": orders_src,
+            "tables": (tables_payload.get("dataSource") or {}).get("catalog") or "unknown",
+        },
+        "sqlCache": cache_status(),
+    }
+    if include_users:
+        from mat3am_sql_cache import get_app_users
+
+        users, umeta = get_app_users(get_connection)
+        out["users"] = users
+        out["usersDataSource"] = umeta
+    return out
+
+
+@app.get("/api/restaurant/operational-snapshot")
+async def restaurant_operational_snapshot(includeUsers: bool = Query(False, alias="includeUsers")):
+    """لقطة تشغيلية واحدة (JSON) — تقليل 6+ اتصالات ODBC من الواجهة."""
+    return await run_in_threadpool(_restaurant_operational_snapshot_sync, includeUsers)
+
+
 @app.get("/api/restaurant/tables")
 def restaurant_get_tables():
     """جلب الطاولات — من مراكز التكلفة (TBL005) أولاً، ثم من ملف، ثم افتراضي"""
@@ -14417,22 +14516,21 @@ def restaurant_get_tables():
             return "ready"
         return st
 
-    # 1) قاعدة البيانات (TBL005)
-    conn = get_connection()
-    if conn:
+    # 1) قاعدة البيانات (TBL005) — كاش ذاكرة + مرآة JSON (انظر mat3am_sql_cache.py)
+    from mat3am_sql_cache import get_tbl005_cost_centers
+
+    tbl005_rows, tbl_meta = get_tbl005_cost_centers(get_connection)
+    if tbl005_rows:
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT CardGuide, CostCenter FROM TBL005 WHERE CostCenter IS NOT NULL ORDER BY CostCenter")
-            rows = cursor.fetchall()
             row_by_id = {}
             row_by_name = {}
-            for row in rows:
-                gid = str(row[0] or "").upper()
-                nm = str(row[1] or "")
+            for item in tbl005_rows:
+                gid = str(item.get("id") or "").strip().upper()
+                nm = str(item.get("name") or "").strip()
                 if gid:
-                    row_by_id[gid] = row
+                    row_by_id[gid] = item
                 if nm:
-                    row_by_name[nm] = row
+                    row_by_name[nm] = item
             tables = []
             if plan_refs:
                 used = set()
@@ -14444,7 +14542,7 @@ def restaurant_get_tables():
                         row = row_by_name.get(ref["label"])
                     if row is None:
                         continue
-                    gid = str(row[0])
+                    gid = str(row.get("id") or "")
                     if gid in used:
                         continue
                     used.add(gid)
@@ -14465,7 +14563,7 @@ def restaurant_get_tables():
                     tables.append({
                         "id": gid,
                         "number": i,
-                        "name": ref["label"] or (row[1] or ("طاولة " + str(i))),
+                        "name": ref["label"] or (row.get("name") or ("طاولة " + str(i))),
                         "seats": 4,
                         "status": status_v,
                         "dirtyAt": dirty_at,
@@ -14478,8 +14576,8 @@ def restaurant_get_tables():
                         "features": {"canAddChildSeat": True, "nearBalcony": False, "nearBathroom": False, "smokingArea": False, "vipSection": False},
                     })
             else:
-                for i, row in enumerate(rows, 1):
-                    gid = str(row[0])
+                for i, row in enumerate(tbl005_rows, 1):
+                    gid = str(row.get("id") or "")
                     st_row = local_state.get(gid.upper(), {})
                     try:
                         min_charge = float(st_row.get("minimumCharge") or 0)
@@ -14495,9 +14593,9 @@ def restaurant_get_tables():
                             overdue = True
                     no_order_info = no_order_map.get(gid, {}) if isinstance(no_order_map, dict) else {}
                     tables.append({
-                        "id": str(row[0]),
+                        "id": gid,
                         "number": i,
-                        "name": row[1] or ("طاولة " + str(i)),
+                        "name": row.get("name") or ("طاولة " + str(i)),
                         "seats": 4,
                         "status": status_v,
                         "dirtyAt": dirty_at,
@@ -14511,14 +14609,9 @@ def restaurant_get_tables():
                     })
             if tables:
                 _merge_mat3am_vip_tables_into(tables)
-                return {"tables": tables}
-        except Exception:
-            pass
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+                return {"tables": tables, "dataSource": {"catalog": "sql", **tbl_meta}}
+        except Exception as tbl_build_err:
+            print(f"[mat3am] restaurant_get_tables TBL005 build: {tbl_build_err}", flush=True)
 
     # 2) ملف محلي (لبيئات بدون قاعدة)
     data = _restaurant_load("tables", [])

@@ -517,6 +517,13 @@ eserved + active.
 - **`src/pages/WaiterOrderPage.tsx`**: القائمة اليومية + Out of Stock؛ عرض بنود الطلبات المُرسلة؛ نموذج ٢ (تبويبات).
 - **`run_api.bat`**: توجيه التحقق من **`FEATURE_GUEST_RETURNS`** عند إعادة تشغيل API.
 
+### 069 — SQL→JSON: كاش TBL005 + لقطة تشغيل + مرآة `/data` — `UTC 2026-05-18T18:00:00Z` — ID `sql-cache-operational-snapshot`
+
+- **`backend/mat3am_sql_cache.py`**: TTL لـ **TBL005** و**MAT3AM_APP_USERS**؛ مرآة **`config/restaurant/sql_mirror/*.json`** عند انقطاع SQL.
+- **`backend/api_server.py`**: **`/api/restaurant/operational-snapshot`** (جلسات/طلبات bulk من **MAT3AM_RESTAURANT_STATE**)؛ **`_restaurant_sql_get_bulk`**؛ **`restaurant_get_tables`** عبر الكاش + **`dataSource`**؛ تسخين عند الإقلاع؛ **`/api/mat3am/sql-cache/status`**.
+- **`src/lib/restaurantTableView.ts`**: fallback عند مخطط بلا طاولات.
+- **`src/pages/WaiterTablesPage.tsx`**: تحميل عبر **operational-snapshot** مع fallback للمسارات الستة.
+
 ### 068 — Railway ↔ SQL قديم: ODBC 17 + OpenSSL legacy — `UTC 2026-05-18T12:00:00Z` — ID `sql-odbc17-seclevel0`
 
 - **`Dockerfile`**: تثبيت **`msodbcsql17`** مع 18؛ **`OPENSSL_CONF`** بـ **`SECLEVEL=0`** + مزوّد **legacy** و**`MinProtocol = TLSv1`**.
