@@ -517,6 +517,12 @@ eserved + active.
 - **`src/pages/WaiterOrderPage.tsx`**: القائمة اليومية + Out of Stock؛ عرض بنود الطلبات المُرسلة؛ نموذج ٢ (تبويبات).
 - **`run_api.bat`**: توجيه التحقق من **`FEATURE_GUEST_RETURNS`** عند إعادة تشغيل API.
 
+### 068 — Railway ↔ SQL قديم: ODBC 17 + OpenSSL legacy — `UTC 2026-05-18T12:00:00Z` — ID `sql-odbc17-seclevel0`
+
+- **`Dockerfile`**: تثبيت **`msodbcsql17`** مع 18؛ **`OPENSSL_CONF`** بـ **`SECLEVEL=0`** + مزوّد **legacy** و**`MinProtocol = TLSv1`**.
+- **`backend/odbc_driver.py`**: تفضيل Driver **17** ثم 18؛ **`pyodbc_connect_compat`** يجرّب كل السائقات وكل خيارات TLS؛ **`ODBC_BUILD=2026-05-18-odbc17-seclevel0`**.
+- **`backend/api_server.py`**: رسالة SSL أوضح تعرض السائقات المثبتة/المُجرَّبة.
+
 ### 066 — استقرار API: ODBC غير حاجب + بروكسي وخطوة اتصال — `UTC 2026-05-16T06:30:00Z` — ID `api-sql-nonblocking-devconn`
 
 - **`backend/api_server.py`**: **`test-connection`** و**`/api/ready?check_db=1`** و**`mat3am-schema-probe/ensure`** عبر **`run_in_threadpool`**؛ مهلة اختبار ODBC **6** ثوانٍ.
