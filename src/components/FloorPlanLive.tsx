@@ -353,8 +353,13 @@ export default function FloorPlanLive() {
         <p style={{ color: "var(--danger)", fontSize: "0.88rem", marginTop: "0.35rem" }}>مخطط غير صالح.</p>
       )}
       {msg && <p style={{ color: "var(--danger)", fontSize: "0.88rem" }}>{msg}</p>}
+      {plan && plan.tables.length === 0 && tables.length > 0 && (
+        <p style={{ color: "var(--muted)", fontSize: "0.82rem", marginTop: "0.35rem" }}>
+          المخطط بلا طاولات — عرض مؤقت من كتالوج SQL (TBL005). أكمل المخطط من «محرّر المخطط».
+        </p>
+      )}
 
-      {plan ? (
+      {plan && plan.tables.length > 0 ? (
         <FloorPlanSvgView plan={plan} live={live} />
       ) : (
         <div
