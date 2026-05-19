@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
 import { networkErrorResponse, safeFetch } from "../lib/safeFetch";
 
