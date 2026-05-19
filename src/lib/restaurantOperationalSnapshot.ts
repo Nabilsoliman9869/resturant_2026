@@ -2,7 +2,7 @@ import { safeFetch } from "./safeFetch";
 import { tryParseJson } from "./tryParseJson";
 
 /** فترة تحديث شاشات التشغيل — تقليل ضغط ODBC على Railway */
-export const RESTAURANT_POLL_MS = 15_000;
+export const RESTAURANT_POLL_MS = 18_000;
 
 export type OperationalSnapshot = {
   ok?: boolean;

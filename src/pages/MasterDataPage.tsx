@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
+import { REFERENCE_DATA_SAVE_HINT } from "../lib/referenceDataPolicy";
+import ReferenceDataRefreshPanel from "../components/ReferenceDataRefreshPanel";
 
 const SUPPLIER_GROUP_GUID = "26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500";
 
@@ -82,7 +84,15 @@ export default function MasterDataPage() {
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
+      let hint = REFERENCE_DATA_SAVE_HINT;
+      try {
+        const j = JSON.parse(t) as { referenceDataHint?: string };
+        if (j.referenceDataHint) hint = j.referenceDataHint;
+      } catch {
+        /* use default */
+      }
       setNewProduct("");
+      setMsg(hint);
       await loadAll();
     } catch (e) {
       setMsg(`فشل إضافة الصنف: ${String(e)}`);
@@ -118,9 +128,11 @@ export default function MasterDataPage() {
     <div>
       <h2 style={{ marginTop: 0 }}>تعريفات الأصناف والعملاء والموردين</h2>
 
+      <ReferenceDataRefreshPanel compact showUsersOption={false} />
+
       <div className="card" style={{ marginBottom: "1rem" }}>
         <button type="button" className="btn btn-primary" onClick={() => void loadAll()}>
-          تحميل/تحديث التعريفات
+          تحميل/تحديث التعريفات من الكاش
         </button>
       </div>
 

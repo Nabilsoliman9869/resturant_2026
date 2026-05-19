@@ -616,3 +616,12 @@ eserved + active.
 - **`api_server.py`**: `GET /api/restaurant/order-taker-bootstrap` (طلب واحد)؛ GZipMiddleware؛ تسخين catalog عند الإقلاع.
 - **`WaiterOrderPage.tsx`**: `loadAll` → bootstrap؛ القائمة اليومية تُحمَّل بالخلفية.
 - **`RestaurantDualBells`**: poll 12s؛ **`DbConnectionBar`**: ready خفيف + فحص SQL كل 5 دورات.
+
+### 082 — سياسة بيانات مرجعية: refresh API + كاش فقط + رسائل — `UTC 2026-05-19T12:00:00Z` — ID `ref-data-policy-082`
+
+- **`backend/mat3am_sql_cache.py`**: `reference_cache_only_enabled`، `allow_live` في `_get_rows_cached`، `refresh_all_reference_data`.
+- **`backend/api_server.py`**: `POST /api/mat3am/reference-data/refresh`، `GET .../status`؛ بحث/ترشيح أصناف من الكاش؛ `REFERENCE_DATA_SAVE_HINT_AR` في POST أصناف/مجموعات.
+- **`src/components/ReferenceDataRefreshPanel.tsx`**, **`src/lib/referenceDataPolicy.ts`**: زر «تحديث بيانات النظام» للمدير/المطوّر.
+- **`DeveloperConnection.tsx`**, **`MasterDataPage.tsx`**: دمج اللوحة + رسالة بعد حفظ صنف.
+- **`docs/REFERENCE_DATA_POLICY.md`**: سياسة مرجعي vs تشغيلي.
+- **`Dockerfile`**: `MAT3AM_REFERENCE_CACHE_ONLY=1`؛ poll تشغيلي 18s (`RESTAURANT_POLL_MS`, `RestaurantDualBells`).

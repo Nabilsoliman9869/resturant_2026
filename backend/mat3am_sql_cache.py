@@ -35,6 +35,12 @@ TBL007_TTL_SEC = _ttl_sec("MAT3AM_TBL007_CACHE_TTL", 300.0)
 TBL006_TTL_SEC = _ttl_sec("MAT3AM_TBL006_CACHE_TTL", 300.0)
 USERS_TTL_SEC = _ttl_sec("MAT3AM_USERS_CACHE_TTL", 90.0)
 
+# عند التفعيل: قراءات GET المرجعية من الذاكرة/المرآة فقط — لا ODBC في الخلفية عند انتهاء TTL.
+def reference_cache_only_enabled() -> bool:
+    raw = (os.environ.get("MAT3AM_REFERENCE_CACHE_ONLY") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
 ConnectionFactory = Callable[[], Any]
 
 
@@ -137,6 +143,7 @@ def _get_rows_cached(
     fetch_live: Callable[[], Tuple[List[dict], Optional[str]]],
     *,
     force: bool = False,
+    allow_live: bool = True,
 ) -> Tuple[List[dict], dict]:
     """ذاكرة + stale-while-revalidate: عند انتهاء TTL يُعاد الكاش القديم فوراً ويُحدَّث بالخلفية."""
     now = time.time()
@@ -153,6 +160,13 @@ def _get_rows_cached(
                 "error": None,
                 "stale": False,
             }
+        if not allow_live:
+            return list(rows), {
+                "source": "memory-stale",
+                "fromMirror": bool(slot["from_mirror"]),
+                "error": slot.get("error"),
+                "stale": True,
+            }
         # منتهي TTL — أعد القديم الآن وحدّث بالخلفية
         _bg_refresh(tag, lambda: _load_rows_slot(slot, mirror_name, fetch_live))
 
@@ -161,6 +175,34 @@ def _get_rows_cached(
             "fromMirror": bool(slot["from_mirror"]),
             "error": slot.get("error"),
             "stale": True,
+        }
+
+    if not allow_live and not force:
+        mirrored = _read_mirror_rows(mirror_name)
+        if mirrored:
+            with _LOCK:
+                slot["rows"] = mirrored
+                slot["fetched_at"] = now
+                slot["error"] = None
+                slot["from_mirror"] = True
+            return list(mirrored), {
+                "source": "mirror",
+                "fromMirror": True,
+                "error": None,
+                "stale": False,
+            }
+        if rows is not None:
+            return list(rows), {
+                "source": "memory",
+                "fromMirror": bool(slot["from_mirror"]),
+                "error": slot.get("error"),
+                "stale": True,
+            }
+        return [], {
+            "source": "none",
+            "fromMirror": False,
+            "error": "reference_cache_empty",
+            "stale": False,
         }
 
     return _load_rows_slot(slot, mirror_name, fetch_live, now=now)
@@ -241,6 +283,7 @@ def status() -> dict:
                 "lastError": _TBL006["error"],
             },
             "mirrorDir": _MIRROR_DIR,
+            "referenceCacheOnly": reference_cache_only_enabled(),
         }
 
 
@@ -275,8 +318,11 @@ def _fetch_tbl005_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
             pass
 
 
-def get_tbl005_cost_centers(get_connection: ConnectionFactory, *, force: bool = False) -> Tuple[List[dict], dict]:
+def get_tbl005_cost_centers(
+    get_connection: ConnectionFactory, *, force: bool = False, allow_live: Optional[bool] = None
+) -> Tuple[List[dict], dict]:
     """قائمة مراكز التكلفة من SQL مع TTL؛ عند الفشل تُجرَّب مرآة JSON."""
+    live = allow_live if allow_live is not None else (not reference_cache_only_enabled())
     return _get_rows_cached(
         _TBL005,
         TBL005_TTL_SEC,
@@ -284,6 +330,7 @@ def get_tbl005_cost_centers(get_connection: ConnectionFactory, *, force: bool = 
         "tbl005",
         lambda: _fetch_tbl005_live(get_connection),
         force=force,
+        allow_live=live,
     )
 
 
@@ -387,9 +434,10 @@ def _fetch_tbl007_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
 
 
 def get_tbl007_catalog_rows(
-    get_connection: ConnectionFactory, *, force: bool = False
+    get_connection: ConnectionFactory, *, force: bool = False, allow_live: Optional[bool] = None
 ) -> Tuple[List[dict], dict]:
     """صفوف كتالوج الأصناف النشطة — يُبنى رد API في api_server."""
+    live = allow_live if allow_live is not None else (not reference_cache_only_enabled())
     return _get_rows_cached(
         _TBL007,
         TBL007_TTL_SEC,
@@ -397,6 +445,7 @@ def get_tbl007_catalog_rows(
         "tbl007",
         lambda: _fetch_tbl007_live(get_connection),
         force=force,
+        allow_live=live,
     )
 
 
@@ -458,8 +507,9 @@ def _fetch_tbl006_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
 
 
 def get_tbl006_group_rows(
-    get_connection: ConnectionFactory, *, force: bool = False
+    get_connection: ConnectionFactory, *, force: bool = False, allow_live: Optional[bool] = None
 ) -> Tuple[List[dict], dict]:
+    live = allow_live if allow_live is not None else (not reference_cache_only_enabled())
     return _get_rows_cached(
         _TBL006,
         TBL006_TTL_SEC,
@@ -467,19 +517,47 @@ def get_tbl006_group_rows(
         "tbl006",
         lambda: _fetch_tbl006_live(get_connection),
         force=force,
+        allow_live=live,
     )
 
 
 def warm_catalog_only(get_connection: ConnectionFactory) -> None:
     """تسخين الكتالوج أولاً — أهم مسار لسرعة صفحة الطلب."""
-    get_tbl007_catalog_rows(get_connection, force=True)
-    get_tbl006_group_rows(get_connection, force=True)
-    get_tbl005_cost_centers(get_connection, force=True)
+    get_tbl007_catalog_rows(get_connection, force=True, allow_live=True)
+    get_tbl006_group_rows(get_connection, force=True, allow_live=True)
+    get_tbl005_cost_centers(get_connection, force=True, allow_live=True)
 
 
 def warm(get_connection: ConnectionFactory) -> None:
     warm_catalog_only(get_connection)
     get_app_users(get_connection, force=True)
+
+
+def refresh_all_reference_data(
+    get_connection: ConnectionFactory, *, include_users: bool = True
+) -> dict:
+    """إعادة بناء كامل للبيانات المرجعية من SQL (مدير/مطوّر — زر «تحديث الآن»)."""
+    import time as _time
+
+    t0 = _time.perf_counter()
+    p_rows, p_meta = get_tbl007_catalog_rows(get_connection, force=True, allow_live=True)
+    g_rows, g_meta = get_tbl006_group_rows(get_connection, force=True, allow_live=True)
+    t_rows, t_meta = get_tbl005_cost_centers(get_connection, force=True, allow_live=True)
+    u_count = 0
+    u_meta: dict = {"skipped": True}
+    if include_users:
+        users, u_meta = get_app_users(get_connection, force=True)
+        u_count = len(users or [])
+    elapsed_ms = round((_time.perf_counter() - t0) * 1000, 1)
+    return {
+        "ok": True,
+        "elapsedMs": elapsed_ms,
+        "tbl007": {"count": len(p_rows or []), "source": p_meta.get("source"), "error": p_meta.get("error")},
+        "tbl006": {"count": len(g_rows or []), "source": g_meta.get("source"), "error": g_meta.get("error")},
+        "tbl005": {"count": len(t_rows or []), "source": t_meta.get("source"), "error": t_meta.get("error")},
+        "appUsers": {"count": u_count, "source": u_meta.get("source"), "error": u_meta.get("error"), "skipped": u_meta.get("skipped")},
+        "cache": status(),
+    }
 
 
 def find_user_for_login(

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 import { useDbSettingsRefresh } from "../context/DbSettingsRefreshContext";
+import ReferenceDataRefreshPanel from "../components/ReferenceDataRefreshPanel";
 
 type DevLog = {
   id: number;
@@ -557,6 +558,8 @@ export default function DeveloperConnection() {
           </p>
         ) : null}
       </SetupStep>
+
+      <ReferenceDataRefreshPanel />
 
       <SetupStep
         step={1}

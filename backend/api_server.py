@@ -4440,6 +4440,71 @@ def _invalidate_menu_catalog_cache() -> None:
         pass
 
 
+REFERENCE_DATA_SAVE_HINT_AR = (
+    "تم الحفظ في قاعدة البيانات. سيظهر التعديل في القوائم بعد «تحديث بيانات النظام» "
+    "(من إعدادات المطوّر/المدير) أو تلقائياً عند التحديث التالي للكاش."
+)
+
+
+def _search_tbl007_from_catalog_cache(
+    search_text: str,
+    *,
+    menu_picker: bool = False,
+    top_n: int = 100,
+) -> tuple:
+    """بحث في صفوف TBL007 المخزّنة — بدون SELECT مباشر عند تفعيل سياسة الكاش."""
+    from mat3am_sql_cache import get_tbl007_catalog_rows
+
+    q = str(search_text or "").strip()
+    if not q:
+        return [], {"source": "empty", "error": None}
+    rows, meta = get_tbl007_catalog_rows(get_connection, force=False)
+    if not rows and meta.get("error") == "reference_cache_empty":
+        raise HTTPException(
+            status_code=503,
+            detail="بيانات الأصناف غير جاهزة بعد — انتظر التسخين أو نفّذ «تحديث بيانات النظام».",
+        )
+    ql = q.lower()
+    hits = [r for r in rows if ql in str(r.get("ProductName") or "").lower()]
+    hits.sort(key=lambda r: str(r.get("ProductName") or ""))
+    hits = hits[: max(1, min(int(top_n), 200))]
+    if menu_picker:
+        return (
+            [{"CardGuide": str(r.get("CardGuide") or ""), "ProductName": str(r.get("ProductName") or "")} for r in hits],
+            meta,
+        )
+    img_manifest_data = _product_images_manifest_load()
+    imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
+    products = [_api_product_from_tbl007_row(r, imgs_map) for r in hits]
+    return products, meta
+
+
+def _products_under_price_from_catalog_cache(max_price: float, limit: int) -> list:
+    from mat3am_sql_cache import get_tbl007_catalog_rows
+
+    rows, meta = get_tbl007_catalog_rows(get_connection, force=False)
+    if not rows and meta.get("error") == "reference_cache_empty":
+        raise HTTPException(
+            status_code=503,
+            detail="بيانات الأصناف غير جاهزة — نفّذ تحديث بيانات النظام.",
+        )
+    lim = min(int(limit), 80)
+    mp = float(max_price)
+    picked: list = []
+    for r in rows:
+        try:
+            px = float(r.get("AgentPrice") or 0)
+        except (TypeError, ValueError):
+            px = 0.0
+        if px <= mp:
+            picked.append(r)
+    picked.sort(key=lambda r: (float(r.get("AgentPrice") or 0), str(r.get("ProductName") or "")))
+    picked = picked[:lim]
+    img_manifest_data = _product_images_manifest_load()
+    imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
+    return [_api_product_from_tbl007_row(r, imgs_map) for r in picked]
+
+
 def _api_product_from_tbl007_row(row: dict, imgs_map: dict) -> dict:
     guid = str(row.get("CardGuide") or "")
     guid_u = guid.upper()
@@ -4692,7 +4757,13 @@ def create_product(body: dict):
         if image_url:
             _product_images_manifest_set(g, image_url)
         _invalidate_menu_catalog_cache()
-        return {"success": True, "CardGuide": g, "ProductName": name, "imageUrl": image_url}
+        return {
+            "success": True,
+            "CardGuide": g,
+            "ProductName": name,
+            "imageUrl": image_url,
+            "referenceDataHint": REFERENCE_DATA_SAVE_HINT_AR,
+        }
     except Exception as e:
         if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -4742,107 +4813,19 @@ def put_product_prep_minutes(card_guide: str, body: dict):
 
 @app.get("/api/restaurant/products/search-menu")
 def restaurant_search_products_for_menu(search_text: str = Query(..., min_length=1)):
-    """بحث خفيف لصفحة «القائمة اليومية» — CardGuide + ProductName فقط (بدون manifest صور)."""
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-    q = str(search_text or "").strip()
-    if not q:
-        return {"products": []}
-    try:
-        cursor = conn.cursor()
-        pattern = f"%{q}%"
-        cursor.execute(
-            """
-            SELECT TOP 80 CardGuide, ProductName
-            FROM dbo.TBL007
-            WHERE ProductName LIKE ? AND (NotActive = 0 OR NotActive IS NULL)
-            ORDER BY ProductName
-            """,
-            (pattern,),
-        )
-        return {
-            "products": [
-                {"CardGuide": str(row[0]), "ProductName": str(row[1] or "")}
-                for row in cursor.fetchall()
-                if row and row[0]
-            ]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+    """بحث خفيف لصفحة «القائمة اليومية» — من كاش TBL007 (بدون ODBC لكل حرف)."""
+    products, _meta = _search_tbl007_from_catalog_cache(search_text, menu_picker=True, top_n=80)
+    return {"products": products}
 
 
 @app.get("/api/products/search")
 def search_products(search_text: str, menu_picker: bool = Query(False, alias="menuPicker")):
-    """البحث عن المنتجات — menuPicker=1 لصفحة القائمة اليومية (خفيف، بدون manifest صور)."""
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-    
-    try:
-        cursor = conn.cursor()
-        q = str(search_text or "").strip()
-        if not q:
-            return {"products": []}
-        if not menu_picker:
-            _ensure_menu_tables(cursor)
-        search_pattern = f"%{q}%"
-        top_n = 80 if menu_picker else 100
-        if menu_picker:
-            query = f"""
-            SELECT TOP ({top_n}) CardGuide, ProductName
-            FROM dbo.TBL007
-            WHERE ProductName LIKE ? AND (NotActive = 0 OR NotActive IS NULL)
-            ORDER BY ProductName
-            """
-            cursor.execute(query, search_pattern)
-            return {
-                "products": [
-                    {"CardGuide": str(row[0]), "ProductName": str(row[1] or "")}
-                    for row in cursor.fetchall()
-                    if row and row[0]
-                ]
-            }
-        query = f"""
-        SELECT TOP ({top_n}) CardGuide, ProductName, AgentPrice, ProductImageUrl, Hieght3
-        FROM TBL007
-        WHERE ProductName LIKE ? AND NotActive = 0
-        ORDER BY ProductName
-        """
-        cursor.execute(query, search_pattern)
-
-        img_manifest_data = _product_images_manifest_load()
-        imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
-        products = []
-        for row in cursor.fetchall():
-            guid = str(row[0])
-            rec = imgs_map.get(guid.upper()) if isinstance(imgs_map, dict) else None
-            img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
-            img_db = str(row[3]) if len(row) > 3 and row[3] else None
-            products.append({
-                "CardGuide": guid,
-                "ProductName": row[1],
-                "Price": float(row[2]) if row[2] else 0.0,
-                "AgentPrice": float(row[2]) if row[2] else 0.0,
-                "image": f"/api/products/{guid}/image",
-                "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
-                "PrepMinutes": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
-                "Hieght3": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
-            })
-        return {"products": products}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+    """البحث عن المنتجات — من كاش TBL007."""
+    top_n = 80 if menu_picker else 100
+    products, _meta = _search_tbl007_from_catalog_cache(
+        search_text, menu_picker=menu_picker, top_n=top_n
+    )
+    return {"products": products}
 
 
 @app.get("/api/products/picks-under-price")
@@ -4850,51 +4833,11 @@ def products_picks_under_price(
     max_price: float = Query(..., ge=0),
     limit: int = Query(24, ge=1, le=80),
 ):
-    """أصناف بسعر الوحدة ≤ max_price — لترشيح بدائل ضمن فرق المينيموم تشارج."""
+    """أصناف بسعر الوحدة ≤ max_price — من كاش TBL007."""
     if max_price <= 0:
         return {"products": []}
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
-    lim = min(int(limit), 80)
-    try:
-        cursor = conn.cursor()
-        _ensure_menu_tables(cursor)
-        query = f"""
-        SELECT TOP ({lim}) CardGuide, ProductName, AgentPrice, ProductImageUrl, Hieght3
-        FROM TBL007
-        WHERE NotActive = 0 AND AgentPrice IS NOT NULL AND AgentPrice <= ?
-        ORDER BY AgentPrice ASC, ProductName ASC
-        """
-        cursor.execute(query, (float(max_price),))
-        img_manifest_data = _product_images_manifest_load()
-        imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
-        products = []
-        for row in cursor.fetchall():
-            guid = str(row[0])
-            rec = imgs_map.get(guid.upper()) if isinstance(imgs_map, dict) else None
-            img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
-            img_db = str(row[3]) if len(row) > 3 and row[3] else None
-            products.append(
-                {
-                    "CardGuide": guid,
-                    "ProductName": row[1],
-                    "Price": float(row[2]) if row[2] else 0.0,
-                    "AgentPrice": float(row[2]) if row[2] else 0.0,
-                    "image": f"/api/products/{guid}/image",
-                    "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
-                    "PrepMinutes": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
-                    "Hieght3": float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
-                }
-            )
-        return {"products": products}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+    products = _products_under_price_from_catalog_cache(max_price, limit)
+    return {"products": products}
 
 
 @app.get("/api/products/{card_guide}/xtra")
@@ -5459,7 +5402,13 @@ def create_product_group(body: dict):
         if image_url:
             _group_images_manifest_set(g, image_url)
         _invalidate_menu_catalog_cache()
-        return {"success": True, "CardGuide": g, "GroupName": name, "imageUrl": image_url}
+        return {
+            "success": True,
+            "CardGuide": g,
+            "GroupName": name,
+            "imageUrl": image_url,
+            "referenceDataHint": REFERENCE_DATA_SAVE_HINT_AR,
+        }
     except Exception as e:
         if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -14729,6 +14678,37 @@ async def mat3am_sql_cache_status(sql_probe: bool = Query(False, alias="sqlProbe
     if sql_probe:
         out["restaurantSqlReadyLive"] = await run_in_threadpool(_restaurant_sql_ready)
     return out
+
+
+def _mat3am_reference_data_refresh_sync(body: dict) -> dict:
+    body = body if isinstance(body, dict) else {}
+    _terminal_require_user(body.get("mat3amActor"))
+    actor = body.get("mat3amActor") or {}
+    role = str((actor or {}).get("role") or "").strip().lower()
+    if role not in ("manager", "developer"):
+        raise HTTPException(status_code=403, detail="تحديث البيانات المرجعية للمدير/المطوّر فقط")
+    include_users = body.get("includeUsers") not in (False, 0, "0", "false", "no")
+    from mat3am_sql_cache import refresh_all_reference_data
+
+    return refresh_all_reference_data(get_connection, include_users=bool(include_users))
+
+
+@app.post("/api/mat3am/reference-data/refresh", include_in_schema=False)
+async def mat3am_reference_data_refresh(body: dict):
+    """إعادة بناء TBL005/006/007 (+ مستخدمين اختياري) من SQL — بعد تعديل تعريفات."""
+    return await run_in_threadpool(_mat3am_reference_data_refresh_sync, body)
+
+
+@app.get("/api/mat3am/reference-data/status", include_in_schema=False)
+async def mat3am_reference_data_status():
+    from mat3am_sql_cache import reference_cache_only_enabled, status as cache_status
+
+    return {
+        "ok": True,
+        "referenceCacheOnly": reference_cache_only_enabled(),
+        "saveHint": REFERENCE_DATA_SAVE_HINT_AR,
+        "cache": cache_status(),
+    }
 
 
 def _perf_ms(fn) -> tuple:

@@ -8,7 +8,8 @@ type Mat3amActorPayload = { id: string; login: string; name: string; role: strin
 
 /** استطلاع أسرع حتى تصل الرسائل بين الأقسام بلا انتظار طويل (كان 8 ث). */
 /** استطلاع الوارد — أبطأ لتقليل ضغط ODBC على Railway */
-const POLL_MS = 12_000;
+/** مزامنة مع RESTAURANT_POLL_MS — تقليل ضغط ODBC على Railway */
+const POLL_MS = 18_000;
 
 type InboxItem = {
   id: string;
