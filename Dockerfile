@@ -57,5 +57,6 @@ COPY backend ./backend
 COPY --from=frontend /app/ui/restaurant ./ui/restaurant
 
 ENV MAT3AM_BASE_DIR=/data
+ENV MAT3AM_UVICORN_WORKERS=2
 WORKDIR /app/backend
 CMD ["python", "api_server.py"]

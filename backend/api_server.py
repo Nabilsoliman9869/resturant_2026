@@ -189,8 +189,8 @@ def _mat3am_exe_build_stamp_for_whoami() -> str:
 
 
 @app.get("/__whoami__", include_in_schema=False)
-def whoami():
-    """اختبار: هل الخادم الذي يعمل هو هذا الملف؟"""
+async def whoami():
+    """اختبار: هل الخادم الذي يعمل هو هذا الملف؟ (async — لا يستهلك thread pool)"""
     try:
         _mt = int(os.path.getmtime(__file__))
     except Exception:
@@ -297,7 +297,7 @@ if REST_DIR.exists():
     @app.get("/static/restaurant", include_in_schema=False)
     @app.get("/static/restaurant/", include_in_schema=False)
     @app.get("/static/restaurant/{path:path}", include_in_schema=False)
-    def restaurant_spa(path: str = ""):
+    async def restaurant_spa(path: str = ""):
         index_file = REST_DIR / "index.html"
         if index_file.is_file():
             return FileResponse(index_file, media_type="text/html", headers=_MAT3AM_SPA_INDEX_HEADERS)
@@ -306,7 +306,7 @@ if REST_DIR.exists():
     _spa_index_html = REST_DIR / "index.html"
 
     @app.get("/login", include_in_schema=False)
-    def restaurant_spa_login():
+    async def restaurant_spa_login():
         """React Router يستخدم /login — بدون هذا المسار يعيد الخادم 404 عند تحديث الصفحة."""
         if _spa_index_html.is_file():
             return FileResponse(_spa_index_html, media_type="text/html", headers=_MAT3AM_SPA_INDEX_HEADERS)
@@ -315,7 +315,7 @@ if REST_DIR.exists():
     @app.get("/app", include_in_schema=False)
     @app.get("/app/", include_in_schema=False)
     @app.get("/app/{full_path:path}", include_in_schema=False)
-    def restaurant_spa_app_shell(full_path: str = ""):
+    async def restaurant_spa_app_shell(full_path: str = ""):
         """مسارات /app/... للواجهة الموحدة — تحديث المتصفح يحتاج إرجاع index وليس 404."""
         if _spa_index_html.is_file():
             return FileResponse(_spa_index_html, media_type="text/html", headers=_MAT3AM_SPA_INDEX_HEADERS)
@@ -3532,8 +3532,8 @@ def api_db_check():
         return {"ok": False, "detail": str(e), "path": _settings_path}
 
 @app.get("/api/ping")
-def api_ping():
-    """للتأكد أن السيرفر يعمل — افتح: /api/ping على منفذ XTRA_API_PORT"""
+async def api_ping():
+    """للتأكد أن السيرفر يعمل — خفيف جداً على حلقة asyncio (healthcheck Railway)."""
     return {"server": "api_server", "ok": True, "port": XTRA_API_PORT}
 
 
@@ -14488,11 +14488,18 @@ def _mark_session_first_order_delay(session_id: str) -> None:
         _restaurant_save("table_sessions", sessions)
 
 @app.get("/api/mat3am/sql-cache/status", include_in_schema=False)
-def mat3am_sql_cache_status():
-    """تشخيص كاش SQL (TBL005 / مستخدمي التطبيق) — للمطوّر."""
+async def mat3am_sql_cache_status(sql_probe: bool = Query(False, alias="sqlProbe")):
+    """تشخيص كاش SQL — افتراضياً بدون ODBC (لا يحجز thread pool)."""
     from mat3am_sql_cache import status as cache_status
 
-    return {"ok": True, "cache": cache_status(), "restaurantSqlReady": _restaurant_sql_ready()}
+    out = {
+        "ok": True,
+        "cache": cache_status(),
+        "restaurantSqlReady": bool(_restaurant_sql_table_ready),
+    }
+    if sql_probe:
+        out["restaurantSqlReadyLive"] = await run_in_threadpool(_restaurant_sql_ready)
+    return out
 
 
 def _perf_ms(fn) -> tuple:
@@ -22427,10 +22434,18 @@ if __name__ == "__main__":
     import uvicorn
 
     _this = Path(__file__).resolve()
+    try:
+        _workers = max(1, min(4, int((os.environ.get("MAT3AM_UVICORN_WORKERS") or "1").strip())))
+    except ValueError:
+        _workers = 1
     print("=" * 56)
     print("MAT3AM_API — مطاعم/backend (دخول dev دائم في هذا الملف)")
     print(f"ملف الخادم: {_this}")
     print(f"المنفذ: {XTRA_API_PORT} — تحقق: http://127.0.0.1:{XTRA_API_PORT}/__whoami__")
+    print(f"Uvicorn workers: {_workers}")
     print("يجب أن يظهر سطر: MAT3AM_API=1 DEV_LOGIN_ALWAYS=1")
     print("=" * 56)
-    uvicorn.run(app, host="0.0.0.0", port=XTRA_API_PORT)
+    if _workers > 1:
+        uvicorn.run("api_server:app", host="0.0.0.0", port=XTRA_API_PORT, workers=_workers)
+    else:
+        uvicorn.run(app, host="0.0.0.0", port=XTRA_API_PORT)

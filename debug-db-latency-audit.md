@@ -170,3 +170,26 @@ GET /api/mat3am/sql-cache/status
 | 2026-05-20 | فحص Railway الحي أعاد `502 Application failed to respond` للصفحة نفسها ولـ `/__whoami__` و`/api/ping`، ما يرجّح أن الخدمة لا تكمل startup أو readiness وليست فقط بطيئة داخل request |
 | 2026-05-20 | تم تعديل startup في `backend/api_server.py` لتأجيل `MAT3AM schema ensure` و`sql_cache warm` و`kids migrate` إلى background بعد بدء استقبال الطلبات، لتقليل خطر فشل readiness على Railway |
 | 2026-05-20 | **المرحلة 2:** كاش `TBL007`/`TBL006` (TTL 300s، مرآة JSON)؛ `/api/products` و`/api/product-groups` من الذاكرة؛ `GET /api/restaurant/order-taker-catalog`؛ `WaiterOrderPage.loadAll` يستدعي catalog واحد بدل طلبين ODBC |
+| 2026-05-20 | **استقرار Railway:** `/api/ready` كان `async` (سريع) بينما `/api/ping` وSPA و`sql-cache/status` كانت `def` sync — تنتظر **thread pool** المشغول بـ ODBC. أُصلح: ping/whoami/SPA async؛ `sql-cache/status` بدون `_restaurant_sql_ready()` إلا بـ `?sqlProbe=1`؛ `MAT3AM_UVICORN_WORKERS=2` في Docker |
+
+## 6. لماذا `/api/ready` سريع و`/api/ping` يتعطل أحياناً؟
+
+| المسار | النوع | ODBC / thread pool |
+|--------|--------|---------------------|
+| `GET /api/ready` (بدون `check_db`) | `async` | لا — يقرأ ملف floor_plan فقط |
+| `GET /api/ping` (قبل الإصلاح) | `def` sync | ينتظر خيطاً حراً من نفس pool طلبات SQL |
+| `GET /api/mat3am/sql-cache/status` (قبل الإصلاح) | `def` + `_restaurant_sql_ready()` | فتح ODBC على كل طلب |
+| `GET /app/...` SPA (قبل الإصلاح) | `def` | نفس pool |
+
+عند ضغط ODBC (warm، catalog، snapshot)، طلبات خفيفة **تصطف** في الطابور → timeout من الخارج رغم أن العملية «حية».
+
+**بعد الإصلاح:** ping / whoami / SPA = `async`؛ status = ذاكرة فقط؛ عاملان uvicorn على Railway.
+
+**اختبار سريع بعد النشر:**
+
+```bash
+curl -sS -w "\ncode=%{http_code} time=%{time_total}s\n" https://.../api/ping
+curl -sS -w "\ncode=%{http_code} time=%{time_total}s\n" https://.../api/mat3am/sql-cache/status
+# فحص ODBC اختياري فقط:
+curl -sS "https://.../api/mat3am/sql-cache/status?sqlProbe=1"
+```

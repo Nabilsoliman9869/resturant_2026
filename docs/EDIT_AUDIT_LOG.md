@@ -603,3 +603,9 @@ eserved + active.
 - **`backend/mat3am_sql_cache.py`**: `get_tbl007_catalog_rows`، `get_tbl006_group_rows`، TTL (`MAT3AM_TBL007_CACHE_TTL` / `MAT3AM_TBL006_CACHE_TTL` افتراضي 300s)، مرآة JSON، `invalidate_menu_catalog`، تسخين في `warm()`.
 - **`backend/api_server.py`**: `/api/products` و`/api/product-groups` من الكاش؛ `GET /api/restaurant/order-taker-catalog`؛ إبطال الكاش عند إنشاء/تعديل صنف.
 - **`src/pages/WaiterOrderPage.tsx`**: `loadAll` → طلب واحد `order-taker-catalog` بدل `products` + `product-groups`.
+
+### 080 — استقرار Railway: ping/SPA async + workers — `UTC 2026-05-20T22:00:00Z` — ID `railway-threadpool-stability`
+
+- **`backend/api_server.py`**: `/api/ping`، `/__whoami__`، مسارات SPA `/app/*` → `async`؛ `sql-cache/status` بدون ODBC افتراضياً (`?sqlProbe=1` اختياري).
+- **`Dockerfile`**: `MAT3AM_UVICORN_WORKERS=2`.
+- **`debug-db-latency-audit.md`**: شرح فرق `/api/ready` السريع vs timeout على ping من الخارج.
