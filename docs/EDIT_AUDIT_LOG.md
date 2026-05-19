@@ -579,3 +579,9 @@ eserved + active.
 - **`WaiterOrderPage.tsx`**: زر ☰ في الهيدر؛ إخفاء «انتقل إلى» على الجوال.
 - **`WaiterUiStylePrompt.tsx`**: مقدمة تدفق 3 خطوات.
 - **`roles.ts`**: بعد الدخول → `/app/waiter/tables`.
+
+### 076 — توثيق الوضع النهائي + حفظ مرجعي كامل — `UTC 2026-05-20T14:30:00Z` — ID `doc-waiter-final-state`
+
+- **`docs/WAITER_NAV_FINAL_STATE.md`**: مرجع ثابت — تدفق من `/login` إلى POS، جدول مسارات، قائمة واحدة (FAB/☰/سايدبار)، 5 تبويبات كابتن، فلتر `CaptainGuestDock`، مفاتيح `localStorage`/`sessionStorage`، خريطة ملفات، مخطط mermaid، إشارة إلى commit **`11016ce`**.
+- **`README.md`**: إحالة إلى الوثيقة ضمن «ما تم تنفيذه».
+- **ملاحظة تشغيل**: لا يُستأنف `order-taker` تلقائياً بعد المقدمة؛ نقطة البداية `WAITER_HUB_PATH` (`/app/waiter/tables`).
