@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ROLE_ROUTES, type RoleId } from "../auth/roles";
 import type { SessionUser } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
+import { safeFetch } from "../lib/safeFetch";
 import { DbConnectionBar } from "../components/DbConnectionBar";
 
 const ROLE_SET = new Set<RoleId>([
@@ -51,13 +52,14 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const ld = browserLocalDateISO();
-      const r = await fetch(`${getApiBase()}/api/auth/login`, {
+      const r = await safeFetch(`${getApiBase()}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Mat3am-Local-Date": ld,
         },
         body: JSON.stringify({ login: L, pin: P, localDate: ld }),
+        timeoutMs: 45_000,
       });
       const j = await r.json().catch(
         () => ({} as { detail?: string | unknown; user?: { id: string; name: string; login?: string; role: RoleId } }),
@@ -107,7 +109,7 @@ export default function LoginPage() {
       }}
     >
       <div style={{ position: "fixed", top: "0.65rem", insetInlineEnd: "0.65rem", zIndex: 20, maxWidth: "min(96vw, 320px)" }}>
-        <DbConnectionBar compact />
+        <DbConnectionBar compact lightweight />
       </div>
       <div className="card" style={{ maxWidth: 400, width: "100%" }}>
         <h1

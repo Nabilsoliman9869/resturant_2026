@@ -1457,14 +1457,47 @@ def _product_card_guides(cols: set, values: dict) -> dict:
     return out
 
 
-@app.post("/api/auth/login")
-async def api_auth_login(request: Request):
-    """تسجيل الدخول: دخول تهيئة أولية (dev) بدون الاعتماد على MAT3AM_APP_USERS، أو من الجدول."""
-    try:
-        raw = await request.json()
-    except Exception:
-        raw = {}
-    cal_iso = _login_calendar_iso_from_request(request, raw)
+def _api_auth_login_build_response(
+    cursor,
+    conn,
+    *,
+    user_id: str,
+    login_name: str,
+    display_name: str,
+    login_nm: str,
+    role_code: str,
+    cal_iso: Optional[str],
+) -> dict:
+    effective_role = _resolve_effective_role_code(cursor, user_id, role_code, cal_iso)
+    enforce_shift = _enforce_role_schedule_shift_active()
+    floor_shift_roles = {"waiter", "host", "server", "speed_order"}
+    needs_shift = role_code in floor_shift_roles or effective_role in floor_shift_roles
+    if enforce_shift and needs_shift:
+        if not _user_has_role_schedule_covering_today(cursor, user_id, cal_iso):
+            raise HTTPException(status_code=403, detail="أنت لست ضمن فريق العمل اليوم")
+    _audit_log(
+        cursor,
+        "LOGIN_OK",
+        "MAT3AM_APP_USERS",
+        user_id,
+        login_name,
+        f"role={effective_role}" + (f" (base={role_code})" if effective_role != role_code else ""),
+    )
+    conn.commit()
+    name_out = str(display_name or login_nm or "").strip()
+    return {
+        "ok": True,
+        "user": {
+            "id": user_id,
+            "name": name_out,
+            "login": str(login_nm or "").strip(),
+            "role": effective_role,
+        },
+    }
+
+
+def _api_auth_login_sync(raw: object, cal_iso: Optional[str]) -> dict:
+    """تسجيل الدخول — بدون DDL على المسار السريع (كاش مستخدمين)."""
     lo, pw = _parse_login_from_json_body(raw)
     login_name = _strip_invisible_chars(lo.strip())
     pin = _strip_invisible_chars(pw.strip())
@@ -1488,12 +1521,48 @@ async def api_auth_login(request: Request):
             },
         }
 
+    from mat3am_sql_cache import find_user_for_login
+
+    cached, cache_src = find_user_for_login(get_connection, login_name, pin)
+    if cache_src == "bad-pin":
+        raise HTTPException(status_code=401, detail="رمز الدخول غير صحيح")
+    if cache_src == "inactive":
+        raise HTTPException(status_code=401, detail="المستخدم غير مفعل")
+
+    if cached and cache_src == "memory":
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+        try:
+            cursor = conn.cursor()
+            role_code = str(cached.get("role") or "").strip().lower()
+            if role_code not in ALLOWED_ROLE_CODES:
+                raise HTTPException(status_code=403, detail=f"الدور غير مدعوم: {role_code}")
+            return _api_auth_login_build_response(
+                cursor,
+                conn,
+                user_id=str(cached["id"]),
+                login_name=login_name,
+                display_name=str(cached.get("name") or ""),
+                login_nm=str(cached.get("login") or login_name),
+                role_code=role_code,
+                cal_iso=cal_iso,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"تعذر تسجيل الدخول: {str(e)}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
     try:
         cursor = conn.cursor()
-        _ensure_mat3am_dev_schema(cursor)
         cursor.execute(
             """
             SELECT TOP 1 Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
@@ -1567,22 +1636,6 @@ async def api_auth_login(request: Request):
         role_code = str(row[3] or "").strip().lower()
         if role_code not in ALLOWED_ROLE_CODES:
             raise HTTPException(status_code=403, detail=f"الدور غير مدعوم: {role_code}")
-        effective_role = _resolve_effective_role_code(cursor, str(row[0]), role_code, cal_iso)
-        enforce_shift = _enforce_role_schedule_shift_active()
-        floor_shift_roles = {"waiter", "host", "server", "speed_order"}
-        needs_shift = role_code in floor_shift_roles or effective_role in floor_shift_roles
-        if enforce_shift and needs_shift:
-            if not _user_has_role_schedule_covering_today(cursor, str(row[0]), cal_iso):
-                raise HTTPException(status_code=403, detail="أنت لست ضمن فريق العمل اليوم")
-        _audit_log(
-            cursor,
-            "LOGIN_OK",
-            "MAT3AM_APP_USERS",
-            str(row[0]),
-            login_name,
-            f"role={effective_role}" + (f" (base={role_code})" if effective_role != role_code else ""),
-        )
-        conn.commit()
         display = row[2]
         login_nm = row[1]
         name_out = ""
@@ -1593,15 +1646,16 @@ async def api_auth_login(request: Request):
                 name_out = str(login_nm).strip()
         except Exception:
             name_out = str(login_nm or "").strip()
-        return {
-            "ok": True,
-            "user": {
-                "id": str(row[0]),
-                "name": name_out,
-                "login": str(login_nm or "").strip(),
-                "role": effective_role,
-            },
-        }
+        return _api_auth_login_build_response(
+            cursor,
+            conn,
+            user_id=str(row[0]),
+            login_name=login_name,
+            display_name=name_out,
+            login_nm=str(login_nm or ""),
+            role_code=role_code,
+            cal_iso=cal_iso,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -1611,6 +1665,17 @@ async def api_auth_login(request: Request):
             conn.close()
         except Exception:
             pass
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request):
+    """تسجيل الدخول — في thread pool؛ مسار سريع من كاش MAT3AM_APP_USERS."""
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    cal_iso = _login_calendar_iso_from_request(request, raw)
+    return await run_in_threadpool(_api_auth_login_sync, raw, cal_iso)
 
 
 def _mat3am_role_schedule_entries_list(cursor) -> List[Any]:
@@ -1657,7 +1722,8 @@ def api_auth_users(include_role_schedule: bool = Query(False, alias="includeRole
     if not users:
         err = meta.get("error") or "فشل الاتصال بقاعدة البيانات"
         raise HTTPException(status_code=500, detail=f"تعذر قراءة المستخدمين: {err}")
-    out: dict = {"users": users, "dataSource": meta}
+    safe_users = [{k: v for k, v in u.items() if k != "pinHash"} for u in users]
+    out: dict = {"users": safe_users, "dataSource": meta}
     if include_role_schedule:
         conn = get_connection()
         if conn:
@@ -1709,6 +1775,12 @@ def api_auth_user_create(body: dict):
         )
         _audit_log(cursor, "CREATE_USER", "MAT3AM_APP_USERS", new_id, login_name, f"role={role}")
         conn.commit()
+        try:
+            from mat3am_sql_cache import invalidate_users
+
+            invalidate_users()
+        except Exception:
+            pass
         return {"ok": True, "id": new_id}
     except HTTPException:
         raise
@@ -11294,10 +11366,11 @@ def _mat3am_startup_ensure_restaurant_state_sql_sync():
 
 def _mat3am_startup_warm_catalog_sync():
     try:
-        from mat3am_sql_cache import warm_catalog_only
+        from mat3am_sql_cache import get_app_users, warm_catalog_only
 
         warm_catalog_only(get_connection)
-        print("[mat3am] catalog warm: TBL007/TBL006/TBL005 جاهزة في الذاكرة", flush=True)
+        get_app_users(get_connection, force=True)
+        print("[mat3am] catalog warm: TBL007/TBL006/TBL005 + APP_USERS جاهزة في الذاكرة", flush=True)
     except Exception as e:
         print(f"[mat3am] catalog warm warning: {e}", flush=True)
 

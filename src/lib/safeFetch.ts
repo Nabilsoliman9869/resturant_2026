@@ -15,11 +15,20 @@ export function networkErrorResponse(statusText: string = "NETWORK"): Response {
   return fake as unknown as Response;
 }
 
-export async function safeFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+export type SafeFetchInit = RequestInit & { timeoutMs?: number };
+
+export async function safeFetch(input: string | URL, init?: SafeFetchInit): Promise<Response> {
+  const { timeoutMs, ...rest } = init || {};
+  const ctrl = timeoutMs != null && timeoutMs > 0 ? new AbortController() : undefined;
+  const timer =
+    ctrl && timeoutMs != null ? window.setTimeout(() => ctrl.abort(), timeoutMs) : undefined;
   try {
-    return await fetch(input, { cache: "no-store", ...(init || {}) });
+    const r = await fetch(input, { cache: "no-store", ...rest, signal: ctrl?.signal ?? rest.signal });
+    return r;
   } catch {
     return networkErrorResponse();
+  } finally {
+    if (timer != null) window.clearTimeout(timer);
   }
 }
 

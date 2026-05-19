@@ -14,7 +14,7 @@ function dotColor(ok: boolean, pending: boolean): string {
   return ok ? "#22c55e" : "#ef4444";
 }
 
-export function DbConnectionBar({ compact }: { compact?: boolean }) {
+export function DbConnectionBar({ compact, lightweight }: { compact?: boolean; lightweight?: boolean }) {
   const [pending, setPending] = useState(true);
   const [ok, setOk] = useState(false);
   const [dbName, setDbName] = useState<string | null>(null);
@@ -112,33 +112,40 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
 
         if (!cancelled) setApiDown(false);
 
-        pollCountRef.current += 1;
-        const deepDbCheck = pollCountRef.current === 1 || pollCountRef.current % 5 === 0;
-        const rReady = await safeFetch(
-          deepDbCheck ? `${base}/api/ready?check_db=1` : `${base}/api/ready`,
-        );
-        if (cancelled) return;
-        if (!rReady.ok) {
-          setOk(false);
-          setDbName(cfgDbParsed);
-          setServerLabel(cfgServer);
-          setDbDetail("تعذر فحص الخادم");
-          return;
-        }
-        const j = (await rReady.json()) as { database?: ReadyDb };
-        const db = j.database;
-        const st = db?.status;
-        if (deepDbCheck) {
-          setOk(st === "ok");
-          const liveName = db?.databaseName?.trim() || null;
-          setDbName(liveName || cfgDbParsed);
-          setServerLabel(db?.serverLabel?.trim() || cfgServer);
-          setDbDetail(st === "ok" ? null : db?.detail?.trim() || st || null);
+        if (!lightweight) {
+          pollCountRef.current += 1;
+          const deepDbCheck = pollCountRef.current === 1 || pollCountRef.current % 5 === 0;
+          const rReady = await safeFetch(
+            deepDbCheck ? `${base}/api/ready?check_db=1` : `${base}/api/ready`,
+          );
+          if (cancelled) return;
+          if (!rReady.ok) {
+            setOk(false);
+            setDbName(cfgDbParsed);
+            setServerLabel(cfgServer);
+            setDbDetail("تعذر فحص الخادم");
+            return;
+          }
+          const j = (await rReady.json()) as { database?: ReadyDb };
+          const db = j.database;
+          const st = db?.status;
+          if (deepDbCheck) {
+            setOk(st === "ok");
+            const liveName = db?.databaseName?.trim() || null;
+            setDbName(liveName || cfgDbParsed);
+            setServerLabel(db?.serverLabel?.trim() || cfgServer);
+            setDbDetail(st === "ok" ? null : db?.detail?.trim() || st || null);
+          } else if (!cancelled) {
+            setOk(true);
+            setDbName(cfgDbParsed);
+            setServerLabel(cfgServer);
+            setDbDetail(null);
+          }
         } else if (!cancelled) {
-          setOk(true);
+          setOk(apiAlive);
           setDbName(cfgDbParsed);
           setServerLabel(cfgServer);
-          setDbDetail(null);
+          setDbDetail(apiAlive ? null : "API غير متاح");
         }
       } catch {
         try {
@@ -166,12 +173,12 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
     }
 
     poll();
-    const t = window.setInterval(poll, 20_000);
+    const t = window.setInterval(poll, lightweight ? 45_000 : 20_000);
     return () => {
       cancelled = true;
       window.clearInterval(t);
     };
-  }, []);
+  }, [lightweight]);
 
   const label = apiDown
     ? "API متوقف — شغّل run_full_stack.bat (2288 + 9999)"

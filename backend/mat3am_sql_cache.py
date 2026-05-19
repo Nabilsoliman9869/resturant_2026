@@ -295,7 +295,7 @@ def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Op
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt
+            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt, PinHash
             FROM dbo.MAT3AM_APP_USERS
             ORDER BY CreatedAt DESC
             """
@@ -310,6 +310,7 @@ def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Op
                     "role": str(r[3] or "").lower(),
                     "isActive": bool(r[4]) if r[4] is not None else True,
                     "createdAt": str(r[5]) if r[5] else "",
+                    "pinHash": str(r[6] or "").strip() if len(r) > 6 else "",
                 }
             )
         return users, None
@@ -479,3 +480,28 @@ def warm_catalog_only(get_connection: ConnectionFactory) -> None:
 def warm(get_connection: ConnectionFactory) -> None:
     warm_catalog_only(get_connection)
     get_app_users(get_connection, force=True)
+
+
+def find_user_for_login(
+    get_connection: ConnectionFactory, login_name: str, pin: str
+) -> Tuple[Optional[dict], str]:
+    """
+    تحقق سريع من الذاكرة/المرآة أولاً (بدون DDL).
+    يُرجع (صف مستخدم داخلي أو None, مصدر: memory|sql-miss|invalid).
+    """
+    ln = str(login_name or "").strip().lower()
+    pw = str(pin or "").strip()
+    if not ln or not pw:
+        return None, "empty"
+
+    users, meta = get_app_users(get_connection)
+    if users and meta.get("source") in ("memory", "memory-stale", "sql", "mirror"):
+        for u in users:
+            if str(u.get("login") or "").strip().lower() != ln:
+                continue
+            if u.get("isActive") is False:
+                return None, "inactive"
+            if str(u.get("pinHash") or "").strip() != pw:
+                return None, "bad-pin"
+            return u, "memory"
+    return None, "sql-miss"
