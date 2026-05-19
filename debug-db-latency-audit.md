@@ -169,3 +169,4 @@ GET /api/mat3am/sql-cache/status
 | 2026-05-20 | الاستنتاج الحالي: محلياً لا توجد مشكلة واضحة في الاتصال أو كاش `TBL005`؛ المرشح الأوضح للبطء الإدراكي هو تحميل `/api/products` كاملاً دفعة واحدة |
 | 2026-05-20 | فحص Railway الحي أعاد `502 Application failed to respond` للصفحة نفسها ولـ `/__whoami__` و`/api/ping`، ما يرجّح أن الخدمة لا تكمل startup أو readiness وليست فقط بطيئة داخل request |
 | 2026-05-20 | تم تعديل startup في `backend/api_server.py` لتأجيل `MAT3AM schema ensure` و`sql_cache warm` و`kids migrate` إلى background بعد بدء استقبال الطلبات، لتقليل خطر فشل readiness على Railway |
+| 2026-05-20 | **المرحلة 2:** كاش `TBL007`/`TBL006` (TTL 300s، مرآة JSON)؛ `/api/products` و`/api/product-groups` من الذاكرة؛ `GET /api/restaurant/order-taker-catalog`؛ `WaiterOrderPage.loadAll` يستدعي catalog واحد بدل طلبين ODBC |

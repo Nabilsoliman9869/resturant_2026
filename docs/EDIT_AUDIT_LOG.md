@@ -597,3 +597,9 @@ eserved + active.
 - **`backend/api_server.py`**: `_run_background_startup_task`؛ تأجيل `_ensure_mat3am_dev_schema` + `sql_cache warm` و`kids migrate` إلى threads بعد الإقلاع — لتفادي 502/`Application failed to respond` عندما SQL بعيد أو healthcheck قصير.
 - **`railway.toml`**: healthcheck `/api/ping` (120s) — لا تغيير؛ التطبيق يجب أن يرد قبل انتهاء مهلة schema.
 - **`debug-db-latency-audit.md`**: قياس محلي + ملاحظة 502 على Railway قبل النشر.
+
+### 079 — كاش كتالوج TBL007/TBL006 + catalog مجمّع للطلب — `UTC 2026-05-20T20:00:00Z` — ID `cache-tbl007-order-catalog`
+
+- **`backend/mat3am_sql_cache.py`**: `get_tbl007_catalog_rows`، `get_tbl006_group_rows`، TTL (`MAT3AM_TBL007_CACHE_TTL` / `MAT3AM_TBL006_CACHE_TTL` افتراضي 300s)، مرآة JSON، `invalidate_menu_catalog`، تسخين في `warm()`.
+- **`backend/api_server.py`**: `/api/products` و`/api/product-groups` من الكاش؛ `GET /api/restaurant/order-taker-catalog`؛ إبطال الكاش عند إنشاء/تعديل صنف.
+- **`src/pages/WaiterOrderPage.tsx`**: `loadAll` → طلب واحد `order-taker-catalog` بدل `products` + `product-groups`.

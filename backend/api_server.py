@@ -4356,63 +4356,94 @@ def get_service_groups():
         except Exception:
             pass
 
-@app.get("/api/products")
-def get_products(group_guide: Optional[str] = None):
-    """الحصول على المنتجات/الخدمات من TBL007"""
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-    
+def _invalidate_menu_catalog_cache() -> None:
     try:
-        cursor = conn.cursor()
-        _ensure_menu_tables(cursor)
-        if group_guide:
-            query = """
-            SELECT CardGuide, ProductName, LatinName, EndUserPrice, AgentPrice, GroupGuid, ProductImageUrl, Hieght3
-            FROM TBL007
-            WHERE ProductName IS NOT NULL AND NotActive = 0 AND GroupGuid = CAST(? AS uniqueidentifier)
-            ORDER BY ProductName
-            """
-            cursor.execute(query, group_guide)
-        else:
-            query = """
-            SELECT CardGuide, ProductName, LatinName, EndUserPrice, AgentPrice, GroupGuid, ProductImageUrl, Hieght3
-            FROM TBL007
-            WHERE ProductName IS NOT NULL AND NotActive = 0
-            ORDER BY ProductName
-            """
-            cursor.execute(query)
-        
-        img_manifest_data = _product_images_manifest_load()
-        imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
-        products = []
-        for row in cursor.fetchall():
-            guid = str(row[0])
-            guid_u = guid.upper()
-            rec = imgs_map.get(guid_u) if isinstance(imgs_map, dict) else None
-            img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
-            img_db = str(row[6]) if len(row) > 6 and row[6] else None
-            products.append({
-                "CardGuide": guid,
-                "ProductName": row[1],
-                "Price": float(row[3]) if row[3] else (float(row[4]) if row[4] else 0.0),
-                "BaseEndUserPrice": float(row[3]) if row[3] else 0.0,
-                "AgentPrice": float(row[4]) if row[4] else 0.0,
-                "GroupGuid": str(row[5]) if row[5] else None,
-                "image": f"/api/products/{guid}/image",
-                "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
-                "PrepMinutes": float(row[7]) if len(row) > 7 and row[7] is not None else 0.0,
-                "Hieght3": float(row[7]) if len(row) > 7 and row[7] is not None else 0.0,
-            })
-        return {"products": products}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+        from mat3am_sql_cache import invalidate_menu_catalog
+
+        invalidate_menu_catalog()
+    except Exception:
+        pass
+
+
+def _api_product_from_tbl007_row(row: dict, imgs_map: dict) -> dict:
+    guid = str(row.get("CardGuide") or "")
+    guid_u = guid.upper()
+    rec = imgs_map.get(guid_u) if isinstance(imgs_map, dict) else None
+    img_manifest = rec.get("image") if isinstance(rec, dict) and rec.get("image") else None
+    img_db = row.get("ProductImageUrl")
+    eup = row.get("EndUserPrice")
+    ap = row.get("AgentPrice")
+    prep_raw = row.get("Hieght3")
+    prep = float(prep_raw) if prep_raw is not None else 0.0
+    return {
+        "CardGuide": guid,
+        "ProductName": row.get("ProductName"),
+        "Price": float(eup) if eup else (float(ap) if ap else 0.0),
+        "BaseEndUserPrice": float(eup) if eup else 0.0,
+        "AgentPrice": float(ap) if ap else 0.0,
+        "GroupGuid": row.get("GroupGuid"),
+        "image": f"/api/products/{guid}/image",
+        "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/products/{guid}/image"),
+        "PrepMinutes": prep,
+        "Hieght3": prep,
+    }
+
+
+@app.get("/api/products")
+def get_products(group_guide: Optional[str] = None, refresh: bool = Query(False)):
+    """الحصول على المنتجات/الخدمات من TBL007 — كاش ذاكرة + مرآة JSON (TTL عبر MAT3AM_TBL007_CACHE_TTL)."""
+    from mat3am_sql_cache import get_tbl007_catalog_rows
+
+    rows, meta = get_tbl007_catalog_rows(get_connection, force=refresh)
+    if not rows and meta.get("error"):
+        raise HTTPException(status_code=500, detail=f"فشل تحميل الأصناف: {meta.get('error')}")
+
+    filt = str(group_guide or "").strip().upper()
+    if filt:
+        rows = [r for r in rows if str(r.get("GroupGuid") or "").strip().upper() == filt]
+
+    img_manifest_data = _product_images_manifest_load()
+    imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
+    products = [_api_product_from_tbl007_row(r, imgs_map) for r in rows]
+    return {"products": products}
+
+
+@app.get("/api/restaurant/order-taker-catalog")
+def restaurant_order_taker_catalog(refresh: bool = Query(False)):
+    """كتالوج مجمّع لصفحة الطلب — مجموعات + أصناف في طلب ODBC واحد (كاش)."""
+    from mat3am_sql_cache import get_tbl006_group_rows, get_tbl007_catalog_rows
+
+    rows_p, meta_p = get_tbl007_catalog_rows(get_connection, force=refresh)
+    rows_g, meta_g = get_tbl006_group_rows(get_connection, force=refresh)
+    if not rows_p and meta_p.get("error"):
+        raise HTTPException(status_code=500, detail=f"فشل تحميل الأصناف: {meta_p.get('error')}")
+
+    img_manifest_data = _product_images_manifest_load()
+    imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
+    products = [_api_product_from_tbl007_row(r, imgs_map) for r in rows_p]
+
+    groups = []
+    for row in rows_g:
+        gid = str(row.get("CardGuide") or "")
+        img_manifest = _group_images_manifest_get(gid)
+        img_db = row.get("GroupImageUrl")
+        groups.append(
+            {
+                "CardGuide": gid,
+                "MainGuide": row.get("MainGuide") or "",
+                "LatinName": row.get("LatinName") or "",
+                "GroupName": row.get("GroupName"),
+                "image": f"/api/product-groups/{gid}/image",
+                "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/product-groups/{gid}/image-auto"),
+            }
+        )
+
+    return {
+        "ok": True,
+        "products": products,
+        "groups": groups,
+        "dataSource": {"products": meta_p, "groups": meta_g},
+    }
 
 @app.post("/api/products")
 def create_product(body: dict):
@@ -4447,6 +4478,7 @@ def create_product(body: dict):
         conn.commit()
         if image_url:
             _product_images_manifest_set(g, image_url)
+        _invalidate_menu_catalog_cache()
         return {"success": True, "CardGuide": g, "ProductName": name, "imageUrl": image_url}
     except Exception as e:
         if conn: conn.rollback()
@@ -4478,6 +4510,7 @@ def put_product_prep_minutes(card_guide: str, body: dict):
             minutes = 0.0
         cursor.execute(f"UPDATE dbo.TBL007 SET [{col}] = ? WHERE CardGuide = CAST(? AS uniqueidentifier)", (minutes, card_guide))
         conn.commit()
+        _invalidate_menu_catalog_cache()
         return {"ok": True, "CardGuide": card_guide, "minutes": minutes}
     except HTTPException:
         raise
@@ -5168,62 +5201,31 @@ def menu_bootstrap():
 
 # ========== Product Groups ==========
 @app.get("/api/product-groups")
-def get_product_groups():
-    """الحصول على مجموعات المنتجات من TBL006"""
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-    
-    try:
-        cursor = conn.cursor()
-        _ensure_menu_tables(cursor)
-        query = """
-        SELECT
-            g.CardGuide,
-            g.MainGuide,
-            g.LatinName,
-            g.GroupName,
-            g.GroupImageUrl,
-            s.ProductGuide,
-            s.ProductImageUrl
-        FROM TBL006 g
-        OUTER APPLY (
-            SELECT TOP 1
-                p.CardGuide AS ProductGuide,
-                p.ProductImageUrl
-            FROM TBL007 p
-            WHERE p.GroupGuid = g.CardGuide AND p.NotActive = 0
-            ORDER BY
-                CASE WHEN p.ProductImageUrl IS NULL OR LTRIM(RTRIM(p.ProductImageUrl)) = '' THEN 1 ELSE 0 END,
-                p.ProductName
-        ) s
-        WHERE g.GroupName IS NOT NULL
-        ORDER BY g.GroupName
-        """
-        cursor.execute(query)
-        
-        groups = []
-        for row in cursor.fetchall():
-            gid = str(row[0])
-            img_manifest = _group_images_manifest_get(gid)
-            img_db = str(row[4]) if len(row) > 4 and row[4] else None
-            groups.append({
+def get_product_groups(refresh: bool = Query(False)):
+    """مجموعات المنتجات من TBL006 — كاش ذاكرة (MAT3AM_TBL006_CACHE_TTL)."""
+    from mat3am_sql_cache import get_tbl006_group_rows
+
+    rows, meta = get_tbl006_group_rows(get_connection, force=refresh)
+    if not rows and meta.get("error"):
+        raise HTTPException(status_code=500, detail=f"فشل تحميل المجموعات: {meta.get('error')}")
+
+    groups = []
+    for row in rows:
+        gid = str(row.get("CardGuide") or "")
+        img_manifest = _group_images_manifest_get(gid)
+        img_db = row.get("GroupImageUrl")
+        groups.append(
+            {
                 "CardGuide": gid,
-                "MainGuide": str(row[1]).upper() if len(row) > 1 and row[1] else "",
-                "LatinName": row[2] or "",
-                "GroupName": row[3],
+                "MainGuide": row.get("MainGuide") or "",
+                "LatinName": row.get("LatinName") or "",
+                "GroupName": row.get("GroupName"),
                 "image": f"/api/product-groups/{gid}/image",
                 "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/product-groups/{gid}/image-auto"),
-            })
-        return {"groups": groups}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+            }
+        )
+    return {"groups": groups}
+
 
 @app.post("/api/product-groups")
 def create_product_group(body: dict):
@@ -5243,6 +5245,7 @@ def create_product_group(body: dict):
         conn.commit()
         if image_url:
             _group_images_manifest_set(g, image_url)
+        _invalidate_menu_catalog_cache()
         return {"success": True, "CardGuide": g, "GroupName": name, "imageUrl": image_url}
     except Exception as e:
         if conn: conn.rollback()
@@ -11132,7 +11135,7 @@ def _mat3am_startup_ensure_restaurant_state_sql_sync():
             from mat3am_sql_cache import warm as _sql_cache_warm_run
 
             _sql_cache_warm_run(get_connection)
-            print("[mat3am] sql_cache: تم تسخين TBL005 و MAT3AM_APP_USERS", flush=True)
+            print("[mat3am] sql_cache: تم تسخين TBL005 و TBL007 و TBL006 و MAT3AM_APP_USERS", flush=True)
         except Exception as warm_err:
             print(f"[mat3am] sql_cache warm warning: {warm_err}", flush=True)
     except Exception as e:

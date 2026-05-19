@@ -613,9 +613,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         return;
       }
 
-      const [pr, gr, fp, tb, rss, pol, promo, dmRemote, dmSched, ar, ks] = await Promise.all([
-        safeFetch(`${base}/api/products`),
-        safeFetch(`${base}/api/product-groups`),
+      const [cat, fp, tb, rss, pol, promo, dmRemote, dmSched, ar, ks] = await Promise.all([
+        safeFetch(`${base}/api/restaurant/order-taker-catalog`),
         safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
         safeFetch(`${base}/api/restaurant/tables`),
         safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
@@ -635,8 +634,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         );
         return;
       }
-      const pj = tryParseJson<{ products?: unknown }>(await pr.text()) ?? {};
-      const gj = tryParseJson<{ groups?: unknown }>(await gr.text()) ?? {};
+      const catJ =
+        tryParseJson<{ products?: unknown; groups?: unknown; ok?: boolean }>(await cat.text()) ?? {};
+      const pj = { products: catJ.products };
+      const gj = { groups: catJ.groups };
+      if (cat.status !== 0 && !cat.ok) {
+        setMsg(
+          cat.status === 0
+            ? briefNetworkHint("Failed to fetch")
+            : `تعذر تحميل القائمة (HTTP ${cat.status}) — تحقق من SQL/كتالوج الأصناف.`,
+        );
+        return;
+      }
       const fpj = tryParseJson<{ plan?: unknown }>(await fp.text()) ?? {};
       const tj = tryParseJson<{ tables?: unknown }>(await tb.text()) ?? {};
       const rsj = tryParseJson<{ sessions?: unknown }>(await rss.text()) ?? {};
