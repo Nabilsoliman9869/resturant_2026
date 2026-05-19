@@ -21,6 +21,7 @@ import re
 import random
 import sys
 import tempfile
+import threading
 import unicodedata
 from pathlib import Path
 from config import get_connection_string, get_connection_string_driver13, DATABASE
@@ -11063,6 +11064,17 @@ def _mat3am_startup_bootstrap():
         print(f"[mat3am] ODBC probe failed: {e}", flush=True)
 
 
+def _run_background_startup_task(name: str, fn) -> None:
+    def _runner():
+        try:
+            fn()
+        except Exception as e:
+            print(f"[startup][bg:{name}] {e}", flush=True)
+
+    t = threading.Thread(target=_runner, name=f"startup-{name}", daemon=True)
+    t.start()
+
+
 _RESTAURANT_SQL_KEYS = frozenset(
     {
         "orders",
@@ -11102,9 +11114,8 @@ def _restaurant_sql_ensure_table(cursor) -> None:
     )
 
 
-@app.on_event("startup")
-def _mat3am_startup_ensure_restaurant_state_sql():
-    """نفس منطق POST /api/dev/bootstrap: جداول MAT3AM كاملة عند الإقلاع إن وُجد اتصال (لا تعتمد على الضغط على زر التهيئة)."""
+def _mat3am_startup_ensure_restaurant_state_sql_sync():
+    """تهيئة SQL الثقيلة بشكل متزامن؛ تُستدعى بالخلفية حتى لا تؤخر readiness على Railway."""
     global _restaurant_sql_table_ready
     _restaurant_sql_table_ready = False
     conn = get_connection()
@@ -11135,6 +11146,12 @@ def _mat3am_startup_ensure_restaurant_state_sql():
             conn.close()
         except Exception:
             pass
+
+
+@app.on_event("startup")
+def _mat3am_startup_ensure_restaurant_state_sql():
+    print("[mat3am] MAT3AM schema: background bootstrap scheduled", flush=True)
+    _run_background_startup_task("mat3am-schema", _mat3am_startup_ensure_restaurant_state_sql_sync)
 
 
 def _restaurant_sql_ready() -> bool:
@@ -14473,6 +14490,196 @@ def mat3am_sql_cache_status():
     from mat3am_sql_cache import status as cache_status
 
     return {"ok": True, "cache": cache_status(), "restaurantSqlReady": _restaurant_sql_ready()}
+
+
+def _perf_ms(fn) -> tuple:
+    """(milliseconds, result) — لقياس مرحلة واحدة."""
+    import time
+
+    t0 = time.perf_counter()
+    out = fn()
+    return round((time.perf_counter() - t0) * 1000, 1), out
+
+
+def _mat3am_perf_probe_sync(*, cold_cache: bool = False) -> dict:
+    """
+    قياس زمني لمراحل ODBC/SQL — بدون تعديل منطق التشغيل.
+    استخدم ?cold=1 لإجبار جلب TBL005 من SQL (تجاهل كاش الذاكرة).
+    """
+    import time
+    from mat3am_sql_cache import get_app_users, get_tbl005_cost_centers, invalidate_tbl005, status as cache_status
+
+    steps: list = []
+    hints: list = []
+
+    def step(name: str, fn):
+        ms, val = _perf_ms(fn)
+        steps.append({"name": name, "ms": ms})
+        return val
+
+    # 1) اتصال + SELECT 1 (محاكاة DbConnectionBar / ready?check_db=1)
+    def connect_probe():
+        conn = get_connection()
+        if not conn:
+            return {"ok": False, "error": "no_connection"}
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.execute("SELECT DB_NAME()")
+            db_row = cur.fetchone()
+            cur.close()
+            return {"ok": True, "database": str(db_row[0]) if db_row and db_row[0] else None}
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    c1 = step("odbc_connect_select1_close", connect_probe)
+    if not (isinstance(c1, dict) and c1.get("ok")):
+        hints.append("فشل الاتصال — راجع settings.json و TLS/ODBC قبل قياس باقي المراحل.")
+
+    # 2) اتصال ثانٍ متتالٍ — يُظهر تكلفة غياب connection pool
+    step("odbc_connect_select1_close_repeat", connect_probe)
+
+    connect_ms = sum(s["ms"] for s in steps if s["name"].startswith("odbc_connect"))
+    if connect_ms > 3000:
+        hints.append(
+            f"زمن فتح اتصال ODBC مرتفع ({connect_ms}ms لمحاولتين) — غالباً شبكة بعيدة (Railway↔SQL) أو تجريب عدة drivers/TLS."
+        )
+    elif connect_ms > 800:
+        hints.append("زمن الاتصال متوسط — الكاش يخفف TBL005 لكن كل endpoint بلا كاش يفتح اتصالاً جديداً.")
+
+    if cold_cache:
+        invalidate_tbl005()
+
+    # 3) TBL005 — بارد ثم دافئ (كاش الذاكرة)
+    step("tbl005_fetch", lambda: get_tbl005_cost_centers(get_connection, force=cold_cache))
+    step("tbl005_fetch_cached", lambda: get_tbl005_cost_centers(get_connection, force=False))
+
+    t_tbl = next((s["ms"] for s in steps if s["name"] == "tbl005_fetch"), 0)
+    t_tbl_w = next((s["ms"] for s in steps if s["name"] == "tbl005_fetch_cached"), 0)
+    if t_tbl > 2000 and t_tbl_w < 50:
+        hints.append("كاش TBL005 فعّال — أول جلب بطيء والتالي سريع؛ تأكد من warm عند الإقلاع.")
+
+    # 4) حالة تشغيل مجمّعة (اتصال واحد)
+    step("sql_bulk_state", lambda: _restaurant_sql_get_bulk(["table_sessions", "orders"]))
+
+    # 5) لقطة تشغيل كاملة (ما تستدعيه شريحات الطاولات)
+    step("operational_snapshot", lambda: _restaurant_operational_snapshot_sync(False))
+
+    t_snap = next((s["ms"] for s in steps if s["name"] == "operational_snapshot"), 0)
+    if t_snap > 5000:
+        hints.append(
+            "operational-snapshot بطيء — يستدعي restaurant_get_tables + bulk؛ راقب حجم orders/sessions في SQL/JSON."
+        )
+
+    # 6) محاكاة جزء من تحميل WaiterOrderPage (طلبات متوازية = عدة اتصالات ODBC)
+    def waiter_load_parallel_sim():
+        import concurrent.futures
+
+        def one_products():
+            conn = get_connection()
+            if not conn:
+                return None
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT TOP 1 CardGuide FROM dbo.TBL007 WHERE ProductName IS NOT NULL AND NotActive = 0"
+                )
+                return cur.fetchone()
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+            futs = [ex.submit(one_products) for _ in range(3)]
+            return [f.result() for f in futs]
+
+    step("parallel_3x_connect_top1_product", waiter_load_parallel_sim)
+
+    t_par = next((s["ms"] for s in steps if s["name"] == "parallel_3x_connect_top1_product"), 0)
+    if t_par > connect_ms * 1.5 and connect_ms > 500:
+        hints.append(
+            "طلبات متوازية من الواجهة تضاعف زمن ODBC — WaiterOrderPage يطلق ~10 fetch معاً عند loadAll."
+        )
+
+    # 7) GET /api/products كامل (أثقل مسار قائمة)
+    def products_full_count():
+        conn = get_connection()
+        if not conn:
+            return {"error": "no_connection"}
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM dbo.TBL007
+                WHERE ProductName IS NOT NULL AND (NotActive = 0 OR NotActive IS NULL)
+                """
+            )
+            row = cur.fetchone()
+            return {"count": int(row[0]) if row and row[0] is not None else 0}
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    step("tbl007_count", products_full_count)
+
+    def products_sample_fetchall():
+        conn = get_connection()
+        if not conn:
+            return 0
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT CardGuide, ProductName, EndUserPrice, AgentPrice, GroupGuid
+                FROM dbo.TBL007
+                WHERE ProductName IS NOT NULL AND (NotActive = 0 OR NotActive IS NULL)
+                ORDER BY ProductName
+                """
+            )
+            rows = cur.fetchall() or []
+            return len(rows)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    n_rows = step("tbl007_full_row_scan_like_api_products", products_sample_fetchall)
+    if isinstance(n_rows, int) and n_rows > 500:
+        hints.append(
+            f"جدول TBL007 كبير ({n_rows} صفاً في مسح كامل) — GET /api/products يجلب الكل دفعة واحدة عند فتح الطلب."
+        )
+
+    total_ms = round(sum(s["ms"] for s in steps), 1)
+    return {
+        "ok": True,
+        "totalMs": total_ms,
+        "steps": steps,
+        "sqlCache": cache_status(),
+        "restaurantSqlReady": _restaurant_sql_ready(),
+        "odbcBuild": __import__("odbc_driver", fromlist=["MAT3AM_ODBC_BUILD"]).MAT3AM_ODBC_BUILD,
+        "hints": hints,
+        "interpretation": {
+            "connectHeavy": connect_ms >= 1500,
+            "cacheHelpsTbl005": t_tbl > 300 and t_tbl_w < 100,
+            "snapshotHeavy": t_snap >= 3000,
+            "productsCatalogHeavy": isinstance(n_rows, int) and n_rows >= 300,
+        },
+    }
+
+
+@app.get("/api/mat3am/perf-probe", include_in_schema=False)
+async def mat3am_perf_probe(cold: bool = Query(False, description="إبطال كاش TBL005 قبل القياس")):
+    """قياس زمني ODBC/SQL — للتشخيص فقط (مطوّر/محلي)."""
+    return await run_in_threadpool(_mat3am_perf_probe_sync, cold_cache=cold)
 
 
 def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
@@ -18991,12 +19198,17 @@ def _kids_db_migrate_from_json_once() -> int:
         except Exception: pass
 
 
-@app.on_event("startup")
-def _kids_startup_migrate():
+def _kids_startup_migrate_sync():
     try:
         _kids_db_migrate_from_json_once()
     except Exception as e:
         print(f"[kids][migrate-startup] {e}", flush=True)
+
+
+@app.on_event("startup")
+def _kids_startup_migrate():
+    print("[kids][migrate-startup] background migrate scheduled", flush=True)
+    _run_background_startup_task("kids-migrate", _kids_startup_migrate_sync)
 
 
 @app.get("/api/kids/tickets")

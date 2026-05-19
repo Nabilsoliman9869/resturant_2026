@@ -585,3 +585,15 @@ eserved + active.
 - **`docs/WAITER_NAV_FINAL_STATE.md`**: مرجع ثابت — تدفق من `/login` إلى POS، جدول مسارات، قائمة واحدة (FAB/☰/سايدبار)، 5 تبويبات كابتن، فلتر `CaptainGuestDock`، مفاتيح `localStorage`/`sessionStorage`، خريطة ملفات، مخطط mermaid، إشارة إلى commit **`11016ce`**.
 - **`README.md`**: إحالة إلى الوثيقة ضمن «ما تم تنفيذه».
 - **ملاحظة تشغيل**: لا يُستأنف `order-taker` تلقائياً بعد المقدمة؛ نقطة البداية `WAITER_HUB_PATH` (`/app/waiter/tables`).
+
+### 077 — تشخيص بطء SQL: perf-probe + سكربت قياس — `UTC 2026-05-20T16:00:00Z` — ID `perf-probe-db-latency`
+
+- **`backend/api_server.py`**: `GET /api/mat3am/perf-probe` — قياس مراحل ODBC (اتصال، TBL005 بارد/دافئ، bulk state، operational-snapshot، محاكاة طلبات متوازية، حجم TBL007) مع `hints` تلقائية.
+- **`scripts/bench_db_latency.py`**: تشغيل القياس من CLI ضد `http://127.0.0.1:2288` (خيارات `--cold`, `--repeat`, `--direct`).
+- **`debug-db-latency-audit.md`**: أسباب ملحوظة مرتبة، جدول polling، خطة اختبار دقيقة (API + DevTools + Railway).
+
+### 078 — Railway readiness: startup SQL في الخلفية — `UTC 2026-05-20T18:30:00Z` — ID `railway-bg-startup`
+
+- **`backend/api_server.py`**: `_run_background_startup_task`؛ تأجيل `_ensure_mat3am_dev_schema` + `sql_cache warm` و`kids migrate` إلى threads بعد الإقلاع — لتفادي 502/`Application failed to respond` عندما SQL بعيد أو healthcheck قصير.
+- **`railway.toml`**: healthcheck `/api/ping` (120s) — لا تغيير؛ التطبيق يجب أن يرد قبل انتهاء مهلة schema.
+- **`debug-db-latency-audit.md`**: قياس محلي + ملاحظة 502 على Railway قبل النشر.
