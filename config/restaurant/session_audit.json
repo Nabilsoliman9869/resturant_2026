@@ -39,5 +39,14 @@
     "fromTableId": "D8680F71-47C5-4402-92F0-74A475301167",
     "toTableId": "5DE585BC-425F-4E46-BBF2-8D97C8A6724E",
     "actor": "waiter"
+  },
+  {
+    "at": "2026-05-12T23:39:54.054223",
+    "action": "claim_order_taker",
+    "sessionId": "7b834bd6-2e0b-48c9-80fc-d09ad6129916",
+    "tableId": "10B7C06D-A4EA-4C57-88E3-17484F7E617B",
+    "captainUserId": "6905CB4A-E016-4FB4-899F-F08FE10BA825",
+    "captainLogin": "captain1",
+    "actorRole": "waiter"
   }
 ]

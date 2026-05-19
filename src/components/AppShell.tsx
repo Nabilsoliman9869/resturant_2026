@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { CashierAlertsBar } from "./CashierAlertsBar";
 import { RestaurantDualBells } from "./RestaurantDualBells";
@@ -18,9 +18,10 @@ import {
   roleUsesWaiterOrderUiStyle,
   saveWaiterLastPath,
   waiterPathAfterStylePick,
-  type OrderTakerMobileUi,
 } from "../lib/waiterOrderUiPrefs";
 import { buildMat3amActor } from "../lib/mat3amActor";
+import { WAITER_NAV_ITEMS } from "../lib/waiterNav";
+import { AppMenuProvider } from "../context/AppMenuContext";
 import "../styles/appShell.css";
 
 type NavItem = { to: string; label: string };
@@ -37,212 +38,6 @@ function isNavItemActive(pathname: string, base: string, n: NavItem): boolean {
     return pathname === dest || pathname.startsWith(`${dest}/`);
   }
   return pathname === dest;
-}
-
-/** أيقونات SVG بسيطة لشريط الجوال — بدون مكتبة خارجية */
-function NavDockGlyph({ navTo }: { navTo: string }) {
-  const cn = "app-shell__dock-svg";
-  switch (navTo) {
-    case "dashboard":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M4 10.5h6V4.5H4v6zm10 0h6V4.5h-6v6zM4 20.5h6v-6H4v6zm10 0h6v-6h-6v6z"
-          />
-        </svg>
-      );
-    case "tables":
-    case "captain-tables":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M4 6.5h16v3H4v-3zm0 5.5h7.5v6H4v-6zm9.5 0H20v6h-7.5v-6z"
-          />
-        </svg>
-      );
-    case "table-sessions":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M6 4h12v4H6V4zm-2 6h16v10H4V10zm2 2v6h12v-6H6z"
-          />
-        </svg>
-      );
-    case "invoices-local":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M7 3h10v2H7V3zm-2 4h14v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7zm4 3h6v2H9v-2zm0 4h6v2H9v-2z"
-          />
-        </svg>
-      );
-    case "order-taker":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M6 4h12v2H6V4zm0 4h12l-1 10H7L6 8zm3.5 2.5h5v1.5h-5V10.5z"
-          />
-        </svg>
-      );
-    case "call-center":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M6.5 3h11l1 3v14H5.5V6l1-3zm2 5a9 9 0 0 0 6 6l1.2-1.2-2.3-1.2.6-1.5 3.5 1.8a1 1 0 0 0 1.3-.4c.4-.8.6-1.7.6-2.6 0-.4-.3-.7-.7-.7h-1a8 8 0 0 0-8 8v1c0 .4.3.7.7.7.9 0 1.8-.2 2.6-.6a1 1 0 0 0 .4-1.3l-1.8-3.5-1.5.6-1.2-2.3L12 14a9 9 0 0 0-3-8.5z"
-          />
-        </svg>
-      );
-    case "delivery-management":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M4 16.5V8h10v8.5a2.5 2.5 0 0 1-2.5 2.5H8a3 3 0 0 1-3-3v-1H4zm14-7h3l2 4v3h-3v-3h-2v-4zm-9 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"
-          />
-        </svg>
-      );
-    case "kids-area":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M12 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm-7 9c0-2 2.5-3 7-3s7 1 7 3v7H5v-7z"
-          />
-        </svg>
-      );
-    case "pos":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M7 5h10a2 2 0 0 1 2 2v11H5V7a2 2 0 0 1 2-2zm3 4h4v2h-4V9zm0 4h4v2h-4v-2z"
-          />
-        </svg>
-      );
-    case "purchases":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M9 3h6v2h5v2H4V5h5V3zm-4 6h14l-1.2 12H6.2L5 9zm4 3v6h2v-6H9zm4 0v6h2v-6h-2z"
-          />
-        </svg>
-      );
-    case "cash-expense":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            d="M12 3v18M6 9h12M8 14h8M8 18h5"
-            stroke="currentColor"
-            strokeWidth="2"
-            fill="none"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case "reports":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M5 19h14v2H5v-2zm2-4h3v3H7v-3zm4-5h3v8h-3v-8zm4-4h3v12h-3V6z"
-          />
-        </svg>
-      );
-    case "costing":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M5 6h14v2H5V6zm0 5h14v2H5v-2zm0 5h10v2H5v-2zm11 2l4 4-4 4v-8z"
-          />
-        </svg>
-      );
-    case "master-data":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M5 5h6v6H5V5zm8 0h6v6h-6V5zM5 13h6v6H5v-6zm8 0h6v6h-6v-6z"
-          />
-        </svg>
-      );
-    case "settings":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zm7.4-5 .9-2.1-2-1.7-.2-2.7-2.8-.6-1.7-2.1-2.7.9-2.4-1.5-2.4 1.5-2.7-.9-1.7 2.1-2.8.6-.2 2.7-2 1.7.9 2.1-.6 2.8 1.5 2.4-1.5 2.4.9 2.7 2.1 1.7.6 2.8 2.7.2 2 1.7 2.1-.9 2.8.6 2.7 2.1 1.7 2.4-1.5 2.4 1.5z"
-          />
-        </svg>
-      );
-    case "cashflow":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M4 17h16v2H4v-2zm2-5 4-4 4 4 4-4 4 4v3H6v-7z"
-          />
-        </svg>
-      );
-    case "reception":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 9v-1c0-3 4-4.5 8-4.5s8 1.5 8 4.5v1H4z"
-          />
-        </svg>
-      );
-    case "runner":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M5 15l7-8 4 4 4-5v11H5v-2zm7-11h3v3h-3V4z"
-          />
-        </svg>
-      );
-    case "kitchen":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M8 4h8v3H8V4zm-2 6h12v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10zm4 3h4v5h-4v-5z"
-          />
-        </svg>
-      );
-    case "kitchen-item-stop":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-6-6V4zm1 3v5l4 2 .9-1.7L14 11.3V7h-1z"
-          />
-        </svg>
-      );
-    case "speed-order":
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M13 3L4 14h7l-1 7 9-11h-7l1-7z"
-          />
-        </svg>
-      );
-    default:
-      return (
-        <svg className={cn} viewBox="0 0 24 24" aria-hidden>
-          <circle cx="12" cy="12" r="7" fill="currentColor" opacity="0.85" />
-        </svg>
-      );
-  }
 }
 
 const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
@@ -294,13 +89,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "cashflow", label: "التدفق النقدي" },
   ],
   host: [{ to: "reception", label: "استقبال العملاء" }],
-  waiter: [
-    { to: "dashboard", label: "لوحة الصالة" },
-    { to: "tables", label: "الطاولات" },
-    { to: "order-taker", label: "طلب للطاولة" },
-    { to: "runner", label: "استلام من المطبخ" },
-    { to: "pos", label: "طلب سريع (بار)" },
-  ],
+  waiter: WAITER_NAV_ITEMS,
   kitchen: [
     { to: "kitchen", label: "شاشة المطبخ" },
     { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ" },
@@ -340,16 +129,13 @@ export function AppShell({ role }: { role: RoleId }) {
     () => roleUsesWaiterOrderUiStyle(role) && !isWaiterUiPromptDoneThisSession(),
   );
 
-  const handleWaiterUiStyleDone = useCallback(
-    (_choice: OrderTakerMobileUi) => {
-      setUiStylePromptOpen(false);
-      if (role === "waiter") {
-        navigate(waiterPathAfterStylePick(), { replace: true });
-      }
-    },
-    [role, base, navigate],
-  );
-  const isWaiterOrderTaker =
+  const handleWaiterUiStyleDone = useCallback(() => {
+    setUiStylePromptOpen(false);
+    if (role === "waiter") {
+      navigate(waiterPathAfterStylePick(), { replace: true });
+    }
+  }, [role, navigate]);
+  const isOrderTakerFullscreen =
     (role === "waiter" || role === "manager" || role === "developer") &&
     location.pathname.startsWith(`${base}/order-taker`);
 
@@ -363,8 +149,10 @@ export function AppShell({ role }: { role: RoleId }) {
     typeof window !== "undefined" ? window.matchMedia(`(max-width: ${NARROW_MAX_PX}px)`).matches : false,
   );
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarInitialOpen);
-  const [dockTouchHeld, setDockTouchHeld] = useState(false);
-  const dockNavRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (isOrderTakerFullscreen && narrowViewport) setSidebarOpen(false);
+  }, [isOrderTakerFullscreen, narrowViewport, location.pathname]);
 
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${NARROW_MAX_PX}px)`);
@@ -415,62 +203,26 @@ export function AppShell({ role }: { role: RoleId }) {
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
-  const showSidebarChrome = !isWaiterOrderTaker;
-  /** شريط أيقونات الجوال يظهر بدل زر ‹ عندما القائمة الكاملة مغلقة */
-  const showMobileDock = narrowViewport && showSidebarChrome && !sidebarOpen;
+  const showMobileMenuFab = narrowViewport && !sidebarOpen && !isOrderTakerFullscreen;
 
-  useLayoutEffect(() => {
-    if (!showMobileDock) {
-      setDockTouchHeld(false);
-      return;
-    }
-    const el = dockNavRef.current;
-    if (!el) return;
-    let endTimer: ReturnType<typeof setTimeout> | null = null;
-    const begin = () => {
-      if (endTimer) {
-        window.clearTimeout(endTimer);
-        endTimer = null;
-      }
-      setDockTouchHeld(true);
-    };
-    const scheduleEnd = () => {
-      if (endTimer) window.clearTimeout(endTimer);
-      endTimer = window.setTimeout(() => {
-        setDockTouchHeld(false);
-        endTimer = null;
-      }, 280);
-    };
-    el.addEventListener("touchstart", begin, { capture: true, passive: true });
-    el.addEventListener("pointerdown", begin, { capture: true });
-    window.addEventListener("touchend", scheduleEnd, false);
-    window.addEventListener("touchcancel", scheduleEnd, false);
-    window.addEventListener("pointerup", scheduleEnd, false);
-    window.addEventListener("pointercancel", scheduleEnd, false);
-    return () => {
-      if (endTimer) window.clearTimeout(endTimer);
-      el.removeEventListener("touchstart", begin, { capture: true } as AddEventListenerOptions);
-      el.removeEventListener("pointerdown", begin, { capture: true } as AddEventListenerOptions);
-      window.removeEventListener("touchend", scheduleEnd, false);
-      window.removeEventListener("touchcancel", scheduleEnd, false);
-      window.removeEventListener("pointerup", scheduleEnd, false);
-      window.removeEventListener("pointercancel", scheduleEnd, false);
-      setDockTouchHeld(false);
-    };
-  }, [showMobileDock]);
+  const appMenuValue = useMemo(
+    () => ({ openAppMenu: openSidebar, closeAppMenu: closeSidebar }),
+    [openSidebar, closeSidebar],
+  );
 
   return (
     <TerminalLockProvider>
-      <div className={`app-shell${dockTouchHeld ? " app-shell--dock-touch-held" : ""}`}>
+      <AppMenuProvider value={appMenuValue}>
+      <div className="app-shell">
         {interDeptBells ? (
           <RestaurantDualBells role={role} userId={user?.id} mat3amActor={buildMat3amActor(user)} />
         ) : null}
 
-        {showSidebarChrome && narrowViewport && sidebarOpen ? (
+        {narrowViewport && sidebarOpen ? (
           <button type="button" className="app-shell__backdrop" aria-label="إغلاق القائمة" onClick={closeSidebar} />
         ) : null}
 
-        {showSidebarChrome && !narrowViewport && !sidebarOpen ? (
+        {!narrowViewport && !sidebarOpen ? (
           <button
             type="button"
             className="app-shell__rail-tab"
@@ -482,47 +234,21 @@ export function AppShell({ role }: { role: RoleId }) {
           </button>
         ) : null}
 
-        {showMobileDock ? (
-          <nav ref={dockNavRef} className="app-shell__dock" aria-label="تنقل سريع">
-            <div className="app-shell__dock-scroll">
-              {items.map((n) => {
-                const dest = `${base}/${n.to}`;
-                const active = isNavItemActive(location.pathname, base, n);
-                return (
-                  <NavLink
-                    key={n.to}
-                    to={dest}
-                    className={() =>
-                      active ? "app-shell__dock-link app-shell__dock-link--active" : "app-shell__dock-link"
-                    }
-                    title={n.label}
-                    aria-label={n.label}
-                    onClick={closeIfNarrow}
-                  >
-                    <NavDockGlyph navTo={n.to} />
-                  </NavLink>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              className="app-shell__dock-more"
-              aria-label="القائمة الكاملة والحساب والخروج"
-              title="القائمة، الاتصال بقاعدة البيانات، الخروج"
-              onClick={openSidebar}
-            >
-              <svg className="app-shell__dock-svg" viewBox="0 0 24 24" aria-hidden>
-                <path
-                  fill="currentColor"
-                  d="M4 7h16v2H4V7zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"
-                />
-              </svg>
-            </button>
-          </nav>
+        {showMobileMenuFab ? (
+          <button
+            type="button"
+            className="app-shell__menu-fab"
+            aria-label="القائمة الرئيسية"
+            title="القائمة الرئيسية — التنقل والحساب والخروج"
+            onClick={openSidebar}
+          >
+            <svg className="app-shell__menu-fab-svg" viewBox="0 0 24 24" aria-hidden>
+              <path fill="currentColor" d="M4 7h16v2H4V7zm0 5h16v2H4v-2zm0 5h10v2H4v-2z" />
+            </svg>
+          </button>
         ) : null}
 
-        {showSidebarChrome && (
-          <aside
+        <aside
             className={`app-shell__aside ${sidebarOpen ? "is-open" : "is-collapsed"}`}
             aria-hidden={!sidebarOpen}
           >
@@ -548,6 +274,9 @@ export function AppShell({ role }: { role: RoleId }) {
                 ›
               </button>
             </div>
+            <p className="app-shell__nav-heading" style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", fontWeight: 800, color: "var(--muted)" }}>
+              القائمة الرئيسية
+            </p>
             <button type="button" className="btn btn-ghost" onClick={logout} style={{ marginBottom: "0.6rem" }}>
               خروج
             </button>
@@ -560,26 +289,20 @@ export function AppShell({ role }: { role: RoleId }) {
                   to={dest}
                   className={() => (active ? "nav-link nav-link--active" : "nav-link")}
                   onClick={closeIfNarrow}
+                  title={"hint" in n ? (n as { hint?: string }).hint : undefined}
                 >
                   {n.label}
                 </NavLink>
               );
             })}
           </aside>
-        )}
 
         <main
           className="app-shell__main"
-          data-order-taker-shell={isWaiterOrderTaker ? "1" : "0"}
-          style={
-            isWaiterOrderTaker
-              ? { padding: "0" }
-              : showMobileDock
-                ? { padding: "1.5rem", paddingInlineStart: "calc(1.5rem + 52px)" }
-                : { padding: "1.5rem" }
-          }
+          data-order-taker-shell={isOrderTakerFullscreen ? "1" : "0"}
+          style={isOrderTakerFullscreen ? { padding: "0" } : { padding: "1.5rem" }}
         >
-          {isWaiterOrderTaker ? (
+          {isOrderTakerFullscreen ? (
             <div style={{ padding: "0.45rem 0.75rem", borderBottom: "1px solid var(--border)" }}>
               <DbConnectionBar compact />
             </div>
@@ -592,6 +315,7 @@ export function AppShell({ role }: { role: RoleId }) {
           <WaiterUiStylePrompt roleLabel={ROLE_LABELS[role]} onDone={handleWaiterUiStyleDone} />
         ) : null}
       </div>
+      </AppMenuProvider>
     </TerminalLockProvider>
   );
 }

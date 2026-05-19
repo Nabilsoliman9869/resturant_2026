@@ -535,3 +535,47 @@ eserved + active.
 - **`backend/api_server.py`**: **`test-connection`** و**`/api/ready?check_db=1`** و**`mat3am-schema-probe/ensure`** عبر **`run_in_threadpool`**؛ مهلة اختبار ODBC **6** ثوانٍ.
 - **`vite.config.ts`**: **`timeout`/`proxyTimeout`** 120s لـ **`/__whoami__`** و**`/api`**.
 - **`src/pages/DeveloperConnection.tsx`**: مؤشر حي **`/api/ping`** كل 3s؛ رسائل **`Failed to fetch`** أوضح؛ مهلة 25s لاختبار SQL؛ تعطيل أزرار الخطوة ١ إذا API غير حي.
+
+### 070 — مخطط الصالة: رفع Railway + حفظ ذري موحّد — `UTC 2026-05-19T12:00:00Z` — ID `floor-plan-railway-sync`
+
+- **`backend/api_server.py`**: **`_restaurant_persist_floor_plan`** (كتابة ذرية على **DATA_DIR**، مزامنة TBL005، **`meta`** مع sha256/tableCount في GET/PUT).
+- **`src/components/FloorPlanEditor.tsx`**: رسالة حفظ تعرض المسار وعدد الطاولات + إعادة تحميل بعد الحفظ.
+- **`scripts/push_floor_plan_to_railway.py`**: رفع المخطط المحلي عبر PUT (نفس محرّر الإعدادات).
+- **`.gitignore`**: تتبع **`config/restaurant/floor_plan.json`** كمرجع؛ رفع الإنتاج: **39 طاولة**، **الطابق الرئيسي** 1400×920.
+
+### 071 — تدفق الكابتن الموحّد (جوال) — `UTC 2026-05-19T18:00:00Z` — ID `captain-mobile-unified`
+
+- **`src/lib/waiterCaptainMobile.ts`**: 4 تبويبات (طاولة / منيو / سلة / مرسل).
+- **`src/pages/WaiterOrderPage.tsx`**: جوال ≤900px — نموذج واحد؛ شريط سفلي؛ شارة سلة؛ شريط ضيوف في المنيو؛ إزالة اختيار نموذج ١/٢.
+- **`src/styles/operationalRoles.css`**: أنماط `.waiter-pos--ot-ui-captain`.
+- **`src/lib/waiterOrderUiPrefs.ts`**, **`WaiterUiStylePrompt.tsx`**, **`AppShell.tsx`**: مقدمة واحدة للجرسون فقط.
+
+### 072 — تبويب ضيوف + شريط أسماء ثابت — `UTC 2026-05-19T20:15:00Z` — ID `captain-guests-dock`
+
+- **`src/lib/waiterCaptainMobile.ts`**: 5 تبويبات (`table | guests | menu | cart | sent`)؛ قسم «تعريف الضيوف» تحت `guests`؛ `CAPTAIN_DOCK_SEAT_ORDER` و`captainShowsGuestDock`.
+- **`src/components/CaptainGuestDock.tsx`**: شريط جانبي ثابت (يسار RTL) للمقاعد ١–١٢ + ١٣ مشترك؛ الضغط → المنيو لسلة ذلك الضيف.
+- **`src/pages/WaiterOrderPage.tsx`**: ربط Dock؛ صف أسماء أعلى المنيو؛ تبويب ضيوف يفتح لوحة التعريف.
+- **`src/styles/operationalRoles.css`**: شبكة 5 أعمدة للشريط السفلي؛ أنماط Dock والشريط العلوي.
+- **`WaiterUiStylePrompt.tsx`**: نص المقدمة يذكر التبويب الخامس والشريط الجانبي.
+
+### 073 — تبويب رئيسية + شريط ضيوف مُسمّى فقط — `UTC 2026-05-19T21:30:00Z` — ID `captain-home-named-dock`
+
+- **`src/lib/waiterCaptainMobile.ts`**: تبويب `home`؛ `captainDockSeatsFromLabels` (أسماء معرّفة + ١٣ فقط).
+- **`src/components/CaptainHomeMenu.tsx`**: استلام المطبخ، شريحات الطاولات، العودة للطاولات، لوحة الصالة، بار.
+- **`src/pages/WaiterOrderPage.tsx`**: ربط القائمة والشريط المُصفّى؛ إصلاح اختفاء «القائمة الرئيسية» من الشريط السفلي.
+- **`src/styles/operationalRoles.css`**: 6 تبويبات مرنة؛ بطاقة الرئيسية.
+
+### 074 — إزالة تكرار قوائم الجوال في AppShell — `UTC 2026-05-19T22:00:00Z` — ID `appshell-single-menu-fab`
+
+- **`src/components/AppShell.tsx`**: حذف شريط الأيقونات الجانبي + زر الهامبرغر المكرر؛ زر عائم واحد «القائمة الرئيسية» يفتح السايدبار الكامل.
+- **`src/styles/appShell.css`**: `.app-shell__menu-fab`؛ إخفاء `.app-shell__dock` على الجوال.
+
+### 075 — تنقل جرسون موحّد من الدخول — `UTC 2026-05-20T08:00:00Z` — ID `waiter-nav-unified-flow`
+
+- **`src/lib/waiterNav.ts`**: مسار البداية `tables`؛ عناصر قائمة واحدة (بدون «طلب للطاولة» من القائمة).
+- **`src/context/AppMenuContext.tsx`**: فتح القائمة من شاشة الطلب (☰).
+- **`src/components/AppShell.tsx`**: قائمة جانبية دائماً؛ زر عائم للصالة فقط؛ `AppMenuProvider`.
+- **`src/lib/waiterCaptainMobile.ts`**: 5 تبويبات (حذف «رئيسية» المكررة).
+- **`WaiterOrderPage.tsx`**: زر ☰ في الهيدر؛ إخفاء «انتقل إلى» على الجوال.
+- **`WaiterUiStylePrompt.tsx`**: مقدمة تدفق 3 خطوات.
+- **`roles.ts`**: بعد الدخول → `/app/waiter/tables`.

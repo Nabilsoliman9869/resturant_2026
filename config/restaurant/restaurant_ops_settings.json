@@ -15,5 +15,6 @@
   "auditRetentionDays": "365",
   "auditLogClientActions": "on",
   "deliveryChannelStrictFinancialModes": "on",
-  "vipOwnerTemplatesJson": "[{\"id\":\"72d688e1-48e2-4016-9510-bdd5f8410efd\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":true,\"noVat\":true,\"discountEnabled\":false,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0}]"
+  "vipOwnerTemplatesJson": "[{\"id\":\"72d688e1-48e2-4016-9510-bdd5f8410efd\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":true,\"noVat\":true,\"discountEnabled\":false,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0}]",
+  "enforceRoleScheduleForShift": "on"
 }

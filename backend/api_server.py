@@ -11,9 +11,10 @@ from pydantic import BaseModel, model_validator
 from typing import Any, List, Optional, Tuple
 import pyodbc
 from datetime import date as date_cls
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import subprocess
+import hashlib
 import json
 import os
 import re
@@ -13571,20 +13572,98 @@ def restaurant_put_venue(body: dict):
     return _restaurant_write_venue(body if isinstance(body, dict) else {})
 
 
+def _floor_plan_tables_count(plan: dict) -> int:
+    if not isinstance(plan, dict):
+        return 0
+    fls = plan.get("floors")
+    if isinstance(fls, list):
+        n = 0
+        for fl in fls:
+            if isinstance(fl, dict) and isinstance(fl.get("tables"), list):
+                n += len(fl["tables"])
+        return n
+    tbls = plan.get("tables")
+    return len(tbls) if isinstance(tbls, list) else 0
+
+
+def _floor_plan_file_meta(path: str, plan: Optional[dict] = None) -> dict:
+    rel = os.path.relpath(path, _root).replace("\\", "/") if path.startswith(_root) else path
+    if not os.path.exists(path):
+        return {"path": rel, "exists": False, "tableCount": _floor_plan_tables_count(plan) if plan else 0}
+    st = os.stat(path)
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return {
+        "path": rel,
+        "exists": True,
+        "sizeBytes": st.st_size,
+        "updatedAtUtc": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "sha256": h.hexdigest(),
+        "tableCount": _floor_plan_tables_count(plan) if plan is not None else 0,
+    }
+
+
+def _restaurant_write_floor_plan_atomic(path: str, plan: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp", prefix="floor_plan_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(plan, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _restaurant_persist_floor_plan(plan: dict, *, sync_tbl005: bool = True) -> dict:
+    """كتابة floor_plan.json على DATA_DIR فقط — مع مزامنة TBL005 اختيارية وإبطال كاش SQL."""
+    sync_res = {"changed": False, "synced": 0, "failed_labels": []}
+    if sync_tbl005:
+        sync_res = _floor_plan_sync_cost_centers_in_document(plan)
+        if sync_res["failed_labels"]:
+            raise HTTPException(
+                status_code=500,
+                detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]),
+            )
+    p = _restaurant_path("floor_plan")
+    _restaurant_write_floor_plan_atomic(p, plan)
+    try:
+        from mat3am_sql_cache import invalidate_tbl005
+
+        invalidate_tbl005()
+    except Exception:
+        pass
+    meta = _floor_plan_file_meta(p, plan)
+    return {
+        "ok": True,
+        "syncedCostCenters": sync_tbl005,
+        "updatedPlanLinks": sync_res["changed"],
+        "syncedTables": sync_res["synced"],
+        "meta": meta,
+    }
+
+
 @app.get("/api/restaurant/floor-plan")
 def restaurant_floor_plan_get():
-    """مخطط الصالة v1 (مضلع + طاولات) — config/restaurant/floor_plan.json"""
+    """مخطط الصالة v1 (مضلع + طاولات) — config/restaurant/floor_plan.json على DATA_DIR"""
     p = _restaurant_path("floor_plan")
     if not os.path.exists(p):
-        return {"plan": None}
+        return {"plan": None, "meta": _floor_plan_file_meta(p)}
     try:
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
-            return {"plan": data}
+            return {"plan": data, "meta": _floor_plan_file_meta(p, data)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"plan": None}
+    return {"plan": None, "meta": _floor_plan_file_meta(p)}
 
 
 def _floor_plan_single_floor_valid(flo: dict) -> bool:
@@ -13678,23 +13757,11 @@ def restaurant_floor_plan_put(body: dict):
         for i, fl in enumerate(fls):
             if not isinstance(fl, dict) or not _floor_plan_single_floor_valid(fl):
                 raise HTTPException(status_code=400, detail=f"طابق غير صالح في index={i}")
-        sync_res = _floor_plan_sync_cost_centers_in_document(plan)
-        if sync_res["failed_labels"]:
-            raise HTTPException(status_code=500, detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]))
-        p = _restaurant_path("floor_plan")
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(plan, f, ensure_ascii=False, indent=2)
-        return {"ok": True, "syncedCostCenters": True, "updatedPlanLinks": sync_res["changed"], "syncedTables": sync_res["synced"]}
+        return _restaurant_persist_floor_plan(plan, sync_tbl005=True)
 
     if not _floor_plan_single_floor_valid(plan):
         raise HTTPException(status_code=400, detail="مخطط غير صالح: يلزم shell (مضلع ≥3 نقاط) و tables و id و name و width و height")
-    sync_res = _floor_plan_sync_cost_centers_in_document(plan)
-    if sync_res["failed_labels"]:
-        raise HTTPException(status_code=500, detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]))
-    p = _restaurant_path("floor_plan")
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(plan, f, ensure_ascii=False, indent=2)
-    return {"ok": True, "syncedCostCenters": True, "updatedPlanLinks": sync_res["changed"], "syncedTables": sync_res["synced"]}
+    return _restaurant_persist_floor_plan(plan, sync_tbl005=True)
 
 
 @app.post("/api/restaurant/floor-plan/sync-cost-centers")
@@ -13719,17 +13786,17 @@ def restaurant_floor_plan_sync_cost_centers():
         raise HTTPException(status_code=500, detail="فشل ربط بعض طاولات المخطط مع TBL005: " + ", ".join(sync_res["failed_labels"]))
     if sync_res["changed"]:
         try:
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(plan, f, ensure_ascii=False, indent=2)
+            _restaurant_write_floor_plan_atomic(p, plan)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    try:
-        from mat3am_sql_cache import invalidate_tbl005
+        try:
+            from mat3am_sql_cache import invalidate_tbl005
 
-        invalidate_tbl005()
-    except Exception:
-        pass
-    return {"ok": True, "changed": sync_res["changed"], "syncedTables": sync_res["synced"]}
+            invalidate_tbl005()
+        except Exception:
+            pass
+    meta = _floor_plan_file_meta(p, plan)
+    return {"ok": True, "changed": sync_res["changed"], "syncedTables": sync_res["synced"], "meta": meta}
 
 
 def _restaurant_kds_settings_default():

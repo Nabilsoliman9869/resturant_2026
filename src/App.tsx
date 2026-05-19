@@ -209,6 +209,7 @@ export default function App() {
         <Route index element={<Navigate to="tables" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="tables" element={<WaiterTablesPage />} />
+        <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
         <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="runner" element={<RunnerPage />} />

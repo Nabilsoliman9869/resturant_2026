@@ -225,7 +225,12 @@ export default function FloorPlanEditor({ apiTables, onSaved }: Props) {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "فشل الحفظ");
-      setMsg(j.updatedPlanLinks ? "تم الحفظ ومزامنة طاولات المخطط مع TBL005." : "تم الحفظ.");
+      const meta = j.meta as { path?: string; tableCount?: number; sha256?: string } | undefined;
+      const where = meta?.path ? ` → ${meta.path}` : "";
+      const tables = typeof meta?.tableCount === "number" ? ` (${meta.tableCount} طاولة)` : "";
+      const syncNote = j.updatedPlanLinks ? " ومزامنة TBL005." : "";
+      setMsg(`تم الحفظ على الخادم${where}${tables}${syncNote}`);
+      await load();
       onSaved?.();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));

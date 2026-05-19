@@ -1,25 +1,22 @@
-import { useState } from "react";
-import {
-  WAITER_UI_STYLE_OPTIONS,
-  markWaiterUiPromptDone,
-  saveOrderTakerMobileUi,
-  type OrderTakerMobileUi,
-} from "../lib/waiterOrderUiPrefs";
+import { markWaiterUiPromptDone } from "../lib/waiterOrderUiPrefs";
+import { WAITER_HUB_PATH } from "../lib/waiterNav";
 
 type Props = {
   roleLabel: string;
-  onDone: (choice: OrderTakerMobileUi) => void;
+  onDone: () => void;
 };
 
-export function WaiterUiStylePrompt({ roleLabel, onDone }: Props) {
-  const [pick, setPick] = useState<OrderTakerMobileUi | null>(null);
+const FLOW_STEPS = [
+  { emoji: "1️⃣", title: "شريحات الطاولات", desc: "اختر طاولة وافتح الجلسة — نقطة البداية بعد الدخول." },
+  { emoji: "2️⃣", title: "طلب للطاولة", desc: "ضيوف → منيو → سلة → مرسل. أسماء الضيوف في تبويب «ضيوف» فقط." },
+  { emoji: "☰", title: "قائمة واحدة للصالة", desc: "استلام المطبخ، لوحة الصالة، والخروج — من ☰ (جوال) أو القائمة الجانبية." },
+];
 
-  function confirm() {
-    if (!pick) return;
-    saveOrderTakerMobileUi(pick);
+export function WaiterUiStylePrompt({ roleLabel, onDone }: Props) {
+  const confirm = () => {
     markWaiterUiPromptDone();
-    onDone(pick);
-  }
+    onDone();
+  };
 
   return (
     <div
@@ -30,10 +27,11 @@ export function WaiterUiStylePrompt({ roleLabel, onDone }: Props) {
         position: "fixed",
         inset: 0,
         zIndex: 20000,
-        background: "rgba(15,23,42,0.72)",
+        background: "rgba(15,23,42,0.78)",
         display: "grid",
         placeItems: "center",
         padding: 16,
+        direction: "rtl",
       }}
     >
       <div
@@ -48,57 +46,30 @@ export function WaiterUiStylePrompt({ roleLabel, onDone }: Props) {
         }}
       >
         <p style={{ margin: "0 0 0.35rem", fontSize: "0.78rem", color: "#94a3b8", fontWeight: 700 }}>
-          تجربة — اختيار واجهة الجوال
+          تدفق الجرسون
         </p>
         <h2 id="waiter-ui-style-title" style={{ margin: "0 0 0.5rem", fontSize: "1.25rem", fontWeight: 900 }}>
-          أي ستايل تفضّل؟
+          مرحباً {roleLabel}
         </h2>
-        <p style={{ margin: "0 0 1rem", fontSize: "0.88rem", color: "#cbd5e1", lineHeight: 1.5 }}>
-          بعد دخول <strong>{roleLabel}</strong> سيُفتح «طلب للطاولة» مباشرة بالشكل الذي تختاره. يمكنك تغييره لاحقاً من القائمة
-          أعلى الشاشة.
+        <p style={{ margin: "0 0 1rem", fontSize: "0.88rem", color: "#cbd5e1", lineHeight: 1.55 }}>
+          تنقّل واحد من الدخول حتى الطلب — بدون قوائم مكررة.
         </p>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {WAITER_UI_STYLE_OPTIONS.map((opt) => {
-            const on = pick === opt.id;
-            return (
-              <label
-                key={opt.id}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  padding: "0.85rem 1rem",
-                  borderRadius: 12,
-                  border: on ? "2px solid #38bdf8" : "1px solid rgba(148,163,184,0.35)",
-                  background: on ? "rgba(56,189,248,0.12)" : "rgba(15,23,42,0.5)",
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="radio"
-                  name="waiter-ui-style"
-                  checked={on}
-                  onChange={() => setPick(opt.id)}
-                  style={{ width: 20, height: 20, marginTop: 2, accentColor: "#38bdf8", flexShrink: 0 }}
-                  aria-label={opt.title}
-                />
-                <span style={{ flex: 1 }}>
-                  <span style={{ display: "block", fontWeight: 900, fontSize: "1rem" }}>
-                    {opt.num} — {opt.title}
-                  </span>
-                  <span style={{ display: "block", fontSize: "0.82rem", color: "#94a3b8", marginTop: 4, lineHeight: 1.45 }}>
-                    {opt.description}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1.1rem" }}>
-          <button type="button" className="btn btn-primary" disabled={!pick} onClick={confirm}>
-            ابدأ بهذا الستايل
+        <ol style={{ margin: "0 0 1rem", padding: "0 1.1rem", fontSize: "0.86rem", lineHeight: 1.65 }}>
+          {FLOW_STEPS.map((s) => (
+            <li key={s.title} style={{ marginBottom: 10 }}>
+              <strong>
+                {s.emoji} {s.title}
+              </strong>
+              — {s.desc}
+            </li>
+          ))}
+        </ol>
+        <p style={{ margin: "0 0 1rem", fontSize: "0.8rem", color: "#94a3b8" }}>
+          ستبدأ من شريحات الطاولات ({WAITER_HUB_PATH.replace("/app/waiter/", "")}).
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button type="button" className="btn btn-primary" onClick={confirm}>
+            ابدأ من الشريحات
           </button>
         </div>
       </div>

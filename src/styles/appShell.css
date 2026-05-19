@@ -145,7 +145,48 @@
 }
 
 @media (max-width: 960px) {
+  .app-shell__menu-fab {
+    position: fixed;
+    z-index: 1042;
+    inset-inline-end: max(0.65rem, env(safe-area-inset-right, 0px));
+    bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    width: 52px;
+    height: 52px;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #2563eb 0%, #1e3a8a 100%);
+    color: #eff6ff;
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .app-shell__menu-fab:hover {
+    filter: brightness(1.08);
+  }
+
+  .app-shell__menu-fab:focus-visible {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
+  }
+
+  .app-shell__menu-fab-svg {
+    width: 26px;
+    height: 26px;
+    display: block;
+  }
+
   .app-shell__dock {
+    display: none !important;
+  }
+
+  .app-shell__dock--legacy-hidden {
     display: flex;
     flex-direction: column;
     position: fixed;

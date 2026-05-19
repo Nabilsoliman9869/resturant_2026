@@ -29,7 +29,7 @@ export const ROLE_ROUTES: Record<RoleId, string> = {
   manager: "/app/manager",
   developer: "/app/developer",
   host: "/app/host",
-  waiter: "/app/waiter",
+  waiter: "/app/waiter/tables",
   kitchen: "/app/kitchen",
   speed_order: "/app/speed_order",
   server: "/app/server",

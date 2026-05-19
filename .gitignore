@@ -16,8 +16,9 @@ config/tbl_seed_pack_from_db.generated.json
 # إعدادات SQL المحلية — انسخ من config/settings.example.json
 config/settings.json
 
-# بيانات تشغيل المطعم (محلية/تجريبية) — لا تُرفع
-config/restaurant/
+# بيانات تشغيل المطعم (محلية/تجريبية) — لا تُرفع إلا مخطط الصالة المرجعي
+config/restaurant/*
+!config/restaurant/floor_plan.json
 
 # ملفات build الناتجة (Vite outDir = ui/restaurant) — لا تُرفع
 ui/restaurant/assets/

@@ -408,7 +408,7 @@
       "w": 88,
       "h": 58,
       "seats": 6,
-      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d401"
+      "linkedTableId": "FCB87377-D6DB-4B8A-AFF6-E9543A0CBA1C"
     },
     {
       "id": "VIP2",
@@ -419,7 +419,7 @@
       "w": 88,
       "h": 58,
       "seats": 6,
-      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d402"
+      "linkedTableId": "EC4C9D08-3542-4D55-9002-373F297D072C"
     },
     {
       "id": "VIP3",
@@ -430,7 +430,7 @@
       "w": 88,
       "h": 58,
       "seats": 6,
-      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d403"
+      "linkedTableId": "8D97E529-F2A3-4C4A-89E0-ADC574480F90"
     },
     {
       "id": "VIP4",
@@ -441,7 +441,7 @@
       "w": 88,
       "h": 58,
       "seats": 6,
-      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d404"
+      "linkedTableId": "096271DE-97C0-4BE2-9D5E-4FE68CAFA033"
     },
     {
       "id": "VIP5",
@@ -452,7 +452,7 @@
       "w": 88,
       "h": 58,
       "seats": 6,
-      "linkedTableId": "f47ac10b-58cc-4372-a567-0e02b2c3d405"
+      "linkedTableId": "FE2CC438-003A-4DD6-97B4-EFC401F1A555"
     }
   ],
   "textAnnotations": [
