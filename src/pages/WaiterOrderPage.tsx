@@ -597,62 +597,44 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const loadAll = useCallback(async () => {
     setMsg("");
     try {
-      const pingR = await safeFetch(`${base}/api/ping`);
-      if (!pingR.ok || pingR.status === 0) {
-        setMsg(briefNetworkHint("Failed to fetch"));
-        return;
-      }
-      try {
-        const pingJ = (await pingR.json()) as { ok?: boolean };
-        if (!pingJ?.ok) {
-          setMsg("خادم API لا يستجيب بشكل صحيح — أعد تشغيل run_full_stack.bat من مجلد مطاعم.");
-          return;
-        }
-      } catch {
-        setMsg(briefNetworkHint("Failed to fetch"));
-        return;
-      }
-
-      const [cat, fp, tb, rss, pol, promo, dmRemote, dmSched, ar, ks] = await Promise.all([
-        safeFetch(`${base}/api/restaurant/order-taker-catalog`),
-        safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
-        safeFetch(`${base}/api/restaurant/tables`),
-        safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
-        safeFetch(`${base}/api/pos/policy`),
-        safeFetch(`${base}/api/pos/promotions?active_only=true`),
-        fetchDailyMenuFromApi(),
-        fetchDailyMenuSchedule(),
-        safeFetch(`${base}/api/agents`),
-        safeFetch(`${base}/api/restaurant/kitchen/item-stops?active_only=true`),
-      ]);
-
-      if (tb.status === 0 || !tb.ok) {
+      const bootR = await safeFetch(`${base}/api/restaurant/order-taker-bootstrap`);
+      if (bootR.status === 0 || !bootR.ok) {
         setMsg(
-          tb.status === 0
+          bootR.status === 0
             ? briefNetworkHint("Failed to fetch")
-            : `تعذر تحميل الطاولات (HTTP ${tb.status}) — تحقق من SQL ثم TBL005.`,
+            : `تعذر تحميل بيانات الطلب (HTTP ${bootR.status})`,
         );
         return;
       }
-      const catJ =
-        tryParseJson<{ products?: unknown; groups?: unknown; ok?: boolean }>(await cat.text()) ?? {};
-      const pj = { products: catJ.products };
-      const gj = { groups: catJ.groups };
-      if (cat.status !== 0 && !cat.ok) {
-        setMsg(
-          cat.status === 0
-            ? briefNetworkHint("Failed to fetch")
-            : `تعذر تحميل القائمة (HTTP ${cat.status}) — تحقق من SQL/كتالوج الأصناف.`,
-        );
+      const boot =
+        tryParseJson<{
+          ok?: boolean;
+          products?: unknown;
+          groups?: unknown;
+          tables?: unknown;
+          sessions?: unknown;
+          floorPlan?: { plan?: unknown };
+          policy?: Record<string, unknown>;
+          promotions?: unknown;
+          agents?: unknown;
+          kitchenStops?: { items?: unknown };
+          opsSettings?: Record<string, unknown>;
+        }>(await bootR.text()) ?? {};
+
+      if (!boot.ok) {
+        setMsg("تعذر تحميل بيانات الطلب — تحقق من الاتصال بقاعدة البيانات.");
         return;
       }
-      const fpj = tryParseJson<{ plan?: unknown }>(await fp.text()) ?? {};
-      const tj = tryParseJson<{ tables?: unknown }>(await tb.text()) ?? {};
-      const rsj = tryParseJson<{ sessions?: unknown }>(await rss.text()) ?? {};
-      const polj = tryParseJson<Record<string, unknown>>(await pol.text()) ?? {};
-      const promoj = tryParseJson<{ promotions?: unknown }>(await promo.text()) ?? {};
-      const aj = tryParseJson<{ agents?: unknown }>(await ar.text()) ?? {};
-      const ksj = tryParseJson<{ items?: unknown }>(await ks.text()) ?? {};
+
+      const pj = { products: boot.products };
+      const gj = { groups: boot.groups };
+      const fpj = { plan: boot.floorPlan?.plan ?? boot.floorPlan };
+      const tj = { tables: boot.tables };
+      const rsj = { sessions: boot.sessions };
+      const polj = boot.policy ?? {};
+      const promoj = { promotions: boot.promotions };
+      const aj = { agents: boot.agents };
+      const ksj = boot.kitchenStops ?? { items: [] };
 
       setProducts(Array.isArray(pj.products) ? (pj.products as Product[]) : []);
       const rawGroups = Array.isArray(gj.groups) ? (gj.groups as ProductGroup[]) : [];
@@ -723,21 +705,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         sm.set(String(s.productGuide).trim().toUpperCase(), String(s.note || "نفد من المطبخ"));
       }
       setKitchenStoppedMap(sm);
-      setDailyMenuScheduleEntries(dmSched.entries || []);
       setAgents(alist);
-      try {
-        const opResp = await safeFetch(`${base}/api/restaurant/ops-settings?t=${Date.now()}`, {
-          headers: { "Cache-Control": "no-cache" },
-        });
-        const opTxt = await opResp.text();
-        const opJson = tryParseJson<Record<string, unknown>>(opTxt) ?? {};
-        if (opResp.ok) {
-          const mcRaw = Number(opJson.tableDefaultMinimumCharge ?? 0);
-          setTableMinDefaultOps(Number.isFinite(mcRaw) ? Math.max(0, mcRaw) : 0);
-        }
-      } catch {
-        /* ignore ops minimum */
-      }
+      const opJson = boot.opsSettings ?? {};
+      const mcRaw = Number(opJson.tableDefaultMinimumCharge ?? 0);
+      setTableMinDefaultOps(Number.isFinite(mcRaw) ? Math.max(0, mcRaw) : 0);
       setSelectedAgentGuid((prev) => {
         if (prev && alist.some((a) => a.CardGuide === prev)) return prev;
         const pick = alist.find((a) => {
@@ -746,7 +717,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         });
         return pick?.CardGuide || alist[0]?.CardGuide || "";
       });
-      setDailyMenuState(dmRemote ?? loadDailyMenuState());
+      void (async () => {
+        try {
+          const [dmRemote, dmSched] = await Promise.all([fetchDailyMenuFromApi(), fetchDailyMenuSchedule()]);
+          setDailyMenuScheduleEntries(dmSched.entries || []);
+          setDailyMenuState(dmRemote ?? loadDailyMenuState());
+        } catch {
+          setDailyMenuState(loadDailyMenuState());
+        }
+      })();
     } catch (e) {
       setMsg(`تعذر تحميل البيانات: ${briefNetworkHint(e)}`);
     }

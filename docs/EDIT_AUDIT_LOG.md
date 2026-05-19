@@ -609,3 +609,10 @@ eserved + active.
 - **`backend/api_server.py`**: `/api/ping`، `/__whoami__`، مسارات SPA `/app/*` → `async`؛ `sql-cache/status` بدون ODBC افتراضياً (`?sqlProbe=1` اختياري).
 - **`Dockerfile`**: `MAT3AM_UVICORN_WORKERS=2`.
 - **`debug-db-latency-audit.md`**: شرح فرق `/api/ready` السريع vs timeout على ping من الخارج.
+
+### 081 — سرعة التطبيق: bootstrap واحد + SWR + GZip — `UTC 2026-05-21T08:00:00Z` — ID `perf-bootstrap-swr-gzip`
+
+- **`mat3am_sql_cache.py`**: stale-while-revalidate؛ `warm_catalog_only`؛ تسخين كتالوج مبكر.
+- **`api_server.py`**: `GET /api/restaurant/order-taker-bootstrap` (طلب واحد)؛ GZipMiddleware؛ تسخين catalog عند الإقلاع.
+- **`WaiterOrderPage.tsx`**: `loadAll` → bootstrap؛ القائمة اليومية تُحمَّل بالخلفية.
+- **`RestaurantDualBells`**: poll 12s؛ **`DbConnectionBar`**: ready خفيف + فحص SQL كل 5 دورات.

@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable, List, Optional, Tuple
 
 _LOCK = threading.Lock()
+_REFRESH_TAGS: set[str] = set()
 _MIRROR_DIR: Optional[str] = None
 
 _TBL005: dict = {"rows": None, "fetched_at": 0.0, "error": None, "from_mirror": False}
@@ -74,6 +75,95 @@ def _read_mirror_rows(name: str) -> Optional[List[dict]]:
     except Exception:
         pass
     return None
+
+
+def _bg_refresh(tag: str, fn: Callable[[], None]) -> None:
+    with _LOCK:
+        if tag in _REFRESH_TAGS:
+            return
+        _REFRESH_TAGS.add(tag)
+
+    def _run() -> None:
+        try:
+            fn()
+        finally:
+            with _LOCK:
+                _REFRESH_TAGS.discard(tag)
+
+    threading.Thread(target=_run, daemon=True, name=f"cache-refresh-{tag}").start()
+
+
+def _load_rows_slot(
+    slot: dict,
+    mirror_name: str,
+    fetch_live: Callable[[], Tuple[List[dict], Optional[str]]],
+    *,
+    now: Optional[float] = None,
+) -> Tuple[List[dict], dict]:
+    """جلب من SQL + تحديث الذاكرة والمرآة."""
+    now = now if now is not None else time.time()
+    rows, err = fetch_live()
+    from_mirror = False
+    if err and not rows:
+        mirrored = _read_mirror_rows(mirror_name)
+        if mirrored:
+            rows = mirrored
+            from_mirror = True
+            err = f"live_failed_using_mirror: {err}"
+
+    with _LOCK:
+        slot["rows"] = rows
+        slot["fetched_at"] = now
+        slot["error"] = err if not rows else None
+        slot["from_mirror"] = from_mirror
+
+    if rows and not from_mirror:
+        _write_mirror(mirror_name, {"rows": rows, "savedAt": now})
+
+    if from_mirror:
+        source = "mirror"
+    elif rows:
+        source = "sql"
+    else:
+        source = "none"
+    return rows, {"source": source, "fromMirror": from_mirror, "error": err, "stale": False}
+
+
+def _get_rows_cached(
+    slot: dict,
+    ttl: float,
+    mirror_name: str,
+    tag: str,
+    fetch_live: Callable[[], Tuple[List[dict], Optional[str]]],
+    *,
+    force: bool = False,
+) -> Tuple[List[dict], dict]:
+    """ذاكرة + stale-while-revalidate: عند انتهاء TTL يُعاد الكاش القديم فوراً ويُحدَّث بالخلفية."""
+    now = time.time()
+    with _LOCK:
+        rows = slot["rows"]
+        fetched = float(slot["fetched_at"] or 0)
+        age = (now - fetched) if rows is not None else None
+
+    if rows is not None and not force:
+        if age is not None and age < ttl:
+            return list(rows), {
+                "source": "memory",
+                "fromMirror": bool(slot["from_mirror"]),
+                "error": None,
+                "stale": False,
+            }
+        # منتهي TTL — أعد القديم الآن وحدّث بالخلفية
+        _bg_refresh(tag, lambda: _load_rows_slot(slot, mirror_name, fetch_live))
+
+        return list(rows), {
+            "source": "memory-stale",
+            "fromMirror": bool(slot["from_mirror"]),
+            "error": slot.get("error"),
+            "stale": True,
+        }
+
+    return _load_rows_slot(slot, mirror_name, fetch_live, now=now)
 
 
 def invalidate_tbl005() -> None:
@@ -187,39 +277,14 @@ def _fetch_tbl005_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
 
 def get_tbl005_cost_centers(get_connection: ConnectionFactory, *, force: bool = False) -> Tuple[List[dict], dict]:
     """قائمة مراكز التكلفة من SQL مع TTL؛ عند الفشل تُجرَّب مرآة JSON."""
-    now = time.time()
-    with _LOCK:
-        if (
-            not force
-            and _TBL005["rows"] is not None
-            and (now - float(_TBL005["fetched_at"] or 0)) < TBL005_TTL_SEC
-        ):
-            return list(_TBL005["rows"]), {
-                "source": "memory",
-                "fromMirror": bool(_TBL005["from_mirror"]),
-                "error": None,
-            }
-
-    rows, err = _fetch_tbl005_live(get_connection)
-    from_mirror = False
-    if err and not rows:
-        mirrored = _read_mirror_rows("tbl005")
-        if mirrored:
-            rows = mirrored
-            from_mirror = True
-            err = f"live_failed_using_mirror: {err}"
-
-    with _LOCK:
-        _TBL005["rows"] = rows
-        _TBL005["fetched_at"] = now
-        _TBL005["error"] = err if not rows else None
-        _TBL005["from_mirror"] = from_mirror
-
-    if rows and not from_mirror:
-        _write_mirror("tbl005", {"rows": rows, "savedAt": time.time()})
-
-    source = "mirror" if from_mirror else ("sql" if rows else "none")
-    return rows, {"source": source, "fromMirror": from_mirror, "error": err}
+    return _get_rows_cached(
+        _TBL005,
+        TBL005_TTL_SEC,
+        "tbl005",
+        "tbl005",
+        lambda: _fetch_tbl005_live(get_connection),
+        force=force,
+    )
 
 
 def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Optional[str]]:
@@ -324,39 +389,14 @@ def get_tbl007_catalog_rows(
     get_connection: ConnectionFactory, *, force: bool = False
 ) -> Tuple[List[dict], dict]:
     """صفوف كتالوج الأصناف النشطة — يُبنى رد API في api_server."""
-    now = time.time()
-    with _LOCK:
-        if (
-            not force
-            and _TBL007["rows"] is not None
-            and (now - float(_TBL007["fetched_at"] or 0)) < TBL007_TTL_SEC
-        ):
-            return list(_TBL007["rows"]), {
-                "source": "memory",
-                "fromMirror": bool(_TBL007["from_mirror"]),
-                "error": None,
-            }
-
-    rows, err = _fetch_tbl007_live(get_connection)
-    from_mirror = False
-    if err and not rows:
-        mirrored = _read_mirror_rows("tbl007")
-        if mirrored:
-            rows = mirrored
-            from_mirror = True
-            err = f"live_failed_using_mirror: {err}"
-
-    with _LOCK:
-        _TBL007["rows"] = rows
-        _TBL007["fetched_at"] = now
-        _TBL007["error"] = err if not rows else None
-        _TBL007["from_mirror"] = from_mirror
-
-    if rows and not from_mirror:
-        _write_mirror("tbl007", {"rows": rows, "savedAt": time.time()})
-
-    source = "mirror" if from_mirror else ("sql" if rows else "none")
-    return rows, {"source": source, "fromMirror": from_mirror, "error": err}
+    return _get_rows_cached(
+        _TBL007,
+        TBL007_TTL_SEC,
+        "tbl007",
+        "tbl007",
+        lambda: _fetch_tbl007_live(get_connection),
+        force=force,
+    )
 
 
 def _fetch_tbl006_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Optional[str]]:
@@ -419,43 +459,23 @@ def _fetch_tbl006_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
 def get_tbl006_group_rows(
     get_connection: ConnectionFactory, *, force: bool = False
 ) -> Tuple[List[dict], dict]:
-    now = time.time()
-    with _LOCK:
-        if (
-            not force
-            and _TBL006["rows"] is not None
-            and (now - float(_TBL006["fetched_at"] or 0)) < TBL006_TTL_SEC
-        ):
-            return list(_TBL006["rows"]), {
-                "source": "memory",
-                "fromMirror": bool(_TBL006["from_mirror"]),
-                "error": None,
-            }
+    return _get_rows_cached(
+        _TBL006,
+        TBL006_TTL_SEC,
+        "tbl006",
+        "tbl006",
+        lambda: _fetch_tbl006_live(get_connection),
+        force=force,
+    )
 
-    rows, err = _fetch_tbl006_live(get_connection)
-    from_mirror = False
-    if err and not rows:
-        mirrored = _read_mirror_rows("tbl006")
-        if mirrored:
-            rows = mirrored
-            from_mirror = True
-            err = f"live_failed_using_mirror: {err}"
 
-    with _LOCK:
-        _TBL006["rows"] = rows
-        _TBL006["fetched_at"] = now
-        _TBL006["error"] = err if not rows else None
-        _TBL006["from_mirror"] = from_mirror
-
-    if rows and not from_mirror:
-        _write_mirror("tbl006", {"rows": rows, "savedAt": time.time()})
-
-    source = "mirror" if from_mirror else ("sql" if rows else "none")
-    return rows, {"source": source, "fromMirror": from_mirror, "error": err}
+def warm_catalog_only(get_connection: ConnectionFactory) -> None:
+    """تسخين الكتالوج أولاً — أهم مسار لسرعة صفحة الطلب."""
+    get_tbl007_catalog_rows(get_connection, force=True)
+    get_tbl006_group_rows(get_connection, force=True)
+    get_tbl005_cost_centers(get_connection, force=True)
 
 
 def warm(get_connection: ConnectionFactory) -> None:
-    get_tbl005_cost_centers(get_connection, force=True)
-    get_tbl007_catalog_rows(get_connection, force=True)
-    get_tbl006_group_rows(get_connection, force=True)
+    warm_catalog_only(get_connection)
     get_app_users(get_connection, force=True)

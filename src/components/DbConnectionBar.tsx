@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
 import { networkErrorResponse, safeFetch } from "../lib/safeFetch";
 
@@ -58,6 +58,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
 
   useEffect(() => {
     let cancelled = false;
+    const pollCountRef = { current: 0 };
 
     async function parseConnectionCfg(r: Response): Promise<{ cfgDb: string | null; cfgServer: string | null }> {
       if (!r.ok) return { cfgDb: null, cfgServer: null };
@@ -111,23 +112,34 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
 
         if (!cancelled) setApiDown(false);
 
-        const rReady = await safeFetch(`${base}/api/ready?check_db=1`);
+        pollCountRef.current += 1;
+        const deepDbCheck = pollCountRef.current === 1 || pollCountRef.current % 5 === 0;
+        const rReady = await safeFetch(
+          deepDbCheck ? `${base}/api/ready?check_db=1` : `${base}/api/ready`,
+        );
         if (cancelled) return;
         if (!rReady.ok) {
           setOk(false);
           setDbName(cfgDbParsed);
           setServerLabel(cfgServer);
-          setDbDetail("تعذر فحص SQL");
+          setDbDetail("تعذر فحص الخادم");
           return;
         }
         const j = (await rReady.json()) as { database?: ReadyDb };
         const db = j.database;
         const st = db?.status;
-        setOk(st === "ok");
-        const liveName = db?.databaseName?.trim() || null;
-        setDbName(liveName || cfgDbParsed);
-        setServerLabel(db?.serverLabel?.trim() || cfgServer);
-        setDbDetail(st === "ok" ? null : db?.detail?.trim() || st || null);
+        if (deepDbCheck) {
+          setOk(st === "ok");
+          const liveName = db?.databaseName?.trim() || null;
+          setDbName(liveName || cfgDbParsed);
+          setServerLabel(db?.serverLabel?.trim() || cfgServer);
+          setDbDetail(st === "ok" ? null : db?.detail?.trim() || st || null);
+        } else if (!cancelled) {
+          setOk(true);
+          setDbName(cfgDbParsed);
+          setServerLabel(cfgServer);
+          setDbDetail(null);
+        }
       } catch {
         try {
           const rCfg = await safeFetch(`${base}/api/settings/connection`);
@@ -154,7 +166,7 @@ export function DbConnectionBar({ compact }: { compact?: boolean }) {
     }
 
     poll();
-    const t = window.setInterval(poll, 12_000);
+    const t = window.setInterval(poll, 20_000);
     return () => {
       cancelled = true;
       window.clearInterval(t);

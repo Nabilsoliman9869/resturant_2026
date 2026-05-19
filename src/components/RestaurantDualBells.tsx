@@ -7,7 +7,8 @@ import type { RoleId } from "../auth/roles";
 type Mat3amActorPayload = { id: string; login: string; name: string; role: string };
 
 /** استطلاع أسرع حتى تصل الرسائل بين الأقسام بلا انتظار طويل (كان 8 ث). */
-const POLL_MS = 3500;
+/** استطلاع الوارد — أبطأ لتقليل ضغط ODBC على Railway */
+const POLL_MS = 12_000;
 
 type InboxItem = {
   id: string;

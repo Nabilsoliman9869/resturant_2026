@@ -5,6 +5,7 @@ FastAPI Backend - متصل بقاعدة البيانات SQL Server
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel, model_validator
@@ -930,6 +931,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# ضغط JSON الكبير (كتالوج ~400KB+) — يقلّل زمن النقل على Railway
+app.add_middleware(GZipMiddleware, minimum_size=800)
 
 
 ALLOWED_ROLE_CODES = {
@@ -4408,20 +4411,14 @@ def get_products(group_guide: Optional[str] = None, refresh: bool = Query(False)
     return {"products": products}
 
 
-@app.get("/api/restaurant/order-taker-catalog")
-def restaurant_order_taker_catalog(refresh: bool = Query(False)):
-    """كتالوج مجمّع لصفحة الطلب — مجموعات + أصناف في طلب ODBC واحد (كاش)."""
+def _build_catalog_products_groups(*, refresh: bool = False) -> tuple:
     from mat3am_sql_cache import get_tbl006_group_rows, get_tbl007_catalog_rows
 
     rows_p, meta_p = get_tbl007_catalog_rows(get_connection, force=refresh)
     rows_g, meta_g = get_tbl006_group_rows(get_connection, force=refresh)
-    if not rows_p and meta_p.get("error"):
-        raise HTTPException(status_code=500, detail=f"فشل تحميل الأصناف: {meta_p.get('error')}")
-
     img_manifest_data = _product_images_manifest_load()
     imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
     products = [_api_product_from_tbl007_row(r, imgs_map) for r in rows_p]
-
     groups = []
     for row in rows_g:
         gid = str(row.get("CardGuide") or "")
@@ -4437,13 +4434,157 @@ def restaurant_order_taker_catalog(refresh: bool = Query(False)):
                 "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/product-groups/{gid}/image-auto"),
             }
         )
+    return products, groups, meta_p, meta_g
 
+
+def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
+    """طلب واحد لصفحة الطلب: كتالوج (كاش) + طاولات + جلسات + إعدادات — اتصال SQL واحد للباقي."""
+    products, groups, meta_p, meta_g = _build_catalog_products_groups(refresh=refresh)
+
+    bulk = _restaurant_sql_get_bulk(["table_sessions", "orders"])
+    sessions_raw = bulk.get("table_sessions")
+    if sessions_raw is None:
+        sessions_raw = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions_raw, list):
+        sessions_raw = []
+    sessions = [
+        s
+        for s in sessions_raw
+        if isinstance(s, dict)
+        and s.get("status") == "active"
+        and _is_today_iso(str(s.get("startTime") or ""))
+    ]
+
+    tables_payload = restaurant_get_tables()
+    tables = tables_payload.get("tables") if isinstance(tables_payload, dict) else []
+
+    fp_raw = _restaurant_load("floor_plan", {})
+    plan_doc = fp_raw.get("plan") if isinstance(fp_raw, dict) and isinstance(fp_raw.get("plan"), dict) else fp_raw
+
+    ks_raw = _restaurant_read_kitchen_item_stops()
+    ks_items = [x for x in ks_raw if isinstance(x, dict) and bool(x.get("stopped"))]
+
+    ops_raw = _restaurant_read_ops_storage()
+
+    policy = {
+        "servicePercent": 12,
+        "vatPercent": 14,
+        "applyDiscountBeforeTax": True,
+        "serviceBeforeVat": True,
+    }
+    promotions: list = []
+    agents: list = []
+
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            _ensure_costing_and_stock_schema(cursor)
+            try:
+                policy = _mat3am_pos_policy_row_from_cursor(cursor)
+            except Exception:
+                pass
+            try:
+                cursor.execute(
+                    """
+                    SELECT Id, PromoName, PromoType, PriorityNo, IsActive, IsStackable, StartAt, EndAt, ScopeType, PayloadJson, Notes
+                    FROM dbo.MAT3AM_PROMOTION
+                    WHERE IsActive = 1
+                      AND (StartAt IS NULL OR StartAt <= SYSUTCDATETIME())
+                      AND (EndAt IS NULL OR EndAt >= SYSUTCDATETIME())
+                    ORDER BY PriorityNo ASC, UpdatedAt DESC
+                    """
+                )
+                for r in cursor.fetchall() or []:
+                    promotions.append(
+                        {
+                            "Id": str(r[0]),
+                            "PromoName": r[1],
+                            "PromoType": r[2],
+                            "PriorityNo": int(r[3] or 0),
+                            "IsActive": bool(r[4]),
+                            "IsStackable": bool(r[5]),
+                            "StartAt": str(r[6]) if r[6] else None,
+                            "EndAt": str(r[7]) if r[7] else None,
+                            "ScopeType": r[8],
+                            "PayloadJson": r[9],
+                            "Notes": r[10],
+                        }
+                    )
+            except Exception:
+                pass
+            try:
+                supplier_guide = "26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500"
+                cursor.execute(
+                    """
+                    SELECT TOP 120 CardGuide, AgentName, CardNumber
+                    FROM dbo.TBL016
+                    WHERE AgentName IS NOT NULL
+                      AND CardGuide <> CAST(? AS uniqueidentifier)
+                      AND (NotActive IS NULL OR NotActive = 0)
+                    ORDER BY AgentName
+                    """,
+                    (supplier_guide,),
+                )
+                for row in cursor.fetchall() or []:
+                    agents.append(
+                        {
+                            "CardGuide": str(row[0]),
+                            "AgentName": row[1],
+                            "CardNumber": str(row[2]) if row[2] else "",
+                        }
+                    )
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return {
+        "ok": True,
+        "products": products,
+        "groups": groups,
+        "tables": tables,
+        "sessions": sessions,
+        "floorPlan": {"plan": plan_doc} if plan_doc else fp_raw,
+        "policy": policy,
+        "promotions": promotions,
+        "agents": agents,
+        "kitchenStops": {"items": ks_items},
+        "opsSettings": ops_raw if isinstance(ops_raw, dict) else {},
+        "dataSource": {
+            "catalog": {"products": meta_p, "groups": meta_g},
+            "tables": (tables_payload.get("dataSource") if isinstance(tables_payload, dict) else {}),
+            "sessions": "sql" if bulk.get("table_sessions") is not None else "json",
+        },
+    }
+
+
+@app.get("/api/restaurant/order-taker-bootstrap")
+async def restaurant_order_taker_bootstrap(refresh: bool = Query(False)):
+    """تحميل صفحة الطلب في طلب HTTP واحد (كتالوج مضغوط + تشغيل)."""
+    return await run_in_threadpool(_order_taker_bootstrap_sync, refresh=refresh)
+
+
+def _order_taker_catalog_payload(*, refresh: bool = False) -> dict:
+    products, groups, meta_p, meta_g = _build_catalog_products_groups(refresh=refresh)
+    if not products and meta_p.get("error"):
+        raise HTTPException(status_code=500, detail=f"فشل تحميل الأصناف: {meta_p.get('error')}")
     return {
         "ok": True,
         "products": products,
         "groups": groups,
         "dataSource": {"products": meta_p, "groups": meta_g},
     }
+
+
+@app.get("/api/restaurant/order-taker-catalog")
+async def restaurant_order_taker_catalog(refresh: bool = Query(False)):
+    """كتالوج مجمّع — في thread pool (لا يحجز حلقة asyncio)."""
+    return await run_in_threadpool(_order_taker_catalog_payload, refresh=refresh)
+
 
 @app.post("/api/products")
 def create_product(body: dict):
@@ -11149,6 +11290,21 @@ def _mat3am_startup_ensure_restaurant_state_sql_sync():
             conn.close()
         except Exception:
             pass
+
+
+def _mat3am_startup_warm_catalog_sync():
+    try:
+        from mat3am_sql_cache import warm_catalog_only
+
+        warm_catalog_only(get_connection)
+        print("[mat3am] catalog warm: TBL007/TBL006/TBL005 جاهزة في الذاكرة", flush=True)
+    except Exception as e:
+        print(f"[mat3am] catalog warm warning: {e}", flush=True)
+
+
+@app.on_event("startup")
+def _mat3am_startup_warm_catalog():
+    _run_background_startup_task("catalog-warm", _mat3am_startup_warm_catalog_sync)
 
 
 @app.on_event("startup")
