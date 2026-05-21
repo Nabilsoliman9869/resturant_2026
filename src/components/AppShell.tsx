@@ -302,11 +302,11 @@ export function AppShell({ role }: { role: RoleId }) {
           data-order-taker-shell={isOrderTakerFullscreen ? "1" : "0"}
           style={isOrderTakerFullscreen ? { padding: "0" } : { padding: "1.5rem" }}
         >
-          {isOrderTakerFullscreen ? (
+          {isOrderTakerFullscreen ? null : (
             <div style={{ padding: "0.45rem 0.75rem", borderBottom: "1px solid var(--border)" }}>
               <DbConnectionBar compact />
             </div>
-          ) : null}
+          )}
           {role === "cashier" ? <CashierAlertsBar /> : null}
           <Outlet key={dbEpoch} />
         </main>

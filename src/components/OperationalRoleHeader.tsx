@@ -10,12 +10,13 @@ type Props = {
   hideBack?: boolean;
   hideUser?: boolean;
   titleStyle?: CSSProperties;
+  titleSub?: ReactNode;
   rightSlot?: ReactNode;
   /** صف إضافي أسفل عنوان الشريط (مثلاً مجموعات منيو نصية + أوامر سريعة) */
   subToolbar?: ReactNode;
 };
 
-export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hideUser, titleStyle, rightSlot, subToolbar }: Props) {
+export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hideUser, titleStyle, titleSub, rightSlot, subToolbar }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -42,7 +43,9 @@ export function OperationalRoleHeader({ roleTitle, backTo, onBack, hideBack, hid
           )}
           <div>
             <div className="waiter-pos__title" style={titleStyle}>{roleTitle}</div>
-            {!hideUser ? (
+            {titleSub ? (
+              <div className="waiter-pos__title-sub">{titleSub}</div>
+            ) : !hideUser ? (
               <div className="waiter-pos__user" title={user?.login || undefined}>
                 {sessionDisplayName(user)}
               </div>

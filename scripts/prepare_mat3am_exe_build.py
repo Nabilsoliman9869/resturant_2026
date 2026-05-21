@@ -54,9 +54,12 @@ def main() -> None:
         assets.mkdir(parents=True, exist_ok=True)
         ico = assets / "mat3am_icon.ico"
         img = Image.open(src).convert("RGBA")
+        side = max(img.size)
+        canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        canvas.alpha_composite(img, ((side - img.width) // 2, (side - img.height) // 2))
+        img = canvas
         sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-        imgs = [img.resize(s, Image.Resampling.LANCZOS) for s in sizes]
-        imgs[0].save(ico, format="ICO", sizes=[(i.width, i.height) for i in imgs], append_images=imgs[1:])
+        img.save(ico, format="ICO", sizes=sizes)
         print(f"[prepare] wrote {ico}")
 
     ver_path = ROOT / "assets" / "file_version_info.txt"

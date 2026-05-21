@@ -11,6 +11,7 @@ type OrderItem = {
   quantity?: number;
   prepared?: boolean;
   sent?: boolean;
+  handoffAt?: string | null;
   lineStatus?: string;
   cancelled?: boolean;
 };
@@ -41,7 +42,7 @@ function orderLabel(o: OrderRow) {
 }
 
 function lineRemainingForSummary(i: OrderItem): number {
-  if (i.sent || i.prepared) return 0;
+  if (i.sent || i.handoffAt || String(i.lineStatus || "").toLowerCase() === "ready" || i.prepared) return 0;
   return Number(i.quantity || 0);
 }
 
@@ -167,16 +168,20 @@ function usePrepCountdown(prepStartIso: string | undefined, targetMinutes: numbe
 function KdsOrderCard({
   order,
   settings,
+  busyKeys,
   onTogglePrepared,
   onSendLine,
+  onStartPreparing,
   base,
   alertType,
   alertTitlePrefix,
 }: {
   order: OrderRow;
   settings: KdsSettings;
+  busyKeys: Set<string>;
   onTogglePrepared: (orderId: string, lineId: string, prepared: boolean) => void;
   onSendLine: (orderId: string, lineId: string) => void;
+  onStartPreparing: (orderId: string) => void;
   base: string;
   alertType: string;
   alertTitlePrefix: string;
@@ -184,6 +189,7 @@ function KdsOrderCard({
   const target = Number(order.prepTargetMinutes) > 0 ? Number(order.prepTargetMinutes) : settings.prepTargetMinutes;
   const warn = settings.warnBeforeEndMinutes;
   const preparing = (order.status || "").toLowerCase() === "preparing";
+  const pending = (order.status || "").toLowerCase() === "pending";
   const { urgent, overdue, label } = usePrepCountdown(preparing ? order.prepStartTime : undefined, target, warn);
   const cashierNotifiedRef = useRef(false);
 
@@ -251,12 +257,23 @@ function KdsOrderCard({
           <div style={{ color: "var(--wp-muted)", fontSize: "0.88rem", marginTop: 4 }}>
             طاولة: <strong>{kitchenTableDisplay(order)}</strong> · الحالة: {order.status}
           </div>
+          <div style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="waiter-pos__btn waiter-pos__btn--primary"
+              disabled={!pending || busyKeys.has(`${order.id}:status`)}
+              onClick={() => onStartPreparing(order.id)}
+            >
+              {preparing ? "التحضير جارٍ" : pending ? "بدء التحضير" : "تم بدء التحضير"}
+            </button>
+          </div>
           <div style={{ marginTop: 8, fontSize: "0.9rem", lineHeight: 1.45 }}>{orderLabel(order)}</div>
           <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
             {(order.items || []).map((it, idx) => {
               const lid = String(it.lineId || `${order.id}-${idx}`);
               const prepared = Boolean(it.prepared);
-              const sent = Boolean(it.sent);
+              const handedOff = Boolean(it.sent || it.handoffAt || String(it.lineStatus || "").toLowerCase() === "sent" || String(it.lineStatus || "").toLowerCase() === "ready");
+              const lineBusy = busyKeys.has(`${order.id}:${lid}`);
               return (
                 <div
                   key={lid}
@@ -268,26 +285,25 @@ function KdsOrderCard({
                     padding: "6px 8px",
                     border: "1px solid rgba(255,255,255,0.1)",
                     borderRadius: 10,
-                    opacity: sent ? 0.55 : 1,
+                    opacity: handedOff ? 0.55 : 1,
                   }}
                 >
                   <div>{it.name || "صنف"} ×{it.quantity || 1}</div>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.83rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={prepared}
-                      disabled={sent}
-                      onChange={(e) => onTogglePrepared(order.id, lid, e.target.checked)}
-                    />
-                    تم التحضير
-                  </label>
                   <button
                     type="button"
                     className="waiter-pos__btn waiter-pos__btn--ghost"
-                    disabled={!prepared || sent}
+                    disabled={!preparing || prepared || handedOff || lineBusy}
+                    onClick={() => onTogglePrepared(order.id, lid, true)}
+                  >
+                    {prepared || handedOff ? "تم الانتهاء" : "تم الانتهاء"}
+                  </button>
+                  <button
+                    type="button"
+                    className="waiter-pos__btn waiter-pos__btn--ghost"
+                    disabled={!prepared || handedOff || lineBusy}
                     onClick={() => onSendLine(order.id, lid)}
                   >
-                    {sent ? "أُرسل" : "إرسال"}
+                    {handedOff ? "مرسل" : "إرسال"}
                   </button>
                 </div>
               );
@@ -321,6 +337,7 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
   const [settings, setSettings] = useState<KdsSettings>({ prepTargetMinutes: 20, warnBeforeEndMinutes: 5 });
   const [msg, setMsg] = useState("");
   const [filterTable, setFilterTable] = useState<string | null>(null);
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(() => new Set());
 
   const loadAll = useCallback(async () => {
     setMsg("");
@@ -348,7 +365,9 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
   }, [loadAll]);
 
   async function togglePrepared(orderId: string, lineId: string, prepared: boolean) {
+    const key = `${orderId}:${lineId}`;
     setMsg("");
+    setBusyKeys((prev) => new Set(prev).add(key));
     try {
       const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}`, {
         method: "PATCH",
@@ -365,11 +384,19 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
       }
     } catch (e) {
       setMsg(String(e));
+    } finally {
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
   async function sendLine(orderId: string, lineId: string) {
+    const key = `${orderId}:${lineId}`;
     setMsg("");
+    setBusyKeys((prev) => new Set(prev).add(key));
     try {
       const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}/send`, {
         method: "POST",
@@ -384,6 +411,41 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
       }
     } catch (e) {
       setMsg(String(e));
+    } finally {
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
+
+  async function startPreparing(orderId: string) {
+    const key = `${orderId}:status`;
+    setMsg("");
+    setBusyKeys((prev) => new Set(prev).add(key));
+    try {
+      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "preparing" }),
+      });
+      const txt = await r.text();
+      if (!r.ok) throw new Error(txt);
+      const j = tryParseJson<OrderRow>(txt);
+      if (j && typeof j.id === "string") {
+        setOrders((prev) => replaceOrderById(prev, j));
+      } else {
+        await loadAll();
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
@@ -509,8 +571,10 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
                     base={base}
                     alertType={alertType}
                     alertTitlePrefix={alertTitlePrefix}
+                    busyKeys={busyKeys}
                     onTogglePrepared={(oid, lid, prepared) => void togglePrepared(oid, lid, prepared)}
                     onSendLine={(oid, lid) => void sendLine(oid, lid)}
+                    onStartPreparing={(oid) => void startPreparing(oid)}
                   />
                 ))}
               </div>

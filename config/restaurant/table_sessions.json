@@ -533,7 +533,7 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-05-19T01:45:56.998357",
-    "status": "active",
+    "status": "completed",
     "startedByRole": "waiter",
     "startReason": "captain_seat_from_table_card",
     "seatedByUserId": "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
@@ -556,6 +556,27 @@
       "10": "",
       "11": "",
       "12": ""
-    }
+    },
+    "endTime": "2026-05-20T00:00:06.580496"
+  },
+  {
+    "id": "2542513c-e289-43e9-a6fa-b35cdbcee9b2",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 1,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-05-21T02:37:35.804973",
+    "status": "active",
+    "startedByRole": "waiter",
+    "startReason": "captain_seat_from_table_card",
+    "seatedByUserId": "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
+    "seatedByLogin": "waiter",
+    "seatedByName": "جارسون الطلبات",
+    "captainUserId": "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
+    "captainLogin": "waiter",
+    "captainName": "جارسون الطلبات",
+    "captainClaimedAt": "2026-05-21T02:37:35.804973"
   }
 ]

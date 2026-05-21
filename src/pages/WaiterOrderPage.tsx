@@ -533,6 +533,16 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     return `${t.slice(0, Math.max(1, maxChars - 1))}…`;
   }
 
+  function tableDisplayName(t: RestTable | null | undefined): string {
+    if (!t) return "";
+    const n = Number(t.number);
+    if (Number.isFinite(n) && n > 0) return `#${n}`;
+    const raw = String(t.name || t.id || "").trim();
+    const m = /^t\s*(\d+)$/i.exec(raw);
+    if (m) return `#${m[1]}`;
+    return raw || "طاولة";
+  }
+
   const useCaptainMobileUi = narrowOtViewport;
   const appMenu = useAppMenu();
 
@@ -1836,14 +1846,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         roleTitle={pageTitle?.trim() ? pageTitle : "✦ OYA Resturant ✦"}
         backTo={orderTakerExitPath}
         hideUser
+        titleSub={<span className="waiter-pos__producer-inline">© 2026 Sir Consult for Information Technology · SQL</span>}
         titleStyle={{
-          fontSize: "2rem",
+          fontSize: "1.15rem",
           fontWeight: 900,
           lineHeight: 1,
-          top: 8,
-          position: "absolute",
-          left: "47.5%",
-          transform: "translate(-50%, 5mm)",
           fontStyle: "italic",
           letterSpacing: "0.03em",
           fontFamily: "'Segoe Script', 'Brush Script MT', 'Lucida Handwriting', cursive",
@@ -1852,10 +1859,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           borderBottom: "2px solid rgba(232,121,249,0.85)",
           paddingBottom: 2,
           whiteSpace: "nowrap",
-          zIndex: 2,
         }}
         rightSlot={
-          <div className="waiter-pos__hdr-tools" style={{ display: "flex", alignItems: "flex-end", gap: 8, direction: "ltr", minWidth: 0, width: "100%", justifyContent: "flex-end" }}>
+          <div className="waiter-pos__hdr-tools" style={{ display: "grid", gridTemplateColumns: "minmax(560px, 1fr) minmax(250px, 290px) 36px", alignItems: "center", gap: 4, direction: "ltr", minWidth: 0, width: "100%" }}>
             {useCaptainMobileUi && appMenu ? (
               <button
                 type="button"
@@ -1867,63 +1873,70 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 ☰
               </button>
             ) : null}
-            <div className="waiter-pos__hdr-tools-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, minWidth: 280 }}>
-              <span className="waiter-pos__hdr-copy" style={{ fontSize: "0.68rem", fontWeight: 900, color: "#fb923c", textShadow: "0 0 8px rgba(251,146,60,0.7)", whiteSpace: "nowrap", lineHeight: 1 }}>
-                © 2026 جميع الحقوق محفوظة لشركة Sir Consult for Information Technology
-              </span>
-              <div className="waiter-pos__hdr-tools-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, width: "100%", transform: "translateY(3mm)" }}>
-                <select
-                  className="waiter-pos__select"
-                  value={selectedAgentGuid}
-                  onChange={(e) => setSelectedAgentGuid(e.target.value)}
-                  aria-label="اسم العميل"
-                  style={{ minWidth: 140, width: "100%", fontSize: "0.9rem", fontWeight: 700, padding: "0.45rem 0.6rem", textAlign: "right" }}
-                >
-                  {agents.length === 0 ? (
-                    <option value="">اسم العميل</option>
-                  ) : (
-                    agents.map((a) => (
-                      <option key={a.CardGuide} value={a.CardGuide}>
-                        {a.AgentName}
-                      </option>
-                    ))
-                  )}
-                </select>
-                <input
-                  type="date"
-                  value={billDate}
-                  onChange={(e) => setBillDate(e.target.value)}
-                  aria-label="التاريخ"
-                  style={{ minWidth: 120, width: "100%", fontSize: "0.9rem", fontWeight: 700, padding: "0.45rem 0.6rem", borderRadius: 8, border: "1px solid #1e40af", background: "#fff", color: "#0f172a" }}
-                />
-              </div>
+            <div className="waiter-pos__hdr-actions" style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", justifyContent: "flex-start", maxWidth: "none", overflow: "hidden" }}>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--hall" onClick={() => navigate("/app/waiter/dashboard")}>لوحة الصالة</button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--tables" onClick={() => navigate("/app/waiter/tables")}>الطاولات</button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--order" onClick={() => navigate("/app/waiter/order-taker")}>طلب للطاولة</button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--quick" onClick={() => navigate("/app/waiter/pos")}>طلب سريع</button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--report" onClick={() => setShowSummary((prev) => !prev)}>{showSummary ? "إخفاء التقرير" : "تقرير الطاولة"}</button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--cashier" disabled={summonBusy || !activeSessionId} onClick={() => void summonCashier()}>{summonBusy ? "…" : "استدعاء كاشير"}</button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--bill" disabled={requestBillBusy || !activeSessionId || billingLocked} onClick={() => void requestBill()}>{requestBillBusy ? "…" : "طلب الحساب"}</button>
+              <input className="waiter-pos__coupon waiter-pos__hdr-coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="قيمة الكوبون" disabled={billingLocked} />
+            </div>
+            <div className="waiter-pos__hdr-tools-col" style={{ display: "grid", gridTemplateColumns: "minmax(118px, 1fr) minmax(112px, 0.9fr) minmax(86px, 0.72fr)", alignItems: "center", gap: 4, minWidth: 0 }}>
+              <select
+                className="waiter-pos__select"
+                value={selectedAgentGuid}
+                onChange={(e) => setSelectedAgentGuid(e.target.value)}
+                aria-label="اسم العميل"
+                style={{ minWidth: 118, width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", textAlign: "right", height: 30 }}
+              >
+                {agents.length === 0 ? (
+                  <option value="">اسم العميل</option>
+                ) : (
+                  agents.map((a) => (
+                    <option key={a.CardGuide} value={a.CardGuide}>
+                      {a.AgentName}
+                    </option>
+                  ))
+                )}
+              </select>
+              <input
+                type="date"
+                value={billDate}
+                onChange={(e) => setBillDate(e.target.value)}
+                aria-label="التاريخ"
+                style={{ minWidth: 112, width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", borderRadius: 8, border: "1px solid #1e40af", background: "#fff", color: "#0f172a", height: 30 }}
+              />
               <select
                 className="waiter-pos__select"
                 value={selectedTableId}
                 onChange={(e) => setSelectedTableId(e.target.value)}
                 aria-label="اختيار الطاولة"
-                style={{ minWidth: 140, width: "clamp(140px, 22vw, 320px)", maxWidth: "100%", fontSize: "1.05rem", fontWeight: 800, padding: "0.6rem 0.9rem", transform: "translateY(3mm)", textAlign: "center", flexShrink: 0 }}
+                style={{ minWidth: 92, width: "100%", maxWidth: "100%", fontSize: "0.9rem", fontWeight: 800, padding: "0.35rem 0.55rem", textAlign: "center", flexShrink: 0, height: 30 }}
               >
                 {tables.length === 0 ? (
                   <option value="" disabled>لا توجد طاولات — تحقق من TBL005 أو مزامنة المخطط</option>
                 ) : (
                   tables.map((t) => (
                     <option key={t.id} value={t.id} disabled={["dirty", "cleaning"].includes(normalizeTableStatus(String((t as any).status || "")))}>
-                      {t.name || `طاولة ${t.number ?? ""}`}{["dirty", "cleaning"].includes(normalizeTableStatus(String((t as any).status || ""))) ? " (غير جاهزة)" : ""}
+                      {tableDisplayName(t) || `طاولة ${t.number ?? ""}`}{["dirty", "cleaning"].includes(normalizeTableStatus(String((t as any).status || ""))) ? " (غير جاهزة)" : ""}
                     </option>
                   ))
                 )}
               </select>
             </div>
-            <button
-              type="button"
-              className="waiter-pos__close"
-              onClick={() => navigate("/app/waiter/tables")}
-              aria-label="إغلاق"
-              style={{ background: "#dc2626", color: "#fff", border: "1px solid #b91c1c", height: 44, width: 44, fontSize: "1.3rem", borderRadius: 10, transform: "translateY(3mm)" }}
-            >
-              ×
-            </button>
+            <div className="waiter-pos__hdr-close-wrap">
+              <button
+                type="button"
+                className="waiter-pos__close"
+                onClick={() => navigate("/app/waiter/tables")}
+                aria-label="إغلاق"
+                style={{ background: "#dc2626", color: "#fff", border: "1px solid #b91c1c", height: 36, width: 36, fontSize: "1.2rem", borderRadius: 10 }}
+              >
+                ×
+              </button>
+            </div>
           </div>
         }
       />
@@ -1945,22 +1958,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           }}
         >
           هذه الطاولة تحت مسند جرسون الطلبات: <strong>{captainGate.name}</strong>. مع تفعيل قفل الطاولة لا يمكن إصدار الطلبات من حسابك؛ راجع لوحة الطاولات ثم المدير إن احتجت التحويل.
-        </div>
-      ) : activeSessionId && captainGate?.name && user?.role === "waiter" && String(captainGate.id) === String(user?.id) ? (
-        <div
-          style={{
-            margin: "0 1rem 0.5rem",
-            padding: "8px 12px",
-            borderRadius: 10,
-            background: "rgba(22, 163, 74, 0.1)",
-            border: "1px solid rgba(22, 163, 74, 0.35)",
-            color: "#14532d",
-            fontWeight: 800,
-            fontSize: "0.84rem",
-            textAlign: "right",
-          }}
-        >
-          أنت مسند هذه الطاولة (جرسون الطلبات: {captainGate.name}).
         </div>
       ) : activeSessionId &&
         captainGate?.name &&
@@ -2152,7 +2149,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div
               id="waiter-ot-sec-categories"
               className="waiter-pos__top-card waiter-pos__top-card--categories waiter-pos__ot-scroll-target"
-              style={{ gridColumn: "span 3" }}
+              style={{ order: 10 }}
             >
               <h3 style={{ marginTop: 0 }}>التصنيف - الفئة</h3>
               <div className="waiter-pos__cats waiter-pos__cats-inbar" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}>
@@ -2187,31 +2184,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div
               id="waiter-ot-sec-navopts"
               className="waiter-pos__top-card waiter-pos__top-card--navopts waiter-pos__ot-scroll-target"
-              style={{ gridColumn: "span 2" }}
+              style={{ order: 90 }}
             >
-              {!useCaptainMobileUi ? (
-                <>
-              <h3 style={{ marginTop: 0 }}>انتقل إلى</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/dashboard")}>
-                  لوحة الصالة
-                </button>
-                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/tables")}>
-                  الطاولات
-                </button>
-                <button type="button" className="waiter-pos__btn waiter-pos__btn--primary" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/order-taker")}>
-                  طلب للطاولة
-                </button>
-                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem", padding: "5px 2px" }} onClick={() => navigate("/app/waiter/pos")}>
-                  طلب سريع (بار)
-                </button>
-              </div>
-                </>
-              ) : (
-                <p className="waiter-pos__captain-navopts-hint" style={{ margin: "0 0 8px", fontSize: "0.82rem", color: "#94a3b8" }}>
-                  للتنقل: زر ☰ أعلى الشاشة (القائمة الرئيسية).
-                </p>
-              )}
+              <h3 style={{ marginTop: 0 }}>عمليات الطاولة</h3>
               <div style={{ marginTop: 8, marginBottom: 8 }}>
                 <button
                   type="button"
@@ -2226,7 +2201,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   طلب مرتجع ضيف
                 </button>
               </div>
-              <h3 style={{ marginTop: 6, marginBottom: 0 }}>خيارات الطاولات</h3>
               <div className="waiter-pos__split-box">
                 <div className="waiter-pos__field-stack waiter-pos__field-stack--table-pick" style={{ display: "grid", gap: 10 }}>
                   <div className="waiter-pos__table-move-block">
@@ -2278,7 +2252,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     {transferTargetTableId ? (
                       <div className="waiter-pos__table-pick-selected">
                         <span>
-                          المختار: <strong>{tablesMoveCatalog.find((x) => x.id === transferTargetTableId)?.name ?? transferTargetTableId}</strong>
+                          المختار: <strong>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === transferTargetTableId)) || transferTargetTableId}</strong>
                         </span>
                         <button type="button" className="waiter-pos__table-pick-clear" onClick={() => setTransferTargetTableId("")}>
                           مسح
@@ -2350,7 +2324,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     {mergeTargetTableId ? (
                       <div className="waiter-pos__table-pick-selected">
                         <span>
-                          المختار: <strong>{tablesMoveCatalog.find((x) => x.id === mergeTargetTableId)?.name ?? mergeTargetTableId}</strong>
+                          المختار: <strong>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === mergeTargetTableId)) || mergeTargetTableId}</strong>
                         </span>
                         <button type="button" className="waiter-pos__table-pick-clear" onClick={() => setMergeTargetTableId("")}>
                           مسح
@@ -2367,60 +2341,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     </button>
                   </div>
 
-                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 2 }}>
-                    <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
-                    سبليت — فاتورة لكل ضيف (مقاعد ١–١٢)؛ ما يُرسَل على <strong>مقعد ١٣ «مشترك»</strong> يُقسَّم بالتساوي على شيكات المقاعد
-                  </label>
                 </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
-                <button
-                  type="button"
-                  className="waiter-pos__btn waiter-pos__btn--ghost"
-                  style={{ fontSize: "0.8rem", padding: "6px 8px" }}
-                  onClick={() => setShowSummary((prev) => !prev)}
-                >
-                  {showSummary ? "إخفاء التقرير" : "تقرير الطاولة"}
-                </button>
-                <button
-                  type="button"
-                  className="waiter-pos__btn waiter-pos__btn--ghost"
-                  style={{ fontSize: "0.8rem", padding: "6px 8px" }}
-                  disabled={summonBusy || !activeSessionId}
-                  onClick={() => void summonCashier()}
-                >
-                  {summonBusy ? "…" : "استدعاء كاشير"}
-                </button>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="waiter-pos__btn"
-                  style={{
-                    padding: "10px 12px",
-                    fontSize: "1rem",
-                    fontWeight: 900,
-                    background: "linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)",
-                    color: "#fff",
-                    border: "1px solid #0369a1",
-                  }}
-                  disabled={requestBillBusy || !activeSessionId || billingLocked}
-                  onClick={() => void requestBill()}
-                >
-                  {requestBillBusy ? "…" : "طلب الحساب"}
-                </button>
-                <input
-                  className="waiter-pos__coupon"
-                  value={couponCode}
-                  onChange={(e) => setCouponCode(e.target.value)}
-                  placeholder="قيمة الكوبون"
-                  disabled={billingLocked}
-                  style={{ marginTop: 0, background: "#fff", color: "#0f172a", borderColor: "#94a3b8", padding: "10px 12px", fontSize: "0.95rem", fontWeight: 700 }}
-                />
               </div>
               {activeSessionId ? (
                 <div className="waiter-pos__table-kitchen-strip" style={{ marginTop: 10 }}>
-                  <div className="waiter-pos__table-kitchen-strip__title">موقف الطلبات بالمطبخ (جلسة التسكين الحالية)</div>
+                  <div className="waiter-pos__table-kitchen-strip__title">مرسل / جاهز بالمطبخ (جلسة التسكين الحالية)</div>
                   <div className="waiter-pos__table-kitchen-strip__counts" title="طلبات الجلسة الحالية المرسلة للمطبخ — حسب حالة التذكرة">
                     انتظار {sessionKitchenStats.pending} · تحضير {sessionKitchenStats.preparing} · جاهز {sessionKitchenStats.ready}
                   </div>
@@ -2431,7 +2356,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div
               id="waiter-ot-sec-table"
               className="waiter-pos__top-card waiter-pos__top-card--tablemeta waiter-pos__ot-scroll-target"
-              style={{ order: 99 }}
+              style={{ order: 40 }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ fontWeight: 900 }}>{selectedTable?.name ?? "طاولة"}</div>
@@ -2439,7 +2364,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               <div style={{ color: "var(--wp-muted)", marginTop: 4, fontSize: "0.8rem" }}>عنصر {itemCount}</div>
               {activeSessionId ? (
                 <div style={{ color: "var(--wp-muted)", marginTop: 2, fontSize: "0.76rem" }} title={activeSessionId}>
-                  جلسة: {activeSessionId.slice(0, 8)}…
+                  دفعة طلب: {activeSessionId.slice(0, 8)}…
                 </div>
               ) : null}
             </div>
@@ -2447,8 +2372,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div
               id="waiter-ot-sec-pending"
               className="waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__ot-scroll-target"
+              style={{ order: 30 }}
             >
-              <h3 style={{ marginTop: 0 }}>قيد الإرسال</h3>
+              <h3 style={{ marginTop: 0 }}>السلة — قيد الإرسال</h3>
               <div className="waiter-pos__order-box">
                 {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
                   <div key={`top-line-${l.id}`} className="waiter-pos__order-line">
@@ -2497,6 +2423,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               className={`waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__top-card--seatpanel waiter-pos__ot-scroll-target${
                 narrowOtViewport && seatPanelMobCollapsed && assignmentMode === "per_seat" ? " waiter-pos__seatpanel--mob-collapsed" : ""
               }`}
+              style={{ order: 20 }}
             >
               <h3 style={{ marginTop: 0 }}>{assignmentMode === "per_seat" ? "تعريف الضيوف" : "توزيع الطلب"}</h3>
               <div className="waiter-pos__toggle-row">
@@ -2645,15 +2572,19 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         </button>
                       </div>
                     ) : null}
+                    <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 6, color: "#e5e7eb", lineHeight: 1.35 }}>
+                      <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
+                      سبليت — فاتورة لكل ضيف؛ المشترك ١٣ يُقسَّم بالتساوي
+                    </label>
                   </div>
                 </>
                 )
               ) : null}
             </div>
 
-            <div className="waiter-pos__top-card">
+            <div className="waiter-pos__top-card" style={{ order: 50 }}>
               <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__ot-scroll-target">
-                <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>طلبات مُرسلة (هذه الجلسة)</h4>
+                <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>مرسل / جاهز بالمطبخ</h4>
                 {ordersBusy && !sessionOrders.length ? (
                   <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>جاري التحميل…</div>
                 ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
@@ -2680,6 +2611,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 )}
               </div>
               <div id="waiter-ot-sec-totals" className="waiter-pos__footer-totals waiter-pos__ot-scroll-target">
+                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 900, marginBottom: 4 }}>التكلفة</div>
                 {billingTotals.ownerTpl ? (
                   <div style={{ color: "#b45309", fontSize: "0.86rem", fontWeight: 800 }}>
                     سياسة مالك/VIP ({String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}) · عميل القالب مُعرَّف على الجلسة
@@ -2860,7 +2792,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   key={p.CardGuide}
                   type="button"
                   className="waiter-pos__card"
-                  onClick={() => beginAddProduct(p)}
+                  onClick={() => pushCartLineForProduct(p, [])}
                   style={{ opacity: stopped ? 0.55 : 1, position: "relative" }}
                   title={stopped ? stopNote : undefined}
                 >
@@ -2870,6 +2802,61 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     </div>
                   ) : null}
                   <div className="waiter-pos__ribbon">{Math.round((p.Price || 0) * (1 + SERVICE_RATE_FOR_CARD_PRICE))} ج.م</div>
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: 6,
+                      left: 0,
+                      zIndex: 4,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 0,
+                      flexWrap: "nowrap",
+                      padding: "0 0",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        pushCartLineForProduct(p, []);
+                      }}
+                      style={{
+                        background: "rgba(15,23,42,0.82)",
+                        color: "#fff",
+                        borderRadius: "999px 0 0 999px",
+                        padding: "2px 7px",
+                        fontSize: 11,
+                        fontWeight: 900,
+                        border: 0,
+                        cursor: "pointer",
+                      }}
+                    >
+                      عادي
+                    </button>
+                    {activeCatalogAddons.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          beginAddProduct(p);
+                        }}
+                        style={{
+                          background: "rgba(245,158,11,0.95)",
+                          color: "#111827",
+                          borderRadius: "0 999px 999px 0",
+                          padding: "2px 7px",
+                          fontSize: 11,
+                          fontWeight: 900,
+                          border: 0,
+                          cursor: "pointer",
+                        }}
+                      >
+                        إضافات
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="waiter-pos__card-img" style={{ background: bg, position: "relative", overflow: "hidden" }}>
                     {hasImage && (
                       <img

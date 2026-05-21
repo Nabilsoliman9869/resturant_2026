@@ -313,6 +313,13 @@ if REST_DIR.exists():
             return FileResponse(_spa_index_html, media_type="text/html", headers=_MAT3AM_SPA_INDEX_HEADERS)
         raise HTTPException(status_code=503, detail="ui/restaurant/index.html غير موجود")
 
+    @app.get("/app-logo.png", include_in_schema=False)
+    async def restaurant_app_logo():
+        p = REST_DIR / "app-logo.png"
+        if p.is_file():
+            return FileResponse(p, media_type="image/png")
+        raise HTTPException(status_code=404, detail="app-logo.png غير موجود")
+
     @app.get("/app", include_in_schema=False)
     @app.get("/app/", include_in_schema=False)
     @app.get("/app/{full_path:path}", include_in_schema=False)
@@ -4578,12 +4585,7 @@ def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
     """طلب واحد لصفحة الطلب: كتالوج (كاش) + طاولات + جلسات + إعدادات — اتصال SQL واحد للباقي."""
     products, groups, meta_p, meta_g = _build_catalog_products_groups(refresh=refresh)
 
-    bulk = _restaurant_sql_get_bulk(["table_sessions", "orders"])
-    sessions_raw = bulk.get("table_sessions")
-    if sessions_raw is None:
-        sessions_raw = _restaurant_load("table_sessions", [])
-    if not isinstance(sessions_raw, list):
-        sessions_raw = []
+    sessions_raw, orders_raw, _, _ = _restaurant_preload_sessions_orders()
     sessions = [
         s
         for s in sessions_raw
@@ -4592,7 +4594,10 @@ def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
         and _is_today_iso(str(s.get("startTime") or ""))
     ]
 
-    tables_payload = restaurant_get_tables()
+    tables_payload = _restaurant_get_tables_payload(
+        sessions_preload=sessions_raw,
+        orders_preload=orders_raw,
+    )
     tables = tables_payload.get("tables") if isinstance(tables_payload, dict) else []
 
     fp_raw = _restaurant_load("floor_plan", {})
@@ -4694,7 +4699,7 @@ def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
         "dataSource": {
             "catalog": {"products": meta_p, "groups": meta_g},
             "tables": (tables_payload.get("dataSource") if isinstance(tables_payload, dict) else {}),
-            "sessions": "sql" if bulk.get("table_sessions") is not None else "json",
+            "sessions": "restaurant_state",
         },
     }
 
@@ -14582,8 +14587,8 @@ def _session_active_today(s: dict) -> bool:
     return _is_today_iso(st)
 
 
-def _close_stale_active_sessions() -> int:
-    data = _restaurant_load("table_sessions", [])
+def _close_stale_active_sessions(sessions: Optional[list] = None) -> int:
+    data = sessions if sessions is not None else _restaurant_load("table_sessions", [])
     if not isinstance(data, list):
         return 0
     changed = 0
@@ -14603,12 +14608,19 @@ def _close_stale_active_sessions() -> int:
     return changed
 
 
-def _table_no_order_overdue_map(threshold_minutes: int = 10) -> dict:
+def _table_no_order_overdue_map(
+    threshold_minutes: int = 10,
+    *,
+    sessions: Optional[list] = None,
+    orders: Optional[list] = None,
+) -> dict:
     """لكل tableId: تنبيه تأخر أخذ الطلب بعد التسكين (جلسة نشطة اليوم + بدون طلبات)."""
-    sessions = _restaurant_load("table_sessions", [])
+    if sessions is None:
+        sessions = _restaurant_load("table_sessions", [])
     if not isinstance(sessions, list):
         sessions = []
-    orders = _restaurant_load("orders", [])
+    if orders is None:
+        orders = _restaurant_load("orders", [])
     if not isinstance(orders, list):
         orders = []
     now = datetime.now()
@@ -14901,8 +14913,43 @@ async def mat3am_perf_probe(cold: bool = Query(False, description="إبطال ك
     return await run_in_threadpool(_mat3am_perf_probe_sync, cold_cache=cold)
 
 
-def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
-    """لقطة واحدة: SQL (طاولات) + حالة تشغيل (جلسات/طلبات من SQL أو JSON) + إعدادات."""
+def _mat3am_client_timing_sync() -> dict:
+    """أزمنة مسارات الواجهة (مخطط/طاولات/لقطة) — للاختبار العلمي على Render."""
+    import time
+
+    steps: list = []
+
+    def run_step(name: str, fn) -> None:
+        t0 = time.perf_counter()
+        err = None
+        try:
+            fn()
+        except Exception as e:
+            err = str(e)[:200]
+        steps.append(
+            {
+                "name": name,
+                "ms": round((time.perf_counter() - t0) * 1000, 1),
+                "ok": err is None,
+                "error": err,
+            }
+        )
+
+    run_step("floor_plan_get", restaurant_floor_plan_get)
+    run_step("tables_get", restaurant_get_tables)
+    run_step("operational_snapshot", lambda: _restaurant_operational_snapshot_sync(False))
+    total = round(sum(s["ms"] for s in steps), 1)
+    return {"ok": True, "totalMs": total, "steps": steps, "host": os.environ.get("RENDER_EXTERNAL_HOSTNAME")}
+
+
+@app.get("/api/mat3am/client-timing", include_in_schema=False)
+async def mat3am_client_timing():
+    """قياس زمن مسارات شاشة الصالة — مقارنة Render محلي."""
+    return await run_in_threadpool(_mat3am_client_timing_sync)
+
+
+def _restaurant_preload_sessions_orders() -> tuple:
+    """جلسات + طلبات في bulk ODBC واحد (أو JSON) — يُستخدم لعدم فتح 4–6 اتصالات لكل طلب."""
     bulk = _restaurant_sql_get_bulk(["table_sessions", "orders"])
     sessions_raw = bulk.get("table_sessions")
     orders_raw = bulk.get("orders")
@@ -14916,8 +14963,17 @@ def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
         sessions_raw = []
     if not isinstance(orders_raw, list):
         orders_raw = []
+    return sessions_raw, orders_raw, sessions_src, orders_src
 
-    tables_payload = restaurant_get_tables()
+
+def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
+    """لقطة واحدة: SQL (طاولات) + حالة تشغيل (جلسات/طلبات من SQL أو JSON) + إعدادات."""
+    sessions_raw, orders_raw, sessions_src, orders_src = _restaurant_preload_sessions_orders()
+
+    tables_payload = _restaurant_get_tables_payload(
+        sessions_preload=sessions_raw,
+        orders_preload=orders_raw,
+    )
     fp_raw = _restaurant_load("floor_plan", {})
     try:
         wf_raw = _restaurant_read_workflow()
@@ -14959,9 +15015,17 @@ async def restaurant_operational_snapshot(includeUsers: bool = Query(False, alia
     return await run_in_threadpool(_restaurant_operational_snapshot_sync, includeUsers)
 
 
-@app.get("/api/restaurant/tables")
-def restaurant_get_tables():
-    """جلب الطاولات — من مراكز التكلفة (TBL005) أولاً، ثم من ملف، ثم افتراضي"""
+def _restaurant_get_tables_payload(
+    *,
+    sessions_preload: Optional[list] = None,
+    orders_preload: Optional[list] = None,
+) -> dict:
+    """بناء قائمة الطاولات — يُفضّل تمرير جلسات/طلبات محمّلة مسبقاً لتقليل ODBC."""
+    if sessions_preload is None or orders_preload is None:
+        sp, op, _, _ = _restaurant_preload_sessions_orders()
+        sessions_preload = sp if sessions_preload is None else sessions_preload
+        orders_preload = op if orders_preload is None else orders_preload
+
     plan_refs = []
     try:
         raw_doc = _restaurant_load("floor_plan", {})
@@ -14983,20 +15047,20 @@ def restaurant_get_tables():
     except Exception:
         plan_refs = []
 
-    _close_stale_active_sessions()
+    sessions_now = list(sessions_preload) if isinstance(sessions_preload, list) else []
+    orders_now = list(orders_preload) if isinstance(orders_preload, list) else []
+    _close_stale_active_sessions(sessions_now)
     local_state = _local_table_state_map()
-    no_order_map = _table_no_order_overdue_map(10)
+    no_order_map = _table_no_order_overdue_map(10, sessions=sessions_now, orders=orders_now)
     active_table_ids_upper = set()
-    sessions_now = _restaurant_load("table_sessions", [])
-    if isinstance(sessions_now, list):
+    if sessions_now:
         for s in sessions_now:
             if not _session_active_today(s):
                 continue
             tid = str((s or {}).get("tableId") or "").strip().upper()
             if tid:
                 active_table_ids_upper.add(tid)
-    orders_now = _restaurant_load("orders", [])
-    if isinstance(orders_now, list):
+    if orders_now:
         for o in orders_now:
             if not isinstance(o, dict):
                 continue
@@ -15147,6 +15211,12 @@ def restaurant_get_tables():
         row["noOrderMinutes"] = int(no_order_info.get("noOrderMinutes") or 0)
         out.append(row)
     return {"tables": out}
+
+
+@app.get("/api/restaurant/tables")
+def restaurant_get_tables():
+    """جلب الطاولات — من مراكز التكلفة (TBL005) أولاً، ثم من ملف، ثم افتراضي"""
+    return _restaurant_get_tables_payload()
 
 
 def _restaurant_pos_channels_default_doc() -> dict:
