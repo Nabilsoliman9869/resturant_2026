@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
+import { useAuth } from "../auth/AuthContext";
+import { buildMat3amActor } from "../lib/mat3amActor";
 
 function escapeHtml(s: string): string {
   return String(s || "")
@@ -22,6 +24,13 @@ export type CashierInvoiceLine = {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  seatNo?: number | null;
+};
+
+type CashierInvoiceSourceLine = CashierInvoiceLine & {
+  orderId?: string;
+  lineId?: string;
+  productGuide?: string;
 };
 
 export type CashierInvoiceRow = {
@@ -40,6 +49,7 @@ export type CashierInvoiceRow = {
   discount?: number;
   tipAmount?: number;
   lines?: CashierInvoiceLine[];
+  sourceLines?: CashierInvoiceSourceLine[];
   /** من السيرفر: تسمية الطاولة للعرض (مثل «طاولة 5») */
   tableLabel?: string;
   tableNumber?: number;
@@ -47,6 +57,13 @@ export type CashierInvoiceRow = {
   tableIdResolved?: string;
   /** من جلسة الطاولة — اقتراح لعدد الأفراد في السبليت */
   sessionGuestCount?: number;
+  printCount?: number;
+  firstPrintedAt?: string | null;
+  firstPrintedByRole?: string | null;
+  firstPrintedByName?: string | null;
+  lastPrintedAt?: string | null;
+  lastPrintedByRole?: string | null;
+  lastPrintedByName?: string | null;
 };
 
 type CashierPricingSnapshot = {
@@ -76,6 +93,10 @@ type SqlInvoicePayload = {
     TotalValue?: number;
   }>;
 };
+
+function seatLabel(seatNo?: number | null): string {
+  return seatNo != null && Number(seatNo) >= 1 ? `كرسي ${seatNo}` : "بدون كرسي";
+}
 
 function parseMoneyInput(s: string): number {
   const t = String(s || "").trim().replace(",", ".");
@@ -167,10 +188,12 @@ type ThermalReceiptInput = {
   splitEqualPersons?: number;
   perPersonShare?: number | null;
   lineSplitSectionHtml?: string;
+  seatSectionHtml?: string;
 };
 
 function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
   const forCustomer = p.customerReceipt !== false;
+  const seatSectionHtml = p.seatSectionHtml || "";
   const lineRows = p.lines
     .map(
       (ln) =>
@@ -286,6 +309,25 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
     .split-top-val small { font-size: 10px; font-weight: 700; }
     .split-top-sub { font-size: 10px; color: #047857; font-weight: 600; }
     .split-top-warn { background: #fffbeb; border-color: #f59e0b; color: #92400e; font-size: 10px; padding: 7px; }
+    .seat-section {
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 6px 5px;
+      margin: 8px 0;
+      background: #fff;
+    }
+    .seat-section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px dashed #666;
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+      font-size: 10px;
+      font-weight: 800;
+      color: #111;
+    }
     .noprint { font-size: 8px; color: #666; margin-bottom: 6px; }
     @media print { .noprint { display: none !important; } }
   </style>
@@ -301,7 +343,7 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
   ${sessTech}
   <div class="muted">طلب الحساب: ${escapeHtml(p.requestedAt)}</div>
   <hr class="hr"/>
-  <table class="items">${lineRows || `<tr><td colspan="2" class="muted">لا بنود</td></tr>`}</table>
+  ${seatSectionHtml || `<table class="items">${lineRows || `<tr><td colspan="2" class="muted">لا بنود</td></tr>`}</table>`}
   <hr class="hr"/>
   <table class="tot">
     <tr><td>مجموع الأصناف</td><td>${p.ledger.linesSum.toFixed(2)}</td></tr>
@@ -323,24 +365,25 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
 }
 
 function aggregateFromParts(
-  parts: Array<{ name?: string; quantity?: number; unitPrice?: number; lineTotal?: number }>,
+  parts: Array<{ name?: string; quantity?: number; unitPrice?: number; lineTotal?: number; seatNo?: number | null }>,
 ): CashierInvoiceLine[] {
   const m = new Map<string, CashierInvoiceLine>();
   for (const p of parts) {
     const name = String(p.name || "صنف").trim() || "صنف";
     const unitPrice = typeof p.unitPrice === "number" ? p.unitPrice : parseFloat(String(p.unitPrice)) || 0;
     const qty = typeof p.quantity === "number" ? p.quantity : parseFloat(String(p.quantity)) || 0;
+    const seatNo = p.seatNo != null && Number.isFinite(Number(p.seatNo)) && Number(p.seatNo) >= 1 ? Number(p.seatNo) : null;
     const lineTotal =
       typeof p.lineTotal === "number"
         ? p.lineTotal
         : round2(qty * (typeof p.unitPrice === "number" ? p.unitPrice : unitPrice));
-    const key = `${name.toLowerCase()}\0${unitPrice.toFixed(6)}`;
+    const key = `${name.toLowerCase()}\0${unitPrice.toFixed(6)}\0${seatNo ?? "none"}`;
     const ex = m.get(key);
     if (ex) {
       ex.quantity = round2(ex.quantity + qty);
       ex.lineTotal = round2(ex.lineTotal + lineTotal);
     } else {
-      m.set(key, { name, quantity: round2(qty), unitPrice: round2(unitPrice), lineTotal: round2(lineTotal) });
+      m.set(key, { name, quantity: round2(qty), unitPrice: round2(unitPrice), lineTotal: round2(lineTotal), seatNo });
     }
   }
   return [...m.values()];
@@ -417,8 +460,42 @@ function aggregateFromSqlItems(items: SqlInvoicePayload["Items"]): CashierInvoic
       quantity: it.Quantity,
       unitPrice: it.UnitPrice,
       lineTotal: typeof it.TotalValue === "number" ? it.TotalValue : undefined,
+      seatNo: null,
     })) || [];
   return aggregateFromParts(parts);
+}
+
+function groupLinesBySeat(lines: CashierInvoiceLine[]): Array<{ label: string; seatNo: number | null; lines: CashierInvoiceLine[]; total: number }> {
+  const map = new Map<string, { label: string; seatNo: number | null; lines: CashierInvoiceLine[]; total: number }>();
+  for (const ln of lines) {
+    const seatNo = ln.seatNo != null && Number(ln.seatNo) >= 1 ? Number(ln.seatNo) : null;
+    const key = seatNo != null ? `seat:${seatNo}` : "seat:none";
+    const bucket = map.get(key) || { label: seatLabel(seatNo), seatNo, lines: [], total: 0 };
+    bucket.lines.push(ln);
+    bucket.total += Number(ln.lineTotal || 0);
+    map.set(key, bucket);
+  }
+  return [...map.values()].sort((a, b) => {
+    const aa = a.seatNo == null ? Number.MAX_SAFE_INTEGER : a.seatNo;
+    const bb = b.seatNo == null ? Number.MAX_SAFE_INTEGER : b.seatNo;
+    return aa - bb;
+  });
+}
+
+function buildSeatSectionsHtml(lines: CashierInvoiceLine[]): string {
+  const sections = groupLinesBySeat(lines).filter((section) => section.lines.length > 0 && section.lines.some((ln) => ln.seatNo != null && Number(ln.seatNo) >= 1));
+  if (sections.length === 0) return "";
+  return sections
+    .map((section) => {
+      const rows = section.lines
+        .map(
+          (ln) =>
+            `<tr><td colspan="2">${escapeHtml(ln.name)}</td></tr><tr><td>${ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}×${ln.unitPrice.toFixed(2)}</td><td style="text-align:left">${ln.lineTotal.toFixed(2)}</td></tr>`,
+        )
+        .join("");
+      return `<div class="seat-section"><div class="seat-section-head"><span>${escapeHtml(section.label)}</span><strong>${section.total.toFixed(2)} ج.م</strong></div><table class="items">${rows}</table></div>`;
+    })
+    .join("");
 }
 
 export function CashierPayInvoiceModal({
@@ -427,14 +504,25 @@ export function CashierPayInvoiceModal({
   initialRow,
   onClose,
   onPaid,
+  onChanged,
+  allowPayment = true,
+  dialogTitle,
+  printerHint,
+  autoPrintOnOpen = false,
 }: {
   open: boolean;
   invoiceId: string | null;
   initialRow?: CashierInvoiceRow | null;
   onClose: () => void;
   onPaid: () => void;
+  onChanged?: () => void;
+  allowPayment?: boolean;
+  dialogTitle?: string;
+  printerHint?: string;
+  autoPrintOnOpen?: boolean;
 }) {
   const base = getApiBase();
+  const { user } = useAuth();
   const [row, setRow] = useState<CashierInvoiceRow | null>(null);
   const [lines, setLines] = useState<CashierInvoiceLine[]>([]);
   const [billNumber, setBillNumber] = useState<number | undefined>(undefined);
@@ -463,7 +551,9 @@ export function CashierPayInvoiceModal({
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [msg, setMsg] = useState("");
+  const autoPrintedRef = useRef(false);
 
   useEffect(() => {
     if (!open || !invoiceId) return;
@@ -471,6 +561,7 @@ export function CashierPayInvoiceModal({
     setBillingMode("full_table");
     setSplitGuestsInput("");
     setSplitShareLocked(false);
+    autoPrintedRef.current = false;
   }, [open, invoiceId]);
 
   useEffect(() => {
@@ -573,9 +664,22 @@ export function CashierPayInvoiceModal({
       setDetailHint("");
       try {
         const localLines = Array.isArray(invRow.lines) ? invRow.lines : [];
-        if (localLines.length > 0) {
+        const sourceLines = Array.isArray(invRow.sourceLines) ? invRow.sourceLines : [];
+        if (localLines.length > 0 || sourceLines.length > 0) {
           if (cancelled) return;
-          setLines(localLines as CashierInvoiceLine[]);
+          const preferredLines =
+            sourceLines.length > 0
+              ? aggregateFromParts(
+                  sourceLines.map((ln) => ({
+                    name: ln.name,
+                    quantity: ln.quantity,
+                    unitPrice: ln.unitPrice,
+                    lineTotal: ln.lineTotal,
+                    seatNo: ln.seatNo,
+                  })),
+                )
+              : (localLines as CashierInvoiceLine[]);
+          setLines(preferredLines);
           setBillNumber(typeof invRow.billNumber === "number" ? invRow.billNumber : undefined);
           setBillDate("");
           setAgentName("");
@@ -637,7 +741,7 @@ export function CashierPayInvoiceModal({
           if (!fid) return false;
           return fid.split(",").some((x) => x.trim() === invUpper);
         });
-        const rawParts: Array<{ name?: string; quantity?: number; unitPrice?: number; lineTotal?: number }> = [];
+        const rawParts: Array<{ name?: string; quantity?: number; unitPrice?: number; lineTotal?: number; seatNo?: number | null }> = [];
         let aggTax = 0;
         let aggSvc = 0;
         let aggSub = 0;
@@ -656,6 +760,7 @@ export function CashierPayInvoiceModal({
               name: d.name,
               quantity: typeof d.quantity === "number" ? d.quantity : parseFloat(String(d.quantity)) || 0,
               unitPrice: typeof d.unitPrice === "number" ? d.unitPrice : parseFloat(String(d.unitPrice)) || 0,
+              seatNo: typeof (d as { seatNo?: number | null }).seatNo === "number" ? (d as { seatNo?: number | null }).seatNo ?? null : null,
             });
           }
         }
@@ -770,6 +875,9 @@ export function CashierPayInvoiceModal({
     return `<table class="tot" style="margin-top:4px;font-size:9px">${rows}</table>`;
   }, [billingMode, splitPersonsN, lines]);
 
+  const seatSections = useMemo(() => groupLinesBySeat(lines), [lines]);
+  const seatSectionHtml = useMemo(() => buildSeatSectionsHtml(lines), [lines]);
+
   const foldLocked = splitShareLocked;
 
   const pbCash = round2(parseMoneyInput(cash));
@@ -782,7 +890,8 @@ export function CashierPayInvoiceModal({
   const sum2 = round2(sum);
   const sumOk = sum2 === totalDue2;
   const canSubmit = Boolean(
-    row?.awaitingPayment &&
+    allowPayment &&
+      row?.awaitingPayment &&
       row?.invoiceId &&
       !loading &&
       !detailLoading &&
@@ -790,6 +899,9 @@ export function CashierPayInvoiceModal({
       totalDue >= 0 &&
       (lines.length === 0 || ledger.linesSum > 0.0001 || ledger.grand > 0.0001),
   );
+
+  const userRole = String(user?.role || "").trim().toLowerCase();
+  const waiterPrintLocked = userRole === "waiter" && Number(row?.printCount || 0) >= 1;
 
   const suggestRemainder = useCallback(
     (field: "cash" | "visa" | "wallet" | "instapay") => {
@@ -843,6 +955,7 @@ export function CashierPayInvoiceModal({
       splitEqualPersons: billingMode === "split_equal" && splitPersonsN >= 1 ? splitPersonsN : undefined,
       perPersonShare: perPersonShare,
       lineSplitSectionHtml: lineSplitSectionHtml || undefined,
+      seatSectionHtml: seatSectionHtml || undefined,
     });
   }, [
     row,
@@ -864,32 +977,65 @@ export function CashierPayInvoiceModal({
     splitPersonsN,
     perPersonShare,
     lineSplitSectionHtml,
+    seatSectionHtml,
   ]);
 
-  const runThermalPrint = useCallback(() => {
-    if (!receiptHtml) return;
+  const runThermalPrint = useCallback(async () => {
+    if (!receiptHtml || !row?.invoiceId) return;
     setMsg("");
+    setPrinting(true);
     const w = window.open("", "_blank", "noopener,noreferrer,width=420,height=720");
-    if (w) {
-      w.document.open();
-      w.document.write(receiptHtml);
-      w.document.close();
-      w.focus();
-      window.setTimeout(() => {
-        try {
-          w.print();
-        } catch {
-          /* ignore */
-        }
-      }, 350);
-      return;
-    }
     try {
+      const r = await fetch(`${base}/api/restaurant/invoices-local/mark-printed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId: row.invoiceId,
+          mat3amActor: buildMat3amActor(user),
+        }),
+      });
+      const txt = await r.text();
+      const j = tryParseJson<{ detail?: unknown; invoice?: CashierInvoiceRow }>(txt) ?? {};
+      if (!r.ok) {
+        const d = j.detail;
+        throw new Error(typeof d === "string" ? d : txt.slice(0, 200) || "فشل تسجيل الطباعة");
+      }
+      if (j.invoice) setRow(j.invoice);
+      onChanged?.();
+      if (w) {
+        w.document.open();
+        w.document.write(receiptHtml);
+        w.document.close();
+        w.focus();
+        window.setTimeout(() => {
+          try {
+            w.print();
+          } catch {
+            /* ignore */
+          }
+        }, 350);
+        return;
+      }
       printHtmlInIframe(receiptHtml);
-    } catch {
-      setMsg("تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة أو استخدم Ctrl+P من المعاينة.");
+    } catch (e) {
+      try {
+        w?.close();
+      } catch {
+        /* ignore */
+      }
+      setMsg(String(e));
+    } finally {
+      setPrinting(false);
     }
-  }, [receiptHtml]);
+  }, [base, onChanged, receiptHtml, row?.invoiceId, user]);
+
+  useEffect(() => {
+    if (!open || !autoPrintOnOpen) return;
+    if (autoPrintedRef.current) return;
+    if (!row?.invoiceId || !receiptHtml || loading || detailLoading || printing || waiterPrintLocked) return;
+    autoPrintedRef.current = true;
+    void runThermalPrint();
+  }, [autoPrintOnOpen, detailLoading, loading, open, printing, receiptHtml, row?.invoiceId, runThermalPrint, waiterPrintLocked]);
 
   async function submit() {
     const id = String(row?.invoiceId || "").trim();
@@ -937,6 +1083,7 @@ export function CashierPayInvoiceModal({
         throw new Error(typeof d === "string" ? d : txt.slice(0, 200) || "فشل التسديد");
       }
       onPaid();
+      onChanged?.();
       onClose();
     } catch (e) {
       setMsg(String(e));
@@ -978,7 +1125,7 @@ export function CashierPayInvoiceModal({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 id="cashier-pay-title" style={{ marginTop: 0, fontSize: "1.12rem" }}>
-          تسديد الفاتورة
+          {dialogTitle || "تسديد الفاتورة"}
         </h2>
         {loading && !row ? <p style={{ color: "var(--muted)" }}>جاري التحميل…</p> : null}
         {row ? (
@@ -1023,30 +1170,67 @@ export function CashierPayInvoiceModal({
                   {row.splitName ? <span> · {row.splitName}</span> : null}
                 </div>
               </details>
+              <div style={{ textAlign: "center", fontSize: "0.76rem", color: "var(--muted)" }}>
+                مرات الطباعة: {Number(row.printCount || 0)}
+                {row.firstPrintedAt ? <> · أول طباعة: {String(row.firstPrintedAt).replace("T", " ").slice(0, 19)}</> : null}
+                {row.firstPrintedByRole ? <> · بواسطة: {String(row.firstPrintedByRole)}</> : null}
+              </div>
+              {printerHint ? (
+                <div style={{ textAlign: "center", fontSize: "0.76rem", color: "var(--muted)", marginTop: 4 }}>
+                  الطابعة المعتمدة: {printerHint}
+                </div>
+              ) : null}
               {detailLoading ? (
                 <p style={{ margin: "0.35rem 0", fontSize: "0.82rem", color: "var(--muted)" }}>جاري تحميل البنود…</p>
               ) : null}
               {lines.length > 0 ? (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem", marginTop: "0.35rem" }}>
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <th style={{ textAlign: "right", padding: "0.35rem 0.25rem" }}>الصنف</th>
-                      <th style={{ textAlign: "center", padding: "0.35rem 0.25rem", width: "4.2rem" }}>كمية</th>
-                      <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "4.5rem" }}>سعر</th>
-                      <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "4.5rem" }}>إجمالي</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lines.map((ln, i) => (
-                      <tr key={`${ln.name}-${i}`} style={{ borderBottom: "1px solid rgba(148,163,184,0.25)" }}>
-                        <td style={{ padding: "0.35rem 0.25rem" }}>{ln.name}</td>
-                        <td style={{ textAlign: "center" }}>{ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}</td>
-                        <td style={{ textAlign: "left" }}>{ln.unitPrice.toFixed(2)}</td>
-                        <td style={{ textAlign: "left", fontWeight: 600 }}>{ln.lineTotal.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div style={{ display: "grid", gap: "0.45rem", marginTop: "0.35rem" }}>
+                  {seatSections.map((section) => (
+                    <div
+                      key={`${section.label}-${section.seatNo ?? "none"}`}
+                      style={{
+                        border: "1px solid rgba(148,163,184,0.25)",
+                        borderRadius: 10,
+                        overflow: "hidden",
+                        background: "rgba(255,255,255,0.02)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          padding: "0.45rem 0.55rem",
+                          background: "rgba(255,255,255,0.04)",
+                          borderBottom: "1px solid rgba(148,163,184,0.2)",
+                        }}
+                      >
+                        <strong>{section.label}</strong>
+                        <span style={{ fontWeight: 700 }}>{section.total.toFixed(2)} ج.م</span>
+                      </div>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                            <th style={{ textAlign: "right", padding: "0.35rem 0.25rem" }}>الصنف</th>
+                            <th style={{ textAlign: "center", padding: "0.35rem 0.25rem", width: "4.2rem" }}>كمية</th>
+                            <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "4.5rem" }}>سعر</th>
+                            <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "4.5rem" }}>إجمالي</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {section.lines.map((ln, i) => (
+                            <tr key={`${section.label}-${ln.name}-${i}`} style={{ borderBottom: "1px solid rgba(148,163,184,0.25)" }}>
+                              <td style={{ padding: "0.35rem 0.25rem" }}>{ln.name}</td>
+                              <td style={{ textAlign: "center" }}>{ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}</td>
+                              <td style={{ textAlign: "left" }}>{ln.unitPrice.toFixed(2)}</td>
+                              <td style={{ textAlign: "left", fontWeight: 600 }}>{ln.lineTotal.toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
               ) : !detailLoading ? (
                 <p style={{ fontSize: "0.82rem", color: "var(--muted)", margin: "0.25rem 0" }}>لا توجد بنود للعرض حالياً.</p>
               ) : null}
@@ -1197,6 +1381,8 @@ export function CashierPayInvoiceModal({
               </p>
             )}
 
+            {allowPayment ? (
+              <>
             <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.35rem" }}>توزيع السداد وسياسة السبليت</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.65rem", fontSize: "0.8rem" }}>
               <span style={{ color: "var(--muted)" }}>سياسة السبليت</span>
@@ -1461,21 +1647,31 @@ export function CashierPayInvoiceModal({
               <input type="checkbox" checked={closeSession} onChange={(e) => setCloseSession(e.target.checked)} />
               إغلاق الجلسة بعد التسديد (إن لم تبقَ فواتير معلّقة)
             </label>
+              </>
+            ) : null}
           </>
         ) : null}
         {msg ? (
           <p style={{ color: "var(--danger)", fontSize: "0.88rem", marginTop: "0.75rem" }}>{msg}</p>
         ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "1rem", justifyContent: "flex-end", alignItems: "center" }}>
-          <button type="button" className="btn btn-ghost" disabled={paying || !row || !receiptHtml} onClick={() => runThermalPrint()} title="فتح حوار الطباعة">
-            طباعة إيصال
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={paying || printing || !row || !receiptHtml || waiterPrintLocked}
+            onClick={() => void runThermalPrint()}
+            title={waiterPrintLocked ? "تمت طباعة الشيك مرة من الكابتن؛ أي إعادة طباعة تكون من الكاشير أو المدير." : "فتح حوار الطباعة"}
+          >
+            {printing ? "..." : waiterPrintLocked ? "طبع الكابتن" : "طباعة إيصال"}
           </button>
-          <button type="button" className="btn btn-ghost" disabled={paying} onClick={onClose}>
+          <button type="button" className="btn btn-ghost" disabled={paying || printing} onClick={onClose}>
             إلغاء
           </button>
-          <button type="button" className="btn btn-primary" disabled={!canSubmit || paying} onClick={() => void submit()}>
-            {paying ? "…" : "تأكيد التسديد"}
-          </button>
+          {allowPayment ? (
+            <button type="button" className="btn btn-primary" disabled={!canSubmit || paying || printing} onClick={() => void submit()}>
+              {paying ? "…" : "تأكيد التسديد"}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

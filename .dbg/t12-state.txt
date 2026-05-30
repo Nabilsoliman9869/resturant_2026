@@ -1,0 +1,31 @@
+﻿PING_ERR The operation has timed out.
+TABLES
+SESSIONS
+{
+    "id":  "daf10409-43a5-4a65-9027-86aa8641ae44",
+    "tableId":  "7B14A454-9070-4513-8B2F-CE5AED71BCE6",
+    "projectId":  null,
+    "hostId":  null,
+    "guestCount":  1,
+    "childrenCount":  0,
+    "preferences":  {
+
+                    },
+    "startTime":  "2026-05-26T01:04:45.252112",
+    "status":  "active",
+    "startedByRole":  "waiter",
+    "startReason":  "captain_seat_from_table_card",
+    "seatedByUserId":  "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
+    "seatedByLogin":  "waiter",
+    "seatedByName":  "Ø¬Ø§Ø±Ø³ÙÙ Ø§ÙØ·ÙØ¨Ø§Øª",
+    "captainUserId":  "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
+    "captainLogin":  "waiter",
+    "captainName":  "Ø¬Ø§Ø±Ø³ÙÙ Ø§ÙØ·ÙØ¨Ø§Øª",
+    "captainRole":  "waiter",
+    "captainClaimedAt":  "2026-05-26T01:04:45.254156",
+    "noOrderFirstAlertAt":  "2026-05-26T01:16:42.640353",
+    "noOrderWatchStage":  "captain_first",
+    "noOrderLastAlertAt":  "2026-05-26T01:16:42.640353",
+    "tableDisplayName":  "T12",
+    "linkedOrderCount":  0
+}

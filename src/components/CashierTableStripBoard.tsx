@@ -12,10 +12,13 @@ export type TableOverviewSession = {
   billingRequestedAt?: string | null;
   awaitingPayment?: boolean;
   awaitingInvoiceId?: string | null;
+  billAgeMinutes?: number;
   orderCount?: number;
   kitchenInProgressCount?: number;
   linesPreview?: string;
   itemsSubtotal?: number;
+  minimumCharge?: number;
+  minimumGap?: number;
 };
 
 const POLL_MS = 28000;
@@ -129,9 +132,13 @@ function TableStrip({ s, onOpenPay }: { s: TableOverviewSession; onOpenPay: (inv
   const sub = typeof s.itemsSubtotal === "number" ? s.itemsSubtotal : 0;
   const kc = typeof s.kitchenInProgressCount === "number" ? s.kitchenInProgressCount : 0;
   const oc = typeof s.orderCount === "number" ? s.orderCount : 0;
+  const billAge = Math.max(0, Number(s.billAgeMinutes || 0));
+  const minCharge = Math.max(0, Number(s.minimumCharge || 0));
+  const minGap = Math.max(0, Number(s.minimumGap || 0));
 
   let border = "1px solid var(--border)";
-  if (pay) border = "1px solid rgba(234, 179, 8, 0.55)";
+  if (pay && billAge >= 10) border = "1px solid rgba(239, 68, 68, 0.6)";
+  else if (pay) border = "1px solid rgba(234, 179, 8, 0.55)";
   else if (bill) border = "1px solid rgba(249, 115, 22, 0.45)";
 
   return (
@@ -140,7 +147,14 @@ function TableStrip({ s, onOpenPay }: { s: TableOverviewSession; onOpenPay: (inv
         border,
         borderRadius: 10,
         padding: "0.65rem 0.75rem",
-        background: pay ? "rgba(234, 179, 8, 0.06)" : bill ? "rgba(249, 115, 22, 0.05)" : "rgba(0,0,0,0.12)",
+        background:
+          pay && billAge >= 10
+            ? "rgba(239, 68, 68, 0.08)"
+            : pay
+              ? "rgba(234, 179, 8, 0.06)"
+              : bill
+                ? "rgba(249, 115, 22, 0.05)"
+                : "rgba(0,0,0,0.12)",
       }}
     >
       <div style={{ fontWeight: 800, fontSize: "0.95rem" }}>{s.tableDisplayName || "طاولة"}</div>
@@ -167,10 +181,19 @@ function TableStrip({ s, onOpenPay }: { s: TableOverviewSession; onOpenPay: (inv
             تسديد
           </button>
         ) : pay ? (
-          <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(234,179,8,0.2)", fontWeight: 700 }}>بانتظار التسديد</span>
+          <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(234,179,8,0.2)", fontWeight: 700 }}>
+            بانتظار التسديد{billAge > 0 ? ` ${billAge} د` : ""}
+          </span>
         ) : null}
         {bill && !pay ? (
-          <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(249,115,22,0.15)", fontWeight: 600 }}>طُلِب الحساب</span>
+          <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(249,115,22,0.15)", fontWeight: 600 }}>
+            طُلِب الحساب{billAge > 0 ? ` ${billAge} د` : ""}
+          </span>
+        ) : null}
+        {minGap > 0 ? (
+          <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(239,68,68,0.15)", fontWeight: 700 }}>
+            ناقص حد أدنى {minGap.toFixed(0)} ج
+          </span>
         ) : null}
         {kc > 0 ? (
           <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(59,130,246,0.15)" }}>مطبخ {kc}</span>
@@ -180,6 +203,12 @@ function TableStrip({ s, onOpenPay }: { s: TableOverviewSession; onOpenPay: (inv
       <div style={{ fontSize: "0.82rem", marginTop: 8, lineHeight: 1.45, color: "var(--muted)", maxHeight: 56, overflow: "hidden" }}>
         {s.linesPreview || "—"}
       </div>
+      {(billAge > 0 || minCharge > 0) ? (
+        <div style={{ marginTop: 8, fontSize: "0.76rem", color: "var(--muted)", lineHeight: 1.45 }}>
+          {billAge > 0 ? `عمر طلب الحساب: ${billAge} د` : "لم يُطلب الحساب بعد"}
+          {minCharge > 0 ? ` · minimum: ${minCharge.toFixed(0)} ج` : ""}
+        </div>
+      ) : null}
       <div style={{ marginTop: 8, fontWeight: 700, fontSize: "0.9rem" }}>{sub.toFixed(2)} ج.م تقريبي</div>
     </div>
   );

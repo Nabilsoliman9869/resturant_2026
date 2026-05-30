@@ -293,6 +293,7 @@ def _fetch_tbl005_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
         return [], "no_connection"
     try:
         cursor = conn.cursor()
+        cursor.execute("SET LOCK_TIMEOUT 3000")
         cursor.execute(
             """
             SELECT CardGuide, CostCenter
@@ -342,7 +343,7 @@ def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Op
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt, PinHash
+            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt, PinHash, SpecialistStationCode
             FROM dbo.MAT3AM_APP_USERS
             ORDER BY CreatedAt DESC
             """
@@ -358,6 +359,7 @@ def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Op
                     "isActive": bool(r[4]) if r[4] is not None else True,
                     "createdAt": str(r[5]) if r[5] else "",
                     "pinHash": str(r[6] or "").strip() if len(r) > 6 else "",
+                    "specialistStationCode": str(r[7] or "").strip().lower() if len(r) > 7 and r[7] else "",
                 }
             )
         return users, None

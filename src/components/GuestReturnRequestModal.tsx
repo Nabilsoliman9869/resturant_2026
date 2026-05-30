@@ -3,7 +3,12 @@ import { getApiBase } from "../lib/apiBase";
 import {
   DEFAULT_GUEST_RETURN_REASONS,
   GUEST_RETURN_DISPOSITIONS,
+  dispositionLabel,
+  guestReturnApprovalModeLabel,
+  guestReturnItemStageLabel,
+  guestReturnKindLabel,
   groupReasonsByCategory,
+  resolveGuestReturnDecision,
   type GuestReturnReason,
 } from "../lib/guestReturnCatalog";
 import { guestReturnApiErrorMessage, probeGuestReturnsApi } from "../lib/guestReturnApi";
@@ -18,6 +23,8 @@ export type GuestReturnOrderLine = {
   quantity: number;
   unitPrice: number;
   seatNo?: number | null;
+  lineStatus?: string;
+  orderStatus?: string;
 };
 
 type Props = {
@@ -100,6 +107,26 @@ export default function GuestReturnRequestModal(props: Props) {
   const displayLines = frozenLinesRef.current.length ? frozenLinesRef.current : lines;
 
   const grouped = useMemo(() => groupReasonsByCategory(reasons), [reasons]);
+  const reasonByCode = useMemo(() => new Map(reasons.map((r) => [r.code, r])), [reasons]);
+  const selectedDecisions = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof resolveGuestReturnDecision>>();
+    for (const d of drafts) {
+      if (!d.reasonCode) continue;
+      const ln = displayLines.find((x) => `${x.orderId}::${x.lineId}` === d.key);
+      if (!ln) continue;
+      const reason = reasonByCode.get(d.reasonCode);
+      m.set(
+        d.key,
+        resolveGuestReturnDecision({
+          reasonCode: d.reasonCode,
+          reasonCategory: reason?.category,
+          lineStatus: ln.lineStatus,
+          orderStatus: ln.orderStatus,
+        }),
+      );
+    }
+    return m;
+  }, [displayLines, drafts, reasonByCode]);
 
   const patchDraft = useCallback((key: string, patch: Partial<LineDraft>) => {
     setDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
@@ -145,6 +172,11 @@ export default function GuestReturnRequestModal(props: Props) {
         reasonCode: d.reasonCode,
         proposedDisposition: d.proposedDisposition,
         waiterNote: d.waiterNote,
+        lineStatus: ln.lineStatus,
+        orderStatus: ln.orderStatus,
+        itemStage: selectedDecisions.get(d.key)?.stage,
+        returnKind: selectedDecisions.get(d.key)?.kind,
+        approvalMode: selectedDecisions.get(d.key)?.approvalMode,
       };
     });
     setBusy(true);
@@ -214,7 +246,7 @@ export default function GuestReturnRequestModal(props: Props) {
       >
         <h2 style={{ margin: "0 0 0.35rem", fontSize: "1.2rem" }}>طلب مرتجع — الطاولة</h2>
         <p style={{ margin: "0 0 0.75rem", color: "var(--muted)", fontSize: "0.9rem" }}>
-          {tableLabel || tableId} · يُرسل للمدير للاعتماد
+          {tableLabel || tableId}
         </p>
 
         {phase === "success" ? (
@@ -266,6 +298,35 @@ export default function GuestReturnRequestModal(props: Props) {
                         طلب {ln.orderId.slice(0, 8)} · أقصى كمية {ln.quantity}
                         {ln.seatNo != null && ln.seatNo >= 1 ? ` · كرسي ${ln.seatNo}` : ""}
                       </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            border: "1px solid #bfdbfe",
+                            fontSize: "0.78rem",
+                            fontWeight: 700,
+                          }}
+                        >
+                          المرحلة: {guestReturnItemStageLabel(resolveGuestReturnDecision({ lineStatus: ln.lineStatus, orderStatus: ln.orderStatus }).stage)}
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background: "#f8fafc",
+                            color: "#334155",
+                            border: "1px solid #cbd5e1",
+                            fontSize: "0.76rem",
+                          }}
+                        >
+                          حالة الطلب: {guestReturnItemStageLabel(ln.orderStatus || ln.lineStatus || "")}
+                        </span>
+                      </div>
                     </div>
                   </label>
                   {d.selected ? (
@@ -291,7 +352,20 @@ export default function GuestReturnRequestModal(props: Props) {
                         <select
                           value={d.reasonCode}
                           disabled={busy}
-                          onChange={(e) => patchDraft(key, { reasonCode: e.target.value })}
+                          onChange={(e) => {
+                            const nextReasonCode = e.target.value;
+                            const reason = reasonByCode.get(nextReasonCode);
+                            const decision = resolveGuestReturnDecision({
+                              reasonCode: nextReasonCode,
+                              reasonCategory: reason?.category,
+                              lineStatus: ln.lineStatus,
+                              orderStatus: ln.orderStatus,
+                            });
+                            patchDraft(key, {
+                              reasonCode: nextReasonCode,
+                              proposedDisposition: decision.recommendedDisposition || d.proposedDisposition,
+                            });
+                          }}
                           style={{ display: "block", width: "100%", marginTop: 4 }}
                         >
                           <option value="">— اختر السبب —</option>
@@ -306,6 +380,69 @@ export default function GuestReturnRequestModal(props: Props) {
                           ))}
                         </select>
                       </label>
+                      {(() => {
+                        const decision = selectedDecisions.get(key);
+                        if (!decision) return null;
+                        const approvalBg =
+                          decision.approvalMode === "manager_review_required"
+                            ? "#fff7ed"
+                            : decision.approvalMode === "direct_accept_recommended"
+                              ? "#ecfdf5"
+                              : "#eff6ff";
+                        const approvalFg =
+                          decision.approvalMode === "manager_review_required"
+                            ? "#9a3412"
+                            : decision.approvalMode === "direct_accept_recommended"
+                              ? "#166534"
+                              : "#1d4ed8";
+                        return (
+                          <div
+                            style={{
+                              border: "1px solid var(--border)",
+                              borderRadius: 8,
+                              padding: 10,
+                              background: "#f8fafc",
+                              display: "grid",
+                              gap: 6,
+                            }}
+                          >
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  padding: "2px 8px",
+                                  borderRadius: 999,
+                                  background: "#eef2ff",
+                                  color: "#4338ca",
+                                  border: "1px solid #c7d2fe",
+                                  fontSize: "0.78rem",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {guestReturnKindLabel(decision.kind)}
+                              </span>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  padding: "2px 8px",
+                                  borderRadius: 999,
+                                  background: approvalBg,
+                                  color: approvalFg,
+                                  border: `1px solid ${decision.approvalMode === "manager_review_required" ? "#fdba74" : decision.approvalMode === "direct_accept_recommended" ? "#86efac" : "#93c5fd"}`,
+                                  fontSize: "0.78rem",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {guestReturnApprovalModeLabel(decision.approvalMode)}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: "0.84rem", color: "var(--muted)" }}>{decision.policyHint}</div>
+                            <div style={{ fontSize: "0.83rem" }}>
+                              التوجيه المقترح: <strong>{dispositionLabel(decision.recommendedDisposition)}</strong>
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <fieldset style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8 }} disabled={busy}>
                         <legend style={{ fontSize: "0.85rem", fontWeight: 700 }}>المعالجة المقترحة</legend>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

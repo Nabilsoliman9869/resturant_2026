@@ -25,6 +25,7 @@ import { AppMenuProvider } from "../context/AppMenuContext";
 import "../styles/appShell.css";
 
 type NavItem = { to: string; label: string };
+type NavSection = { title: string; items: NavItem[] };
 
 function isNavItemActive(pathname: string, base: string, n: NavItem): boolean {
   const dest = `${base}/${n.to}`;
@@ -38,6 +39,68 @@ function isNavItemActive(pathname: string, base: string, n: NavItem): boolean {
     return pathname === dest || pathname.startsWith(`${dest}/`);
   }
   return pathname === dest;
+}
+
+function pickNavItems(items: NavItem[], order: string[]): NavItem[] {
+  return order
+    .map((key) => items.find((it) => it.to === key))
+    .filter((it): it is NavItem => Boolean(it));
+}
+
+function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
+  const used = new Set<string>();
+  const mark = (picked: NavItem[]) => {
+    for (const item of picked) used.add(item.to);
+    return picked;
+  };
+
+  const sections: NavSection[] = [];
+  if (role === "cashier") {
+    sections.push(
+      { title: "1. الصالة والتحصيل", items: mark(pickNavItems(items, ["dashboard", "table-sessions", "invoices-local"])) },
+      { title: "2. الطلبات والخدمات", items: mark(pickNavItems(items, ["call-center", "kids-area", "pos"])) },
+      { title: "3. المالية اليومية", items: mark(pickNavItems(items, ["purchases", "cash-expense"])) },
+    );
+  } else if (role === "accountant") {
+    sections.push(
+      { title: "1. المتابعة والحسابات", items: mark(pickNavItems(items, ["dashboard", "reports", "costing", "master-data"])) },
+      { title: "2. التشغيل المساند", items: mark(pickNavItems(items, ["call-center", "pos", "purchases"])) },
+    );
+  } else if (role === "manager") {
+    sections.push(
+      { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["guest-returns", "call-center", "delivery-management"])) },
+      { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
+      { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
+    );
+  } else if (role === "developer") {
+    sections.push(
+      { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["guest-returns", "call-center", "delivery-management"])) },
+      { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
+      { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
+    );
+  } else if (role === "server") {
+    sections.push({ title: "1. التشغيل", items: mark(pickNavItems(items, ["dashboard", "runner", "tables"])) });
+  } else if (role === "kitchen") {
+    sections.push({ title: "1. المطبخ", items: mark(pickNavItems(items, ["kitchen", "kitchen-item-stop"])) });
+  } else if (role === "kitchen_specialist") {
+    sections.push({ title: "1. الشيف المختص", items: mark(pickNavItems(items, ["kitchen"])) });
+  } else if (role === "speed_order") {
+    sections.push({ title: "1. الطلبات السريعة", items: mark(pickNavItems(items, ["speed-order"])) });
+  } else if (role === "host") {
+    sections.push({ title: "1. الاستقبال", items: mark(pickNavItems(items, ["reception"])) });
+  } else if (role === "kids_guard") {
+    sections.push({ title: "1. منطقة الأطفال", items: mark(pickNavItems(items, ["kids-area"])) });
+  } else {
+    sections.push({ title: "1. القائمة الرئيسية", items: mark([...items]) });
+  }
+
+  const leftovers = items.filter((it) => !used.has(it.to));
+  if (leftovers.length) {
+    sections.push({ title: `${sections.length + 1}. عناصر إضافية`, items: leftovers });
+  }
+  return sections.filter((section) => section.items.length > 0);
 }
 
 const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
@@ -94,6 +157,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "kitchen", label: "شاشة المطبخ" },
     { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ" },
   ],
+  kitchen_specialist: [{ to: "kitchen", label: "شاشة الشيف المختص" }],
   speed_order: [{ to: "speed-order", label: "شاشة الطلبات السريعة" }],
   server: [
     { to: "dashboard", label: "لوحة الصالة" },
@@ -174,7 +238,7 @@ export function AppShell({ role }: { role: RoleId }) {
     const raw = NAV_BY_ROLE[role];
     if (venueType !== "coffee_shop") return raw;
     const mapped = raw.map((it) => {
-      if (role === "kitchen" && it.to === "kitchen") {
+      if ((role === "kitchen" || role === "kitchen_specialist") && it.to === "kitchen") {
         return { ...it, label: "البار / التحضير" };
       }
       if (role === "speed_order" && it.to === "speed-order") {
@@ -193,6 +257,7 @@ export function AppShell({ role }: { role: RoleId }) {
     }
     return mapped;
   }, [role, venueType]);
+  const navSections = useMemo(() => buildNavSections(role, items), [role, items]);
 
   const interDeptBells = role !== "kids_guard";
 
@@ -280,21 +345,28 @@ export function AppShell({ role }: { role: RoleId }) {
             <button type="button" className="btn btn-ghost" onClick={logout} style={{ marginBottom: "0.6rem" }}>
               خروج
             </button>
-            {items.map((n) => {
-              const dest = `${base}/${n.to}`;
-              const active = isNavItemActive(location.pathname, base, n);
-              return (
-                <NavLink
-                  key={n.to}
-                  to={dest}
-                  className={() => (active ? "nav-link nav-link--active" : "nav-link")}
-                  onClick={closeIfNarrow}
-                  title={"hint" in n ? (n as { hint?: string }).hint : undefined}
-                >
-                  {n.label}
-                </NavLink>
-              );
-            })}
+            {navSections.map((section) => (
+              <div key={section.title} style={{ marginBottom: "0.7rem" }}>
+                <div style={{ margin: "0.15rem 0 0.35rem", fontSize: "0.74rem", fontWeight: 800, color: "var(--muted)" }}>
+                  {section.title}
+                </div>
+                {section.items.map((n) => {
+                  const dest = `${base}/${n.to}`;
+                  const active = isNavItemActive(location.pathname, base, n);
+                  return (
+                    <NavLink
+                      key={`${section.title}-${n.to}`}
+                      to={dest}
+                      className={() => (active ? "nav-link nav-link--active" : "nav-link")}
+                      onClick={closeIfNarrow}
+                      title={"hint" in n ? (n as { hint?: string }).hint : undefined}
+                    >
+                      {n.label}
+                    </NavLink>
+                  );
+                })}
+              </div>
+            ))}
           </aside>
 
         <main

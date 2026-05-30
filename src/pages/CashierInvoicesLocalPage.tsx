@@ -76,6 +76,9 @@ export default function CashierInvoicesLocalPage() {
         open={payOpen}
         invoiceId={payInvoiceId}
         initialRow={payInitialRow}
+        onChanged={() => {
+          void load();
+        }}
         onClose={() => {
           setPayOpen(false);
           setPayInvoiceId(null);
@@ -155,9 +158,9 @@ export default function CashierInvoicesLocalPage() {
                     <td style={{ padding: "0.6rem", fontWeight: 700 }}>{billNo}</td>
                     <td style={{ padding: "0.6rem" }}>{tableTitle}</td>
                     <td style={{ padding: "0.6rem", verticalAlign: "middle" }}>
-                      {awaiting && id ? (
-                        <button type="button" className="btn btn-primary" style={{ fontSize: "0.85rem" }} onClick={() => openPay(inv)}>
-                          تسديد
+                      {id ? (
+                        <button type="button" className={awaiting ? "btn btn-primary" : "btn btn-ghost"} style={{ fontSize: "0.85rem" }} onClick={() => openPay(inv)}>
+                          {awaiting ? "تسديد / طباعة" : "معاينة / طباعة"}
                         </button>
                       ) : (
                         <span style={{ color: "var(--muted)" }}>—</span>

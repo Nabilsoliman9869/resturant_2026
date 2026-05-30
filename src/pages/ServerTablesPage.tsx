@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
+import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 
@@ -80,7 +81,7 @@ export default function ServerTablesPage() {
                 </div>
               );
             }
-            const num = t.number != null ? `#${t.number}` : t.name;
+            const num = normalizeTableDisplayLabel(t.name, t.number, t.id);
             const isBusy = busyIds.has(String(t.id));
             const billReq = billReqIds.has(String(t.id));
             return (

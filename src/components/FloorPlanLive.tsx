@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { normalizeFloorPlanDocument } from "../lib/floorPlanDocument";
+import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
 import { safeFetch } from "../lib/safeFetch";
 import { type FloorPlan, type FloorTable, type TableLiveMap, type TableLiveStatus } from "../lib/floorPlanModel";
@@ -28,7 +29,7 @@ type OrderRec = {
 type PlanStatus = "api" | "missing" | "invalid" | "unavailable";
 
 function tableLabel(t: TableRec) {
-  return (t.name || "").trim() || `طاولة ${t.number ?? t.id.slice(0, 6)}`;
+  return normalizeTableDisplayLabel(t.name, t.number, t.id);
 }
 
 function orderStatusWeight(s: string) {

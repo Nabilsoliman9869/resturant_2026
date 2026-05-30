@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 set "HERE=%~dp0"
+if not defined MAT3AM_BASE_DIR set "MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS"
 set "MAT3AM_PY="
 where python >nul 2>&1 && set "MAT3AM_PY=python"
 if not defined MAT3AM_PY where py >nul 2>&1 && set "MAT3AM_PY=py"
@@ -15,6 +16,7 @@ if not defined MAT3AM_PY (
 )
 echo Running Mat3am full stack from this folder only.
 echo Stopping old processes on ports 2288 and 9999.
+echo DATA_DIR: %MAT3AM_BASE_DIR%
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\mat3am_kill_ports.ps1"
 timeout /t 2 /nobreak >nul

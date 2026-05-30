@@ -15,6 +15,7 @@ const ROLE_SET = new Set<RoleId>([
   "host",
   "waiter",
   "kitchen",
+  "kitchen_specialist",
   "speed_order",
   "server",
   "kids_guard",
@@ -83,6 +84,7 @@ export default function LoginPage() {
         name: String(j.user.name || loginSaved || ""),
         login: loginSaved,
         role,
+        specialistStationCode: String(j.user.specialistStationCode || "").trim().toLowerCase(),
       };
       const route = ROLE_ROUTES[role];
       login(sessionUser);

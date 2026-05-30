@@ -167,7 +167,8 @@ export default function App() {
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
-          <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
+          <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
@@ -227,6 +228,18 @@ export default function App() {
         <Route index element={<Navigate to="kitchen" replace />} />
         <Route path="kitchen" element={<KitchenPage />} />
         <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
+      </Route>
+
+      <Route
+        path="/app/kitchen_specialist/*"
+        element={
+          <RequireRole role="kitchen_specialist">
+            <AppShell role="kitchen_specialist" />
+          </RequireRole>
+        }
+      >
+        <Route index element={<Navigate to="kitchen" replace />} />
+        <Route path="kitchen" element={<KitchenPage mode="specialist" />} />
       </Route>
 
       <Route
@@ -302,7 +315,8 @@ export default function App() {
           <Route path="pos-admin-legacy" element={<PosAdminPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
-          <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
+          <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />

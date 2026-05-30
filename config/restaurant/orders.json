@@ -16,7 +16,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:06:11.581064",
-        "sentAt": "2026-04-17T20:06:20.653256"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:06:20.653256",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "79cc502c-168f-4287-aa8e-946827333a7e",
@@ -29,7 +32,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "status": "preparing",
@@ -57,7 +63,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "2b8047a9-3fc9-4eee-9ded-52602bcf14d5",
@@ -70,7 +79,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "e11aea46-a537-4e11-8efa-9813b18dc64d",
@@ -83,7 +95,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -118,7 +133,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "c4525d0c-7d94-4569-9a4f-f152e193cd5c",
@@ -131,7 +149,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -166,7 +187,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "7a0452ba-8b50-4d15-aca0-380858ac40bb",
@@ -179,7 +203,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "0759e24e-353a-41da-98b4-7fabb9219a10",
@@ -192,7 +219,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -227,7 +257,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f7ce9f58-bac8-45ca-ba8e-bd5f5fcb12dd",
@@ -240,7 +273,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "71af8a35-7a44-48a9-8361-be2c9a599b43",
@@ -253,7 +289,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "1d593c7f-8925-45cf-829f-dce234c32d57",
@@ -266,7 +305,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "0ffede79-f135-46e1-a530-d02cb67a1a4f",
@@ -279,7 +321,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -314,7 +359,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "c01b0b6d-ff0d-44bd-9aa2-382bd2f23e55",
@@ -327,7 +375,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "8bdd7f35-6956-4457-934b-332a91401ca0",
@@ -340,7 +391,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6cf60bf7-bfc9-4e7d-9339-4256e14649ad",
@@ -353,7 +407,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "547ee856-2669-454b-93ec-d3d8a917b8da",
@@ -366,7 +423,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "90ab6133-e5aa-4920-bbea-4765c86b6067",
@@ -379,7 +439,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -414,7 +477,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9b974d28-aed4-49db-9c80-93d8ace60df4",
@@ -427,7 +493,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5a61f205-c5a0-44ed-a9e8-de7301b4425f",
@@ -440,7 +509,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -477,7 +549,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "66c6eeea-f6ab-4b84-9f1a-eeaad3a77928",
@@ -490,7 +565,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5caef26f-9a06-45dc-b869-1eca2dabed82",
@@ -503,7 +581,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -540,7 +621,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "7301fa05-98db-4873-af0b-96882c0fabb9",
@@ -553,7 +637,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "3c3bb99d-8f74-4d55-b6b9-a5c8817bb7a2",
@@ -566,7 +653,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "952bceac-8306-4e81-9be0-84f6c457c745",
@@ -579,7 +669,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -616,7 +709,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6186bdfc-4c3a-4d1a-bdc7-10bbdb4b29ea",
@@ -629,7 +725,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f5e80b74-02ff-44c8-a8e3-817dc85d5131",
@@ -642,7 +741,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "00a88b42-9636-4cae-99d8-6912480eb899",
@@ -655,7 +757,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "b7c3f395-01b7-4966-9f5b-789ae2df94f3",
@@ -668,7 +773,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "09fad079-5fae-4fcb-a341-5080f1dde386",
@@ -681,7 +789,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6d96aa35-1c8f-4643-b864-d8425d520648",
@@ -694,7 +805,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6d8d6b6e-e1fb-4ebb-822a-20154ed7a107",
@@ -707,7 +821,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "10cde9a3-7e18-4d26-8eba-3c4349321f4e",
@@ -720,7 +837,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "ae5b7b3e-53a3-46b9-b34e-140b6282a817",
@@ -733,7 +853,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9007d5ea-5bb6-433c-af11-2b69df869b3d",
@@ -746,7 +869,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "17463519-aad3-43c4-9648-81491f9997de",
@@ -759,7 +885,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -797,7 +926,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "ea6dee61-4650-48f7-afdf-5d56a804a0b7",
@@ -810,7 +942,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "d3ee755f-915c-46b9-a7b0-190a18358a87",
@@ -823,7 +958,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "26f45916-9ca3-445b-8691-b9d664ef025c",
@@ -836,7 +974,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -874,7 +1015,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:45:53.364175",
-        "sentAt": "2026-04-17T20:45:56.794957"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:45:56.794957",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "0c721197-9db5-417b-93bd-56207742b371",
@@ -887,7 +1031,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:46:30.011589",
-        "sentAt": "2026-04-17T20:46:54.684338"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:46:54.684338",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5e40ae2c-a0d6-4341-8f52-1b4b2f5b9943",
@@ -900,7 +1047,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:07.305037",
-        "sentAt": "2026-04-17T20:47:14.857957"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:14.857957",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "68037111-f3e8-4d24-8a6d-844654f4357e",
@@ -913,7 +1063,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:29.684498",
-        "sentAt": "2026-04-17T20:47:57.315113"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:57.315113",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "05062032-ed7f-4eed-a2c7-1118b2dadf6c",
@@ -926,7 +1079,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:49.415758",
-        "sentAt": "2026-04-17T20:47:58.001632"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:58.001632",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "bbbd5bf8-07c7-4d33-83c1-84b25015873f",
@@ -939,7 +1095,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:51.257187",
-        "sentAt": "2026-04-17T20:47:58.826183"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:58.826183",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "ff815630-ef0e-42a4-9c11-f8c8f86aacb5",
@@ -952,7 +1111,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:52.499775",
-        "sentAt": "2026-04-17T20:47:59.643613"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:59.643613",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6e6e8428-e3ae-4ee2-8e7a-d99c6fadb82a",
@@ -965,7 +1127,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:53.531438",
-        "sentAt": "2026-04-17T20:48:00.531211"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:48:00.531211",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f52d20ae-df14-4879-a0fe-8f1a29b4fe74",
@@ -978,7 +1143,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:54.652526",
-        "sentAt": "2026-04-17T20:48:01.418563"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:48:01.418563",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1016,7 +1184,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T22:02:35.177440",
-        "sentAt": "2026-04-17T22:04:08.337512"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T22:04:08.337512",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "7d1fb257-20b1-4601-83e5-0da23d80dded",
@@ -1029,7 +1200,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T22:03:01.168936",
-        "sentAt": "2026-04-17T22:04:09.303968"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T22:04:09.303968",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5c20edfd-b703-4f66-85b8-33f80e4f4b9a",
@@ -1042,7 +1216,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:17.570674",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6d7b686c-c282-4ba5-9744-1a031bfffc98",
@@ -1055,7 +1232,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "44e53e1c-e63c-423a-a3c2-6a43736a3394",
@@ -1068,7 +1248,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9e1130cf-be3c-439c-a6cd-e9ac05acbd0d",
@@ -1081,7 +1264,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1118,7 +1304,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6b8803e7-b832-4ff4-b71b-f4790108c7d1",
@@ -1131,7 +1320,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "200607f8-4f59-471e-a6e6-114cc068fb92",
@@ -1144,7 +1336,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6a2e2a39-1007-400c-849a-e2eec5b1ace1",
@@ -1157,7 +1352,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "1ad28d18-1da7-42f8-a25d-6ecbc0f797e0",
@@ -1170,7 +1368,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "376f842e-b10a-4b73-bcb3-0617389f2e82",
@@ -1183,7 +1384,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "650513a8-26a8-414e-beca-89593162ea99",
@@ -1196,7 +1400,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "a6cdcaf0-c983-410d-aa8e-9b2fcf05c5da",
@@ -1209,7 +1416,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1245,7 +1455,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:35.401014",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "78f1279d-1ebf-409f-a4a6-16cb7078d112",
@@ -1258,7 +1471,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:34.088774",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f738c9b7-359c-4c8a-981f-566dc20b4cb7",
@@ -1271,7 +1487,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:30.361846",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "1746d0b3-4a4a-41f3-b899-2e1ecae01cfe",
@@ -1284,7 +1503,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:28.482656",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9972985f-5e39-4cb4-ac20-64d709d081cf",
@@ -1297,7 +1519,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:27.672988",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "c028c1b4-8a50-4701-9c0d-432e73945cc7",
@@ -1310,7 +1535,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:26.791276",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "65e2e5b2-ff2f-4782-a2a2-00c7c59b2c1f",
@@ -1323,7 +1551,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:03:37.721045",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "b2ac4430-b3f8-49bd-b2e9-8000751fcfe6",
@@ -1336,7 +1567,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:25.815051",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1373,7 +1607,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:20.753173",
-        "sentAt": "2026-04-18T22:15:37.405343"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:37.405343",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f5247d74-d73d-47a4-93fc-ead2dbdc71b2",
@@ -1386,7 +1623,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:23.552230",
-        "sentAt": "2026-04-18T22:15:38.165290"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:38.165290",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "8d782430-8b39-4bbb-ab9e-9b35cae540d7",
@@ -1399,7 +1639,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:28.098575",
-        "sentAt": "2026-04-18T22:15:39.009521"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:39.009521",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "13e58da0-86be-49e9-8bd0-907b97fa71b5",
@@ -1412,7 +1655,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:30.179721",
-        "sentAt": "2026-04-18T22:15:40.438716"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:40.438716",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f683d229-ca29-4f9d-be99-1554baa33a5e",
@@ -1425,7 +1671,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:32.779366",
-        "sentAt": "2026-04-18T22:15:41.278719"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:41.278719",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "92552d51-5f45-41ae-aa0f-f6b34ea14804",
@@ -1438,7 +1687,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:34.041233",
-        "sentAt": "2026-04-18T22:15:41.974189"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:41.974189",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1476,7 +1728,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:21:50.294329",
-        "sentAt": "2026-04-18T22:22:29.736242"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:22:29.736242",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "e9f62cd2-9a96-49d2-9754-279a70e35d68",
@@ -1489,7 +1744,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:22:22.979662",
-        "sentAt": "2026-04-18T22:22:30.392756"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:22:30.392756",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "82d447c7-a05b-43aa-afda-3a58c7979ab7",
@@ -1502,7 +1760,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:41:31.001834",
-        "sentAt": "2026-04-18T22:41:35.468959"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:41:35.468959",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "d2313d90-6903-4312-adb0-eeb8015c8b30",
@@ -1515,7 +1776,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:41:33.087882",
-        "sentAt": "2026-04-18T22:41:36.284438"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:41:36.284438",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1658,5 +1922,347 @@
     "ticketNo": 18,
     "completedAt": null,
     "updatedAt": "2026-05-17T01:05:20.309646"
+  },
+  {
+    "id": "85baafdb-d3a0-4990-adef-8ef11cc3dc50",
+    "sessionId": "2542513c-e289-43e9-a6fa-b35cdbcee9b2",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "60d46838-95a6-468b-ab65-8bef42fc69ca",
+        "name": "anchoves (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "34CDA0A5-8E82-4FBC-8C3F-CE6ED11CE11B",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:58:57.752532",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "27cdf73b-fb79-4a9a-8925-48a8797d94b8",
+        "name": "Alexandarian Liver (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:05.581132",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "f715c604-41d8-4563-9f2e-61a343c100b3",
+        "name": "Alexandarian Liver (DONE ) (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "369A4EB8-C56E-4E70-BD1F-AE777C051414",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:12.040276",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "0351435c-7545-4445-a6e5-efae70d79b8b",
+        "name": "Asfour Soup (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F9837514-5C0C-45F2-AA30-2B7D0E90EC58",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:13.323525",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "bcdce931-df66-4055-8a01-ddfa0dcff0d9",
+        "name": "Asfor With Meat Tagine (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "178B5DCE-0312-47CF-9CA7-EEA2697B6AC1",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:14.527910",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 250.0,
+      "tax": 39.2,
+      "serviceCharge": 30.0,
+      "total": 319.2
+    },
+    "status": "ready",
+    "generalOrder": false,
+    "createdAt": "2026-05-21T04:56:32.701692",
+    "ticketNo": 19,
+    "completedAt": null,
+    "prepStartTime": "2026-05-21T04:58:49.948118"
+  },
+  {
+    "id": "20ce0aea-b4b5-44b5-8a84-eba9524329b7",
+    "sessionId": "94eeae17-1d64-421b-92af-366dc463a313",
+    "tableId": "VIP-E2E-01",
+    "tableGuid": "VIP-E2E-01",
+    "tableLabel": "VIP-E2E-01",
+    "waiterId": "vip-test-user",
+    "items": [
+      {
+        "lineId": "f0f2149f-7cb5-4198-8f65-fbc0e729cb7e",
+        "name": "Alex Liver Sandwich (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T00:49:13.680757",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T00:49:13.680757",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T00:49:13.198751",
+    "prepTargetMinutes": null,
+    "ticketNo": 20,
+    "completedAt": "2026-05-22T00:49:13.680757",
+    "finalInvoiceId": "3C3DDFD6-78CC-498D-AF10-89B17905605F",
+    "billedAt": "2026-05-22T00:49:14.619271",
+    "billingSessionId": "94eeae17-1d64-421b-92af-366dc463a313",
+    "prepStartTime": "2026-05-23T02:11:56.602813",
+    "kpiLeadMinutes": 0.01
+  },
+  {
+    "id": "c5468615-936a-4abc-b4e2-ea5697fa07c4",
+    "sessionId": "2a1e5039-2552-45e5-8106-b65e81deaa33",
+    "tableId": "VIP-E2E-02",
+    "tableGuid": "VIP-E2E-02",
+    "tableLabel": "VIP-E2E-02",
+    "waiterId": "vip-test-user",
+    "items": [
+      {
+        "lineId": "e7f602e1-5ed7-4bcb-abfc-c2187b7da920",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T00:53:52.197553",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T00:53:52.197553",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T00:53:52.045696",
+    "prepTargetMinutes": null,
+    "ticketNo": 21,
+    "completedAt": "2026-05-22T00:53:52.197553",
+    "finalInvoiceId": "7C8AA101-5F0B-4273-82A5-3B62CA6638CF",
+    "billedAt": "2026-05-22T00:53:53.225184",
+    "billingSessionId": "2a1e5039-2552-45e5-8106-b65e81deaa33",
+    "prepStartTime": "2026-05-23T02:11:56.602874",
+    "kpiLeadMinutes": 0.0
+  },
+  {
+    "id": "e5c446cb-054d-4fb2-b2a1-98381df75342",
+    "sessionId": "7cc8ad3d-5e60-4fd4-93f0-ee0e002106b0",
+    "tableId": "VIP-PY-01",
+    "tableGuid": "VIP-PY-01",
+    "tableLabel": "VIP-PY-01",
+    "waiterId": "vip-py-test",
+    "items": [
+      {
+        "lineId": "6db240bf-96c8-4271-8a3a-a46f6adc7035",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T04:34:40.776540",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T04:34:40.776540",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T04:34:40.261545",
+    "prepTargetMinutes": null,
+    "ticketNo": 22,
+    "completedAt": "2026-05-22T04:34:40.776540",
+    "finalInvoiceId": "8C68E76C-21D2-4590-A9DB-5B3A20BC48A9",
+    "billedAt": "2026-05-22T04:34:43.051442",
+    "billingSessionId": "7cc8ad3d-5e60-4fd4-93f0-ee0e002106b0",
+    "prepStartTime": "2026-05-23T02:11:56.602910",
+    "kpiLeadMinutes": 0.01
+  },
+  {
+    "id": "dc93404c-4e83-4238-9b44-1a7862147d18",
+    "sessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "tableId": "PRINT-TEST-01",
+    "tableGuid": "PRINT-TEST-01",
+    "tableLabel": "PRINT-TEST-01",
+    "waiterId": "print-test-waiter",
+    "items": [
+      {
+        "lineId": "234bafdc-4b0e-4742-99d5-472ac222f546",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T15:15:40.822438",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T15:15:40.822438",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T15:15:40.737425",
+    "prepTargetMinutes": null,
+    "ticketNo": 23,
+    "completedAt": "2026-05-22T15:15:40.822438",
+    "finalInvoiceId": "1AFDB044-9816-4BE7-A7C6-D9B319F6AB18",
+    "billedAt": "2026-05-22T15:15:41.473353",
+    "billingSessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "prepStartTime": "2026-05-23T02:11:56.602956",
+    "kpiLeadMinutes": 0.0
+  },
+  {
+    "id": "302e3198-ddec-4f7e-80ac-986402b6fec4",
+    "sessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "tableId": "PRINT-TEST-01",
+    "tableGuid": "PRINT-TEST-01",
+    "tableLabel": "PRINT-TEST-01",
+    "waiterId": "print-test-waiter",
+    "items": [
+      {
+        "lineId": "46a5c712-be2c-4027-af87-c6820e3b7e49",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T15:16:48.084032",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T15:16:48.084032",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T15:16:48.022233",
+    "prepTargetMinutes": null,
+    "ticketNo": 24,
+    "completedAt": "2026-05-22T15:16:48.084032",
+    "finalInvoiceId": "F628C362-3827-4EFD-A7DE-4FAED25A38F3",
+    "billedAt": "2026-05-22T15:16:48.587866",
+    "billingSessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "prepStartTime": "2026-05-23T02:11:56.602996",
+    "kpiLeadMinutes": 0.0
+  },
+  {
+    "id": "7d487b02-0d19-4c00-bd48-ab3e838cd5b7",
+    "sessionId": "94704b4b-7a48-49a4-9bda-b38416d87c5d",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "5793b43b-431c-4cc0-a5e6-0f7a19c20a85",
+        "name": "شاورما دجاج Chicken Shawarma (+ Chicken)",
+        "quantity": 1.0,
+        "unitPrice": 30.0,
+        "productGuide": "6F3CB068-D3A4-4CF7-BCF0-848282352BE9",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "preparedQty": 1.0,
+        "sent": false,
+        "preparedAt": "2026-05-23T02:32:53.289529",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "4199b3fb-7b58-4463-9f85-79b0a31a6e08",
+        "name": "شاورما لحم Beef Shawarma",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "571DC914-B600-45ED-8B5A-EFFBAEF370FC",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "preparedQty": 1.0,
+        "sent": false,
+        "preparedAt": "2026-05-23T02:33:31.286274",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 250.0,
+      "tax": 39.2,
+      "serviceCharge": 30.0,
+      "total": 319.2
+    },
+    "status": "ready",
+    "generalOrder": true,
+    "createdAt": "2026-05-23T01:31:14.453677",
+    "ticketNo": 25,
+    "completedAt": null,
+    "prepStartTime": "2026-05-23T02:11:50.662766"
   }
 ]

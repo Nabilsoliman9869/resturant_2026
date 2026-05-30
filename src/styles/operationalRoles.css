@@ -2856,43 +2856,52 @@
 }
 
 .waiter-addon-modal {
-  width: min(460px, 100%);
-  max-height: min(86vh, 760px);
-  overflow: auto;
+  width: min(430px, 100%);
+  max-height: min(78vh, 660px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
   direction: rtl;
   border-radius: 16px;
   border: 1px solid #1e3a5f;
   background: linear-gradient(180deg, #0b1a2e 0%, #0a1527 100%);
   box-shadow: 0 26px 60px rgba(0, 0, 0, 0.5);
   color: #e2e8f0;
-  padding: 0.9rem 0.95rem;
+  padding: 0.75rem 0.8rem;
+}
+
+.waiter-addon-modal__body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.42rem;
 }
 
 .waiter-addon-modal__head {
   border: 1px solid #2a3e63;
   border-radius: 12px;
   background: rgba(11, 25, 44, 0.86);
-  padding: 0.6rem 0.7rem;
-  margin-bottom: 0.62rem;
+  padding: 0.52rem 0.62rem;
 }
 
 .waiter-addon-modal__head h3 {
-  margin: 0 0 0.18rem;
+  margin: 0 0 0.12rem;
   color: #dbeafe;
-  font-size: 0.98rem;
+  font-size: 0.93rem;
   font-weight: 900;
 }
 
 .waiter-addon-modal__product {
   color: #f8fafc;
   font-weight: 800;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .waiter-addon-modal__sub {
-  margin-top: 0.2rem;
+  margin-top: 0.14rem;
   color: #94a3b8;
-  font-size: 0.83rem;
+  font-size: 0.79rem;
   font-weight: 700;
 }
 
@@ -2900,24 +2909,23 @@
   border: 1px solid #164e7a;
   border-radius: 12px;
   background: linear-gradient(180deg, rgba(8, 47, 73, 0.58) 0%, rgba(7, 29, 53, 0.54) 100%);
-  padding: 0.56rem 0.62rem;
-  margin-bottom: 0.66rem;
+  padding: 0.46rem 0.55rem;
 }
 
 .waiter-addon-modal__price-title {
   color: #bfdbfe;
   font-weight: 900;
-  font-size: 0.86rem;
-  margin-bottom: 0.32rem;
+  font-size: 0.81rem;
+  margin-bottom: 0.24rem;
 }
 
 .waiter-addon-modal__price-row {
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
-  font-size: 0.86rem;
+  font-size: 0.81rem;
   color: #cbd5e1;
-  padding: 0.08rem 0;
+  padding: 0.05rem 0;
 }
 
 .waiter-addon-modal__price-row strong {
@@ -2925,56 +2933,54 @@
 }
 
 .waiter-addon-modal__price-total {
-  margin-top: 0.36rem;
+  margin-top: 0.28rem;
   border-top: 1px dashed rgba(148, 163, 184, 0.4);
-  padding-top: 0.35rem;
+  padding-top: 0.26rem;
   color: #34d399;
   font-weight: 900;
-  font-size: 0.95rem;
+  font-size: 0.89rem;
 }
 
 .waiter-addon-modal__catalog-note {
-  margin-bottom: 0.45rem;
   color: #bfdbfe;
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.77rem;
+  line-height: 1.35;
   font-weight: 700;
 }
 
 .waiter-addon-modal__list-title {
-  margin-bottom: 0.35rem;
   color: #f8fafc;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   font-weight: 900;
 }
 
 .waiter-addon-modal__empty {
-  margin-bottom: 0.7rem;
-  padding: 0.55rem 0.62rem;
+  padding: 0.42rem 0.55rem;
   border-radius: 10px;
   border: 1px solid #334155;
   background: rgba(15, 23, 42, 0.78);
   color: #cbd5e1;
-  font-size: 0.88rem;
-  line-height: 1.45;
+  font-size: 0.81rem;
+  line-height: 1.35;
 }
 
 .waiter-addon-modal__list {
-  margin-bottom: 0.7rem;
-  max-height: min(36vh, 340px);
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: min(30vh, 240px);
   overflow: auto;
   border: 1px solid #2a3f62;
   border-radius: 12px;
   background: rgba(8, 18, 35, 0.74);
-  padding: 0.35rem;
+  padding: 0.28rem;
 }
 
 .waiter-addon-modal__row {
   display: grid;
-  grid-template-columns: 96px 1fr 26px;
+  grid-template-columns: 86px 1fr 24px;
   align-items: center;
-  gap: 0.56rem;
-  padding: 0.42rem 0.45rem;
+  gap: 0.42rem;
+  padding: 0.34rem 0.36rem;
   border-radius: 9px;
   border: 1px solid transparent;
   cursor: pointer;
@@ -2982,7 +2988,7 @@
 }
 
 .waiter-addon-modal__row + .waiter-addon-modal__row {
-  margin-top: 0.22rem;
+  margin-top: 0.18rem;
 }
 
 .waiter-addon-modal__row:hover {
@@ -2996,8 +3002,8 @@
 }
 
 .waiter-addon-modal__check {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   margin: 0;
   justify-self: end;
   accent-color: #22c55e;
@@ -3006,6 +3012,7 @@
 .waiter-addon-modal__name {
   min-width: 0;
   font-weight: 800;
+  font-size: 0.84rem;
   color: #f8fafc;
   direction: rtl;
   text-align: right;
@@ -3014,35 +3021,42 @@
 .waiter-addon-modal__amt {
   color: #22c55e;
   font-weight: 900;
+  font-size: 0.8rem;
   white-space: nowrap;
   justify-self: start;
   text-align: left;
   direction: rtl;
 }
 
+.waiter-addon-modal__footer-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: end;
+}
+
 .waiter-addon-modal__notes-wrap {
   display: block;
-  margin-bottom: 0.75rem;
 }
 
 .waiter-addon-modal__notes-wrap > span {
   display: block;
-  margin-bottom: 0.34rem;
+  margin-bottom: 0.24rem;
   color: #e2e8f0;
-  font-size: 0.88rem;
+  font-size: 0.83rem;
   font-weight: 800;
 }
 
 .waiter-addon-modal__notes {
   width: 100%;
   box-sizing: border-box;
-  min-height: 72px;
+  min-height: 54px;
   border-radius: 10px;
   border: 1px solid #334155;
   background: rgba(15, 23, 42, 0.9);
   color: #f8fafc;
   font-family: inherit;
-  padding: 0.52rem 0.62rem;
+  padding: 0.42rem 0.52rem;
   resize: vertical;
 }
 
@@ -3050,22 +3064,22 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.65rem;
+  white-space: nowrap;
 }
 
 .waiter-addon-modal__qty > span {
   color: #e2e8f0;
   font-weight: 800;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
 }
 
 .waiter-addon-modal__qty > input {
-  width: 84px;
+  width: 72px;
   border-radius: 8px;
   border: 1px solid #334155;
   background: rgba(15, 23, 42, 0.9);
   color: #f8fafc;
-  padding: 0.38rem 0.45rem;
+  padding: 0.32rem 0.38rem;
   font-family: inherit;
 }
 
@@ -3074,13 +3088,34 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.45rem;
+  margin-top: 0.1rem;
 }
 
 .waiter-addon-modal__footnote {
-  margin-top: 0.45rem;
+  margin-top: 0.12rem;
   color: #93c5fd;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-align: left;
+}
+
+@media (max-width: 640px) {
+  .waiter-addon-modal {
+    width: min(400px, 100%);
+    max-height: min(80vh, 620px);
+    padding: 0.68rem 0.72rem;
+  }
+
+  .waiter-addon-modal__footer-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .waiter-addon-modal__qty {
+    justify-content: flex-start;
+  }
+
+  .waiter-addon-modal__list {
+    max-height: min(28vh, 220px);
+  }
 }
 
 /* —— KDS: كروت مطبخ + شريط طاولات —— */

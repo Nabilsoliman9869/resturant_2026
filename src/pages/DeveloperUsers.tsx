@@ -10,8 +10,10 @@ type Row = {
   role: RoleId;
   isActive: boolean;
   createdAt: string;
+  specialistStationCode?: string;
 };
 type AuditRow = { id: number; action: string; entity: string; actor: string; details: string; loggedAt: string };
+type SpecialistStationRow = { id: string; label: string; stationCode: string; active: boolean };
 
 const ALL_ROLES: RoleId[] = [
   "cashier",
@@ -21,6 +23,7 @@ const ALL_ROLES: RoleId[] = [
   "host",
   "waiter",
   "kitchen",
+  "kitchen_specialist",
   "speed_order",
   "server",
   "kids_guard",
@@ -33,18 +36,46 @@ export default function DeveloperUsers() {
   const [name, setName] = useState("");
   const [role, setRole] = useState<RoleId>("cashier");
   const [pin, setPin] = useState("");
+  const [specialistStationCode, setSpecialistStationCode] = useState("");
+  const [stations, setStations] = useState<SpecialistStationRow[]>([]);
   const [msg, setMsg] = useState("");
 
   async function load() {
     setMsg("");
     try {
-      const r = await fetch(`${getApiBase()}/api/auth/users`);
+      const [r, ar, opsr] = await Promise.all([
+        fetch(`${getApiBase()}/api/auth/users`),
+        fetch(`${getApiBase()}/api/auth/audit?limit=50`),
+        fetch(`${getApiBase()}/api/restaurant/ops-settings`),
+      ]);
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || "فشل تحميل المستخدمين");
       setRows(Array.isArray(j.users) ? j.users : []);
-      const ar = await fetch(`${getApiBase()}/api/auth/audit?limit=50`);
       const aj = await ar.json();
       if (ar.ok) setAudit(Array.isArray(aj.audit) ? aj.audit : []);
+      const opsj = await opsr.json().catch(() => ({} as { kitchenSpecialistStationsJson?: string }));
+      const rawStations = String(opsj.kitchenSpecialistStationsJson || "[]").trim();
+      try {
+        const arr = JSON.parse(rawStations);
+        setStations(
+          Array.isArray(arr)
+            ? arr
+                .filter((x) => x && typeof x === "object")
+                .map((x) => {
+                  const row = x as Partial<SpecialistStationRow>;
+                  return {
+                    id: String(row.id || ""),
+                    label: String(row.label || ""),
+                    stationCode: String(row.stationCode || "").trim().toLowerCase(),
+                    active: row.active !== false,
+                  };
+                })
+                .filter((x) => x.stationCode)
+            : [],
+        );
+      } catch {
+        setStations([]);
+      }
     } catch (e) {
       setMsg(String(e));
     }
@@ -65,13 +96,20 @@ export default function DeveloperUsers() {
       const r = await fetch(`${getApiBase()}/api/auth/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login: loginName.trim(), name: name.trim() || loginName.trim(), role, pin: pin.trim() }),
+        body: JSON.stringify({
+          login: loginName.trim(),
+          name: name.trim() || loginName.trim(),
+          role,
+          pin: pin.trim(),
+          specialistStationCode: role === "kitchen_specialist" ? specialistStationCode.trim().toLowerCase() : "",
+        }),
       });
       const j = await r.json().catch(() => ({} as { detail?: string }));
       if (!r.ok) throw new Error(j.detail || "تعذر إنشاء المستخدم");
       setLoginName("");
       setName("");
       setPin("");
+      setSpecialistStationCode("");
       await load();
       setMsg("تم إنشاء المستخدم.");
     } catch (err) {
@@ -113,6 +151,23 @@ export default function DeveloperUsers() {
     }
   }
 
+  async function editSpecialistStation(u: Row, nextCode: string) {
+    setMsg("");
+    try {
+      const r = await fetch(`${getApiBase()}/api/auth/users/${encodeURIComponent(u.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ specialistStationCode: nextCode }),
+      });
+      const j = await r.json().catch(() => ({} as { detail?: string }));
+      if (!r.ok) throw new Error(j.detail || "تعذر تحديث الدور التشغيلي");
+      await load();
+      setMsg("تم تحديث الدور التشغيلي/المحطة.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function removeUser(u: Row) {
     const ok = window.confirm(`حذف المستخدم ${u.login} ؟`);
     if (!ok) return;
@@ -142,6 +197,22 @@ export default function DeveloperUsers() {
               </option>
             ))}
           </select>
+          {role === "kitchen_specialist" ? (
+            <select
+              value={specialistStationCode}
+              onChange={(e) => setSpecialistStationCode(e.target.value)}
+              disabled={stations.length === 0}
+            >
+              <option value="">{stations.length ? "اختر محطة" : "لا توجد محطات معرفة"}</option>
+              {stations
+                .filter((x) => x.active)
+                .map((station) => (
+                  <option key={station.id || station.stationCode} value={station.stationCode}>
+                    {station.label || station.stationCode}
+                  </option>
+                ))}
+            </select>
+          ) : null}
           <input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="رمز الدخول" />
           <button type="submit" className="btn btn-primary">
             إضافة مستخدم
@@ -158,6 +229,7 @@ export default function DeveloperUsers() {
                 <th style={{ padding: "0.5rem" }}>المستخدم</th>
                 <th>الاسم</th>
                 <th>الدور</th>
+                <th>المحطة</th>
                 <th>الحالة</th>
                 <th />
               </tr>
@@ -168,6 +240,24 @@ export default function DeveloperUsers() {
                   <td style={{ padding: "0.5rem" }}>{r.login}</td>
                   <td>{r.name}</td>
                   <td>{ROLE_LABELS[r.role] || r.role}</td>
+                  <td>
+                    {r.role === "kitchen_specialist" ? (
+                      <select
+                        value={r.specialistStationCode || ""}
+                        onChange={(e) => void editSpecialistStation(r, e.target.value)}
+                        style={{ width: "100%" }}
+                      >
+                        <option value="">بدون محطة</option>
+                        {stations.map((station) => (
+                          <option key={station.id || station.stationCode} value={station.stationCode}>
+                            {station.label || station.stationCode}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      r.specialistStationCode || "-"
+                    )}
+                  </td>
                   <td>{r.isActive ? "مفعل" : "موقوف"}</td>
                   <td style={{ display: "flex", gap: 6, padding: "0.4rem" }}>
                     <button type="button" className="btn btn-ghost" onClick={() => void toggleActive(r)}>
