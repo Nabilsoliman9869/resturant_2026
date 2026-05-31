@@ -45,8 +45,14 @@ def cache_get(key: str):
         return None
     try:
         v = r.get(key)
-        return json.loads(v) if v else None
-    except Exception:
+        if v:
+            print(f"[cache] HIT  {key}")
+            return json.loads(v)
+        else:
+            print(f"[cache] MISS {key}")
+            return None
+    except Exception as e:
+        print(f"[cache] ERROR get {key}: {e}")
         return None
 
 
@@ -56,8 +62,9 @@ def cache_set(key: str, data, ttl: int = 10):
         return
     try:
         r.setex(key, ttl, json.dumps(data, ensure_ascii=False))
-    except Exception:
-        pass
+        print(f"[cache] SET  {key} (ttl={ttl}s)")
+    except Exception as e:
+        print(f"[cache] ERROR set {key}: {e}")
 
 
 def cache_delete(key: str):
