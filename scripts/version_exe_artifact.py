@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
 from pathlib import Path
 
 
@@ -27,7 +28,14 @@ def main() -> int:
         print(f"[version-exe] source missing: {src}")
         return 1
     dist.mkdir(parents=True, exist_ok=True)
-    n = next_build_number(dist)
+    # manual override via arg: python version_exe_artifact.py 26
+    if len(sys.argv) > 1:
+        try:
+            n = int(sys.argv[1])
+        except ValueError:
+            n = next_build_number(dist)
+    else:
+        n = next_build_number(dist)
     dst = dist / f"Mat3amPOS{n:03d}.exe"
     shutil.copy2(src, dst)
     print(f"[version-exe] created: {dst}")

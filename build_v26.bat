@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 echo ========================================
-echo  Mat3amPOS.exe — بناء نظيف + طابع زمني + أيقونة
+echo  Mat3amPOS.exe — بناء إصدار 26
 echo ========================================
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\mat3am_kill_ports.ps1" -Ports 2288
@@ -11,7 +11,7 @@ timeout /t 1 /nobreak >nul
 
 where python >nul 2>&1
 if errorlevel 1 (
-  echo لم يُعثر على python في PATH — استخدم Python 3.12 من المسار الكامل أو أضفه لـ PATH.
+  echo لم يُعثر على python في PATH.
   pause
   exit /b 1
 )
@@ -24,21 +24,15 @@ echo [2/4] npm run build — واجهة ui/restaurant...
 call npm run build
 if errorlevel 1 exit /b 1
 
-echo [3/5] PyInstaller --clean...
+echo [3/4] PyInstaller --clean...
 python -m PyInstaller "%~dp0Mat3amPOS.spec" --clean --noconfirm
 if errorlevel 1 exit /b 1
 
-echo [4/5] إنشاء نسخة مرقمة...
-if "%~1"=="" (
-  python "%~dp0scripts\version_exe_artifact.py"
-) else (
-  python "%~dp0scripts\version_exe_artifact.py" %~1
-)
+echo [4/4] إنشاء نسخة مرقمة 26...
+python "%~dp0scripts\version_exe_artifact.py" 26
 if errorlevel 1 exit /b 1
 
 echo.
-echo [5/5] تم — الناتج: dist\Mat3amPOS.exe + نسخة مرقمة Mat3amPOSNNN.exe
-echo  تحقق: خصائص الملف ^> التفاصيل ^> Product version = طابع التاريخ
-echo  أو شغّل ثم افتح: http://127.0.0.1:2288/__whoami__  وابحث عن EXE_BUILD=
+echo [تم] الناتج: dist\Mat3amPOS026.exe
 echo ========================================
 pause
