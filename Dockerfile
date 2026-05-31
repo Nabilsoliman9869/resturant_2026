@@ -50,6 +50,7 @@ RUN printf '%s\n' \
 ENV OPENSSL_CONF=/etc/ssl/openssl_mat3am.cnf
 
 WORKDIR /app
+ARG CACHE_BUST=2026-05-31
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
