@@ -40,6 +40,7 @@ def cache_enabled() -> bool:
 
 
 def cache_get(key: str):
+    global _client
     r = _get_client()
     if not r:
         return None
@@ -53,10 +54,12 @@ def cache_get(key: str):
             return None
     except Exception as e:
         print(f"[cache] ERROR get {key}: {e}")
+        _client = None  # reset → reconnect next call
         return None
 
 
 def cache_set(key: str, data, ttl: int = 10):
+    global _client
     r = _get_client()
     if not r:
         return
@@ -65,19 +68,22 @@ def cache_set(key: str, data, ttl: int = 10):
         print(f"[cache] SET  {key} (ttl={ttl}s)")
     except Exception as e:
         print(f"[cache] ERROR set {key}: {e}")
+        _client = None  # reset → reconnect next call
 
 
 def cache_delete(key: str):
+    global _client
     r = _get_client()
     if not r:
         return
     try:
         r.delete(key)
     except Exception:
-        pass
+        _client = None  # reset → reconnect next call
 
 
 def cache_delete_pattern(pattern: str):
+    global _client
     r = _get_client()
     if not r:
         return
@@ -85,7 +91,7 @@ def cache_delete_pattern(pattern: str):
         for k in r.scan_iter(match=pattern):
             r.delete(k)
     except Exception:
-        pass
+        _client = None  # reset → reconnect next call
 
 
 def cache_invalidate_restaurant():
