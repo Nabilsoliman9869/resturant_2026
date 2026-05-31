@@ -28,14 +28,103 @@ import copy
 from pathlib import Path
 from config import get_connection_string, get_connection_string_driver13, DATABASE
 
+# ── Inline Hybrid Cache (Redis + In-Memory) ──────────────────────────
+import time as _time
+_CACHE_LOCK = threading.RLock()
+_MEM_CACHE: dict = {}
+
 try:
-    from cache_service import cache_get, cache_set, cache_delete_pattern, cache_invalidate_restaurant
+    import redis as _redis_mod
 except Exception:
-    # Fallback if cache_service is missing (should not happen, but keeps EXE safe)
-    def cache_get(key): return None
-    def cache_set(key, data, ttl=10): pass
-    def cache_delete_pattern(pattern): pass
-    def cache_invalidate_restaurant(): pass
+    _redis_mod = None  # type: ignore
+
+_REDIS_URL = os.getenv("REDIS_URL", "").strip()
+_redis_client = None
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client if _redis_client else None
+    if not _redis_mod or not _REDIS_URL:
+        _redis_client = False
+        return None
+    try:
+        r = _redis_mod.from_url(_REDIS_URL, decode_responses=True,
+                                socket_connect_timeout=5, socket_timeout=5,
+                                socket_keepalive=True, health_check_interval=30)
+        r.ping()
+        _redis_client = r
+        print(f"[cache] Redis connected: {_REDIS_URL.rsplit('@', 1)[-1]}")
+        return r
+    except Exception as e:
+        print(f"[cache] Redis unavailable ({e}). Using in-memory fallback.")
+        _redis_client = False
+        return None
+
+def cache_get(key: str):
+    global _redis_client
+    r = _get_redis()
+    if r:
+        try:
+            v = r.get(key)
+            if v:
+                print(f"[cache] HIT  {key} (redis)")
+                return json.loads(v)
+        except Exception as e:
+            print(f"[cache] Redis get error: {e}")
+            _redis_client = None
+    with _CACHE_LOCK:
+        entry = _MEM_CACHE.get(key)
+        if entry and _time.time() <= entry["expires"]:
+            print(f"[cache] HIT  {key} (memory)")
+            return entry["data"]
+        _MEM_CACHE.pop(key, None)
+    print(f"[cache] MISS {key}")
+    return None
+
+def cache_set(key: str, data, ttl: int = 10):
+    global _redis_client
+    r = _get_redis()
+    if r:
+        try:
+            r.setex(key, ttl, json.dumps(data, ensure_ascii=False))
+            print(f"[cache] SET  {key} (redis, ttl={ttl}s)")
+            return
+        except Exception as e:
+            print(f"[cache] Redis set error: {e}")
+            _redis_client = None
+    with _CACHE_LOCK:
+        _MEM_CACHE[key] = {"data": data, "expires": _time.time() + ttl}
+    print(f"[cache] SET  {key} (memory, ttl={ttl}s)")
+
+def cache_delete(key: str):
+    global _redis_client
+    r = _get_redis()
+    if r:
+        try:
+            r.delete(key)
+        except Exception:
+            _redis_client = None
+    with _CACHE_LOCK:
+        _MEM_CACHE.pop(key, None)
+
+def cache_delete_pattern(pattern: str):
+    global _redis_client
+    r = _get_redis()
+    if r:
+        try:
+            for k in r.scan_iter(match=pattern):
+                r.delete(k)
+        except Exception:
+            _redis_client = None
+    prefix = pattern.rstrip("*")
+    with _CACHE_LOCK:
+        for k in list(_MEM_CACHE.keys()):
+            if k.startswith(prefix):
+                _MEM_CACHE.pop(k, None)
+
+def cache_invalidate_restaurant():
+    cache_delete_pattern("mat3am:restaurant:*")
 
 try:
     # Railway يضع PORT — نفس الخدمة تخدم الواجهة والـ API
