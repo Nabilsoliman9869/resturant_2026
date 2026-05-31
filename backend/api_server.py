@@ -18847,9 +18847,11 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
 @app.get("/api/restaurant/cashier/role-inbox")
 @app.get("/api/restaurant/role-inbox")
 def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Query(default="")):
-    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.
-
-    إن وُجد targetUserIds على عنصر (تحويل كابتن)، يُعرض فقط لمستخدم userId المطابق."""
+    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.  Cache TTL 3s."""
+    cache_key = f"mat3am:restaurant:role-inbox:role={forRole}:uid={userId}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
     role = str(forRole or "").strip().lower()
     uid_filter = _mat3am_guid_norm(userId)
     rows = _role_inbox_load_rows()
@@ -18899,7 +18901,9 @@ def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Q
             item["maxSnoozes"] = int(r.get("maxSnoozes") or 0)
         out.append(item)
     out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
-    return {"ok": True, "items": out[:80], "count": len(out)}
+    result = {"ok": True, "items": out[:80], "count": len(out)}
+    cache_set(cache_key, result, ttl=3)
+    return result
 
 
 @app.patch("/api/restaurant/cashier/role-inbox/{item_id}/dismiss")
@@ -18916,6 +18920,7 @@ def restaurant_role_inbox_dismiss(item_id: str):
     if not hit:
         raise HTTPException(status_code=404, detail="العنصر غير موجود")
     _role_inbox_save_rows(rows)
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
     return {"ok": True, "id": item_id}
 
 
@@ -19104,6 +19109,7 @@ def restaurant_cashier_alerts_create(body: dict):
         _cashier_alert_role_inbox_targets(typ, body_d),
         now_iso,
     )
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
     return {"ok": True, "deduped": False, "id": rec["id"], "alert": rec}
 
 
@@ -19125,6 +19131,7 @@ def restaurant_cashier_alerts_dismiss(alert_id: str):
                         hid = True
                 if hid:
                     _role_inbox_save_rows(rin)
+                    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
             except Exception:
                 pass
             return {"ok": True, "id": alert_id}
