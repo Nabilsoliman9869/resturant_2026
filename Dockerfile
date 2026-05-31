@@ -50,7 +50,7 @@ RUN printf '%s\n' \
 ENV OPENSSL_CONF=/etc/ssl/openssl_mat3am.cnf
 
 WORKDIR /app
-ARG CACHE_BUST=2026-05-31-c
+ARG CACHE_BUST=2026-06-01-a
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
@@ -58,7 +58,7 @@ COPY backend ./backend
 COPY --from=frontend /app/ui/restaurant ./ui/restaurant
 
 ENV MAT3AM_BASE_DIR=/data
-ENV MAT3AM_UVICORN_WORKERS=2
+ENV MAT3AM_UVICORN_WORKERS=1
 ENV MAT3AM_REFERENCE_CACHE_ONLY=1
 WORKDIR /app/backend
 CMD ["python", "api_server.py"]
