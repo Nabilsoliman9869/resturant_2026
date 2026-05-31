@@ -16539,7 +16539,7 @@ async def restaurant_operational_snapshot(includeUsers: bool = Query(False, alia
     if cached:
         return cached
     result = await run_in_threadpool(_restaurant_operational_snapshot_sync, includeUsers)
-    cache_set(cache_key, result, ttl=5)
+    cache_set(cache_key, result, ttl=10)
     return result
 
 
@@ -17539,7 +17539,7 @@ def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = Tru
         out.append(row)
     out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
     result = {"sessions": out}
-    cache_set(cache_key, result, ttl=5)
+    cache_set(cache_key, result, ttl=10)
     return result
 
 
