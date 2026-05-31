@@ -124,7 +124,9 @@ def cache_delete_pattern(pattern: str):
                 _MEM_CACHE.pop(k, None)
 
 def cache_invalidate_restaurant():
-    cache_delete_pattern("mat3am:restaurant:*")
+    # disabled: invalidation was clearing cache too aggressively across 2 uvicorn workers
+    # data refreshes automatically via TTL (5s table-sessions, 20s role-inbox, etc.)
+    pass
 
 try:
     # Railway يضع PORT — نفس الخدمة تخدم الواجهة والـ API
