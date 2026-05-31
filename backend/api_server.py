@@ -18847,7 +18847,7 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
 @app.get("/api/restaurant/cashier/role-inbox")
 @app.get("/api/restaurant/role-inbox")
 def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Query(default="")):
-    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.  Cache TTL 3s."""
+    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.  Cache TTL 20s."""
     cache_key = f"mat3am:restaurant:role-inbox:role={forRole}:uid={userId}"
     cached = cache_get(cache_key)
     if cached:
@@ -18902,7 +18902,7 @@ def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Q
         out.append(item)
     out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
     result = {"ok": True, "items": out[:80], "count": len(out)}
-    cache_set(cache_key, result, ttl=3)
+    cache_set(cache_key, result, ttl=20)
     return result
 
 
