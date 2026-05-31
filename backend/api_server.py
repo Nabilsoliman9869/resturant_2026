@@ -1733,7 +1733,7 @@ def _api_auth_login_build_response(
 
 
 def _api_auth_login_sync(raw: object, cal_iso: Optional[str]) -> dict:
-    """تسجيل الدخول — بدون DDL على المسار السريع (كاش مستخدمين)."""
+    """تسجيل الدخول — بدون DDL على المسار السريع (كاش مستخدمين + Redis)."""
     lo, pw = _parse_login_from_json_body(raw)
     login_name = _strip_invisible_chars(lo.strip())
     pin = _strip_invisible_chars(pw.strip())
@@ -1757,6 +1757,39 @@ def _api_auth_login_sync(raw: object, cal_iso: Optional[str]) -> dict:
             },
         }
 
+    # try shared Redis/in-memory cache first
+    cache_key = f"mat3am:restaurant:user:{login_name.lower()}"
+    cached_user = cache_get(cache_key)
+    if cached_user:
+        if cached_user.get("isActive") is False:
+            raise HTTPException(status_code=401, detail="المستخدم غير مفعل")
+        if str(cached_user.get("pinHash") or "").strip() != pin:
+            raise HTTPException(status_code=401, detail="رمز الدخول غير صحيح")
+        role_code = str(cached_user.get("role") or "").strip().lower()
+        if role_code not in ALLOWED_ROLE_CODES:
+            raise HTTPException(status_code=403, detail=f"الدور غير مدعوم: {role_code}")
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT TOP 1 SpecialistStationCode FROM dbo.MAT3AM_APP_USERS WHERE Id = ?", (str(cached_user["id"]),))
+            row = cursor.fetchone()
+            specialist = str(row[0]).strip().lower() if row and row[0] else ""
+            return _api_auth_login_build_response(
+                cursor, conn,
+                user_id=str(cached_user["id"]),
+                login_name=login_name,
+                display_name=str(cached_user.get("name") or ""),
+                login_nm=str(cached_user.get("login") or login_name),
+                role_code=role_code,
+                cal_iso=cal_iso,
+                specialist_station_code=specialist,
+            )
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     from mat3am_sql_cache import find_user_for_login
 
     cached, cache_src = find_user_for_login(get_connection, login_name, pin)
@@ -1764,6 +1797,8 @@ def _api_auth_login_sync(raw: object, cal_iso: Optional[str]) -> dict:
         raise HTTPException(status_code=401, detail="رمز الدخول غير صحيح")
     if cache_src == "inactive":
         raise HTTPException(status_code=401, detail="المستخدم غير مفعل")
+    if cached:
+        cache_set(cache_key, cached, ttl=90)
 
     if cached and cache_src == "memory":
         conn = get_connection()
