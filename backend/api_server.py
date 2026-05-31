@@ -17405,7 +17405,11 @@ def _body_wants_special_table(body: dict) -> bool:
 
 @app.get("/api/restaurant/table-sessions")
 def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = True):
-    """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير."""
+    """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير. Cache TTL 5s."""
+    cache_key = f"mat3am:restaurant:table-sessions:st={status}:today={today_only}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
     _close_stale_active_sessions()
     try:
         threading.Thread(
@@ -17443,7 +17447,9 @@ def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = Tru
         row["linkedOrderCount"] = int(counts.get(str(s.get("id")), 0))
         out.append(row)
     out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
-    return {"sessions": out}
+    result = {"sessions": out}
+    cache_set(cache_key, result, ttl=5)
+    return result
 
 
 def _norm_session_table_id(table_id: str) -> str:
@@ -17662,6 +17668,7 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
                 detail="مرّر clear=true أو vipAgentGuid أو vipTemplateId أو applyOpsDefaults=true أو billingProfile={...}",
             )
         _restaurant_save("table_sessions", data)
+        cache_invalidate_restaurant()
         return {"ok": True, "session": s}
     raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
 
@@ -17722,6 +17729,7 @@ def restaurant_claim_order_taker(session_id: str, body: dict):
             "actorRole": rrole,
         }
     )
+    cache_invalidate_restaurant()
     return {"ok": True, "session": found}
 
 
@@ -17934,6 +17942,7 @@ def restaurant_request_captain_transfer(session_id: str, body: dict):
             "eligibleCount": len(norm_peers),
         }
     )
+    cache_invalidate_restaurant()
     return {"ok": True, "request": rec}
 
 
@@ -18025,6 +18034,7 @@ def restaurant_accept_captain_transfer(request_id: str, body: dict):
             "toCaptainUserId": aid,
         }
     )
+    cache_invalidate_restaurant()
     return {"ok": True, "session": found}
 
 
@@ -18132,6 +18142,7 @@ def restaurant_reassign_order_taker(session_id: str, body: dict):
             "actorId": str(actor.get("id") or ""),
         }
     )
+    cache_invalidate_restaurant()
     return {"ok": True, "session": found}
 
 
@@ -18179,6 +18190,7 @@ def restaurant_cleanup_duplicate_empty_sessions():
             s["endTime"] = now_iso
             completed.append(sid)
     _restaurant_save("table_sessions", data)
+    cache_invalidate_restaurant()
     return {"ok": True, "completedSessionIds": completed, "count": len(completed)}
 
 
@@ -18324,6 +18336,7 @@ def _restaurant_complete_session_internal(
                     "actorRole": str(actor.get("role") or "") or None,
                 }
             )
+            cache_invalidate_restaurant()
             return s
     raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
 
@@ -18776,6 +18789,7 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
                 "actorRole": str(actor.get("role") or ""),
             }
         )
+        cache_invalidate_restaurant()
         return {"ok": True, "action": "snooze", "session": found}
 
     if action == "reset_ready":
@@ -19294,6 +19308,7 @@ def restaurant_patch_session(session_id: str, body: dict):
         raise HTTPException(status_code=400, detail="أرسل tableId أو seatGuestLabels أو seatBillingOverrides")
 
     _restaurant_save("table_sessions", data)
+    cache_invalidate_restaurant()
     return {"ok": True, "session": found}
 
 
@@ -19374,6 +19389,7 @@ def restaurant_merge_session(session_id: str, body: dict):
             "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
         }
     )
+    cache_invalidate_restaurant()
     return {"ok": True, "sourceSessionId": str(session_id), "targetSession": dst}
 
 
