@@ -4,9 +4,6 @@
 
 import os
 import json
-import logging
-
-logger = logging.getLogger(__name__)
 
 try:
     import redis
@@ -22,16 +19,18 @@ def _get_client():
     if _client is not None:
         return _client if _client else None
     if not redis or not REDIS_URL:
+        print(f"[cache] REDIS_URL not set ({REDIS_URL=}, {redis=}). Running without cache.")
         _client = False
         return None
     try:
-        r = redis.from_url(REDIS_URL, decode_responses=True)
+        r = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=5, socket_timeout=5)
         r.ping()
         _client = r
-        logger.info("[cache] Redis connected: %s", REDIS_URL.rsplit("@", 1)[-1])
+        host = REDIS_URL.rsplit("@", 1)[-1]
+        print(f"[cache] Redis connected: {host}")
         return _client
     except Exception as e:
-        logger.warning("[cache] Redis unavailable (%s). Running without cache.", e)
+        print(f"[cache] Redis unavailable ({e}). Running without cache.")
         _client = False
         return None
 
