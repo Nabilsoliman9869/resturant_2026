@@ -762,3 +762,22 @@
     - `src/pages/ReceptionPage.tsx`
   - `npm run build` نجح
   - التحقق العملي أكد أن إجبار إنشاء جلسة جديدة على `T12` (`forceNewSession=true`) يعيد `409` بدل إنشاء جلسة إضافية
+
+27) تنفيذ جديد — إضافة Reset للطاولة كتنظيف تشغيلي كامل:
+- تم اعتماد تسمية جديدة واضحة للمدير/المطور في شريحة الطاولة: `Reset للطاولة`.
+- هذا الإجراء ليس مجرد `إلغاء التسكين` الآمن، بل تنظيف كامل للطاولة من بقايا التشغيل:
+  - إلغاء الطلبات المفتوحة على نفس الطاولة وتحويل سطورها إلى `cancelled`
+  - إنهاء كل الجلسات النشطة على الطاولة نفسها مع فك ارتباط الكابتن
+  - إعادة سجل الطاولة إلى `ready` مع تصفير مؤشرات الانشغال و`no-order watch`
+- التنفيذ في `backend/api_server.py`:
+  - إضافة helper مركزي `_restaurant_force_reset_table(...)`
+  - إضافة action جديد `reset_table` داخل endpoint `/api/restaurant/table-sessions/{session_id}/no-order-watch`
+  - تقييد `Reset للطاولة` على أدوار `manager` و`developer` فقط
+- التنفيذ في `src/pages/WaiterTablesPage.tsx`:
+  - الإبقاء على `إلغاء التسكين` كمسار آمن قائم
+  - وإضافة زر مستقل باسم `Reset للطاولة` للمدير/المطور فقط مع رسالة نجاح واضحة بأنه تنظيف كامل للطاولة
+- التحقق:
+  - `GetDiagnostics` نظيف في:
+    - `backend/api_server.py`
+    - `src/pages/WaiterTablesPage.tsx`
+  - `npm run build` نجح بعد إضافة الإجراء الجديد

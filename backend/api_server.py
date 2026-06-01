@@ -9426,7 +9426,7 @@ def _build_captains_flash_report(report_day_raw: Optional[str]) -> dict:
             continue
         if action == "no_order_watch_extra_time":
             row["extraTimeCount"] += 1
-        elif action == "no_order_watch_reset_ready":
+        elif action in ("no_order_watch_reset_ready", "no_order_watch_reset_table"):
             row["resetReadyCount"] += 1
         elif action == "complete_session":
             row["closeCount"] += 1
@@ -17325,6 +17325,134 @@ def _restaurant_open_orders_for_table(table_id: str) -> list[dict]:
     return out
 
 
+def _restaurant_force_reset_table(table_id: str, *, reason: str = "", actor: Optional[dict] = None) -> dict:
+    """تنظيف تشغيلي كامل للطاولة: إلغاء الطلبات المفتوحة، إنهاء الجلسات النشطة، وإرجاع الطاولة إلى جاهزة."""
+    tid = _norm_session_table_id(str(table_id or "").strip())
+    if not tid:
+        raise HTTPException(status_code=400, detail="tableId مطلوب لتنفيذ Reset للطاولة.")
+    actor = actor if isinstance(actor, dict) else {}
+    reason_txt = str(reason or "").strip()[:500] or "reset_table"
+    now_iso = datetime.now().isoformat()
+
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    active_session_ids: list[str] = []
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if _norm_session_table_id(str(s.get("tableId") or "").strip()) != tid:
+            continue
+        if str(s.get("status") or "").strip().lower() != "active":
+            continue
+        sid = str(s.get("id") or "").strip()
+        if sid:
+            active_session_ids.append(sid)
+
+    completed_session_ids: list[str] = []
+    for sid in active_session_ids:
+        done = _restaurant_complete_session_internal(
+            sid,
+            force=True,
+            reason=reason_txt,
+            actor=actor,
+            table_status_on_complete="ready",
+            release_captain_on_complete=True,
+        )
+        completed_session_ids.append(str((done or {}).get("id") or sid))
+
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+    orders_changed = False
+    cancelled_order_count = 0
+    cancelled_line_count = 0
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        if _norm_session_table_id(str(order.get("tableId") or "").strip()) != tid:
+            continue
+        st = str(order.get("status") or "").strip().lower()
+        if st in ("served", "paid", "cancelled"):
+            continue
+        items = [_kds_normalize_item(x) for x in (order.get("items") or []) if isinstance(x, dict)]
+        order_changed = False
+        if items:
+            for it in items:
+                if bool(it.get("cancelled")):
+                    continue
+                it["cancelled"] = True
+                it["lineStatus"] = "cancelled"
+                it["cancelledAt"] = now_iso
+                it["prepared"] = False
+                it["preparedQty"] = 0.0
+                it["sent"] = False
+                it["preparedAt"] = None
+                it["sentAt"] = None
+                it["handoffAt"] = None
+                cancelled_line_count += 1
+                order_changed = True
+            order["items"] = items
+            prev_status = str(order.get("status") or "").strip().lower()
+            _kds_refresh_order_status(order)
+            if str(order.get("status") or "").strip().lower() == "cancelled":
+                order["cancelledAt"] = str(order.get("cancelledAt") or "").strip() or now_iso
+            if order_changed or prev_status != str(order.get("status") or "").strip().lower():
+                cancelled_order_count += 1
+                orders_changed = True
+        elif st != "cancelled":
+            order["status"] = "cancelled"
+            order["cancelledAt"] = now_iso
+            cancelled_order_count += 1
+            orders_changed = True
+    if orders_changed:
+        _restaurant_save("orders", orders)
+
+    tables = _restaurant_load("tables", [])
+    if not isinstance(tables, list):
+        tables = []
+    table_row = None
+    for t in tables:
+        if isinstance(t, dict) and _norm_session_table_id(str(t.get("id") or "").strip()) == tid:
+            table_row = t
+            break
+    if table_row is None:
+        table_row = {"id": tid}
+        tables.append(table_row)
+    table_row["status"] = "ready"
+    table_row["statusUpdatedAt"] = now_iso
+    table_row["readyAt"] = now_iso
+    table_row["dirtyAt"] = None
+    table_row["cleaningStartedAt"] = None
+    table_row["occupiedSince"] = None
+    table_row["noOrderOverdue"] = False
+    table_row["noOrderMinutes"] = 0
+    table_row["cleanupOverdue"] = False
+    for key in (
+        "minimumCharge",
+        "minimumChargeUpdatedAt",
+        "currentSessionId",
+        "currentOrderId",
+        "captainUserId",
+        "captainLogin",
+        "captainName",
+        "captainRole",
+        "captainClaimedAt",
+        "occupiedAt",
+        "reservedAt",
+        "billingRequestedAt",
+    ):
+        table_row.pop(key, None)
+    _restaurant_save("tables", tables)
+    cache_invalidate_restaurant()
+    return {
+        "table": dict(table_row),
+        "completedSessionIds": completed_session_ids,
+        "cancelledOrderCount": cancelled_order_count,
+        "cancelledLineCount": cancelled_line_count,
+    }
+
+
 def _session_table_display_fallback(tid: str) -> str:
     ts = str(tid or "").strip()
     if not ts:
@@ -18844,8 +18972,8 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
     if not sid:
         raise HTTPException(status_code=400, detail="sessionId مطلوب")
     action = str(body.get("action") or "").strip().lower()
-    if action not in ("snooze", "close", "reset_ready"):
-        raise HTTPException(status_code=400, detail="action يجب أن يكون snooze أو close أو reset_ready")
+    if action not in ("snooze", "close", "reset_ready", "reset_table"):
+        raise HTTPException(status_code=400, detail="action يجب أن يكون snooze أو close أو reset_ready أو reset_table")
     actor = _mat3am_actor_from_body(body)
     if not str(actor.get("id") or "").strip():
         raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
@@ -18882,7 +19010,7 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
         raise HTTPException(status_code=403, detail="هذا الإجراء للكابتن الحالي أو المدير فقط.")
 
     counts = _restaurant_session_order_counts()
-    if int(counts.get(sid, 0)) > 0:
+    if action != "reset_table" and int(counts.get(sid, 0)) > 0:
         _session_no_order_watch_dismiss_alerts_async(sid)
         if _session_no_order_watch_clear(found):
             found["noOrderLastResolvedAt"] = datetime.now().isoformat()
@@ -18917,6 +19045,36 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
         )
         cache_invalidate_restaurant()
         return {"ok": True, "action": "snooze", "session": found}
+
+    if action == "reset_table":
+        if str(actor.get("role") or "").strip().lower() not in ("manager", "developer"):
+            raise HTTPException(status_code=403, detail="Reset للطاولة للمدير أو المطوّر فقط.")
+        reason = str(body.get("reason") or "").strip()
+        table_id = str(found.get("tableId") or "").strip()
+        reset_result = _restaurant_force_reset_table(table_id, reason=reason, actor=actor)
+        _append_session_audit_entry(
+            {
+                "at": now_iso,
+                "action": "no_order_watch_reset_table",
+                "sessionId": sid,
+                "tableId": table_id,
+                "reason": reason,
+                "actorId": str(actor.get("id") or ""),
+                "actorRole": str(actor.get("role") or ""),
+                "cancelledOrderCount": int(reset_result.get("cancelledOrderCount") or 0),
+                "cancelledLineCount": int(reset_result.get("cancelledLineCount") or 0),
+                "completedSessionIds": reset_result.get("completedSessionIds") or [],
+            }
+        )
+        return {
+            "ok": True,
+            "action": "reset_table",
+            "session": {"id": sid, "tableId": table_id, "status": "completed"},
+            "table": reset_result.get("table"),
+            "completedSessionIds": reset_result.get("completedSessionIds") or [],
+            "cancelledOrderCount": int(reset_result.get("cancelledOrderCount") or 0),
+            "cancelledLineCount": int(reset_result.get("cancelledLineCount") or 0),
+        }
 
     if action == "reset_ready":
         reason = str(body.get("reason") or "").strip()
