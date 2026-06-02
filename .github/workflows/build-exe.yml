@@ -38,8 +38,29 @@ jobs:
       - name: Version artifact
         run: python scripts/version_exe_artifact.py ${{ github.event.inputs.version }}
 
-      - name: Upload EXE
+      - name: Create package with ODBC installer
+        run: |
+          mkdir -p package
+          copy dist\Mat3amPOS*.exe package\
+          echo "@echo off" > package\INSTALL_ODBC_FIRST.bat
+          echo "chcp 65001 >nul" >> package\INSTALL_ODBC_FIRST.bat
+          echo "echo ====================================" >> package\INSTALL_ODBC_FIRST.bat
+          echo "echo  تثبيت Microsoft ODBC Driver 18" >> package\INSTALL_ODBC_FIRST.bat
+          echo "echo ====================================" >> package\INSTALL_ODBC_FIRST.bat
+          echo "powershell -Command \"Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2280794' -OutFile 'msodbcsql18.msi'\"" >> package\INSTALL_ODBC_FIRST.bat
+          echo "msiexec /i msodbcsql18.msi /quiet /norestart" >> package\INSTALL_ODBC_FIRST.bat
+          echo "echo تم — اضغط أي مفتاح..." >> package\INSTALL_ODBC_FIRST.bat
+          echo "pause" >> package\INSTALL_ODBC_FIRST.bat
+          echo "Mat3amPOS.exe" > package\README.txt
+          echo "" >> package\README.txt
+          echo "IMPORTANT: إذا ظهر خطأ ODBC:" >> package\README.txt
+          echo "1. شغّل INSTALL_ODBC_FIRST.bat كـ Administrator" >> package\README.txt
+          echo "2. أعد تشغيل Mat3amPOS.exe" >> package\README.txt
+          echo "" >> package\README.txt
+          echo "أو حمّل يدوياً من: https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server" >> package\README.txt
+
+      - name: Upload EXE package
         uses: actions/upload-artifact@v4
         with:
           name: Mat3amPOS-${{ github.event.inputs.version }}
-          path: dist/Mat3amPOS*.exe
+          path: package/
