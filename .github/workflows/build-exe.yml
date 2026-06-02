@@ -42,15 +42,15 @@ jobs:
         run: |
           mkdir -p package
           copy dist\Mat3amPOS*.exe package\
+          copy START_HERE.bat package\
           copy setup_odbc_and_install.bat package\
           echo "Mat3amPOS.exe" > package\README.txt
           echo "" >> package\README.txt
-          echo "=== تثبيت أولي ===" >> package\README.txt
-          echo "1. شغّل setup_odbc_and_install.bat كـ Administrator" >> package\README.txt
-          echo "2. سيُثبّت ODBC تلقائياً + ينسخ البرنامج + يُنشئ Shortcut" >> package\README.txt
-          echo "" >> package\README.txt
-          echo "=== إن كان ODBC مُثبّت ===" >> package\README.txt
-          echo "شغّل Mat3amPOS.exe مباشرة" >> package\README.txt
+          echo "=== تشغيل سريع ===" >> package\README.txt
+          echo "اضغط مرتين على START_HERE.bat" >> package\README.txt
+          echo "- يتحقق من ODBC تلقائياً" >> package\README.txt
+          echo "- يُثبّته إن لم يكن موجوداً" >> package\README.txt
+          echo "- يُشغّل البرنامج" >> package\README.txt
 
       - name: Upload EXE package
         uses: actions/upload-artifact@v4
