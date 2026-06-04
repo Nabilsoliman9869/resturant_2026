@@ -16683,10 +16683,7 @@ def _restaurant_get_tables_payload(
                         continue
                     used.add(gid)
                     st_row = local_state.get(gid.upper(), {})
-                    try:
-                        min_charge = float(st_row.get("minimumCharge") or 0)
-                    except Exception:
-                        min_charge = 0.0
+                    min_charge = _get_table_minimum_charge(st_row)
                     status_v = _normalized_table_status(gid, st_row.get("status"))
                     dirty_at = st_row.get("dirtyAt")
                     clean_started = st_row.get("cleaningStartedAt")
@@ -16715,10 +16712,7 @@ def _restaurant_get_tables_payload(
                 for i, row in enumerate(tbl005_rows, 1):
                     gid = str(row.get("id") or "")
                     st_row = local_state.get(gid.upper(), {})
-                    try:
-                        min_charge = float(st_row.get("minimumCharge") or 0)
-                    except Exception:
-                        min_charge = 0.0
+                    min_charge = _get_table_minimum_charge(st_row)
                     status_v = _normalized_table_status(gid, st_row.get("status"))
                     dirty_at = st_row.get("dirtyAt")
                     clean_started = st_row.get("cleaningStartedAt")
@@ -17246,25 +17240,50 @@ def restaurant_update_table_minimum_charge(table_id: str, body: dict):
     return {"ok": True, "id": tid, "minimumCharge": mc}
 
 
+def _get_table_minimum_charge(st_row: dict | None) -> float:
+    """اقرأ minimumCharge: أولاً من override الطاولة، ثم من الإعدادات الافتراضية."""
+    try:
+        if isinstance(st_row, dict):
+            mc = float(st_row.get("minimumCharge") or 0)
+            if mc > 0:
+                return mc
+    except Exception:
+        pass
+    # fallback: القيمة الافتراضية من الإعدادات
+    try:
+        settings = _settings_load()
+        if isinstance(settings, dict):
+            default_mc = float(str(settings.get("tableDefaultMinimumCharge") or "0").replace(",", "."))
+            return max(0.0, default_mc)
+    except Exception:
+        pass
+    return 0.0
+
+
 def _restaurant_clear_table_minimum_charge_override(table_id: str) -> None:
-    """إزالة الحد الأدنى المخصّص للطاولة ليعود السلوك للافتراضي من الإعدادات."""
+    """إعادة تعيين الحد الأدنى للطاولة إلى القيمة الافتراضية من الإعدادات (عند فتح جلسة جديدة)."""
     tid = str(table_id or "").strip()
     if not tid:
         return
+    default_mc = _get_table_minimum_charge(None)
     data = _restaurant_load("tables", [])
     if not isinstance(data, list):
         data = []
     changed = False
+    found = False
     for t in data:
         if not isinstance(t, dict):
             continue
         if str(t.get("id") or "").strip().upper() != tid.upper():
             continue
-        if "minimumCharge" in t or "minimumChargeUpdatedAt" in t:
-            t.pop("minimumCharge", None)
-            t.pop("minimumChargeUpdatedAt", None)
-            changed = True
+        found = True
+        t["minimumCharge"] = default_mc
+        t["minimumChargeUpdatedAt"] = datetime.now().isoformat()
+        changed = True
         break
+    if not found:
+        data.append({"id": tid, "minimumCharge": default_mc, "minimumChargeUpdatedAt": datetime.now().isoformat()})
+        changed = True
     if changed:
         _restaurant_save("tables", data)
 
@@ -17450,6 +17469,47 @@ def _restaurant_force_reset_table(table_id: str, *, reason: str = "", actor: Opt
         "completedSessionIds": completed_session_ids,
         "cancelledOrderCount": cancelled_order_count,
         "cancelledLineCount": cancelled_line_count,
+    }
+
+
+@app.post("/api/restaurant/tables/{table_id}/reset")
+def restaurant_force_reset_table(table_id: str, body: dict):
+    """Reset للطاولة على مستوى table_id حتى لو لم تعد هناك جلسة نشطة ظاهرة."""
+    if not isinstance(body, dict):
+        body = {}
+    _terminal_require_user(body.get("mat3amActor"))
+    actor = _mat3am_actor_from_body(body)
+    if not str(actor.get("id") or "").strip():
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    if str(actor.get("role") or "").strip().lower() not in ("manager", "developer"):
+        raise HTTPException(status_code=403, detail="Reset للطاولة للمدير أو المطوّر فقط.")
+    tid = str(table_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="tableId مطلوب")
+    reason = str(body.get("reason") or "").strip()
+    now_iso = datetime.now().isoformat()
+    reset_result = _restaurant_force_reset_table(tid, reason=reason, actor=actor)
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "table_force_reset",
+            "sessionId": None,
+            "tableId": tid,
+            "reason": reason,
+            "actorId": str(actor.get("id") or ""),
+            "actorRole": str(actor.get("role") or ""),
+            "cancelledOrderCount": int(reset_result.get("cancelledOrderCount") or 0),
+            "cancelledLineCount": int(reset_result.get("cancelledLineCount") or 0),
+            "completedSessionIds": reset_result.get("completedSessionIds") or [],
+        }
+    )
+    return {
+        "ok": True,
+        "action": "reset_table",
+        "table": reset_result.get("table"),
+        "completedSessionIds": reset_result.get("completedSessionIds") or [],
+        "cancelledOrderCount": int(reset_result.get("cancelledOrderCount") or 0),
+        "cancelledLineCount": int(reset_result.get("cancelledLineCount") or 0),
     }
 
 
@@ -19311,12 +19371,7 @@ def restaurant_cashier_table_overview():
             if dt_bill:
                 bill_age = max(0, int((datetime.now() - dt_bill).total_seconds() // 60))
         st_row = local_state.get(tid.strip().upper()) if tid else None
-        minimum_charge = 0.0
-        try:
-            if isinstance(st_row, dict):
-                minimum_charge = max(0.0, float(st_row.get("minimumCharge") or 0))
-        except (TypeError, ValueError):
-            minimum_charge = 0.0
+        minimum_charge = _get_table_minimum_charge(st_row)
         minimum_gap = max(0.0, round(minimum_charge - round(subtotal, 2), 2)) if minimum_charge > 0 else 0.0
         items_out.append(
             {
