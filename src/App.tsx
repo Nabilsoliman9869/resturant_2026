@@ -42,6 +42,9 @@ import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
 import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
 import RoleScheduleSettingsPage from "./pages/settings/RoleScheduleSettingsPage";
 import RestaurantOpsSettingsPage from "./pages/settings/RestaurantOpsSettingsPage";
+import KitchenOpsSettingsPage from "./pages/settings/KitchenOpsSettingsPage";
+import AuditComplianceSettingsPage from "./pages/settings/AuditComplianceSettingsPage";
+import VipOwnerSettingsPage from "./pages/settings/VipOwnerSettingsPage";
 import PosVenueSettingsPage from "./pages/settings/PosVenueSettingsPage";
 import PosKdsSettingsPage from "./pages/settings/PosKdsSettingsPage";
 import KdsPrepTimesSettingsPage from "./pages/settings/KdsPrepTimesSettingsPage";
@@ -169,6 +172,9 @@ export default function App() {
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
           <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
           <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="kitchen-detail" element={<KitchenOpsSettingsPage />} />
+          <Route path="audit-compliance" element={<AuditComplianceSettingsPage />} />
+          <Route path="vip-owner" element={<VipOwnerSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
@@ -317,6 +323,9 @@ export default function App() {
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
           <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
           <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="kitchen-detail" element={<KitchenOpsSettingsPage />} />
+          <Route path="audit-compliance" element={<AuditComplianceSettingsPage />} />
+          <Route path="vip-owner" element={<VipOwnerSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiBase } from "../../lib/apiBase";
 import SmartProductSearch from "../../components/SmartProductSearch";
+import SettingRow from "../../components/SettingRow";
 import {
   WORKFLOW_ROLE_OPTIONS,
   WORKFLOW_SETTINGS_DEFAULTS,
@@ -475,45 +476,33 @@ export default function RestaurantOpsSettingsPage() {
 
       <h3 style={{ marginTop: "1.25rem", marginBottom: "0.5rem", fontSize: "1.05rem" }}>دورة العمل ومسارات الأدوار</h3>
       <div className="grid-2">
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>من يستقبل العميل عند الدخول</h4>
+        <SettingRow label="من يستقبل العميل عند الدخول" tooltip="يُحدّد أي دور يستقبل العميل عند وصوله. يؤثر على شاشة الاستقبال وتوزيع المهام.">
           <select value={s.receiveGuestBy} onChange={(e) => setS((x) => ({ ...x, receiveGuestBy: e.target.value }))} style={{ width: "100%" }}>
             {WORKFLOW_ROLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>من يأخذ طلبات العميل</h4>
+        <SettingRow label="من يأخذ طلبات العميل" tooltip="يُحدّد من يُسجّل الطلبات على الطاولة. يؤثر على شاشة POS للجرسون.">
           <select value={s.takeOrderBy} onChange={(e) => setS((x) => ({ ...x, takeOrderBy: e.target.value }))} style={{ width: "100%" }}>
             {WORKFLOW_ROLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>قفل الطاولة على كابتن واحد (جرسون الطلبات)</h4>
+        <SettingRow label="قفل الطاولة على كابتن واحد" tooltip="عند التفعيل: يُقبل إرسال الطلبات وطلب الحساب فقط من مستخدم «تسكين كابتن» أو المدير. يمنع تداخل الجرسون على نفس الطاولة.">
           <p style={{ marginTop: 0, fontSize: "0.85rem", color: "var(--muted)" }}>
             عند التفعيل: يُقبل إرسال الطلبات وطلب الحساب فقط من مستخدم «تسكين كابتن» أو المدير/المطوّر.
           </p>
-          <select
-            value={s.orderTakerExclusiveTable}
-            onChange={(e) => setS((x) => ({ ...x, orderTakerExclusiveTable: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.orderTakerExclusiveTable} onChange={(e) => setS((x) => ({ ...x, orderTakerExclusiveTable: e.target.value }))} style={{ width: "100%" }}>
             <option value="off">لا — أي جرسون طلبات يعمل على الطاولة</option>
             <option value="on">نعم — قفل حتى تقفيل الحساب (مع استثناء المدير)</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>من يستلم من المطبخ ويوصل للطاولات</h4>
+        <SettingRow label="من يستلم من المطبخ ويوصل للطاولات" tooltip="يُحدّد من يتولى توصيل الطلبات الجاهزة من المطبخ للطاولات.">
           <select value={s.deliverFromKitchenBy} onChange={(e) => setS((x) => ({ ...x, deliverFromKitchenBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="server">جرسون مناولة</option>
             <option value="waiter">نفس جرسون الطلبات</option>
@@ -521,88 +510,72 @@ export default function RestaurantOpsSettingsPage() {
             <option value="host">جرسون الاستقبال</option>
             <option value="kitchen_window">استلام مباشر من نافذة الشيف</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>دور التنظيف (تنفيذ)</h4>
-          <select
-            value={s.cleaningExecutionBy}
-            onChange={(e) => setS((x) => ({ ...x, cleaningExecutionBy: e.target.value, cleanTableBy: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+        <SettingRow label="دور التنظيف (تنفيذ)" tooltip="من يقوم بتنظيف الطاولة فعلياً بعد انتهاء الجلسة.">
+          <select value={s.cleaningExecutionBy} onChange={(e) => setS((x) => ({ ...x, cleaningExecutionBy: e.target.value, cleanTableBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="server">جرسون مناولة</option>
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
             <option value="cleaner">عامل النظافة</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>من ينفذ طلب الشيك</h4>
+        <SettingRow label="من ينفذ طلب الشيك" tooltip="من يحق له طباعة أو إرسال طلب الحساب للكاشير.">
           <select value={s.checkRequestBy} onChange={(e) => setS((x) => ({ ...x, checkRequestBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
             <option value="cashier">الكاشير</option>
             <option value="server">جرسون المناولة</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>عند استدعاء الكاشير</h4>
+        <SettingRow label="عند استدعاء الكاشير" tooltip="ما يحدث عندما يضغط الجرسون على زر 'استدعاء كاشير'.">
           <select value={s.cashierDispatchMode} onChange={(e) => setS((x) => ({ ...x, cashierDispatchMode: e.target.value }))} style={{ width: "100%" }}>
             <option value="visa_machine">إرسال ماكينة الفيزا</option>
             <option value="cash_collector">إرسال مندوب تحصيل كاش</option>
             <option value="both">الاثنين معًا</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>متى يبدأ التنظيف تلقائياً</h4>
+        <SettingRow label="متى يبدأ التنظيف تلقائياً" tooltip="الحدث الذي يُشغّل تغيير حالة الطاولة إلى 'متسخة' أو 'قيد التنظيف'.">
           <select value={s.cleaningStartTrigger} onChange={(e) => setS((x) => ({ ...x, cleaningStartTrigger: e.target.value }))} style={{ width: "100%" }}>
             <option value="request_check">عند طلب الحساب</option>
             <option value="payment_completed">عند إتمام الدفع</option>
             <option value="manager_command">بأمر مباشر من المدير</option>
             <option value="waiter_command">بأمر مباشر من جرسون الطلبات</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>من ينفذ التنظيف</h4>
-          <select
-            value={s.cleaningExecutionBy}
-            onChange={(e) => setS((x) => ({ ...x, cleaningExecutionBy: e.target.value, cleanTableBy: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+        <SettingRow label="من ينفذ التنظيف" tooltip="نفس 'دور التنظيف' — من يقوم بالتنظيف الفعلي.">
+          <select value={s.cleaningExecutionBy} onChange={(e) => setS((x) => ({ ...x, cleaningExecutionBy: e.target.value, cleanTableBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="server">جرسون المناولة</option>
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
             <option value="cleaner">عامل النظافة</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>مراجعة/اعتماد التنظيف</h4>
+        <SettingRow label="مراجعة/اعتماد التنظيف" tooltip="من يُحقّق من أن الطاولة نظيفة قبل تغيير حالتها إلى 'جاهزة'.">
           <select value={s.cleaningReviewBy} onChange={(e) => setS((x) => ({ ...x, cleaningReviewBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="none">بدون مراجعة</option>
             <option value="manager">المدير</option>
             <option value="waiter">جرسون الطلبات</option>
             <option value="cleaner">عامل النظافة</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>عند بدء التنظيف تتحول الطاولة إلى</h4>
+        <SettingRow label="عند بدء التنظيف تتحول الطاولة إلى" tooltip="الحالة التي تنتقل إليها الطاولة فوراً عند بدء التنظيف.">
           <select value={s.cleaningStartStatus} onChange={(e) => setS((x) => ({ ...x, cleaningStartStatus: e.target.value }))} style={{ width: "100%" }}>
             <option value="dirty">متسخة (تحتاج بدء تنظيف)</option>
             <option value="cleaning">قيد التنظيف (بدء مباشر)</option>
           </select>
-        </div>
+        </SettingRow>
       </div>
 
       <h3 style={{ marginTop: "1.5rem", marginBottom: "0.5rem", fontSize: "1.05rem" }}>مطبخ، طباعة، VIP، كيدز، تدقيق</h3>
       <div className="grid-2">
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>مخرجات المطبخ</h4>
+        <SettingRow label="مخرجات المطبخ" tooltip="كيف يُعرض الطلبات في المطبخ: شاشات KDS أو طابعات أو كلاهما. يؤثر على شاشة الطباخ فقط.">
           <label style={{ display: "block", fontWeight: 700, marginBottom: 4 }}>الوضع</label>
           <select value={s.kitchenOutputMode} onChange={(e) => setS((x) => ({ ...x, kitchenOutputMode: e.target.value }))} style={{ width: "100%" }}>
             <option value="screens">شاشات فقط (KDS)</option>
@@ -610,11 +583,7 @@ export default function RestaurantOpsSettingsPage() {
             <option value="both">شاشات + طابعات</option>
           </select>
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>لوحة التحضير</label>
-          <select
-            value={s.kitchenPrepBoardLayout}
-            onChange={(e) => setS((x) => ({ ...x, kitchenPrepBoardLayout: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.kitchenPrepBoardLayout} onChange={(e) => setS((x) => ({ ...x, kitchenPrepBoardLayout: e.target.value }))} style={{ width: "100%" }}>
             <option value="per_station">شاشة/قائمة لكل محطة أو شيف</option>
             <option value="expeditor_single">شاشة واحدة لمدير المطبخ / الفرشجي</option>
           </select>
@@ -626,10 +595,15 @@ export default function RestaurantOpsSettingsPage() {
           <p style={{ marginTop: 8, marginBottom: 0, fontSize: "0.85rem", color: "var(--muted)" }}>
             عند اختيار <strong>نظام الشيف المختص</strong> تبقى شاشة مدير المطبخ العامة كما هي، ويُفعَّل معها تعريف الشيفات المختصين وأصناف كل شيف من هذه الصفحة.
           </p>
-        </div>
+        </SettingRow>
 
         <div className="card" style={{ gridColumn: "1 / -1" }}>
-          <h4 style={{ marginTop: 0 }}>نظام الشيف المختص</h4>
+          <div className="setting-card-header">
+            <h4 style={{ marginTop: 0 }}>نظام الشيف المختص</h4>
+            <SettingTooltip title="نظام الشيف المختص">
+              يقسم المطبخ إلى محطات متخصصة (مثل شواء، معجنات، سلطة)، كل محطة مسؤولة عن أصناف محددة. يتطلب تعريف المحطات وربط الأصناف بها.
+            </SettingTooltip>
+          </div>
           <div
             style={{
               marginBottom: 10,
@@ -796,42 +770,25 @@ export default function RestaurantOpsSettingsPage() {
           </details>
         </div>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>طباعة المطبخ</h4>
+        <SettingRow label="طباعة المطبخ" tooltip="إعدادات طباعة تذاكر المطبخ. يتطلب توصيل طابعة محلية أو شبكية.">
           <label style={{ display: "block", fontWeight: 700, marginBottom: 4 }}>نمط التذكرة</label>
-          <select
-            value={s.kitchenPrintTicketMode}
-            onChange={(e) => setS((x) => ({ ...x, kitchenPrintTicketMode: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.kitchenPrintTicketMode} onChange={(e) => setS((x) => ({ ...x, kitchenPrintTicketMode: e.target.value }))} style={{ width: "100%" }}>
             <option value="batch_only">ما يُرسل في هذه الدفعة فقط</option>
             <option value="aggregated_summary">ملخص مُجمَّع (مثل شريط المطبخ)</option>
             <option value="delta_net">صافي «مزيلة» (مطلوب − منفّذ + الحالي)</option>
           </select>
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>طباعة بديل عن شريحة الطاولة</label>
-          <select
-            value={s.kitchenPrintShowTableChip}
-            onChange={(e) => setS((x) => ({ ...x, kitchenPrintShowTableChip: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.kitchenPrintShowTableChip} onChange={(e) => setS((x) => ({ ...x, kitchenPrintShowTableChip: e.target.value }))} style={{ width: "100%" }}>
             <option value="on">نعم</option>
             <option value="off">لا</option>
           </select>
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>تلميح جهاز الطابعة (اختياري)</label>
-          <input
-            value={s.kitchenPrinterDeviceHint}
-            onChange={(e) => setS((x) => ({ ...x, kitchenPrinterDeviceHint: e.target.value }))}
-            style={{ width: "100%" }}
-            placeholder="اسم الطابعة أو المسار — للربط لاحقاً"
-          />
-          <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} onClick={() => void testPrinter()}>
-            اختبار توصيل الطابعة (مهيأ)
-          </button>
+          <input value={s.kitchenPrinterDeviceHint} onChange={(e) => setS((x) => ({ ...x, kitchenPrinterDeviceHint: e.target.value }))} style={{ width: "100%" }} placeholder="اسم الطابعة أو المسار — للربط لاحقاً" />
+          <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} onClick={() => void testPrinter()}>اختبار توصيل الطابعة (مهيأ)</button>
           {printerMsg ? <p style={{ marginTop: 8, fontSize: "0.85rem" }}>{printerMsg}</p> : null}
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>طاولة المالك / VIP (افتراضيات المدير)</h4>
+        <SettingRow label="طاولة المالك / VIP (افتراضيات المدير)" tooltip="الإعدادات الافتراضية للجلسات على طاولات VIP (VIP 1…5). يمكن للمدير تعديلها يدوياً من شاشة الطلب.">
           <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: 0 }}>
             تُطبَّق تلقائياً على الجلسات التي تُفتح على طاولات <strong>VIP 1…5</strong> (معرفات ثابتة في البيانات الافتراضية والمخطط). يمكن للمدير تعديلها يدوياً من شاشة الطلب إن لزم.
           </p>
@@ -846,78 +803,45 @@ export default function RestaurantOpsSettingsPage() {
             <option value="on">نعم</option>
           </select>
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>خصم افتراضي %</label>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.5}
-            value={s.specialTableDefaultDiscountPct}
-            onChange={(e) => setS((x) => ({ ...x, specialTableDefaultDiscountPct: e.target.value }))}
-            style={{ width: "100%" }}
-          />
+          <input type="number" min={0} max={100} step={0.5} value={s.specialTableDefaultDiscountPct} onChange={(e) => setS((x) => ({ ...x, specialTableDefaultDiscountPct: e.target.value }))} style={{ width: "100%" }} />
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>تسعير المالك (طريقة قراءة الأسعار)</label>
-          <select
-            value={s.specialTableDefaultPriceMode}
-            onChange={(e) => setS((x) => ({ ...x, specialTableDefaultPriceMode: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.specialTableDefaultPriceMode} onChange={(e) => setS((x) => ({ ...x, specialTableDefaultPriceMode: e.target.value }))} style={{ width: "100%" }}>
             <option value="menu">سعر المنيو (الافتراضي)</option>
             <option value="cost_plus">سعر التكلفة + نسبة</option>
           </select>
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>نسبة فوق التكلفة % (عند اختيار تكلفة + نسبة)</label>
-          <input
-            type="number"
-            min={0}
-            max={400}
-            step={0.5}
-            value={s.specialTableDefaultCostMarkupPct}
-            disabled={String(s.specialTableDefaultPriceMode || "").toLowerCase() !== "cost_plus"}
-            onChange={(e) => setS((x) => ({ ...x, specialTableDefaultCostMarkupPct: e.target.value }))}
-            style={{ width: "100%" }}
-            placeholder="مثال: 10 يعني تكلفة + 10%"
-          />
-        </div>
+          <input type="number" min={0} max={400} step={0.5} value={s.specialTableDefaultCostMarkupPct} disabled={String(s.specialTableDefaultPriceMode || "").toLowerCase() !== "cost_plus"} onChange={(e) => setS((x) => ({ ...x, specialTableDefaultCostMarkupPct: e.target.value }))} style={{ width: "100%" }} placeholder="مثال: 10 يعني تكلفة + 10%" />
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>عملاء owners&vip (TBL015 → TBL016)</h4>
+        <SettingRow label="عملاء owners&vip (TBL015 → TBL016)" tooltip="قائمة العملاء (المالكين والشخصيات المهمة) التي تظهر في دروب داون طاولة VIP.">
           <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: 0 }}>
             هذه هي <strong>مصدر الدروب داون</strong> في شرائح الطاولات. لو أدخلت مجموعة في <code>TBL015</code> لكن لم تنشئ عملاء في <code>TBL016</code>{" "}
             فلن يظهر شيء في Owner/VIP داخل الشريحة.
           </p>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              value={ownersVipAgentNameDraft}
-              onChange={(e) => setOwnersVipAgentNameDraft(e.target.value)}
-              style={{ width: "100%" }}
-              placeholder="اسم عميل مالك/شخص مهم…"
-            />
-            <button type="button" className="btn btn-primary" disabled={ownersVipAgentBusy || !ownersVipAgentNameDraft.trim()} onClick={() => void createOwnersVipAgent()}>
-              إضافة
-            </button>
-            <button type="button" className="btn btn-ghost" disabled={ownersVipAgentBusy} onClick={() => void loadOwnersVipAgents()}>
-              تحديث
-            </button>
+            <input value={ownersVipAgentNameDraft} onChange={(e) => setOwnersVipAgentNameDraft(e.target.value)} style={{ width: "100%" }} placeholder="اسم عميل مالك/شخص مهم…" />
+            <button type="button" className="btn btn-primary" disabled={ownersVipAgentBusy || !ownersVipAgentNameDraft.trim()} onClick={() => void createOwnersVipAgent()}>إضافة</button>
+            <button type="button" className="btn btn-ghost" disabled={ownersVipAgentBusy} onClick={() => void loadOwnersVipAgents()}>تحديث</button>
           </div>
           {ownersVipAgentMsg ? <p style={{ marginTop: 8, fontSize: "0.85rem" }}>{ownersVipAgentMsg}</p> : null}
-          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--muted)" }}>
-            GroupGuide: <code>{ownersVipGroupGuide || "غير موجود"}</code> — العدد: <strong>{ownersVipAgents.length}</strong>
-          </div>
+          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--muted)" }}>GroupGuide: <code>{ownersVipGroupGuide || "غير موجود"}</code> — العدد: <strong>{ownersVipAgents.length}</strong></div>
           <div style={{ marginTop: 8, maxHeight: 160, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
-            {ownersVipAgents.length ? (
-              ownersVipAgents.map((a) => (
-                <div key={a.CardGuide} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <span>{a.AgentName}</span>
-                  <code style={{ opacity: 0.7 }}>{a.CardGuide}</code>
-                </div>
-              ))
-            ) : (
-              <div style={{ color: "var(--muted)" }}>لا يوجد عملاء في مجموعة owners&vip حالياً.</div>
-            )}
+            {ownersVipAgents.length ? ownersVipAgents.map((a) => (
+              <div key={a.CardGuide} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <span>{a.AgentName}</span>
+                <code style={{ opacity: 0.7 }}>{a.CardGuide}</code>
+              </div>
+            )) : <div style={{ color: "var(--muted)" }}>لا يوجد عملاء في مجموعة owners&vip حالياً.</div>}
           </div>
-        </div>
+        </SettingRow>
 
         <div className="card">
-          <h4 style={{ marginTop: 0 }}>قوالب Owner/VIP (تغذي شرائح الطاولات)</h4>
+          <div className="setting-card-header">
+            <h4 style={{ marginTop: 0 }}>قوالب Owner/VIP (تغذي شرائح الطاولات)</h4>
+            <SettingTooltip title="قوالب Owner/VIP">
+              قوالب جاهزة لطاولات المالكين والشخصيات المهمة. كل قالب يربط الجلسة بعميل محدد مع سياسة خصم/ضريبة/خدمة.
+            </SettingTooltip>
+          </div>
           <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: 0 }}>
             القالب هو “اسم + عميل من <code>TBL016</code>” مع سياسة خصم/بدون ضريبة/بدون خدمة. القالب يظهر في دروب داون الشريحة، وعند تطبيقه تُربَط الجلسة بهذا العميل.
           </p>
@@ -1101,8 +1025,7 @@ export default function RestaurantOpsSettingsPage() {
           </details>
         </div>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>الوردية وجدولة الأدوار</h4>
+        <SettingRow label="الوردية وجدولة الأدوار" tooltip="إلزام وجود جدولة يومية للموظف قبل السماح له بتسجيل الدخول. يمنع الدخول العشوائي.">
           <p style={{ marginTop: 0, color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.45 }}>
             عند التفعيل، لا يُسمح بتسجيل الدخول لأدوار الصالة (جرسون الطلبات، الاستقبال، المناولة، الطلبات السريعة) إلا إذا وُجد لهذا المستخدم{" "}
             <strong>صف في «جدولة أدوار المستخدمين»</strong> يغطي تاريخ اليوم. وإلا تظهر رسالة: «أنت لست ضمن فريق العمل اليوم».
@@ -1110,51 +1033,34 @@ export default function RestaurantOpsSettingsPage() {
             <span style={{ color: "#0f766e", fontWeight: 700 }}>بعد «حفظ الكل» يكفي طلب تسجيل دخول جديد</span> — يُقرأ الإعداد من الملف مباشرة دون إعادة تشغيل الخادم (مع الدمج مع قاعدة البيانات).
           </p>
           <label style={{ display: "block", fontWeight: 700, marginBottom: 4 }}>إلزام وجود جدولة لليوم قبل الدخول</label>
-          <select
-            value={s.enforceRoleScheduleForShift}
-            onChange={(e) => setS((x) => ({ ...x, enforceRoleScheduleForShift: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.enforceRoleScheduleForShift} onChange={(e) => setS((x) => ({ ...x, enforceRoleScheduleForShift: e.target.value }))} style={{ width: "100%" }}>
             <option value="off">معطّل (الافتراضي)</option>
             <option value="on">مفعّل</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>Kids Area</h4>
+        <SettingRow label="Kids Area" tooltip="إعدادات منطقة الأطفال. التذاكر المنفصلة تعني أن أطفال المنطقة لا تُحسب على حساب الطاولة.">
           <label style={{ display: "block", fontWeight: 700, marginBottom: 4 }}>تذاكر منفصلة عن الطاولات</label>
           <select value={s.kidsAreaSeparateTickets} onChange={(e) => setS((x) => ({ ...x, kidsAreaSeparateTickets: e.target.value }))} style={{ width: "100%" }}>
             <option value="on">نعم</option>
             <option value="off">لا</option>
           </select>
-        </div>
+        </SettingRow>
 
-        <div className="card">
-          <h4 style={{ marginTop: 0 }}>التدقيق والقنوات</h4>
+        <SettingRow label="التدقيق والقنوات" tooltip="إعدادات التدقيق والقنوات. ملاحظة: 'احتفاظ السجلات' و'تسجيل أحداث الواجهة' مستقبليان — لا يوجد حذف تلقائي حالياً. 'سياسة الدليفري' تذكير — التنفيذ المالي لاحقاً.">
           <label style={{ display: "block", fontWeight: 700, marginBottom: 4 }}>احتفاظ سجلات (يوماً)</label>
-          <input
-            type="number"
-            min={7}
-            max={3650}
-            value={s.auditRetentionDays}
-            onChange={(e) => setS((x) => ({ ...x, auditRetentionDays: e.target.value }))}
-            style={{ width: "100%" }}
-          />
+          <input type="number" min={7} max={3650} value={s.auditRetentionDays} onChange={(e) => setS((x) => ({ ...x, auditRetentionDays: e.target.value }))} style={{ width: "100%" }} />
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>تسجيل أحداث الواجهة</label>
           <select value={s.auditLogClientActions} onChange={(e) => setS((x) => ({ ...x, auditLogClientActions: e.target.value }))} style={{ width: "100%" }}>
             <option value="on">مفعّل</option>
             <option value="off">معطّل</option>
           </select>
           <label style={{ display: "block", fontWeight: 700, marginTop: 10, marginBottom: 4 }}>سياسة ذمّة الدليفري/المواقع (تذكير)</label>
-          <select
-            value={s.deliveryChannelStrictFinancialModes}
-            onChange={(e) => setS((x) => ({ ...x, deliveryChannelStrictFinancialModes: e.target.value }))}
-            style={{ width: "100%" }}
-          >
+          <select value={s.deliveryChannelStrictFinancialModes} onChange={(e) => setS((x) => ({ ...x, deliveryChannelStrictFinancialModes: e.target.value }))} style={{ width: "100%" }}>
             <option value="on">تمييز مسارات مالية صارم (موصى به)</option>
             <option value="off">مرن — للمطاعم التي لا تفرّق بعد</option>
           </select>
-        </div>
+        </SettingRow>
       </div>
 
       <div style={{ marginTop: 12, display: "flex", gap: 8 }}>

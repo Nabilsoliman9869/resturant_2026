@@ -319,6 +319,11 @@ export function AppShell({ role }: { role: RoleId }) {
           >
             <div className="app-shell__aside-head">
               <div className="app-shell__aside-brand">
+                <img
+                  src="/app-logo.png"
+                  alt="SIR RESTO"
+                  className="app-shell__brand-logo"
+                />
                 <div
                   style={{
                     fontFamily: "var(--font)",
@@ -374,6 +379,9 @@ export function AppShell({ role }: { role: RoleId }) {
           data-order-taker-shell={isOrderTakerFullscreen ? "1" : "0"}
           style={isOrderTakerFullscreen ? { padding: "0" } : { padding: "1.5rem" }}
         >
+          <div className="app-shell__fixed-logo" aria-hidden="true">
+            <img src="/app-logo.png" alt="" className="app-shell__fixed-logo-img" />
+          </div>
           {isOrderTakerFullscreen ? null : (
             <div style={{ padding: "0.45rem 0.75rem", borderBottom: "1px solid var(--border)" }}>
               <DbConnectionBar compact />

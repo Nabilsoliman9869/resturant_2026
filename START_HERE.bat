@@ -6,6 +6,18 @@ echo   Mat3amPOS - تثبيت وتشغيل تلقائي
 echo ====================================
 echo.
 
+if exist "%~dp0Mat3amPOS_Setup.exe" (
+    echo [*] تشغيل Setup EXE...
+    "%~dp0Mat3amPOS_Setup.exe"
+    exit /b %errorlevel%
+)
+
+if exist "%~dp0run_setup_odbc_and_install.bat" (
+    echo [*] تشغيل launcher الاحتياطي...
+    call "%~dp0run_setup_odbc_and_install.bat"
+    exit /b %errorlevel%
+)
+
 :: التحقق من وجود ODBC
 powershell -Command "try { $d = Get-OdbcDriver -Name '*ODBC*17*SQL*' -Platform 64bit; if (-not $d) { $d = Get-OdbcDriver -Name '*ODBC*18*SQL*' -Platform 64bit } if ($d) { exit 0 } else { exit 1 } } catch { exit 1 }"
 if %errorlevel%==0 goto RUN_APP
@@ -23,6 +35,11 @@ if not exist "%TEMP%\msodbcsql18.msi" (
 
 echo [*] جاري التثبيت...
 msiexec /i "%TEMP%\msodbcsql18.msi" /quiet /norestart >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [X] فشل تثبيت ODBC - شغّل الملف كمسؤول Administrator
+    pause
+    exit /b 1
+)
 del "%TEMP%\msodbcsql18.msi" 2>nul
 echo [OK] تم تثبيت ODBC Driver
 echo.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { getApiBase } from "../../lib/apiBase";
+import SettingRow from "../../components/SettingRow";
 
 export default function MinimumChargeSettingsPage() {
   const base = getApiBase();
@@ -50,12 +51,14 @@ export default function MinimumChargeSettingsPage() {
 
   return (
     <div style={{ maxWidth: 560 }}>
-      <h2 style={{ marginTop: 0 }}>الميني موم تشارج</h2>
+      <h2 style={{ marginTop: 0 }}>الحد الأدنى للطاولة</h2>
       <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
         هذه هي القيمة الافتراضية لحد الطاولة الأدنى. يمكن للمدير تعديلها أو جعلها صفرًا.
       </p>
-      <div className="card">
-        <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>minimum charge الافتراضي</label>
+      <SettingRow
+        label="minimum charge الافتراضي"
+        tooltip="الحد الأدنى الذي يجب أن يصل إليه حساب الطاولة. يظهر للجرسون ويُحسب في الضريبة والخدمة. يمكن تعديله لكل طاولة من شاشة POS."
+      >
         <input
           type="number"
           min={0}
@@ -68,7 +71,7 @@ export default function MinimumChargeSettingsPage() {
         {!canEdit ? (
           <div style={{ marginTop: 8, fontSize: "0.84rem", color: "#b45309" }}>التعديل متاح للمدير فقط.</div>
         ) : null}
-      </div>
+      </SettingRow>
       <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
         <button type="button" className="btn btn-primary" disabled={!canEdit || busy} onClick={() => void save()}>
           حفظ

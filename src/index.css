@@ -271,3 +271,65 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
 }
+
+/* ===== SettingTooltip ===== */
+.setting-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  margin-inline-start: 6px;
+}
+.setting-tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--surface2);
+  color: var(--accent2);
+  border: 1px solid var(--border);
+  line-height: 1;
+}
+.setting-tooltip-popup {
+  position: absolute;
+  inset-inline-start: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 999;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  font-size: 0.82rem;
+  color: var(--text);
+  line-height: 1.55;
+  direction: rtl;
+  text-align: right;
+  white-space: normal;
+  word-break: break-word;
+}
+.setting-tooltip-popup::before {
+  content: "";
+  position: absolute;
+  inset-inline-end: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 6px solid transparent;
+  border-inline-start-color: var(--surface2);
+}
+
+/* ===== SettingCard with tooltip row ===== */
+.setting-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}

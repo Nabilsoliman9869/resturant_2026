@@ -95,6 +95,7 @@ export default function WaiterTablesPage() {
   const [vipBusySessionId, setVipBusySessionId] = useState<string>("");
   const [captainTransferBusySessionId, setCaptainTransferBusySessionId] = useState<string>("");
   const [noOrderBusySessionId, setNoOrderBusySessionId] = useState<string>("");
+  const [tableResetBusyId, setTableResetBusyId] = useState<string>("");
   const [tableJumpQuery, setTableJumpQuery] = useState("");
   const [tableJumpHighlightId, setTableJumpHighlightId] = useState<string | null>(null);
   const tableCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -698,12 +699,43 @@ export default function WaiterTablesPage() {
     await applyNoOrderWatchAction(sessionId, "reset_ready");
   }
 
-  async function resetTableSession(sessionId: string) {
+  async function resetTableByTableId(tableId: string) {
+    const tid = String(tableId || "").trim();
+    if (!tid) return;
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
     const reason =
       window.prompt("سبب Reset للطاولة (تنظيف كامل للجلسة والطلبات المفتوحة على الطاولة):", "تنظيف كامل للطاولة") || "";
     const txt = reason.trim();
     if (!txt) return;
-    await applyNoOrderWatchAction(sessionId, "reset_table", txt);
+    setTableResetBusyId(tid);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/tables/${encodeURIComponent(tid)}/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: txt,
+          mat3amActor: actor,
+        }),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم تنفيذ Reset للطاولة وتنظيف حالتها بالكامل.");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setTableResetBusyId("");
+    }
   }
 
   async function submitReassignCaptain() {
@@ -1077,6 +1109,10 @@ export default function WaiterTablesPage() {
             const alertBusy = Boolean(alertBusyByTable[String(t.id)]);
             const canEditMin = user?.role === "manager" || user?.role === "developer";
             const billAgeMinutes = diffMinutesFromIso(sessRow?.billingRequestedAt || undefined);
+            const canForceResetTable = Boolean(
+              (user?.role === "manager" || user?.role === "developer") &&
+              (tStatus === "occupied" || sidStr || money.orderCount > 0 || billReq),
+            );
             const noOrderWatchActive = Boolean(
               sidStr && money.orderCount === 0 && (noOrderMinutes >= 10 || snoozeActive || watchStage),
             );
@@ -1241,6 +1277,25 @@ export default function WaiterTablesPage() {
 
                   </div>
 
+                  {canForceResetTable ? (
+                    <div
+                      className="waiter-tblcard__spec-alert"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}
+                    >
+                      <button
+                        type="button"
+                        className="waiter-tblcard__send"
+                        disabled={tableResetBusyId === String(t.id)}
+                        onClick={() => void resetTableByTableId(String(t.id))}
+                        title="Reset للطاولة: تنظيف كامل للجلسات والطلبات المفتوحة وإرجاع الطاولة إلى جاهزة حتى لو لم تعد هناك جلسة نشطة"
+                        style={{ background: "rgba(244,114,182,0.16)", borderColor: "rgba(244,114,182,0.45)", color: "#fbcfe8" }}
+                      >
+                        {tableResetBusyId === String(t.id) ? "…" : "Reset للطاولة"}
+                      </button>
+                    </div>
+                  ) : null}
+
                   {sidStr && noOrderWatchActive ? (
                     <div
                       className="waiter-tblcard__spec-alert"
@@ -1268,18 +1323,6 @@ export default function WaiterTablesPage() {
                           style={{ background: "rgba(16,185,129,0.18)", borderColor: "rgba(16,185,129,0.55)", color: "#d1fae5" }}
                         >
                           {noOrderBusySessionId === sidStr ? "…" : "إلغاء التسكين"}
-                        </button>
-                      ) : null}
-                      {(user?.role === "manager" || user?.role === "developer") ? (
-                        <button
-                          type="button"
-                          className="waiter-tblcard__send"
-                          disabled={noOrderBusySessionId === sidStr}
-                          onClick={() => void resetTableSession(sidStr)}
-                          title="Reset للطاولة: تنظيف كامل للجلسات والطلبات المفتوحة وإرجاع الطاولة إلى جاهزة"
-                          style={{ background: "rgba(244,114,182,0.16)", borderColor: "rgba(244,114,182,0.45)", color: "#fbcfe8" }}
-                        >
-                          {noOrderBusySessionId === sidStr ? "…" : "Reset للطاولة"}
                         </button>
                       ) : null}
                       <button

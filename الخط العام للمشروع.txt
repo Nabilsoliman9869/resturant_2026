@@ -781,3 +781,75 @@
     - `backend/api_server.py`
     - `src/pages/WaiterTablesPage.tsx`
   - `npm run build` نجح بعد إضافة الإجراء الجديد
+
+28) تنفيذ جديد — Reset للطاولة صار يعمل على مستوى table_id:
+- بعد تشخيص حالة مثل `T10` ثبت أن المشكلة قد تبقى موجودة حتى عندما لا توجد `session` نشطة ظاهرة، لأن الطاولة قد تحمل طلبات orphan مفتوحة مرتبطة بجلسة أقدم.
+- تم اعتماد endpoint مباشر في `backend/api_server.py`:
+  - `POST /api/restaurant/tables/{table_id}/reset`
+  - بصلاحية `manager / developer` فقط
+  - ويستدعي helper المركزي `_restaurant_force_reset_table(...)`
+- تم تعديل `src/pages/WaiterTablesPage.tsx` بحيث:
+  - لم يعد زر `Reset للطاولة` يعتمد على `sessionId`
+  - ولم يعد محصورًا داخل `no-order watch`
+  - بل صار يظهر على بطاقة الطاولة نفسها للمدير/المطور عندما تكون الطاولة:
+    - `occupied`
+    - أو عليها جلسة نشطة
+    - أو عليها طلبات/مؤشرات تشغيلية تجعل التنظيف الكامل منطقيًا
+- النتيجة المقصودة:
+  - الطاولات العالقة مثل `T10` يمكن تنظيفها مباشرة من الشريحة حتى لو اختفت الجلسة النشطة وبقيت الطلبات المفتوحة القديمة
+  - ويبقى `إلغاء التسكين` مسارًا آمنًا منفصلًا لحالة الجلسة بلا طلبات
+
+29) تنفيذ جديد — اعتماد هوية SIR RESTO في الواجهة و EXE 028:
+- تم اعتماد الصورة:
+  - `E:\XTRA_WEB\مطاعم\SIRRESTO .jpeg`
+  كمصدر هوية جديد للتطبيق.
+- تم تحويل الصورة إلى:
+  - `public/app-logo.png`
+  ثم مزامنتها أيضًا إلى:
+  - `ui/restaurant/app-logo.png`
+  حتى تظهر في شاشة التحميل ورمز الموقع وصورة التطبيق داخل الواجهة.
+- تم تعديل `scripts/prepare_mat3am_exe_build.py` ليعطي أولوية لصورة `SIRRESTO .jpeg` عند توليد:
+  - `assets/mat3am_icon.ico`
+  بدل الاعتماد الحصري على الصورة القديمة.
+- تم تعديل `src/components/AppShell.tsx` و `src/styles/appShell.css` لإظهار اللوجو بشكل ثابت وخفيف:
+  - داخل رأس القائمة الجانبية
+  - وكشارة ثابتة صغيرة على الصفحات دون تعطيل التفاعل
+- بسبب استمرار قفل `ui/restaurant/index.html` في البيئة الحالية، تم بناء الواجهة إلى:
+  - `_pack_ui/restaurant`
+  ثم تغليف EXE باستخدام:
+  - `_Mat3amPOS_pack.spec`
+- تم إنشاء النسخة الجديدة بنجاح:
+  - `dist/Mat3amPOS028.exe`
+- طابع البناء الحالي:
+  - `2026-06-01T20:49:12Z code=M260601-2049-1665E07 git=1665e07`
+
+30) تنفيذ جديد — Launcher مباشر لتثبيت ODBC وتشغيل المُثبت:
+- تم إضافة ملف تشغيل واضح في جذر المشروع:
+  - `run_setup_odbc_and_install.bat`
+- وظيفة هذا الملف:
+  - التحقق من وجود `setup_odbc_and_install.bat`
+  - إعادة تشغيله بصلاحية Administrator تلقائيًا عند الحاجة
+  - أو استدعاؤه مباشرة إذا كانت الجلسة مرفوعة الصلاحية بالفعل
+- الهدف:
+  - إعطاء المستخدم مدخلًا واضحًا وآمنًا لتشغيل تثبيت ODBC + تثبيت البرنامج دون الحاجة لكتابة أوامر يدويًا
+
+31) تنفيذ جديد — Setup EXE مستقل للتحقق من ODBC وتشغيل البرنامج:
+- تم إنشاء launcher جديد قابل للتغليف في:
+  - `scripts/mat3am_setup_launcher.py`
+- وظيفة هذا الـ launcher:
+  - التحقق من وجود `ODBC Driver 17/18 for SQL Server`
+  - طلب صلاحية Administrator تلقائيًا عند الحاجة
+  - تحميل `ODBC Driver 18` من Microsoft وتثبيته إذا لم يكن موجودًا
+  - تشغيل `Mat3amPOS.exe` بعد نجاح التحقق/التثبيت
+  - استخدام fallback إلى `setup_odbc_and_install.bat` عند فشل المسار الأصلي
+- تم تعديل `START_HERE.bat` بحيث:
+  - يفضّل تشغيل `Mat3amPOS_Setup.exe` إذا كان موجودًا
+  - ثم fallback إلى `run_setup_odbc_and_install.bat`
+  - ثم fallback أخير إلى المنطق القديم داخل BAT نفسه
+- تم إضافة build محلي مستقل:
+  - `build_setup_launcher.bat`
+  - وينتج:
+    - `dist/Mat3amPOS_Setup.exe`
+- تم تحديث `.github/workflows/build-exe.yml` لضم:
+  - بناء `Mat3amPOS_Setup.exe`
+  - وإرفاقه داخل package النهائي مع ملفات التشغيل المساندة
