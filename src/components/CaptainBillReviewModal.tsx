@@ -18,6 +18,7 @@ type CaptainBillReviewModalProps = {
   returnableCount: number;
   printerHint: string;
   lines: CaptainBillReviewLine[];
+  returnedLines?: CaptainBillReviewLine[];
   totals: {
     subtotal: number;
     serviceCharge: number;
@@ -51,6 +52,7 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
     returnableCount,
     printerHint,
     lines,
+    returnedLines,
     totals,
     confirmBusy,
     onClose,
@@ -322,6 +324,45 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
             </div>
           </div>
         </div>
+
+        {returnedLines && returnedLines.length > 0 ? (
+          <div style={{ marginTop: 14, border: "1px solid rgba(239,68,68,0.35)", borderRadius: 12, overflow: "hidden", background: "rgba(239,68,68,0.06)" }}>
+            <div style={{ padding: "10px 12px", fontWeight: 800, borderBottom: "1px solid rgba(239,68,68,0.25)", color: "#ef4444" }}>
+              مرتجعات الطاولة (معتمدة)
+            </div>
+            <div style={{ maxHeight: "24vh", overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem", color: "var(--text)" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid rgba(239,68,68,0.18)", background: "rgba(255,255,255,0.02)" }}>
+                    <th style={{ textAlign: "right", padding: "8px 10px" }}>الصنف</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px", width: 80 }}>كمية مرتجعة</th>
+                    <th style={{ textAlign: "left", padding: "8px 10px", width: 92 }}>سعر</th>
+                    <th style={{ textAlign: "left", padding: "8px 10px", width: 110 }}>إجمالي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {returnedLines.map((ln) => (
+                    <tr key={ln.key} style={{ borderBottom: "1px solid rgba(239,68,68,0.12)" }}>
+                      <td style={{ padding: "8px 10px" }}>
+                        <div style={{ fontWeight: 700 }}>{ln.name}</div>
+                        <div style={{ color: "var(--muted)", fontSize: "0.76rem", marginTop: 2 }}>{ln.statusLabel || "—"}</div>
+                      </td>
+                      <td style={{ textAlign: "center", padding: "8px 10px" }}>
+                        {ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}
+                      </td>
+                      <td style={{ textAlign: "left", padding: "8px 10px" }}>{money(ln.unitPrice)}</td>
+                      <td style={{ textAlign: "left", padding: "8px 10px", fontWeight: 800 }}>{money(ln.lineTotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "8px 12px", display: "flex", justifyContent: "space-between", borderTop: "1px solid rgba(239,68,68,0.18)" }}>
+              <span style={{ fontWeight: 700 }}>إجمالي المرتجعات</span>
+              <span style={{ fontWeight: 800 }}>{money(returnedLines.reduce((s, l) => s + l.lineTotal, 0))}</span>
+            </div>
+          </div>
+        ) : null}
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
           <button type="button" className="btn btn-ghost" onClick={onClose}>

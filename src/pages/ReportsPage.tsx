@@ -283,6 +283,9 @@ export default function ReportsPage() {
         <button type="button" className="btn btn-ghost" onClick={() => void loadCaptainsFlash()}>
           تحديث فلاش ريبورت
         </button>
+        <a className="btn btn-ghost" href="/app/flash-report">
+          فلاش ريبورت مالي عام
+        </a>
       </div>
 
       <div className="card" style={{ marginBottom: "1rem" }}>

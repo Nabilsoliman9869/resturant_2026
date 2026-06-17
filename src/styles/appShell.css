@@ -289,6 +289,19 @@
   flex: 1;
 }
 
+.app-shell__aside-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline-end: 2px;
+}
+
+.app-shell__aside-supplement {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
 .app-shell__brand-logo {
   display: block;
   width: 88px;
@@ -298,6 +311,356 @@
   border-radius: 18px;
   background: rgba(15, 23, 42, 0.35);
   box-shadow: 0 10px 28px rgba(2, 6, 23, 0.28);
+}
+
+.app-shell__brand-title {
+  font-family: var(--font);
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.app-shell__brand-user {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.app-shell__aside-copy {
+  margin-top: auto;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.app-shell__aside--order-taker {
+  width: 248px;
+  background:
+    radial-gradient(circle at top, rgba(14, 165, 233, 0.14), transparent 28%),
+    linear-gradient(180deg, #081221 0%, #09111d 100%);
+  border-inline-start: 1px solid rgba(59, 130, 246, 0.22);
+}
+
+.app-shell__aside--order-taker .app-shell__aside-head {
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.app-shell__aside--order-taker .app-shell__aside-brand {
+  flex: 1 1 auto;
+  padding: 0.65rem 0.7rem;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(8, 15, 29, 0.96) 100%);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.22);
+}
+
+.app-shell__aside--order-taker .app-shell__brand-logo {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 0.35rem;
+}
+
+.app-shell__aside--order-taker .app-shell__brand-title {
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.app-shell__aside--order-taker .app-shell__brand-user {
+  margin-top: 0.1rem;
+  color: #bfdbfe;
+  font-size: 0.72rem;
+}
+
+.app-shell__aside--order-taker .app-shell__nav-heading {
+  display: none;
+}
+
+.app-shell__aside--order-taker .app-shell__aside-main {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.38rem;
+}
+
+.app-shell__aside--order-taker .app-shell__nav-section {
+  display: contents;
+}
+
+.app-shell__aside--order-taker .app-shell__nav-section-title {
+  display: none;
+}
+
+.app-shell__aside--order-taker .app-shell__logout-btn,
+.app-shell__aside--order-taker .app-shell__aside-supplement,
+.app-shell__aside--order-taker .app-shell__aside-copy {
+  grid-column: 1 / -1;
+}
+
+.app-shell__aside--order-taker .app-shell__logout-btn {
+  margin-bottom: 0 !important;
+  min-height: 36px;
+}
+
+.app-shell__aside--order-taker .nav-link {
+  padding: 0.5rem 0.55rem;
+  min-height: 40px;
+  border-radius: 10px;
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.36);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-bottom: 0;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.app-shell__aside--order-taker .nav-link:hover {
+  color: #fff;
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(96, 165, 250, 0.25);
+}
+
+.app-shell__aside--order-taker .nav-link--active {
+  color: #f8fafc;
+  background: linear-gradient(180deg, rgba(30, 64, 175, 0.86) 0%, rgba(30, 41, 59, 0.95) 100%);
+  border: 1px solid rgba(96, 165, 250, 0.42);
+}
+
+.app-shell__aside--order-taker .app-shell__aside-supplement {
+  margin-top: 0.3rem;
+  padding: 0.7rem;
+  border-top: 0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(9, 17, 29, 0.98) 0%, rgba(2, 6, 23, 0.98) 100%);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.18);
+}
+
+.app-shell__aside--order-taker .app-shell__aside-copy {
+  margin-top: 0.35rem;
+  color: #7c93b6;
+  font-size: 0.63rem;
+  line-height: 1.35;
+}
+
+.app-shell__op-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+
+.app-shell__op-heading {
+  margin-bottom: 0.25rem;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.app-shell__op-subhead {
+  margin-top: 0.35rem;
+  margin-bottom: 0.18rem;
+  color: #93c5fd;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.app-shell__op-note {
+  margin-bottom: 0.28rem;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.app-shell__op-note--warn {
+  color: #fecaca;
+}
+
+.app-shell__op-link {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.38rem 0;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: transparent;
+  color: #e2e8f0;
+  text-align: right;
+  font-size: 0.96rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.app-shell__op-link:hover {
+  color: #93c5fd;
+}
+
+.app-shell__op-link:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.app-shell__op-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  margin: 0.15rem 0 0.35rem;
+}
+
+.app-shell__op-flow {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.15rem 0 0.35rem;
+}
+
+.app-shell__op-flow-title {
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.app-shell__op-flow-note {
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.app-shell__op-flow-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.app-shell__op-editor input {
+  min-width: 0;
+  height: 34px;
+  padding: 0.35rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.app-shell__op-cta {
+  height: 34px;
+  padding: 0 0.8rem;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #0284c7 0%, #0369a1 100%);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.app-shell__op-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.app-shell__aside--order-taker .app-shell__op-section {
+  gap: 0.42rem;
+  padding: 0.7rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(11, 22, 38, 0.98) 0%, rgba(3, 10, 22, 0.98) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.app-shell__aside--order-taker .app-shell__op-heading {
+  color: #f8fafc;
+  font-size: 0.82rem;
+}
+
+.app-shell__aside--order-taker .app-shell__op-subhead {
+  margin-bottom: 0.08rem;
+  color: #7dd3fc;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+}
+
+.app-shell__aside--order-taker .app-shell__op-link {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.5);
+  color: #eff6ff;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--primary {
+  background: linear-gradient(180deg, rgba(2, 132, 199, 0.88) 0%, rgba(3, 105, 161, 0.92) 100%);
+  border-color: rgba(103, 232, 249, 0.32);
+  color: #fff;
+}
+
+.app-shell__op-link-label {
+  display: block;
+}
+
+.app-shell__op-link-meta {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  opacity: 0.95;
+}
+
+.app-shell__aside--order-taker .app-shell__op-link:hover {
+  color: #fff;
+  background: rgba(29, 78, 216, 0.28);
+  border-color: rgba(125, 211, 252, 0.28);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--primary:hover {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.92) 0%, rgba(3, 105, 161, 1) 100%);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link:disabled {
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.22);
+  border-color: rgba(100, 116, 139, 0.12);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--ghost {
+  background: rgba(15, 23, 42, 0.26);
+}
+
+.app-shell__op-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.42rem;
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--soft-red {
+  background: linear-gradient(180deg, rgba(190, 24, 93, 0.88) 0%, rgba(136, 19, 55, 0.92) 100%);
+  border-color: rgba(251, 113, 133, 0.3);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--soft-blue {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.9) 0%, rgba(29, 78, 216, 0.94) 100%);
+  border-color: rgba(96, 165, 250, 0.34);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--soft-violet {
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.88) 0%, rgba(109, 40, 217, 0.94) 100%);
+  border-color: rgba(167, 139, 250, 0.34);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--soft-teal {
+  background: linear-gradient(180deg, rgba(13, 148, 136, 0.88) 0%, rgba(15, 118, 110, 0.94) 100%);
+  border-color: rgba(94, 234, 212, 0.28);
+}
+
+.app-shell__aside--order-taker .app-shell__op-link--soft-amber {
+  background: linear-gradient(180deg, rgba(217, 119, 6, 0.9) 0%, rgba(180, 83, 9, 0.94) 100%);
+  border-color: rgba(251, 191, 36, 0.3);
 }
 
 .app-shell__main {

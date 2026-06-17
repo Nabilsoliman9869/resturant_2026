@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getApiBase } from "../../lib/apiBase";
 import SmartProductSearch from "../../components/SmartProductSearch";
 import SettingRow from "../../components/SettingRow";
+import SettingTooltip from "../../components/SettingTooltip";
 import {
   WORKFLOW_ROLE_OPTIONS,
   WORKFLOW_SETTINGS_DEFAULTS,
@@ -30,6 +31,8 @@ export type RestaurantOpsSettings = {
   /** عند on: جرسون/استقبال/مناولة/طلبات سريعة يُرفض دخولهم بدون صف جدولة دور يغطي اليوم */
   enforceRoleScheduleForShift: string;
   vipOwnerTemplatesJson: string;
+  /** وضع اختيار الأصناف عند الكابتن: classic (عادي) | wizard (معالج موجّه) */
+  captainItemSelectionMode: string;
 };
 
 export type RestaurantFullOpsBundle = RestaurantOpsSettings & WorkflowSettings;
@@ -54,6 +57,7 @@ const OPS_DEFAULTS: RestaurantOpsSettings = {
   deliveryChannelStrictFinancialModes: "on",
   enforceRoleScheduleForShift: "off",
   vipOwnerTemplatesJson: "[]",
+  captainItemSelectionMode: "classic",
 };
 
 const FULL_DEFAULTS: RestaurantFullOpsBundle = { ...OPS_DEFAULTS, ...WORKFLOW_SETTINGS_DEFAULTS };
@@ -518,6 +522,13 @@ export default function RestaurantOpsSettingsPage() {
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
             <option value="cleaner">عامل النظافة</option>
+          </select>
+        </SettingRow>
+
+        <SettingRow label="كيفية اختيار الأصناف عند الكابتن" tooltip="وضع اختيار الأصناف: العادي (إضافات مسطحة) أو المعالج (تدفق موجّه خطوة بخطوة).">
+          <select value={s.captainItemSelectionMode} onChange={(e) => setS((x) => ({ ...x, captainItemSelectionMode: e.target.value }))} style={{ width: "100%" }}>
+            <option value="classic">عادي — إضافات مسطحة كما هو الآن</option>
+            <option value="wizard">معالج — تدفق موجّه خطوة بخطوة (مثل Toast)</option>
           </select>
         </SettingRow>
 

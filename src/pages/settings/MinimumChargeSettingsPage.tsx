@@ -41,7 +41,7 @@ export default function MinimumChargeSettingsPage() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j as { detail?: string }).detail || `HTTP ${r.status}`);
       setValue(String((j as { tableDefaultMinimumCharge?: string | number }).tableDefaultMinimumCharge ?? value));
-      setMsg("تم حفظ minimum charge الافتراضي بنجاح.");
+      setMsg("تم حفظ الحد الأدنى الافتراضي لكل كرسي بنجاح.");
     } catch (e) {
       setMsg(`فشل الحفظ: ${String(e)}`);
     } finally {
@@ -51,13 +51,13 @@ export default function MinimumChargeSettingsPage() {
 
   return (
     <div style={{ maxWidth: 560 }}>
-      <h2 style={{ marginTop: 0 }}>الحد الأدنى للطاولة</h2>
+      <h2 style={{ marginTop: 0 }}>الحد الأدنى لكل كرسي</h2>
       <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-        هذه هي القيمة الافتراضية لحد الطاولة الأدنى. يمكن للمدير تعديلها أو جعلها صفرًا.
+        هذه هي القيمة الافتراضية للحد الأدنى لكل كرسي/ضيف، شاملة الخدمة والضريبة. ويمكن للمدير تعديلها أو جعلها صفرًا.
       </p>
       <SettingRow
-        label="minimum charge الافتراضي"
-        tooltip="الحد الأدنى الذي يجب أن يصل إليه حساب الطاولة. يظهر للجرسون ويُحسب في الضريبة والخدمة. يمكن تعديله لكل طاولة من شاشة POS."
+        label="الحد الأدنى الافتراضي لكل كرسي"
+        tooltip="القيمة الدنيا المطلوبة لكل كرسي/ضيف بعد احتساب الخدمة والضريبة. ويمكن عمل override لها على مستوى الطاولة من شاشة التشغيل، ثم تُطبّق على عدد الضيوف المعتمد داخل الجلسة."
       >
         <input
           type="number"

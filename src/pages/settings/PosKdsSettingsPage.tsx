@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { getApiBase } from "../../lib/apiBase";
+import SettingRow from "../../components/SettingRow";
 
 export default function PosKdsSettingsPage() {
   const base = getApiBase();
@@ -49,35 +50,32 @@ export default function PosKdsSettingsPage() {
           أزمنة تحضير لكل صنف (TBL007)
         </NavLink>
       </p>
-      <div className="card" style={{ marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0 }}>الافتراضي العام (عند عدم ضبط صنف)</h3>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ display: "block" }}>
-            زمن التحضير الافتراضي (دقيقة)
-            <input
-              type="number"
-              min={1}
-              max={240}
-              value={kdsPrep}
-              onChange={(e) => setKdsPrep(Number(e.target.value) || 20)}
-              style={{ display: "block", width: 160, marginTop: 6 }}
-            />
-          </label>
-          <label style={{ display: "block" }}>
-            تنبيه قبل النهاية (دقيقة)
-            <input
-              type="number"
-              min={0}
-              max={120}
-              value={kdsWarn}
-              onChange={(e) => setKdsWarn(Number(e.target.value) || 5)}
-              style={{ display: "block", width: 160, marginTop: 6 }}
-            />
-          </label>
-          <button type="button" className="btn btn-primary" onClick={() => void saveKds()}>
-            حفظ
-          </button>
-        </div>
+      <div className="grid-2">
+        <SettingRow label="زمن التحضير الافتراضي (دقيقة)" tooltip="الوقت المتوقع لإعداد الطلب في المطبخ. يُستخدم في شاشة KDS لحساب وقت التسليم المتوقع عند عدم وجود زمن مُحدد للصنف في TBL007.">
+          <input
+            type="number"
+            min={1}
+            max={240}
+            value={kdsPrep}
+            onChange={(e) => setKdsPrep(Number(e.target.value) || 20)}
+            style={{ width: "100%" }}
+          />
+        </SettingRow>
+        <SettingRow label="تنبيه قبل النهاية (دقيقة)" tooltip="متى يبدأ KDS بإظهار تنبيه باللون الأحمر/البرتقالي قبل انتهاء زمن التحضير. يساعد مدير المطبخ على تتبع الطلبات المتأخرة.">
+          <input
+            type="number"
+            min={0}
+            max={120}
+            value={kdsWarn}
+            onChange={(e) => setKdsWarn(Number(e.target.value) || 5)}
+            style={{ width: "100%" }}
+          />
+        </SettingRow>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <button type="button" className="btn btn-primary" onClick={() => void saveKds()}>
+          حفظ
+        </button>
       </div>
       {msg ? <p style={{ color: "var(--accent2)" }}>{msg}</p> : null}
     </div>

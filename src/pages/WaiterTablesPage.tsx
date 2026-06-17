@@ -1337,7 +1337,7 @@ export default function WaiterTablesPage() {
                           {billStatusLabel || "طلب حساب"}
                         </span>
                       ) : null}
-                      {noOrderStatusLabel ? <span className="waiter-tblcard__mini-chip" title="متابعة التسكين بلا طلبات">⏱ {noOrderStatusLabel}</span> : null}
+                      {noOrderStatusLabel ? <span className="waiter-tblcard__mini-chip" data-tooltip="متابعة التسكين بلا طلبات">⏱ {noOrderStatusLabel}</span> : null}
                     </div>
                     <div className="waiter-tblcard__spec-seated-by">
                       {captainLabel ? (
@@ -1353,7 +1353,7 @@ export default function WaiterTablesPage() {
 
                   <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
                     <div className="waiter-tblcard__pill-row">
-                      {(user?.role === "manager" || user?.role === "developer") && !sidStr ? (
+                      {(user?.role === "manager" || user?.role === "developer" || user?.role === "waiter") && !sidStr ? (
                         <label
                           className="waiter-tblcard__pill"
                           style={{
@@ -1364,7 +1364,7 @@ export default function WaiterTablesPage() {
                             background: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.15)" : undefined,
                             borderColor: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.4)" : undefined,
                           }}
-                          title="تسجيل الجلسة كضيف — تُحوّل الفاتورة لاحقاً على حساب العميل الوهمي 'ضيف'"
+                          data-tooltip="تسجيل الجلسة كضيف — تُحوّل الفاتورة لاحقاً على حساب العميل الوهمي 'ضيف'"
                         >
                           <input
                             type="checkbox"
@@ -1413,7 +1413,7 @@ export default function WaiterTablesPage() {
                             e.stopPropagation();
                             void requestCaptainTransfer(sidStr);
                           }}
-                          title="إرسال تنبيه للزملاء بنفس الدور الفعّال اليوم — قبول من الجرس الأحمر"
+                          data-tooltip="إرسال تنبيه للزملاء بنفس الدور الفعّال اليوم — قبول من الجرس الأحمر"
                         >
                           {captainTransferBusySessionId === sidStr ? "…" : "طلب تحويل"}
                         </button>
@@ -1428,7 +1428,7 @@ export default function WaiterTablesPage() {
                             setReassignSid(sidStr);
                             setReassignPickId("");
                           }}
-                          title="تغيير/تحويل الكابتن"
+                          data-tooltip="تغيير/تحويل الكابتن"
                         >
                           تغيير كابتن
                         </button>
@@ -1448,7 +1448,7 @@ export default function WaiterTablesPage() {
                         className="waiter-tblcard__send"
                         disabled={tableResetBusyId === String(t.id)}
                         onClick={() => void resetTableByTableId(String(t.id))}
-                        title="Reset للطاولة: تنظيف كامل للجلسات والطلبات المفتوحة وإرجاع الطاولة إلى جاهزة حتى لو لم تعد هناك جلسة نشطة"
+                        data-tooltip="Reset للطاولة: تنظيف كامل للجلسات والطلبات المفتوحة وإرجاع الطاولة إلى جاهزة حتى لو لم تعد هناك جلسة نشطة"
                         style={{ background: "rgba(244,114,182,0.16)", borderColor: "rgba(244,114,182,0.45)", color: "#fbcfe8" }}
                       >
                         {tableResetBusyId === String(t.id) ? "…" : "Reset للطاولة"}
@@ -1468,7 +1468,7 @@ export default function WaiterTablesPage() {
                           className="waiter-tblcard__send"
                           disabled={noOrderBusySessionId === sidStr}
                           onClick={() => void snoozeNoOrderSession(sidStr)}
-                          title="منح مدة إضافية 10 دقائق"
+                          data-tooltip="منح مدة إضافية 10 دقائق"
                         >
                           {noOrderBusySessionId === sidStr ? "…" : "مدة إضافية 10 د"}
                         </button>
@@ -1479,7 +1479,7 @@ export default function WaiterTablesPage() {
                           className="waiter-tblcard__send"
                           disabled={noOrderBusySessionId === sidStr}
                           onClick={() => void resetReadyNoOrderSession(sidStr)}
-                          title="إلغاء التسكين وإرجاع الطاولة إلى جاهزة"
+                          data-tooltip="إلغاء التسكين وإرجاع الطاولة إلى جاهزة"
                           style={{ background: "rgba(16,185,129,0.18)", borderColor: "rgba(16,185,129,0.55)", color: "#d1fae5" }}
                         >
                           {noOrderBusySessionId === sidStr ? "…" : "إلغاء التسكين"}
@@ -1490,7 +1490,7 @@ export default function WaiterTablesPage() {
                         className="waiter-tblcard__send"
                         disabled={noOrderBusySessionId === sidStr}
                         onClick={() => void closeNoOrderSession(sidStr)}
-                        title="إلغاء التسكين إذا لم توجد طلبات على الطاولة"
+                        data-tooltip="إلغاء التسكين إذا لم توجد طلبات على الطاولة"
                       >
                         {noOrderBusySessionId === sidStr ? "…" : "إلغاء التسكين"}
                       </button>
@@ -1513,8 +1513,9 @@ export default function WaiterTablesPage() {
 
                   {sidStr ? (
                     <div
-                      style={{ marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr) 86px", gap: 8, width: "100%", alignItems: "center" }}
+                      style={{ position: "relative", marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr) 86px", gap: 8, width: "100%", alignItems: "center" }}
                       onClick={(e) => e.stopPropagation()}
+                      data-tooltip="ربط الطاولة على Owner/VIP"
                     >
                       <select
                         className="waiter-pos__select"
@@ -1535,7 +1536,6 @@ export default function WaiterTablesPage() {
                           return vipChoiceBySession[sidStr] ?? currentMode;
                         })()}
                         onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
-                        title="ربط الطاولة على Owner/VIP"
                       >
                         <option value="">عادي (بدون Owner/VIP)</option>
                         <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
@@ -1573,7 +1573,7 @@ export default function WaiterTablesPage() {
                           const chosen = vipChoiceBySession[sidStr] ?? "";
                           void applyVipBilling(sidStr, chosen);
                         }}
-                        title="تطبيق Owner/VIP على الجلسة"
+                        data-tooltip="تطبيق Owner/VIP على الجلسة"
                       >
                         {vipBusySessionId === sidStr ? "…" : "تطبيق"}
                       </button>
@@ -1598,7 +1598,7 @@ export default function WaiterTablesPage() {
                       <div className="waiter-tblcard__money-est-label">قيمة تقديرية</div>
                       <div className="waiter-tblcard__money-est-val">{money.totalCost.toFixed(0)} ج</div>
                     </div>
-                    <div className="waiter-tblcard__money-min-stack" onClick={(e) => e.stopPropagation()}>
+                    <div className="waiter-tblcard__money-min-stack" onClick={(e) => e.stopPropagation()} data-tooltip="الحد الأدنى لكل كرسي على هذه الطاولة">
                       {canEditMin ? (
                         <input
                           className="waiter-tblcard__money-input"
@@ -1608,7 +1608,6 @@ export default function WaiterTablesPage() {
                           value={minChargeDraftByTable[String(t.id)] ?? ""}
                           onChange={(e) => setMinChargeDraftByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
                           disabled={Boolean(minChargeBusyByTable[String(t.id)])}
-                          title="الحد الأدنى لكل كرسي على هذه الطاولة"
                         />
                       ) : (
                         <div className="waiter-tblcard__money-min-readout">{minOk.toFixed(0)}</div>
@@ -1635,7 +1634,7 @@ export default function WaiterTablesPage() {
                     <div className="waiter-tblcard__spec-min-gap">فرق الحد الأدنى: {minGap.toFixed(0)} ج</div>
                   ) : null}
 
-                  <div className="waiter-tblcard__spec-alert" onClick={(e) => e.stopPropagation()}>
+                  <div className="waiter-tblcard__spec-alert" onClick={(e) => e.stopPropagation()} data-tooltip="تنبيه كاشير سريع من إعدادات التشغيل — ليست قائمة عملاء الملاك">
                     <button
                       type="button"
                       className="waiter-tblcard__send"
@@ -1649,7 +1648,6 @@ export default function WaiterTablesPage() {
                       value={alertPick}
                       onChange={(e) => setAlertPickByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
                       disabled={alertBusy || alertPresets.length === 0}
-                      title="تنبيه كاشير سريع من إعدادات التشغيل — ليست قائمة عملاء الملاك"
                     >
                       <option value="">— اختر —</option>
                       {alertPresets.map((x) => (

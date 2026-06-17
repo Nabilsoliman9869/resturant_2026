@@ -97,6 +97,14 @@ export default function PosAdminPage() {
 
   async function addPromotion() {
     setMsg("");
+    if (!name.trim()) {
+      setMsg("اسم العرض مطلوب.");
+      return;
+    }
+    if (!type.trim()) {
+      setMsg("نوع العرض مطلوب.");
+      return;
+    }
     try {
       const payload = JSON.parse(payloadText);
       const body = {

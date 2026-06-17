@@ -1,4 +1,49 @@
   /* واجهات الأدوار التشغيلية — نمط موحّد (فاتح، أخضر، بطاقات) */
+
+/* Tooltip مخصص يحل مشكلة ترميز title في بعض المتصفحات */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0b1220;
+  color: #f8fafc;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+}
+[data-tooltip]::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #0b1220;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 200;
+  pointer-events: none;
+}
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before {
+  opacity: 1;
+}
 .role-op,
 .waiter-pos {
   /* خط يدعم العربية — لا تعتمد على Syne/system فقط */
@@ -559,6 +604,88 @@
   direction: ltr;
 }
 
+.waiter-pos__title-sub {
+  margin-top: 0.22rem;
+}
+
+.waiter-pos__title-subtle {
+  color: #93c5fd;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.waiter-pos__hdr-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(320px, 0.95fr) 40px;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.waiter-pos__hdr-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.waiter-pos__hdr-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(125, 211, 252, 0.26);
+  color: #e0f2fe;
+  font-size: 0.74rem;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.waiter-pos__hdr-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.waiter-pos__hdr-action-btn {
+  min-height: 34px !important;
+  padding: 0.42rem 0.8rem !important;
+  color: #fff !important;
+  border: 1px solid transparent !important;
+  font-size: 0.76rem !important;
+  font-weight: 900 !important;
+  white-space: nowrap;
+}
+
+.waiter-pos__hdr-action-btn--report {
+  background: linear-gradient(180deg, #8b5cf6 0%, #6d28d9 100%) !important;
+  border-color: #6d28d9 !important;
+}
+
+.waiter-pos__hdr-action-btn--cashier {
+  background: linear-gradient(180deg, #f59e0b 0%, #b45309 100%) !important;
+  border-color: #b45309 !important;
+}
+
+.waiter-pos__hdr-action-btn--bill {
+  background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%) !important;
+  border-color: #0284c7 !important;
+}
+
+.waiter-pos__hdr-fields {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(112px, 0.9fr) minmax(96px, 0.85fr) minmax(96px, 0.72fr);
+  gap: 0.35rem;
+  min-width: 0;
+  align-items: center;
+}
+
 .waiter-pos__table-pill {
   display: flex;
   align-items: center;
@@ -591,12 +718,12 @@
 .waiter-pos__topbar {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(190px, 0.72fr);
+  grid-auto-columns: minmax(180px, 1fr);
   gap: 0.55rem;
   align-items: stretch;
   /* ارتفاع ثابت نحو نصف الشاشة — كل عمود يتمرّر داخل مساحته */
-  height: min(34vh, 255px);
-  max-height: min(34vh, 255px);
+  height: min(24vh, 180px);
+  max-height: min(24vh, 180px);
   overflow-x: auto;
   overflow-y: hidden;
   position: sticky;
@@ -627,6 +754,7 @@
 /* أعمدة بمحتوى طويل: تمرير اللوحة كاملة — عند التركيز على select داخل field-stack نسمح بالامتداد فوق الطبقات */
 .waiter-pos__topbar > .waiter-pos__top-card--navopts {
   overflow-y: auto;
+  min-height: 180px;
 }
 
 .waiter-pos__topbar > .waiter-pos__top-card--navopts:has(.waiter-pos__field-stack:focus-within) {
@@ -649,12 +777,89 @@
   overflow-y: hidden;
 }
 
-.waiter-pos__top-card--categories {
+.waiter-pos__cat-strip {
+  display: grid;
+  grid-template-columns: repeat(15, minmax(0, 1fr));
+  grid-auto-rows: minmax(52px, auto);
+  gap: 0.42rem;
+  align-content: start;
+  padding: 0.5rem 0.65rem;
+  background: linear-gradient(180deg, #fff7f7 0%, #fff1f2 100%);
+  border: 1px solid rgba(244, 114, 182, 0.18);
+  border-radius: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: 172px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat {
+  width: 100%;
+  min-height: 52px;
+  padding: 0.35rem 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.15;
+  border-radius: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 100%);
+  color: #172554;
+  font-weight: 900;
+  cursor: pointer;
   display: flex;
-  flex-direction: column;
-  min-height: 0;
-  width: min(25.2vw, 234px);
-  min-width: min(25.2vw, 234px);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat:nth-child(5n + 1) {
+  background: linear-gradient(180deg, #fff8dc 0%, #fde68a 100%);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #78350f;
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat:nth-child(5n + 2) {
+  background: linear-gradient(180deg, #eff6ff 0%, #bfdbfe 100%);
+  border-color: rgba(59, 130, 246, 0.32);
+  color: #1e3a8a;
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat:nth-child(5n + 3) {
+  background: linear-gradient(180deg, #ecfdf5 0%, #bbf7d0 100%);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #166534;
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat:nth-child(5n + 4) {
+  background: linear-gradient(180deg, #fdf2f8 0%, #fbcfe8 100%);
+  border-color: rgba(236, 72, 153, 0.3);
+  color: #9d174d;
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat:nth-child(5n + 5) {
+  background: linear-gradient(180deg, #f5f3ff 0%, #ddd6fe 100%);
+  border-color: rgba(139, 92, 246, 0.32);
+  color: #5b21b6;
+}
+
+.waiter-pos__cat-strip .waiter-pos__cat--active {
+  background: linear-gradient(180deg, #22c55e 0%, #15803d 100%);
+  color: #fff;
+  border-color: #15803d;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18), 0 6px 14px rgba(21, 128, 61, 0.24);
 }
 
 .waiter-pos__topbar .waiter-pos__top-card--categories .waiter-pos__cats-inbar {
@@ -732,6 +937,54 @@
   gap: 6px;
 }
 
+.waiter-pos__ops-launcher {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.waiter-pos__ops-launcher-btn {
+  min-height: 74px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.28);
+  color: #e2e8f0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: right;
+  font-family: inherit;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+}
+
+.waiter-pos__ops-launcher-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.18);
+}
+
+.waiter-pos__ops-launcher-btn:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.waiter-pos__ops-launcher-btn__title {
+  font-size: 0.92rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.waiter-pos__ops-launcher-btn__sub {
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #cbd5e1;
+}
+
 .waiter-pos__table-move-block + .waiter-pos__table-move-block {
   margin-top: 10px;
   padding-top: 10px;
@@ -743,6 +996,10 @@
   font-weight: 850;
   color: #94a3b8;
   line-height: 1.3;
+}
+
+.waiter-pos__table-move-block__title--dialog {
+  font-size: 1rem;
 }
 
 .waiter-pos__table-pick-search {
@@ -804,6 +1061,10 @@
   padding: 2px 0;
 }
 
+.waiter-pos__table-pick-list--dialog {
+  max-height: min(48vh, 420px);
+}
+
 .waiter-pos__table-pick-row {
   width: 100%;
   text-align: right;
@@ -846,6 +1107,10 @@
   line-height: 1.35;
 }
 
+.waiter-pos__table-pick-selected--dialog {
+  font-size: 0.88rem;
+}
+
 .waiter-pos__table-pick-clear {
   border: none;
   background: rgba(248, 113, 113, 0.15);
@@ -863,6 +1128,115 @@
   width: 100%;
   min-height: 44px;
   font-weight: 850 !important;
+}
+
+.waiter-pos__ops-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  background: rgba(2, 9, 23, 0.68);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.waiter-pos__ops-modal {
+  width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid rgba(51, 65, 85, 0.95);
+  background: linear-gradient(180deg, #0b1220 0%, #111827 100%);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.48);
+}
+
+.waiter-pos__ops-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(15, 23, 42, 0.88) 100%);
+}
+
+.waiter-pos__ops-modal__head-copy {
+  min-width: 0;
+}
+
+.waiter-pos__ops-modal__title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.2rem;
+  font-weight: 950;
+}
+
+.waiter-pos__ops-modal__note {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.waiter-pos__ops-modal__close {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(15, 23, 42, 0.65);
+  color: #f8fafc;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.waiter-pos__ops-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px 20px;
+}
+
+.waiter-pos__ops-modal__grid-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) 140px 170px 96px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.waiter-pos__ops-modal__grid-row--invoice {
+  grid-template-columns: minmax(0, 1.7fr) 140px 170px;
+}
+
+@media (max-width: 900px) {
+  .waiter-pos__ops-modal-overlay {
+    padding: 10px;
+  }
+
+  .waiter-pos__ops-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    border-radius: 16px;
+  }
+
+  .waiter-pos__ops-modal__head,
+  .waiter-pos__ops-modal__body {
+    padding-inline: 14px;
+  }
+
+  .waiter-pos__ops-modal__grid-row,
+  .waiter-pos__ops-modal__grid-row--invoice {
+    grid-template-columns: 1fr;
+  }
 }
 
 .waiter-pos__top-card {
@@ -912,6 +1286,7 @@
 .waiter-pos__toggle-row {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .waiter-pos__seat-mob-actions {
@@ -1269,6 +1644,319 @@
   min-height: 0;
 }
 
+.waiter-pos__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 24%);
+  gap: 0.75rem;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.waiter-pos__menu-column,
+.waiter-pos__cart-column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.waiter-pos__cart-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.waiter-pos__menu-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 0;
+}
+
+.waiter-pos__seat-pills-bar {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d1fae5;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(236, 253, 245, 0.94) 100%);
+}
+
+.waiter-pos__seat-pills-bar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #14532d;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.waiter-pos__seat-pills-bar__launch {
+  min-height: 28px;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(14, 116, 144, 0.25);
+  background: rgba(6, 182, 212, 0.1);
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.waiter-pos__seat-pills-bar__prompt {
+  min-height: 42px;
+  border-radius: 10px;
+  border: 1px dashed rgba(14, 116, 144, 0.28);
+  background: rgba(6, 182, 212, 0.08);
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.waiter-pos__seat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+
+.waiter-pos__seat-pill {
+  min-width: 56px;
+  min-height: 38px;
+  padding: 0.22rem 0.45rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  color: #0f172a;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.06rem;
+  cursor: pointer;
+}
+
+.waiter-pos__seat-pill--active {
+  background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%);
+  border-color: #0369a1;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.18);
+}
+
+.waiter-pos__seat-pill--shared {
+  background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
+  border-color: rgba(217, 119, 6, 0.28);
+  color: #92400e;
+}
+
+.waiter-pos__seat-pill--shared.waiter-pos__seat-pill--active {
+  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  color: #fff7ed;
+  border-color: #b45309;
+}
+
+.waiter-pos__seat-pill__label {
+  max-width: 72px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.waiter-pos__seat-pill__meta {
+  font-size: 0.64rem;
+  font-weight: 800;
+  opacity: 0.9;
+}
+
+.waiter-pos__workspace-block {
+  flex-shrink: 0;
+}
+
+.waiter-pos__desk-card {
+  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  padding: 0.8rem;
+  color: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-height: 0;
+}
+
+.waiter-pos__desk-card--summary {
+  flex: 0 0 auto;
+  gap: 0.45rem;
+}
+
+.waiter-pos__desk-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.waiter-pos__desk-card__title {
+  color: #f8fafc;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.waiter-pos__desk-card__sub {
+  margin-top: 0.2rem;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.waiter-pos__cart-seat-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.38rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.16);
+  color: #0f172a;
+  max-width: fit-content;
+}
+
+.waiter-pos__cart-seat-indicator__label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #0f766e;
+}
+
+.waiter-pos__cart-seat-indicator__value {
+  font-size: 0.72rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.waiter-pos__desk-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.waiter-pos__desk-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.waiter-pos__desk-pill--warn {
+  background: rgba(251, 191, 36, 0.16);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #fde68a;
+}
+
+.waiter-pos__cost-summary {
+  padding: 0.05rem 0;
+}
+
+.waiter-pos__cart-submit {
+  min-height: 34px;
+  padding: 0.42rem 0.9rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 900 !important;
+  background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%) !important;
+  border: 1px solid #15803d !important;
+  color: #fff !important;
+}
+
+.waiter-pos__cart-submit:disabled {
+  background: linear-gradient(180deg, #64748b 0%, #475569 100%) !important;
+  border-color: #64748b !important;
+  opacity: 0.68;
+  cursor: not-allowed;
+}
+
+.waiter-pos__cost-drawer {
+  margin-top: 0.15rem;
+  padding: 0.75rem !important;
+  border-radius: 12px;
+}
+
+.waiter-pos__cart-column .waiter-pos__order-box {
+  min-height: 190px;
+  max-height: none;
+  flex: 1 1 auto;
+}
+
+.waiter-pos__cart-column .waiter-pos__sent {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 170px;
+  overflow: auto;
+  padding-inline-end: 0.2rem;
+}
+
+.waiter-pos__summary-toggle {
+  font-size: 0.74rem !important;
+  padding: 0.34rem 0.7rem !important;
+  min-height: 32px !important;
+}
+
+.waiter-pos__summary-block-title {
+  margin: 0 0 4px;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.waiter-pos__summary-empty {
+  color: #94a3b8;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.waiter-pos__sent--compact {
+  padding-top: 0.15rem;
+}
+
+.waiter-pos__sent--compact ul {
+  font-size: 0.76rem;
+}
+
+.waiter-pos__menu-column .waiter-pos__cat-strip {
+  max-height: 182px !important;
+}
+
+.waiter-pos__menu-column .waiter-pos__search-wrap {
+  top: 0;
+  background: transparent;
+  border-bottom-color: #d1fae5;
+}
+
+.waiter-pos__menu-column .waiter-pos__grid {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid #d1fae5;
+  border-radius: 14px;
+  padding: 0.7rem;
+}
+
+.waiter-pos__menu-column .waiter-pos__workspace-block:last-child {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.waiter-pos__menu-column #waiter-ot-sec-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .waiter-pos__cats-head {
   font-size: 0.9rem;
   font-weight: 900;
@@ -1308,16 +1996,15 @@
 
 .waiter-pos__cat {
   width: 100%;
-  min-height: 52px;
-  padding: 0.22rem;
-  border-radius: 6px;
-  border: 1px solid #6ee7b7;
-  background: linear-gradient(180deg, #ecfccb 0%, #d9f99d 100%);
-  box-shadow: 0 1px 0 #bbf7d0 inset;
+  min-height: 40px;
+  padding: 0.35rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
   cursor: pointer;
-  font-size: 0.6rem;
+  font-size: 0.8rem;
   font-weight: 800;
-  color: #14532d;
+  color: #1e293b;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1329,6 +2016,28 @@
   color: #fff;
   border-color: #15803d;
   box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
+}
+
+.waiter-pos__mini-toggle {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.waiter-pos__mini-toggle:hover {
+  background: #e2e8f0;
+}
+.waiter-pos__mini-toggle--on {
+  background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+  color: #fff;
+  border-color: #15803d;
 }
 
 .waiter-pos__cat-wrap {
@@ -1354,10 +2063,10 @@
   background: rgba(255, 255, 255, 0.92);
   color: #0f172a;
   border-radius: 4px;
-  font-size: 0.68rem;
+  font-size: 0.82rem;
   font-weight: 800;
-  line-height: 1.25;
-  padding: 2px 4px;
+  line-height: 1.3;
+  padding: 3px 6px;
   white-space: normal;
   overflow-wrap: anywhere;
   text-align: center;
@@ -1399,6 +2108,22 @@
 
 /* جوال — طلب للطاولة: عمود واحد وترتيب مهام؛ تصنيفات أفقية قابلة للسحب */
 @media (max-width: 900px) {
+  .waiter-pos__hdr-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .waiter-pos__hdr-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .waiter-pos__hdr-primary-actions {
+    flex-wrap: wrap;
+  }
+
+  .waiter-pos__workspace {
+    grid-template-columns: 1fr;
+  }
+
   .waiter-pos__topbar {
     display: flex;
     flex-direction: column;
@@ -1448,6 +2173,25 @@
     flex: 1 1 auto;
     min-height: 12rem;
     overflow-y: auto !important;
+  }
+
+  .waiter-pos__top-card--seatpanel .waiter-pos__toggle-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .waiter-pos__top-card--seatpanel .waiter-pos__toggle--guestcount {
+    grid-column: 1 / -1;
+  }
+
+  .waiter-pos__top-card--seatpanel .waiter-pos__toggle {
+    min-width: 0;
+    min-height: 50px;
+    white-space: normal;
+    line-height: 1.35;
+    font-size: 0.84rem;
   }
 
   .waiter-pos__topbar > .waiter-pos__top-card--seatpanel.waiter-pos__seatpanel--mob-collapsed {
@@ -1761,6 +2505,7 @@
 }
 
 .waiter-pos__select {
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
   padding: 0.4rem 0.65rem;
   border-radius: 8px;
   border: 1px solid var(--wp-border);
@@ -2029,10 +2774,12 @@
 
 .waiter-tables-card--ready {
   border-color: rgba(34, 197, 94, 0.85);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 
 .waiter-tables-card--busy {
   border-color: rgba(239, 68, 68, 0.9);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 
 .waiter-tables-card--blocked {
@@ -2132,6 +2879,7 @@
 }
 
 .waiter-tables-owner-pill {
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
   font-size: 10px;
   font-weight: 900;
   padding: 3px 10px;
@@ -2283,6 +3031,7 @@
 
 /* طاولات اختيار الجارسون — بطاقة كبيرة */
 .role-op__pick-card {
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
   background: var(--wp-card);
   border: 2px solid var(--wp-green-dim);
   border-radius: 20px;
@@ -2439,6 +3188,7 @@
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: rgba(255, 255, 255, 0.85);
   border-radius: 999px;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
   padding: 6px 12px;
   font-size: 0.82rem;
   font-weight: 900;
@@ -2495,6 +3245,7 @@
 }
 
 .waiter-tblcard__mini-chip {
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
   font-size: 0.72rem;
   font-weight: 900;
   padding: 4px 8px;
@@ -2561,6 +3312,7 @@
 }
 
 .waiter-tblcard__money-min-stack {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2632,6 +3384,7 @@
 }
 
 .waiter-tblcard__spec-alert {
+  position: relative;
   margin-top: 10px;
   display: grid;
   grid-template-columns: 88px 1fr;
@@ -2669,6 +3422,7 @@
 }
 
 .waiter-tblcard__alert-select {
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
   height: 38px;
   border-radius: 10px;
   border: 1px solid rgba(15, 23, 42, 0.2);
@@ -4617,4 +5371,36 @@
 .waiter-pos--order-taker .waiter-pos__main {
   flex: 1 1 auto;
   overflow: hidden;
+}
+
+/* ── Bootstrap loading overlay for WaiterOrderPage ── */
+.waiter-pos__bootstrap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.waiter-pos__bootstrap-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(226, 232, 240, 0.2);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: waiter-pos-spin 0.8s linear infinite;
+}
+
+@keyframes waiter-pos-spin {
+  to { transform: rotate(360deg); }
+}
+
+.waiter-pos__bootstrap-label {
+  font-size: 1.05rem;
 }
