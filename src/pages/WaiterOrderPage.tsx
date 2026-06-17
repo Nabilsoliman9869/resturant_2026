@@ -26,10 +26,10 @@ import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import { CaptainGuestDock } from "../components/CaptainGuestDock";
+import ModifierWizard, { type ModifierGroup } from "../components/ModifierWizard";
 import { useAppMenu } from "../context/AppMenuContext";
 import {
   CAPTAIN_MOBILE_TABS,
-  captainDockSeatsFromLabels,
   captainShowsGuestDock,
   type CaptainMobileTab,
 } from "../lib/waiterCaptainMobile";
@@ -66,6 +66,10 @@ type SessionBillingProfile = {
 type OrderTakerSessionRow = {
   id?: string;
   tableId?: string;
+  status?: string;
+  startTime?: string;
+  guestCount?: number | string;
+  minimumChargePerSeat?: number | string;
   captainUserId?: string;
   captainName?: string;
   captainLogin?: string;
@@ -74,7 +78,13 @@ type OrderTakerSessionRow = {
   seatGuestLabels?: unknown;
 };
 
-type ProductGroup = { CardGuide: string; GroupName: string; image?: string; imageUrl?: string };
+type PatchSessionResponse = {
+  ok?: boolean;
+  session?: OrderTakerSessionRow;
+  detail?: string;
+};
+
+type ProductGroup = { CardGuide: string; GroupName: string; image?: string; imageUrl?: string; DisplayCategory?: string };
 type Agent = { CardGuide: string; AgentName: string; CardNumber?: string };
 type KitchenStopRow = { productGuide: string; stopped?: boolean; note?: string };
 
@@ -106,6 +116,14 @@ function matchesTablePickQuery(t: RestTable, rawQuery: string): boolean {
   return false;
 }
 
+type CartModifier = {
+  groupId: string;
+  groupName: string;
+  itemName: string;
+  priceDelta: number;
+  source?: "item" | "free_text";
+};
+
 type CartLine = {
   id: string;
   productGuide: string;
@@ -119,9 +137,24 @@ type CartLine = {
   addonIdsKey?: string;
   /** ملاحظة للمطبخ/التذكرة — تُدمج مع اسم البند عند الإرسال */
   kitchenNotes?: string;
+  /** إضافات المعالج (Wizard modifiers) */
+  modifiers?: CartModifier[];
 };
 
 type CatalogAddonRow = { id: number; label: string; price: number; sortOrder: number; isActive: boolean };
+
+type ProductModifierProfileEntry = {
+  groupId: string;
+  sortOrder?: number;
+  isEnabled?: boolean;
+  isRequired?: boolean | null;
+  minSelect?: number | null;
+  maxSelect?: number | null;
+  allowFreeText?: boolean | null;
+  freeTextRequired?: boolean | null;
+  freeTextLabel?: string;
+  freeTextPlaceholder?: string;
+};
 
 type ServerOrderItem = {
   lineId?: string;
@@ -296,28 +329,56 @@ function restaurantTableIdsEqual(a: unknown, b: unknown): boolean {
 /** فهرس جلسات نشطة: مفتاح = مرجع طاولة من الجلسة، ثم يُملأ تحت مرجع كل صف في المخطط يشير لنفس الطاولة */
 function buildSessionByTableRef(sess: unknown[], catalog?: RestTable[]): Record<string, { id: string; captainUserId: string }> {
   const out: Record<string, { id: string; captainUserId: string }> = {};
-  for (const x of sess) {
+  const activeRows = (Array.isArray(sess) ? sess : [])
+    .filter((x): x is OrderTakerSessionRow => !!x && typeof x === "object")
+    .filter((x) => String(x.status || "").toLowerCase() === "active");
+  for (const x of sortSessionsByRecencyDesc(activeRows)) {
     if (!x || typeof x !== "object") continue;
     const o = x as { id?: string; tableId?: unknown; status?: string; captainUserId?: string };
-    if (String(o.status || "").toLowerCase() !== "active") continue;
     const tid = tableRefKey(o.tableId);
     if (!tid) continue;
+    if (out[tid]?.id) continue;
     out[tid] = { id: String(o.id || "").trim(), captainUserId: String(o.captainUserId || "").trim() };
   }
   if (catalog?.length) {
     for (const t of catalog) {
       const k = tableRefKey(t.id);
       if (out[k]?.id) continue;
-      for (const x of sess) {
-        if (!x || typeof x !== "object") continue;
-        const o = x as { id?: string; tableId?: unknown; status?: string; captainUserId?: string };
-        if (String(o.status || "").toLowerCase() !== "active") continue;
+      for (const o of sortSessionsByRecencyDesc(activeRows)) {
         if (!restaurantTableIdsEqual(t.id, o.tableId)) continue;
         out[k] = { id: String(o.id || "").trim(), captainUserId: String(o.captainUserId || "").trim() };
         break;
       }
     }
   }
+  return out;
+}
+
+function sessionRecencyValue(row: OrderTakerSessionRow | null | undefined): string {
+  return String(row?.startTime || "").trim();
+}
+
+function compareSessionRecencyDesc(a: OrderTakerSessionRow, b: OrderTakerSessionRow): number {
+  return sessionRecencyValue(b).localeCompare(sessionRecencyValue(a));
+}
+
+function sortSessionsByRecencyDesc(rows: OrderTakerSessionRow[]): OrderTakerSessionRow[] {
+  return rows.slice().sort(compareSessionRecencyDesc);
+}
+
+function clampSeatGuestCount(raw: unknown, fallback = 1): number {
+  const fb = Math.max(1, Math.min(SEAT_SLOT_COUNT, Math.floor(Number(fallback) || 1)));
+  const n = Math.floor(Number(raw) || 0);
+  if (!Number.isFinite(n) || n < 1) return fb;
+  return Math.max(1, Math.min(SEAT_SLOT_COUNT, n));
+}
+
+function buildAutoNumberedSeatLabels(guestCount: number, existing?: Record<number, string> | null): Record<number, string> {
+  const count = clampSeatGuestCount(guestCount, 1);
+  const out: Record<number, string> = {};
+  for (let i = 1; i <= count; i += 1) out[i] = String(i);
+  const shared = String(existing?.[SHARED_SEAT_NO] ?? "").trim();
+  if (shared) out[SHARED_SEAT_NO] = shared.slice(0, 120);
   return out;
 }
 
@@ -390,6 +451,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [assignmentMode, setAssignmentMode] = useState<"per_seat" | "general">("per_seat");
   const [selectedSeat, setSelectedSeat] = useState(1);
   const [categoryKey, setCategoryKey] = useState<string>("all");
+  const [subGroupKey, setSubGroupKey] = useState<string>("all");
+  const [displayMode, setDisplayMode] = useState<"group" | "category">("group");
+  const [sortMode, setSortMode] = useState<"default" | "name" | "price">("default");
   const [couponCode, setCouponCode] = useState("");
   const [tipAmount, setTipAmount] = useState(0);
   const [selectedAgentGuid, setSelectedAgentGuid] = useState("");
@@ -406,6 +470,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [ordersBusy, setOrdersBusy] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [returnModalLines, setReturnModalLines] = useState<GuestReturnOrderLine[]>([]);
+  const [approvedReturnsMap, setApprovedReturnsMap] = useState<Record<string, number>>({});
   const [billReviewOpen, setBillReviewOpen] = useState(false);
   const [captainInvoiceOpen, setCaptainInvoiceOpen] = useState(false);
   const [captainInvoiceId, setCaptainInvoiceId] = useState<string | null>(null);
@@ -431,6 +496,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [requestBillBusy, setRequestBillBusy] = useState(false);
   const [summonBusy, setSummonBusy] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [showCostDrawer, setShowCostDrawer] = useState(false);
+  const [showGapPicks, setShowGapPicks] = useState(false);
   const [splitBySeat, setSplitBySeat] = useState(false);
   const [reorderSeatTargets, setReorderSeatTargets] = useState<Record<string, number>>({});
   const [reorderBusyKey, setReorderBusyKey] = useState("");
@@ -438,6 +505,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [mergeTargetTableId, setMergeTargetTableId] = useState("");
   const [transferPickQuery, setTransferPickQuery] = useState("");
   const [mergePickQuery, setMergePickQuery] = useState("");
+  const [navoptsActiveTab, setNavoptsActiveTab] = useState<"returns" | "transfer" | "merge" | "reorder" | "invoices" | null>(null);
+  const [guestSeatDialogOpen, setGuestSeatDialogOpen] = useState(false);
   /** نتائج «بحث» — null = لم يُنفَّذ بحث بعد (لا تُعرض قائمة تحت الحقل) */
   const [transferSearchResults, setTransferSearchResults] = useState<RestTable[] | null>(null);
   const [mergeSearchResults, setMergeSearchResults] = useState<RestTable[] | null>(null);
@@ -448,8 +517,19 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [sessionMoveBusy, setSessionMoveBusy] = useState(false);
   /** اسم للعرض/الطباعة على الشيك — نصّي على الجلسة وليس عميلاً منفصلاً في TBL016 */
   const [seatGuestLabels, setSeatGuestLabels] = useState<Record<number, string>>({});
+  const [sessionGuestCount, setSessionGuestCount] = useState(1);
+  const [sessionMinimumChargePerSeat, setSessionMinimumChargePerSeat] = useState(0);
+  const [guestCountDraft, setGuestCountDraft] = useState("1");
+  const [minimumChargeFlowOpen, setMinimumChargeFlowOpen] = useState(false);
+  const [minimumChargeFlowStep, setMinimumChargeFlowStep] = useState<"count" | "naming">("count");
   /** حدّ أدنى افتراضي من `/api/restaurant/ops-settings` عندما لا يُحدَّد على الطاولة */
   const [tableMinDefaultOps, setTableMinDefaultOps] = useState(0);
+  /** وضع اختيار الأصناف: classic | wizard */
+  const [captainItemSelectionMode, setCaptainItemSelectionMode] = useState<"classic" | "wizard">("classic");
+  /** منتج قيد البناء في معالج الإضافات (modifier wizard) */
+  const [wizardProduct, setWizardProduct] = useState<{ guide: string; name: string; price: number } | null>(null);
+  const [wizardGroups, setWizardGroups] = useState<ModifierGroup[]>([]);
+  const [_wizardStepInfo, setWizardStepInfo] = useState<{ step: number; total: number; groupName: string } | null>(null);
   /** ترشيح أصناف بسعر الوحدة ضمن فرق المينيموم (بديل عن دفع فرق بدون منفعة) */
   const [gapPickHits, setGapPickHits] = useState<Product[]>([]);
   const [gapPickBusy, setGapPickBusy] = useState(false);
@@ -468,7 +548,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   /** تدفق الكابتن الموحّد — تبويب واحد ظاهر على الجوال */
   const [captainTab, setCaptainTab] = useState<CaptainMobileTab>("menu");
   /** جوال: إخفاء قائمة المقاعد بعد تأكيد الاسم للانتقال للفئات/الأصناف */
-  const [seatPanelMobCollapsed, setSeatPanelMobCollapsed] = useState(false);
+  const [, setSeatPanelMobCollapsed] = useState(false);
   const [mobileFlowToast, setMobileFlowToast] = useState("");
   const mobileFlowToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCategoryKeyRef = useRef(categoryKey);
@@ -536,14 +616,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }, [selectedTableId]);
 
   useEffect(() => {
-    setTransferSearchResults(null);
-    setTransferTargetTableId("");
-  }, [transferPickQuery]);
+    const q = transferPickQuery.trim();
+    const list = q ? transferPickBase.filter((t) => matchesTablePickQuery(t, q)) : transferPickBase.slice(0, 80);
+    setTransferSearchResults(list);
+    setTransferTargetTableId((cur) => (cur && list.some((t) => t.id === cur) ? cur : list[0]?.id || ""));
+  }, [transferPickBase, transferPickQuery]);
 
   useEffect(() => {
-    setMergeSearchResults(null);
-    setMergeTargetTableId("");
-  }, [mergePickQuery]);
+    const q = mergePickQuery.trim();
+    const list = q ? mergePickBase.filter((t) => matchesTablePickQuery(t, q)) : mergePickBase.slice(0, 80);
+    setMergeSearchResults(list);
+    setMergeTargetTableId((cur) => (cur && list.some((t) => t.id === cur) ? cur : list[0]?.id || ""));
+  }, [mergePickBase, mergePickQuery]);
 
   const isDeliveryEmbedded = String(embeddedChannel || "").trim().toLowerCase() === "delivery";
   const selectedTableStatus = normalizeTableStatus(String((selectedTable as any)?.status || ""));
@@ -597,10 +681,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     const bp = row?.billingProfile;
     setSessionBillingProfile(bp && typeof bp === "object" ? bp : null);
     setBillingRequestedAt(row?.billingRequestedAt ? String(row.billingRequestedAt) : null);
+    const guestCount = clampSeatGuestCount(row?.guestCount, 1);
+    setSessionGuestCount(guestCount);
+    setGuestCountDraft(String(guestCount));
+    setSessionMinimumChargePerSeat(Math.max(0, toNum(row?.minimumChargePerSeat, 0)));
   }
 
   function applySeatGuestLabelsFromRow(row: OrderTakerSessionRow | null | undefined) {
     const raw = row && typeof row === "object" ? row.seatGuestLabels : undefined;
+    const guestCount = clampSeatGuestCount(row?.guestCount, 1);
     const next: Record<number, string> = {};
     if (raw && typeof raw === "object") {
       for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
@@ -609,30 +698,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         next[n] = String(v ?? "").slice(0, 120);
       }
     }
+    for (let i = 1; i <= guestCount; i += 1) {
+      if (!String(next[i] ?? "").trim()) next[i] = String(i);
+    }
     setSeatGuestLabels(next);
     seatGuestLabelsRef.current = next;
   }
 
   const useCaptainMobileUi = narrowOtViewport;
   const appMenu = useAppMenu();
-
-  const captainDockSeats = useMemo(
-    () =>
-      assignmentMode === "per_seat"
-        ? captainDockSeatsFromLabels(seatGuestLabels, SEAT_SLOT_COUNT, SHARED_SEAT_NO)
-        : [],
-    [assignmentMode, seatGuestLabels],
-  );
-
-  const showCaptainGuestDock =
-    useCaptainMobileUi && captainShowsGuestDock(captainTab, assignmentMode === "per_seat", captainDockSeats);
-
-  useEffect(() => {
-    if (!useCaptainMobileUi || assignmentMode !== "per_seat") return;
-    if (captainDockSeats.length > 0 && !captainDockSeats.includes(selectedSeat)) {
-      setSelectedSeat(captainDockSeats[0]!);
-    }
-  }, [captainDockSeats, selectedSeat, useCaptainMobileUi, assignmentMode]);
 
   const pickCaptainSeatForOrder = useCallback(
     (seatNo: number) => {
@@ -659,6 +733,52 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }
 
+  async function saveGuestCount(nextRaw: number): Promise<boolean> {
+    const nextCount = clampSeatGuestCount(nextRaw, sessionGuestCount || 1);
+    const sessionId = activeSessionId || (await ensureGuestSession());
+    if (!sessionId) {
+      return false;
+    }
+    if (highestOccupiedNormalSeat > nextCount) {
+      setMsg(`لا يمكن تقليل عدد الضيوف إلى ${nextCount} لأن هناك بنودًا مرتبطة حتى المقعد ${highestOccupiedNormalSeat}. انقل البنود أولًا أو زد العدد.`);
+      return false;
+    }
+    const autoLabels = buildAutoNumberedSeatLabels(nextCount, seatGuestLabelsRef.current);
+    setSessionBusy(true);
+    setMsg("");
+    try {
+      const payload = Object.fromEntries(
+        Array.from({ length: SHARED_SEAT_NO }, (_, idx) => {
+          const seatNo = idx + 1;
+          return [String(seatNo), String(autoLabels[seatNo] ?? "").trim().slice(0, 120)];
+        }),
+      );
+      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestCount: nextCount, autoNumberSeats: true, seatGuestLabels: payload }),
+      });
+      const txt = await r.text();
+      const js = tryParseJson<PatchSessionResponse>(txt) ?? {};
+      if (!r.ok) throw new Error(js.detail || txt || `HTTP ${r.status}`);
+      const sessionRow = js.session ?? (js as OrderTakerSessionRow);
+      setSessionGuestCount(nextCount);
+      setGuestCountDraft(String(nextCount));
+      setSeatGuestLabels(autoLabels);
+      seatGuestLabelsRef.current = autoLabels;
+      setSelectedSeat((prev) => (prev !== SHARED_SEAT_NO && prev > nextCount ? nextCount : prev));
+      applySessionMetaRow(sessionRow);
+      applySeatGuestLabelsFromRow(sessionRow);
+      setMsg(`تم اعتماد ${nextCount} ضيف/كرسي للجلسة الحالية.`);
+      return true;
+    } catch (e) {
+      setMsg(`تعذر حفظ عدد الضيوف: ${briefNetworkHint(e)}`);
+      return false;
+    } finally {
+      setSessionBusy(false);
+    }
+  }
+
   function onSeatGuestInputChange(seatIndex: number, value: string) {
     const sliced = value.slice(0, 120);
     setSeatGuestLabels((prev) => {
@@ -676,40 +796,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   const loadAll = useCallback(async () => {
     setMsg("");
-    const bootstrapStartedAt = Date.now();
-    // #region debug-point C:bootstrap-start
-    fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "api-disconnect-slow-items",
-        runId: "pre-fix",
-        hypothesisId: "C",
-        location: "WaiterOrderPage.tsx:loadAll:start",
-        msg: "[DEBUG] order-taker bootstrap start",
-        data: { base, role: String(user?.role || ""), userId: String(user?.id || "") },
-        ts: Date.now(),
-      }),
-    }).catch(() => { });
-    // #endregion
+    setLoading(true);
     try {
       const bootR = await safeFetch(`${base}/api/restaurant/order-taker-bootstrap`);
       if (bootR.status === 0 || !bootR.ok) {
-        // #region debug-point D:bootstrap-failure
-        fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "api-disconnect-slow-items",
-            runId: "pre-fix",
-            hypothesisId: "D",
-            location: "WaiterOrderPage.tsx:loadAll:boot-response",
-            msg: "[DEBUG] order-taker bootstrap failed",
-            data: { status: bootR.status, ok: bootR.ok, elapsedMs: Date.now() - bootstrapStartedAt },
-            ts: Date.now(),
-          }),
-        }).catch(() => { });
-        // #endregion
         setMsg(
           bootR.status === 0
             ? briefNetworkHint("Failed to fetch")
@@ -734,21 +824,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }>(await bootR.text()) ?? {};
 
       if (!boot.ok) {
-        // #region debug-point D:bootstrap-not-ok
-        fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "api-disconnect-slow-items",
-            runId: "pre-fix",
-            hypothesisId: "D",
-            location: "WaiterOrderPage.tsx:loadAll:boot-payload",
-            msg: "[DEBUG] order-taker bootstrap payload not ok",
-            data: { elapsedMs: Date.now() - bootstrapStartedAt },
-            ts: Date.now(),
-          }),
-        }).catch(() => { });
-        // #endregion
         setMsg("تعذر تحميل بيانات الطلب — تحقق من الاتصال بقاعدة البيانات.");
         return;
       }
@@ -763,28 +838,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const promoj = { promotions: boot.promotions };
       const aj = { agents: boot.agents };
       const ksj = boot.kitchenStops ?? { items: [] };
-      // #region debug-point C:bootstrap-success
-      fetch("http://127.0.0.1:7777/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "api-disconnect-slow-items",
-          runId: "pre-fix",
-          hypothesisId: "C",
-          location: "WaiterOrderPage.tsx:loadAll:boot-success",
-          msg: "[DEBUG] order-taker bootstrap success",
-          data: {
-            elapsedMs: Date.now() - bootstrapStartedAt,
-            productsCount: Array.isArray(boot.products) ? boot.products.length : 0,
-            groupsCount: Array.isArray(boot.groups) ? boot.groups.length : 0,
-            tablesCount: Array.isArray(boot.tables) ? boot.tables.length : 0,
-            sessionsCount: Array.isArray(boot.sessions) ? boot.sessions.length : 0,
-            agentsCount: Array.isArray(boot.agents) ? boot.agents.length : 0,
-          },
-          ts: Date.now(),
-        }),
-      }).catch(() => { });
-      // #endregion
 
       setProducts(Array.isArray(pj.products) ? (pj.products as Product[]) : []);
       const rawGroups = Array.isArray(gj.groups) ? (gj.groups as ProductGroup[]) : [];
@@ -805,7 +858,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         .map((t) => ({ ...t, status: statusById.get(String((t as any).id)) || normalizeTableStatus(String((t as any).status || "")) }))
         .filter((table) => !table.isSeparator);
 
-      const sessList = Array.isArray(rsj.sessions) ? (rsj.sessions as OrderTakerSessionRow[]) : [];
+      const sessListRaw = Array.isArray(rsj.sessions) ? (rsj.sessions as OrderTakerSessionRow[]) : [];
+      const sessList = sortSessionsByRecencyDesc(sessListRaw);
       activeSessionsRef.current = sessList;
       const uid = user?.id != null ? String(user.id) : "";
       const mgrDev = user?.role === "manager" || user?.role === "developer";
@@ -862,6 +916,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const opJson = boot.opsSettings ?? {};
       const mcRaw = Number(opJson.tableDefaultMinimumCharge ?? 0);
       setTableMinDefaultOps(Number.isFinite(mcRaw) ? Math.max(0, mcRaw) : 0);
+      setCaptainItemSelectionMode(opJson.captainItemSelectionMode === "wizard" ? "wizard" : "classic");
       setSelectedAgentGuid((prev) => {
         if (prev && alist.some((a) => a.CardGuide === prev)) return prev;
         const pick = alist.find((a) => {
@@ -881,6 +936,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       })();
     } catch (e) {
       setMsg(`تعذر تحميل البيانات: ${briefNetworkHint(e)}`);
+    } finally {
+      setLoading(false);
     }
   }, [base, searchParams, user?.id, user?.role]);
 
@@ -948,8 +1005,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       for (const it of activeOrderItems(o)) {
         const lid = String(it.lineId || "").trim();
         if (!lid) continue;
-        const qty = Number(it.quantity ?? 1) || 1;
+        const originalQty = Number(it.quantity ?? 1) || 1;
         const unitPrice = Number(it.unitPrice ?? 0) || 0;
+        const approvedQty = approvedReturnsMap[`${o.id}:${lid}`] || 0;
+        const qty = Math.max(0, originalQty - approvedQty);
+        if (qty <= 0) continue;
         rows.push({
           key: `${o.id}:${lid}`,
           name: String(it.name || "صنف"),
@@ -962,7 +1022,32 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
     }
     return rows;
-  }, [sessionOrders]);
+  }, [sessionOrders, approvedReturnsMap]);
+
+  const returnedReviewLines = useMemo<CaptainBillReviewLine[]>(() => {
+    const rows: CaptainBillReviewLine[] = [];
+    for (const o of sessionOrders) {
+      const orderStatus = String(o.status || "").toLowerCase();
+      if (orderStatus === "cancelled") continue;
+      for (const it of activeOrderItems(o)) {
+        const lid = String(it.lineId || "").trim();
+        if (!lid) continue;
+        const approvedQty = approvedReturnsMap[`${o.id}:${lid}`] || 0;
+        if (approvedQty <= 0) continue;
+        const unitPrice = Number(it.unitPrice ?? 0) || 0;
+        rows.push({
+          key: `ret:${o.id}:${lid}`,
+          name: String(it.name || "صنف"),
+          quantity: approvedQty,
+          unitPrice,
+          lineTotal: approvedQty * unitPrice,
+          seatNo: extractSeatFromOrderItem(it),
+          statusLabel: "مرتجع معتمد",
+        });
+      }
+    }
+    return rows;
+  }, [sessionOrders, approvedReturnsMap]);
 
   const reviewSeatMoveRows = useMemo<ReviewSeatMoveRow[]>(() => {
     const rows: ReviewSeatMoveRow[] = [];
@@ -1001,6 +1086,82 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     return rows;
   }, [cart, sessionOrders]);
 
+  const highestOccupiedNormalSeat = useMemo(() => {
+    let maxSeat = 1;
+    for (const row of reviewSeatMoveRows) {
+      const seatNo = row.seatNo != null ? Number(row.seatNo) : 0;
+      if (Number.isFinite(seatNo) && seatNo >= 1 && seatNo <= SEAT_SLOT_COUNT) {
+        maxSeat = Math.max(maxSeat, Math.floor(seatNo));
+      }
+    }
+    return maxSeat;
+  }, [reviewSeatMoveRows]);
+
+  const activeGuestSeatCount = useMemo(() => {
+    let maxLabeled = 1;
+    for (let i = 1; i <= SEAT_SLOT_COUNT; i += 1) {
+      if (String(seatGuestLabels[i] ?? "").trim()) maxLabeled = i;
+    }
+    return clampSeatGuestCount(Math.max(sessionGuestCount, maxLabeled, highestOccupiedNormalSeat), 1);
+  }, [sessionGuestCount, seatGuestLabels, highestOccupiedNormalSeat]);
+
+  const visibleSeatNumbers = useMemo(
+    () => Array.from({ length: activeGuestSeatCount }, (_, idx) => idx + 1),
+    [activeGuestSeatCount],
+  );
+
+  const guestSeatNumbers = useMemo(
+    () => [SHARED_SEAT_NO, ...visibleSeatNumbers],
+    [visibleSeatNumbers],
+  );
+
+  const seatCartStats = useMemo(() => {
+    const map = new Map<number, { qty: number; lines: number }>();
+    for (const line of cart) {
+      const seatNo = seatNoFromLine(line);
+      if (seatNo == null) continue;
+      const prev = map.get(seatNo) ?? { qty: 0, lines: 0 };
+      prev.qty += Number(line.qty || 0);
+      prev.lines += 1;
+      map.set(seatNo, prev);
+    }
+    return map;
+  }, [cart]);
+
+  const captainDockSeats = useMemo(
+    () => (assignmentMode === "per_seat" ? [...visibleSeatNumbers, SHARED_SEAT_NO] : []),
+    [assignmentMode, visibleSeatNumbers],
+  );
+
+  const showCaptainGuestDock =
+    useCaptainMobileUi && captainShowsGuestDock(captainTab, assignmentMode === "per_seat", captainDockSeats);
+
+  const desktopSeatPills = useMemo(
+    () => (assignmentMode === "per_seat" ? [...visibleSeatNumbers, SHARED_SEAT_NO] : []),
+    [assignmentMode, visibleSeatNumbers],
+  );
+
+  useEffect(() => {
+    if (!useCaptainMobileUi || assignmentMode !== "per_seat") return;
+    if (captainDockSeats.length > 0 && !captainDockSeats.includes(selectedSeat)) {
+      setSelectedSeat(captainDockSeats[0]!);
+    }
+  }, [captainDockSeats, selectedSeat, useCaptainMobileUi, assignmentMode]);
+
+  async function requireSeatFlowBeforeOrder(): Promise<boolean> {
+    if (!useDesktopOrderWorkspace) return true;
+    if (selectedTableBlocked) {
+      setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
+      return false;
+    }
+    if (!selectedTableId || !activeSessionId || assignmentMode !== "per_seat" || activeGuestSeatCount < 1) {
+      setMsg("ابدأ من زر منيموم شارج وحدد عدد الأفراد أولًا قبل تسجيل الأصناف على المقاعد.");
+      await openMinimumChargeFlow();
+      return false;
+    }
+    return true;
+  }
+
   const waiterMenuGroups = useMemo(() => {
     const groupIds = new Set<string>();
     for (const p of menuEligibleProducts) {
@@ -1009,6 +1170,28 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
     return normalizedGroups.filter((g) => groupIds.has(g.CardGuide));
   }, [menuEligibleProducts, normalizedGroups]);
+
+  const displayCategories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const g of waiterMenuGroups) {
+      const c = (g.DisplayCategory || "").trim();
+      if (c) cats.add(c);
+    }
+    return Array.from(cats).sort((a, b) => a.localeCompare(b, "ar"));
+  }, [waiterMenuGroups]);
+
+  const groupsInSelectedCategory = useMemo(() => {
+    if (categoryKey === "all") return [];
+    return waiterMenuGroups.filter((g) => (g.DisplayCategory || "").trim() === categoryKey);
+  }, [waiterMenuGroups, categoryKey]);
+
+  useEffect(() => {
+    setSubGroupKey("all");
+  }, [categoryKey]);
+
+  useEffect(() => {
+    if (displayMode === "group") setSubGroupKey("all");
+  }, [displayMode]);
 
   useEffect(() => {
     let stop = false;
@@ -1170,7 +1353,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   useEffect(() => {
     if (selectedSeat > SHARED_SEAT_NO) setSelectedSeat(SHARED_SEAT_NO);
     if (selectedSeat < 1) setSelectedSeat(1);
-  }, [selectedSeat]);
+    if (selectedSeat !== SHARED_SEAT_NO && selectedSeat > activeGuestSeatCount) setSelectedSeat(activeGuestSeatCount);
+  }, [selectedSeat, activeGuestSeatCount]);
 
   useEffect(() => {
     setSeatNameEditorSeat(null);
@@ -1180,6 +1364,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     if (!activeSessionId) {
       setSeatGuestLabels({});
       seatGuestLabelsRef.current = {};
+      setSessionGuestCount(1);
+      setGuestCountDraft("1");
+      setSessionMinimumChargePerSeat(0);
       return () => {
         cancelled = true;
       };
@@ -1241,21 +1428,26 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         const vr = await safeFetch(`${base}/api/restaurant/table-sessions?status=active`, { timeoutMs: 10000 });
         if (!vr.ok) return null;
         const vj = tryParseJson<{ sessions?: unknown }>(await vr.text()) ?? {};
-        sessions = Array.isArray(vj.sessions) ? (vj.sessions as OrderTakerSessionRow[]) : [];
+        sessions = sortSessionsByRecencyDesc(Array.isArray(vj.sessions) ? (vj.sessions as OrderTakerSessionRow[]) : []);
         activeSessionsRef.current = sessions;
       }
-      if (urlSessionId) {
-        const s = sessions.find(
-          (x: { id?: string; tableId?: string }) => String(x.id) === String(urlSessionId)
-        );
-        if (s && String(s.tableId) === String(tableId)) return String(s.id);
+      const sameTableActive = sessions
+        .filter((x) => String(x?.status || "active").toLowerCase() === "active")
+        .filter((x) => restaurantTableIdsEqual(String(x?.tableId || ""), String(tableId || "")))
+        .slice()
+        .sort(compareSessionRecencyDesc);
+      const latest = sameTableActive[0];
+      if (latest?.id) {
+        if (urlSessionId) {
+          const fromUrl = sameTableActive.find((x) => String(x.id || "") === String(urlSessionId));
+          if (fromUrl?.id && String(fromUrl.id) === String(latest.id)) return String(latest.id);
+        }
+        return String(latest.id);
       }
-      const existing = sessions.find((x: { tableId?: string }) => String(x.tableId) === String(tableId));
-      if (existing?.id) return String(existing.id);
       const cr = await safeFetch(`${base}/api/restaurant/table-sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId, guestCount: 2, mat3amActor: buildMat3amActor(user) }),
+        body: JSON.stringify({ tableId, guestCount: 1, autoNumberSeats: true, mat3amActor: buildMat3amActor(user) }),
         timeoutMs: 12000,
       });
       if (!cr.ok) return null;
@@ -1264,6 +1456,35 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     },
     [base, urlSessionId, user]
   );
+
+  const ensureGuestSession = useCallback(async (): Promise<string | null> => {
+    if (activeSessionId) return activeSessionId;
+    if (!selectedTableId) {
+      setMsg("اختر طاولة أولًا قبل إدارة الضيوف أو المينيموم شارج.");
+      return null;
+    }
+    if (selectedTableBlocked) {
+      setMsg("الطاولة الحالية ليست جاهزة للتشغيل الآن.");
+      return null;
+    }
+    setSessionBusy(true);
+    setMsg("");
+    try {
+      const sid = await resolveSessionForTable(selectedTableId);
+      if (!sid) {
+        setMsg("تعذر فتح جلسة الطاولة الحالية. أعد المحاولة.");
+        return null;
+      }
+      setActiveSessionId(sid);
+      activeSessionsRef.current = [];
+      return sid;
+    } catch (e) {
+      setMsg(`تعذر فتح جلسة الطاولة: ${briefNetworkHint(e)}`);
+      return null;
+    } finally {
+      setSessionBusy(false);
+    }
+  }, [activeSessionId, resolveSessionForTable, selectedTableBlocked, selectedTableId]);
 
   useEffect(() => {
     if (!selectedTableId) {
@@ -1330,11 +1551,35 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }, [activeSessionId, base]);
 
+  const loadApprovedGuestReturns = useCallback(async () => {
+    if (!activeSessionId) {
+      setApprovedReturnsMap({});
+      return;
+    }
+    try {
+      const r = await fetch(`${base}/api/restaurant/guest-returns?sessionId=${encodeURIComponent(activeSessionId)}&status=approved`);
+      const j = tryParseJson<{ requests?: Array<{ lines?: Array<{ orderId?: string; lineId?: string; returnQty?: number }> }> }>(await r.text()) ?? {};
+      const map: Record<string, number> = {};
+      for (const req of j.requests || []) {
+        for (const ln of req.lines || []) {
+          if (!ln) continue;
+          const key = `${ln.orderId || ""}:${ln.lineId || ""}`;
+          if (key === ":") continue;
+          map[key] = (map[key] || 0) + (Number(ln.returnQty) || 0);
+        }
+      }
+      setApprovedReturnsMap(map);
+    } catch {
+      setApprovedReturnsMap({});
+    }
+  }, [activeSessionId, base]);
+
   useEffect(() => {
     void loadSessionOrders();
+    void loadApprovedGuestReturns();
     const id = window.setInterval(() => void loadSessionOrders(), 12000);
     return () => window.clearInterval(id);
-  }, [loadSessionOrders]);
+  }, [loadSessionOrders, loadApprovedGuestReturns]);
 
   useEffect(() => {
     void loadSessionInvoices();
@@ -1345,17 +1590,120 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   const filteredProducts = useMemo(() => {
     let list = menuEligibleProducts;
-    if (categoryKey !== "all") {
+    if (displayMode === "category" && categoryKey !== "all") {
+      const targetIds = new Set<string>();
+      for (const g of waiterMenuGroups) {
+        if ((g.DisplayCategory || "").trim() === categoryKey) targetIds.add(g.CardGuide);
+      }
+      list = list.filter((p) => targetIds.has(String(p.GroupGuid || "").trim()));
+      if (subGroupKey !== "all") {
+        list = list.filter((p) => (p.GroupGuid || "") === subGroupKey);
+      }
+    } else if (displayMode === "group" && categoryKey !== "all") {
       list = list.filter((p) => (p.GroupGuid || "") === categoryKey);
     }
+    if (sortMode === "name") {
+      list = [...list].sort((a, b) => (a.ProductName || "").localeCompare(b.ProductName || "", "ar"));
+    } else if (sortMode === "price") {
+      list = [...list].sort((a, b) => (a.Price || 0) - (b.Price || 0));
+    }
     return list;
-  }, [menuEligibleProducts, categoryKey]);
+  }, [menuEligibleProducts, categoryKey, subGroupKey, displayMode, sortMode, waiterMenuGroups]);
+
+  const navoptsDialogTitle =
+    navoptsActiveTab === "returns"
+      ? "مرتجع الطاولة"
+      : navoptsActiveTab === "transfer"
+        ? "تحويل الطاولة"
+        : navoptsActiveTab === "merge"
+          ? "دمج الجلسات بين الطاولات"
+          : navoptsActiveTab === "reorder"
+            ? "نقل البنود بين الضيوف"
+            : navoptsActiveTab === "invoices"
+              ? "شيكات الطاولة"
+              : "";
+
+  const navoptsDialogNote =
+    navoptsActiveTab === "returns"
+      ? "افتح المرتجع من نافذة واسعة وواضحة بدل العمود الضيق."
+      : navoptsActiveTab === "transfer"
+        ? "اختر الطاولة الهدف براحة بصرية، مع دعم التحديد أو الدبل كليك للتنفيذ."
+        : navoptsActiveTab === "merge"
+          ? "راجع الطاولة الهدف بوضوح ثم نفذ الدمج من نفس النافذة."
+          : navoptsActiveTab === "reorder"
+            ? "انقل البنود بين الضيوف ضمن مساحة أكبر وأسهل للمراجعة."
+            : navoptsActiveTab === "invoices"
+              ? "راجع شيكات الطاولة ومعاينة الطباعة من نافذة مستقلة."
+              : "";
+
+  const closeNavoptsDialog = useCallback(() => {
+    setNavoptsActiveTab(null);
+  }, []);
+
+  const openGuestSeatDialog = useCallback(async () => {
+    const sid = await ensureGuestSession();
+    if (!sid) return;
+    if (useCaptainMobileUi) setCaptainTab("guests");
+    setGuestSeatDialogOpen(true);
+  }, [ensureGuestSession, useCaptainMobileUi]);
+
+  const openMinimumChargeFlow = useCallback(async () => {
+    const sid = await ensureGuestSession();
+    if (!sid) return;
+    setAssignmentMode("per_seat");
+    setGuestCountDraft(String(activeGuestSeatCount || 1));
+    setMinimumChargeFlowStep("count");
+    setMinimumChargeFlowOpen(true);
+  }, [activeGuestSeatCount, ensureGuestSession]);
+
+  const confirmMinimumChargeFlow = useCallback(async () => {
+    const ok = await saveGuestCount(Number(guestCountDraft) || activeGuestSeatCount);
+    if (!ok) return;
+    setMinimumChargeFlowStep("naming");
+    setMinimumChargeFlowOpen(true);
+  }, [activeGuestSeatCount, guestCountDraft, saveGuestCount]);
+
+  const answerMinimumChargeNaming = useCallback(
+    async (wantsNaming: boolean) => {
+      setMinimumChargeFlowOpen(false);
+      if (!wantsNaming) return;
+      await openGuestSeatDialog();
+    },
+    [openGuestSeatDialog],
+  );
+
+  const closeGuestSeatDialog = useCallback(() => {
+    setGuestSeatDialogOpen(false);
+    setSeatNameEditorSeat(null);
+  }, []);
+
+  const openNavoptsDialog = useCallback(
+    (tab: "returns" | "transfer" | "merge" | "reorder" | "invoices") => {
+      setNavoptsActiveTab(tab);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!navoptsActiveTab && !guestSeatDialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (guestSeatDialogOpen) {
+        closeGuestSeatDialog();
+        return;
+      }
+      closeNavoptsDialog();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navoptsActiveTab, guestSeatDialogOpen, closeGuestSeatDialog, closeNavoptsDialog]);
 
   useEffect(() => {
     if (categoryKey === "all") return;
-    if (waiterMenuGroups.some((g) => g.CardGuide === categoryKey)) return;
+    if (displayMode === "group" && waiterMenuGroups.some((g) => g.CardGuide === categoryKey)) return;
+    if (displayMode === "category" && displayCategories.includes(categoryKey)) return;
     setCategoryKey("all");
-  }, [categoryKey, waiterMenuGroups]);
+  }, [categoryKey, waiterMenuGroups, displayMode, displayCategories]);
 
   const cartForPromo = useMemo(
     () => cart.map((l) => ({ id: l.id, productGuide: l.productGuide, name: l.name, qty: l.qty, unitPrice: l.unitPrice })),
@@ -1371,83 +1719,133 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   );
   const discountValue = promoResult.invoiceDiscount + lineDiscountTotal;
   const netBeforeTax = Math.max(0, gross - discountValue);
-
-  const effectiveTableMinimum = useMemo(() => {
+  const effectiveMinimumChargePerSeat = useMemo(() => {
     if (isDeliveryEmbedded) return 0;
-    if (!selectedTable) return 0;
-    const tmc = toNum(selectedTable.minimumCharge, 0);
-    if (tmc > 0) return tmc;
+    const sessionValue = Math.max(0, toNum(sessionMinimumChargePerSeat, 0));
+    if (sessionValue > 0) return sessionValue;
+    const tableValue = Math.max(0, toNum(selectedTable?.minimumCharge, 0));
+    if (tableValue > 0) return tableValue;
     return Math.max(0, tableMinDefaultOps);
-  }, [selectedTable, isDeliveryEmbedded, tableMinDefaultOps]);
+  }, [isDeliveryEmbedded, selectedTable, sessionMinimumChargePerSeat, tableMinDefaultOps]);
 
-  const netAfterMinimum =
-    effectiveTableMinimum > 0 && !isDeliveryEmbedded ? Math.max(netBeforeTax, effectiveTableMinimum) : netBeforeTax;
-
-  const minimumChargeDelta =
-    effectiveTableMinimum > 0 && !isDeliveryEmbedded && netBeforeTax < effectiveTableMinimum
-      ? effectiveTableMinimum - netBeforeTax
-      : 0;
-
-  const reviewLinesSubtotal = useMemo(
-    () => billReviewLines.reduce((sum, line) => sum + Math.max(0, Number(line.lineTotal || 0)), 0),
-    [billReviewLines],
+  const effectiveTableMinimum = useMemo(
+    () => effectiveMinimumChargePerSeat * activeGuestSeatCount,
+    [effectiveMinimumChargePerSeat, activeGuestSeatCount],
   );
 
-  const reviewNetAfterMinimum =
-    effectiveTableMinimum > 0 && !isDeliveryEmbedded ? Math.max(reviewLinesSubtotal, effectiveTableMinimum) : reviewLinesSubtotal;
+  const buildSeatMinimumSummary = useCallback(
+    (rows: Array<{ lineTotal: number; seatNo?: number | null }>) => {
+      const seatMap = new Map<number, number>();
+      for (const seatNo of visibleSeatNumbers) seatMap.set(seatNo, 0);
+      const distributionTargets = visibleSeatNumbers.length > 0 ? visibleSeatNumbers : [1];
+      for (const row of rows) {
+        const lineTotal = Math.max(0, Number(row.lineTotal || 0));
+        if (lineTotal <= 0) continue;
+        const rawSeat = row.seatNo != null ? Number(row.seatNo) : null;
+        if (
+          rawSeat != null &&
+          Number.isFinite(rawSeat) &&
+          rawSeat >= 1 &&
+          rawSeat <= SEAT_SLOT_COUNT &&
+          rawSeat !== SHARED_SEAT_NO &&
+          seatMap.has(Math.floor(rawSeat))
+        ) {
+          const seatNo = Math.floor(rawSeat);
+          seatMap.set(seatNo, (seatMap.get(seatNo) || 0) + lineTotal);
+          continue;
+        }
+        const share = lineTotal / distributionTargets.length;
+        for (const seatNo of distributionTargets) {
+          seatMap.set(seatNo, (seatMap.get(seatNo) || 0) + share);
+        }
+      }
+      const sbp = sessionBillingProfile;
+      const billActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
+      const vipPct = billActive ? Math.max(0, Math.min(100, toNum(sbp?.discountPct, 0))) : 0;
+      const seats = visibleSeatNumbers.map((seatNo) => {
+        const subtotal = Math.max(0, Number(seatMap.get(seatNo) || 0));
+        const netAfterOwner = billActive ? Math.max(0, subtotal * (1 - vipPct / 100)) : subtotal;
+        const serviceCharge = billActive && sbp?.noService ? 0 : (netAfterOwner * policy.servicePercent) / 100;
+        const vatValue =
+          billActive && sbp?.noVat
+            ? 0
+            : policy.serviceBeforeVat
+              ? ((netAfterOwner + serviceCharge) * policy.vatPercent) / 100
+              : (netAfterOwner * policy.vatPercent) / 100;
+        const grossBeforeMinimum = netAfterOwner + serviceCharge + vatValue;
+        const minimumGap =
+          !isDeliveryEmbedded && effectiveMinimumChargePerSeat > 0
+            ? Math.max(0, effectiveMinimumChargePerSeat - grossBeforeMinimum)
+            : 0;
+        return { seatNo, subtotal, serviceCharge, vatValue, grossBeforeMinimum, minimumGap };
+      });
+      return {
+        seats,
+        subtotal: seats.reduce((sum, row) => sum + row.subtotal, 0),
+        serviceCharge: seats.reduce((sum, row) => sum + row.serviceCharge, 0),
+        vatValue: seats.reduce((sum, row) => sum + row.vatValue, 0),
+        grossBeforeMinimum: seats.reduce((sum, row) => sum + row.grossBeforeMinimum, 0),
+        minimumGap: seats.reduce((sum, row) => sum + row.minimumGap, 0),
+      };
+    },
+    [
+      visibleSeatNumbers,
+      sessionBillingProfile,
+      policy.servicePercent,
+      policy.serviceBeforeVat,
+      policy.vatPercent,
+      effectiveMinimumChargePerSeat,
+      isDeliveryEmbedded,
+    ],
+  );
 
-  const reviewMinimumChargeDelta =
-    effectiveTableMinimum > 0 && !isDeliveryEmbedded && reviewLinesSubtotal < effectiveTableMinimum
-      ? effectiveTableMinimum - reviewLinesSubtotal
-      : 0;
+  const liveMinimumChargeLines = useMemo(
+    () => [
+      ...billReviewLines.map((line) => ({ lineTotal: Number(line.lineTotal || 0), seatNo: line.seatNo ?? null })),
+      ...cart
+        .filter((line) => Number(line.qty || 0) > 0)
+        .map((line) => ({
+          lineTotal: Math.max(0, Number(line.qty || 0)) * Math.max(0, Number(line.unitPrice || 0)),
+          seatNo: seatNoFromLine(line),
+        })),
+    ],
+    [billReviewLines, cart],
+  );
+
+  const currentSeatMinimumSummary = useMemo(
+    () => buildSeatMinimumSummary(liveMinimumChargeLines),
+    [buildSeatMinimumSummary, liveMinimumChargeLines],
+  );
+
+  const netAfterMinimum = netBeforeTax;
+  const minimumChargeDelta = currentSeatMinimumSummary.minimumGap;
+
+  const reviewSeatMinimumSummary = useMemo(
+    () => buildSeatMinimumSummary(billReviewLines.map((line) => ({ lineTotal: Number(line.lineTotal || 0), seatNo: line.seatNo ?? null }))),
+    [buildSeatMinimumSummary, billReviewLines],
+  );
+
+  const reviewMinimumChargeDelta = reviewSeatMinimumSummary.minimumGap;
 
   const reviewBillingTotals = useMemo(() => {
     const sbp = sessionBillingProfile;
     const billActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
-    const vipPct = billActive ? Math.max(0, Math.min(100, toNum(sbp?.discountPct, 0))) : 0;
-    const netAfterOwner = billActive ? Math.max(0, reviewNetAfterMinimum * (1 - vipPct / 100)) : reviewNetAfterMinimum;
     const ownerTpl = billActive && String(sbp?.source || "") === "vip_owner_template";
-    if (!billActive) {
-      const baseAmount = policy.applyDiscountBeforeTax ? reviewNetAfterMinimum : reviewLinesSubtotal;
-      const svc = (baseAmount * policy.servicePercent) / 100;
-      const vat =
-        policy.serviceBeforeVat
-          ? ((reviewNetAfterMinimum + svc) * policy.vatPercent) / 100
-          : (reviewNetAfterMinimum * policy.vatPercent) / 100;
-      return {
-        netPortion: reviewNetAfterMinimum,
-        serviceCharge: svc,
-        vatValue: vat,
-        ownerTpl,
-      };
-    }
-    const svc = sbp?.noService ? 0 : (netAfterOwner * policy.servicePercent) / 100;
-    const vat = sbp?.noVat
-      ? 0
-      : policy.serviceBeforeVat
-        ? ((netAfterOwner + svc) * policy.vatPercent) / 100
-        : (netAfterOwner * policy.vatPercent) / 100;
     return {
-      netPortion: netAfterOwner,
-      serviceCharge: svc,
-      vatValue: vat,
+      netPortion: reviewSeatMinimumSummary.subtotal,
+      serviceCharge: reviewSeatMinimumSummary.serviceCharge,
+      vatValue: reviewSeatMinimumSummary.vatValue,
       ownerTpl,
     };
   }, [
     sessionBillingProfile,
-    reviewNetAfterMinimum,
-    reviewLinesSubtotal,
-    policy.applyDiscountBeforeTax,
-    policy.servicePercent,
-    policy.serviceBeforeVat,
-    policy.vatPercent,
+    reviewSeatMinimumSummary,
   ]);
 
   const reviewTotal = Math.max(
     0,
-    reviewBillingTotals.netPortion +
-    reviewBillingTotals.serviceCharge +
-    reviewBillingTotals.vatValue +
+    reviewSeatMinimumSummary.grossBeforeMinimum +
+    reviewMinimumChargeDelta +
     Math.max(0, tipAmount || 0),
   );
 
@@ -1588,6 +1986,63 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     sessionBillingProfile,
   ]);
 
+  async function handleProductClick(p: Product) {
+    if (!(await requireSeatFlowBeforeOrder())) return;
+    if (captainItemSelectionMode !== "wizard") {
+      pushCartLineForProduct(p, [], "", 1);
+      return;
+    }
+    try {
+      const [groupsR, linksR] = await Promise.all([
+        fetch(`${base}/api/restaurant/modifier-groups`),
+        fetch(`${base}/api/restaurant/product-modifiers/${encodeURIComponent(p.CardGuide)}`),
+      ]);
+      const gj = await groupsR.json().catch(() => ({ groups: [] }));
+      const lj = await linksR.json().catch(() => ({ groupIds: [], entries: [] }));
+      const allGroups: ModifierGroup[] = Array.isArray(gj?.groups) ? gj.groups : [];
+      const profileEntries: ProductModifierProfileEntry[] = Array.isArray(lj?.entries) ? lj.entries : [];
+      const linkedIds: string[] = Array.isArray(lj?.groupIds) ? lj.groupIds : [];
+      const normalizedEntries = profileEntries
+        .filter((entry) => !!entry && typeof entry === "object" && String(entry.groupId || "").trim())
+        .filter((entry) => entry.isEnabled !== false);
+      const productGroups: ModifierGroup[] = normalizedEntries.length
+        ? normalizedEntries.reduce<ModifierGroup[]>((acc, entry, idx) => {
+          const baseGroup = allGroups.find((g) => g.groupId === entry.groupId);
+          if (!baseGroup) return acc;
+          const minSelect = entry.minSelect != null ? Math.max(0, Number(entry.minSelect) || 0) : baseGroup.minSelect;
+          const maxSelectRaw = entry.maxSelect != null ? Math.max(0, Number(entry.maxSelect) || 0) : baseGroup.maxSelect;
+          const maxSelect = Math.max(minSelect, maxSelectRaw);
+          acc.push({
+            ...baseGroup,
+            sortOrder: entry.sortOrder != null ? Number(entry.sortOrder) || idx : baseGroup.sortOrder,
+            isRequired: entry.isRequired == null ? baseGroup.isRequired : Boolean(entry.isRequired),
+            minSelect,
+            maxSelect,
+            allowFreeText: entry.allowFreeText == null ? Boolean(baseGroup.allowFreeText) : Boolean(entry.allowFreeText),
+            freeTextRequired: entry.freeTextRequired == null ? Boolean(baseGroup.freeTextRequired) : Boolean(entry.freeTextRequired),
+            freeTextLabel: String(entry.freeTextLabel || baseGroup.freeTextLabel || ""),
+            freeTextPlaceholder: String(entry.freeTextPlaceholder || baseGroup.freeTextPlaceholder || ""),
+          });
+          return acc;
+        }, [])
+        : (linkedIds.length === 0
+          ? []
+          : linkedIds
+            .map((id) => allGroups.find((g) => g.groupId === id))
+            .filter((g): g is ModifierGroup => !!g));
+      productGroups.sort((a, b) => a.sortOrder - b.sortOrder);
+      if (productGroups.length === 0) {
+        pushCartLineForProduct(p, [], "", 1);
+        return;
+      }
+      setWizardProduct({ guide: p.CardGuide, name: p.ProductName || p.CardGuide, price: Number(p.Price ?? 0) });
+      setWizardGroups(productGroups);
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+      pushCartLineForProduct(p, [], "", 1);
+    }
+  }
+
   function pushCartLineForProduct(p: Product, addons: CatalogAddonRow[], kitchenNotesRaw = "", qtyRaw = 1) {
     if (orderTakingLocked && captainGate?.name) {
       setMsg(`الطاولة مسندة إلى جرسون الطلبات: ${captainGate.name}. لا يمكن إضافة بنود إلا من حساب المسند أو عبر المدير (قفل الطاولة مفعّل).`);
@@ -1653,8 +2108,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     });
   }
 
-  /** ضغطة على صنف: دائماً خطوة اختيار إضافات (مودال) — تجنّباً لتخطّي المودال عند تأخّر الشبكة أو كتالوج فارغ */
-  function beginAddProduct(p: Product) {
+  /** نقطة دخول موحدة من البحث/الأزرار: في وضع wizard يجب المرور أولاً على مجموعات السواء/الصوص/الاختيارات المرتبطة بالصنف. */
+  async function beginAddProduct(p: Product) {
+    if (!(await requireSeatFlowBeforeOrder())) return;
+    if (captainItemSelectionMode === "wizard") {
+      await handleProductClick(p);
+      return;
+    }
     if (orderTakingLocked && captainGate?.name) {
       setMsg(`الطاولة مسندة إلى جرسون الطلبات: ${captainGate.name}. لا يمكن إضافة بنود إلا من حساب المسند أو عبر المدير (قفل الطاولة مفعّل).`);
       return;
@@ -1915,14 +2375,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           }
         }
         const groupsBuild: typeof splitGroups = [];
-        for (let i = 1; i <= SEAT_SLOT_COUNT; i++) {
-          const label = String(seatGuestLabels[i] ?? "").trim();
-          if (!label) continue;
-          if (!seatsWithItems.has(i)) continue;
-          groupsBuild.push({ id: `check-${i}`, name: label, seats: [i] });
+        for (const seatNo of visibleSeatNumbers) {
+          const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
+          groupsBuild.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
         }
         const orphanSeats = [...seatsWithItems]
-          .filter((i) => i !== SHARED_SEAT_NO && !String(seatGuestLabels[i] ?? "").trim())
+          .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
           .sort((a, b) => a - b);
         if (orphanSeats.length > 0) {
           groupsBuild.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
@@ -2007,14 +2465,24 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }
 
-  async function transferTable() {
+  async function transferTableTo(targetTableId: string) {
+    setTransferTargetTableId(targetTableId);
+    if (!targetTableId) return;
+    if (targetTableId === selectedTableId) {
+      setMsg("اختر طاولة مختلفة للتحويل.");
+      return;
+    }
+    await transferTableByTarget(targetTableId);
+  }
+
+  async function transferTableByTarget(targetTableId: string) {
     setMsg("");
-    if (!activeSessionId || !transferTargetTableId) return;
+    if (!activeSessionId || !targetTableId) return;
     if (orderTakingLocked && captainGate?.name) {
       setMsg(`تحويل الجلسة ضمن مسند الطاولة (${captainGate.name}) أو المدير.`);
       return;
     }
-    if (transferTargetTableId === selectedTableId) {
+    if (targetTableId === selectedTableId) {
       setMsg("اختر طاولة مختلفة للتحويل.");
       return;
     }
@@ -2023,14 +2491,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: transferTargetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
+        body: JSON.stringify({ tableId: targetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
-      setSelectedTableId(transferTargetTableId);
+      setSelectedTableId(targetTableId);
       setTransferTargetTableId("");
       setTransferPickQuery("");
       setTransferSearchResults(null);
+      closeNavoptsDialog();
       setMsg("تم تحويل الجلسة إلى الطاولة الجديدة.");
       void loadSessionOrders();
       void loadAll();
@@ -2041,14 +2510,24 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }
 
-  async function mergeIntoTable() {
+  async function mergeIntoTableTo(targetTableId: string) {
+    setMergeTargetTableId(targetTableId);
+    if (!targetTableId) return;
+    if (targetTableId === selectedTableId) {
+      setMsg("اختر طاولة مختلفة للدمج.");
+      return;
+    }
+    await mergeIntoTableTarget(targetTableId);
+  }
+
+  async function mergeIntoTableTarget(targetTableId: string) {
     setMsg("");
-    if (!activeSessionId || !mergeTargetTableId) return;
+    if (!activeSessionId || !targetTableId) return;
     if (orderTakingLocked && captainGate?.name) {
       setMsg(`دمج الجلسات ضمن مسند الطاولة (${captainGate.name}) أو المدير.`);
       return;
     }
-    if (mergeTargetTableId === selectedTableId) {
+    if (targetTableId === selectedTableId) {
       setMsg("اختر طاولة مختلفة للدمج.");
       return;
     }
@@ -2057,14 +2536,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}/merge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetTableId: mergeTargetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
+        body: JSON.stringify({ targetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
-      setSelectedTableId(mergeTargetTableId);
+      setSelectedTableId(targetTableId);
       setMergeTargetTableId("");
       setMergePickQuery("");
       setMergeSearchResults(null);
+      closeNavoptsDialog();
       setMsg("تم دمج الطاولة الحالية مع الطاولة الهدف ونقل الطلبات للجلسة الهدف.");
       void loadSessionOrders();
       void loadAll();
@@ -2127,6 +2607,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   const goToNextSeatMobile = useCallback(() => {
     setSeatNameEditorSeat(null);
+    setGuestSeatDialogOpen(true);
     setSeatPanelMobCollapsed(false);
     setSelectedSeat((prev) => {
       const idx = SEAT_MOBILE_NAV_ORDER.findIndex((x) => x === prev);
@@ -2148,6 +2629,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const afterSeatNameConfirmGoCategories = useCallback(() => {
     setSeatNameEditorSeat(null);
     if (typeof window !== "undefined" && window.matchMedia(`(max-width: ${WAITER_OT_NARROW_MAX_PX}px)`).matches) {
+      setGuestSeatDialogOpen(false);
       setSeatPanelMobCollapsed(true);
       showMobileFlowToast("اختر الفئة — ثم تبويب «أصناف» للشبكة.");
       if (useCaptainMobileUi) {
@@ -2220,11 +2702,155 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   function openCaptainInvoice(inv: CashierInvoiceRow) {
     const id = String(inv.invoiceId || "").trim();
     if (!id) return;
+    closeNavoptsDialog();
     setCaptainInitialInvoiceRow(inv);
     setCaptainInvoiceId(id);
     setCaptainInvoiceAutoPrint(false);
     setCaptainInvoiceOpen(true);
   }
+
+  const showBootstrapOverlay = loading && products.length === 0 && groups.length === 0;
+  const useDesktopOrderWorkspace = !useCaptainMobileUi;
+  const desktopTableLabel = selectedTable ? tableDisplayName(selectedTable) : selectedTableId || "بدون طاولة";
+  const desktopSessionLabel = activeSessionId ? `#${activeSessionId.slice(0, 8)}` : "لا توجد جلسة";
+  const desktopBillingLabel = billingLocked ? "قيد طلب الحساب" : "جلسة مفتوحة";
+  const operationalSidebarContent = useMemo(
+    () => (
+      <div className="app-shell__op-section">
+        <div className="app-shell__op-heading">عمليات الجلسة الحالية</div>
+        <button
+          type="button"
+          className="app-shell__op-link app-shell__op-link--primary"
+          onClick={() => {
+            void openMinimumChargeFlow();
+          }}
+          disabled={!selectedTableId || selectedTableBlocked || billingLocked || sessionBusy}
+        >
+          <span className="app-shell__op-link-label">منيموم شارج</span>
+          {effectiveMinimumChargePerSeat > 0 ? (
+            <span className="app-shell__op-link-meta">
+              {effectiveMinimumChargePerSeat.toFixed(0)} ج.م / {activeGuestSeatCount} ضيف
+            </span>
+          ) : null}
+        </button>
+        {minimumChargeFlowOpen ? (
+          <div className="app-shell__op-flow">
+            {minimumChargeFlowStep === "count" ? (
+              <>
+                <div className="app-shell__op-flow-title">أدخل عدد الضيوف</div>
+                <div className="app-shell__op-editor">
+                  <input
+                    type="number"
+                    min={1}
+                    max={SEAT_SLOT_COUNT}
+                    value={guestCountDraft}
+                    onChange={(e) => setGuestCountDraft(e.target.value)}
+                    disabled={billingLocked || sessionBusy}
+                  />
+                  <button
+                    type="button"
+                    className="app-shell__op-cta"
+                    disabled={billingLocked || sessionBusy}
+                    onClick={() => void confirmMinimumChargeFlow()}
+                    aria-label="اعتماد عدد الضيوف"
+                  >
+                    {sessionBusy ? "..." : "✓"}
+                  </button>
+                </div>
+                <div className="app-shell__op-flow-note">
+                  عند اعتماد العدد سيتم إنشاء المقاعد تلقائيًا من 1 إلى {clampSeatGuestCount(guestCountDraft || activeGuestSeatCount, activeGuestSeatCount)}.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="app-shell__op-flow-title">هل ترغب في تسمية الضيوف؟</div>
+                <div className="app-shell__op-flow-note">
+                  اختر <strong>نعم</strong> لفتح المقاعد بالعدد المعتمد مع مقعد 13 المشترك، ثم اكتب اسم كل ضيف على مقعده.
+                </div>
+                <div className="app-shell__op-flow-actions">
+                  <button type="button" className="app-shell__op-cta" onClick={() => void answerMinimumChargeNaming(true)}>
+                    نعم
+                  </button>
+                  <button type="button" className="app-shell__op-link app-shell__op-link--ghost" onClick={() => void answerMinimumChargeNaming(false)}>
+                    لا
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
+
+        <div className="app-shell__op-subhead">عمليات الطاولة</div>
+        <div className="app-shell__op-grid">
+          <button
+            type="button"
+            className="app-shell__op-link app-shell__op-link--soft-red"
+            onClick={() => openNavoptsDialog("returns")}
+            disabled={!activeSessionId || returnableLines.length === 0}
+          >
+            مرتجع
+          </button>
+          <button
+            type="button"
+            className="app-shell__op-link app-shell__op-link--soft-blue"
+            onClick={() => openNavoptsDialog("transfer")}
+            disabled={!activeSessionId || sessionMoveBusy}
+          >
+            تحويل
+          </button>
+          <button
+            type="button"
+            className="app-shell__op-link app-shell__op-link--soft-violet"
+            onClick={() => openNavoptsDialog("merge")}
+            disabled={!activeSessionId || sessionMoveBusy}
+          >
+            دمج
+          </button>
+          <button
+            type="button"
+            className="app-shell__op-link app-shell__op-link--soft-teal"
+            onClick={() => openNavoptsDialog("reorder")}
+          >
+            نقل
+          </button>
+          <button
+            type="button"
+            className="app-shell__op-link app-shell__op-link--soft-amber"
+            onClick={() => openNavoptsDialog("invoices")}
+          >
+            شيكات
+          </button>
+        </div>
+      </div>
+    ),
+    [
+      activeGuestSeatCount,
+      activeSessionId,
+      billingLocked,
+      confirmMinimumChargeFlow,
+      effectiveMinimumChargePerSeat,
+      minimumChargeFlowOpen,
+      minimumChargeFlowStep,
+      guestCountDraft,
+      openMinimumChargeFlow,
+      answerMinimumChargeNaming,
+      returnableLines.length,
+      selectedTableBlocked,
+      selectedTableId,
+      sessionBusy,
+      sessionMoveBusy,
+    ],
+  );
+
+  useEffect(() => {
+    if (!appMenu?.setAsideSupplement) return;
+    if (!useDesktopOrderWorkspace) {
+      appMenu.setAsideSupplement(null);
+      return;
+    }
+    appMenu.setAsideSupplement(operationalSidebarContent);
+    return () => appMenu.setAsideSupplement(null);
+  }, [appMenu, operationalSidebarContent, useDesktopOrderWorkspace]);
 
   return (
     <div
@@ -2232,26 +2858,27 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }${showCaptainGuestDock ? " waiter-pos--captain-guest-dock-on" : ""}`}
       {...(useCaptainMobileUi ? { "data-ot-captain-tab": captainTab } : {})}
     >
+      {showBootstrapOverlay ? (
+        <div className="waiter-pos__bootstrap-overlay">
+          <div className="waiter-pos__bootstrap-spinner" />
+          <div className="waiter-pos__bootstrap-label">جاري تحميل بيانات الطلب…</div>
+        </div>
+      ) : null}
       <OperationalRoleHeader
-        roleTitle={pageTitle?.trim() ? pageTitle : "✦ OYA Resturant ✦"}
+        roleTitle={pageTitle?.trim() ? pageTitle : "SIR RESTO"}
         backTo={orderTakerExitPath}
         hideUser
-        titleSub={<span className="waiter-pos__producer-inline">© 2026 Sir Consult for Information Technology · SQL</span>}
+        titleSub={<span className="waiter-pos__title-subtle">مطاعم XTRA · شاشة الطلب الحالية للجرسون</span>}
         titleStyle={{
-          fontSize: "1.15rem",
+          fontSize: "1.02rem",
           fontWeight: 900,
           lineHeight: 1,
-          fontStyle: "italic",
-          letterSpacing: "0.03em",
-          fontFamily: "'Segoe Script', 'Brush Script MT', 'Lucida Handwriting', cursive",
-          color: "#e879f9",
-          textShadow: "0 0 7px rgba(232,121,249,0.95), 0 0 14px rgba(217,70,239,0.7)",
-          borderBottom: "2px solid rgba(232,121,249,0.85)",
-          paddingBottom: 2,
+          letterSpacing: "0.02em",
+          color: "#f8fafc",
           whiteSpace: "nowrap",
         }}
         rightSlot={
-          <div className="waiter-pos__hdr-tools" style={{ display: "grid", gridTemplateColumns: "minmax(560px, 1fr) minmax(250px, 290px) 36px", alignItems: "center", gap: 4, direction: "ltr", minWidth: 0, width: "100%" }}>
+          <div className="waiter-pos__hdr-shell">
             {useCaptainMobileUi && appMenu ? (
               <button
                 type="button"
@@ -2263,23 +2890,29 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 ☰
               </button>
             ) : null}
-            <div className="waiter-pos__hdr-actions" style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", justifyContent: "flex-start", maxWidth: "none", overflow: "hidden" }}>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--hall" onClick={() => navigate("/app/waiter/dashboard")}>لوحة الصالة</button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--tables" onClick={() => navigate("/app/waiter/tables")}>الطاولات</button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--order" onClick={() => navigate("/app/waiter/order-taker")}>طلب للطاولة</button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--quick" onClick={() => navigate("/app/waiter/pos")}>طلب سريع</button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--report" onClick={() => setShowSummary((prev) => !prev)}>{showSummary ? "إخفاء التقرير" : "تقرير الطاولة"}</button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--cashier" disabled={summonBusy || !activeSessionId} onClick={() => void summonCashier()}>{summonBusy ? "…" : "استدعاء كاشير"}</button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-mini-btn waiter-pos__hdr-mini-btn--bill" disabled={requestBillBusy || !activeSessionId || billingLocked} onClick={openBillReview}>{requestBillBusy ? "…" : "طلب الحساب"}</button>
-              <input className="waiter-pos__coupon waiter-pos__hdr-coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="قيمة الكوبون" disabled={billingLocked} />
+            <div className="waiter-pos__hdr-status">
+              <span className="waiter-pos__hdr-status-chip">{desktopTableLabel}</span>
+              <span className="waiter-pos__hdr-status-chip">{desktopSessionLabel}</span>
+              <span className="waiter-pos__hdr-status-chip">{desktopBillingLabel}</span>
             </div>
-            <div className="waiter-pos__hdr-tools-col" style={{ display: "grid", gridTemplateColumns: "minmax(118px, 1fr) minmax(112px, 0.9fr) minmax(86px, 0.72fr)", alignItems: "center", gap: 4, minWidth: 0 }}>
+            <div className="waiter-pos__hdr-primary-actions">
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--report" onClick={() => setShowSummary((prev) => !prev)}>
+                {showSummary ? "إخفاء التقرير" : "تقرير الطاولة"}
+              </button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--cashier" disabled={summonBusy || !activeSessionId} onClick={() => void summonCashier()}>
+                {summonBusy ? "…" : "استدعاء كاشير"}
+              </button>
+              <button type="button" className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--bill" disabled={requestBillBusy || !activeSessionId || billingLocked} onClick={openBillReview}>
+                {requestBillBusy ? "…" : "طلب الحساب"}
+              </button>
+            </div>
+            <div className="waiter-pos__hdr-fields">
               <select
                 className="waiter-pos__select"
                 value={selectedAgentGuid}
                 onChange={(e) => setSelectedAgentGuid(e.target.value)}
                 aria-label="اسم العميل"
-                style={{ minWidth: 118, width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", textAlign: "right", height: 30 }}
+                style={{ width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", textAlign: "right", height: 34 }}
               >
                 {agents.length === 0 ? (
                   <option value="">اسم العميل</option>
@@ -2296,14 +2929,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 value={billDate}
                 onChange={(e) => setBillDate(e.target.value)}
                 aria-label="التاريخ"
-                style={{ minWidth: 112, width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", borderRadius: 8, border: "1px solid #1e40af", background: "#fff", color: "#0f172a", height: 30 }}
+                style={{ width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", borderRadius: 8, border: "1px solid #1e40af", background: "#fff", color: "#0f172a", height: 34 }}
               />
               <select
                 className="waiter-pos__select"
                 value={selectedTableId}
                 onChange={(e) => setSelectedTableId(e.target.value)}
                 aria-label="اختيار الطاولة"
-                style={{ minWidth: 92, width: "100%", maxWidth: "100%", fontSize: "0.9rem", fontWeight: 800, padding: "0.35rem 0.55rem", textAlign: "center", flexShrink: 0, height: 30 }}
+                style={{ width: "100%", maxWidth: "100%", fontSize: "0.9rem", fontWeight: 800, padding: "0.35rem 0.55rem", textAlign: "center", flexShrink: 0, height: 34 }}
               >
                 {tables.length === 0 ? (
                   <option value="" disabled>لا توجد طاولات — تحقق من TBL005 أو مزامنة المخطط</option>
@@ -2315,6 +2948,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   ))
                 )}
               </select>
+              <input className="waiter-pos__coupon waiter-pos__hdr-coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="قيمة الكوبون" disabled={billingLocked} />
             </div>
             <div className="waiter-pos__hdr-close-wrap">
               <button
@@ -2418,38 +3052,160 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       ) : null}
 
       {showSummary && (
-        <div className="card waiter-pos__summary-panel" style={{ margin: "0.75rem 1rem", padding: "1rem 1.1rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 800 }}>{selectedTable?.name ?? "طاولة"}</div>
-            <button type="button" className="btn btn-ghost" style={{ fontSize: "0.78rem" }} onClick={() => setShowSummary(false)}>
-              إغلاق
-            </button>
+        <div
+          className="card waiter-pos__summary-panel"
+          style={{ margin: "0.75rem 1rem", padding: "1rem 1.1rem", maxHeight: "85vh", overflowY: "auto", overflowX: "hidden" }}
+        >
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", borderBottom: "1px solid #e2e8f0", paddingBottom: 10 }}>
+            <div style={{ fontWeight: 900, fontSize: "1.1rem" }}>
+              {selectedTable?.name ?? "طاولة"} — ملخص الجلسة
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem" }} onClick={() => window.print()}>
+                🖨️ طباعة
+              </button>
+              <button type="button" className="btn btn-ghost" style={{ fontSize: "0.78rem" }} onClick={() => setShowSummary(false)}>
+                إغلاق
+              </button>
+            </div>
           </div>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "0.5rem", fontSize: "0.95rem" }}>
-            <span style={{ padding: "6px 11px", borderRadius: 999, background: "#dcfce7", color: "#14532d", fontWeight: 700 }}>
-              عناصر السلة: {cart.reduce((a, l) => a + l.qty, 0)}
-            </span>
-            <span style={{ padding: "6px 11px", borderRadius: 999, background: "#dbeafe", color: "#1e3a8a", fontWeight: 700 }}>
-              طلبات الجلسة: {sessionOrders.length}
-            </span>
-            <span style={{ padding: "6px 11px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontWeight: 700 }}>
-              مطبخ قيد التجهيز: {sessionOrders.filter((o: any) => ["pending", "preparing"].includes(String(o?.status || "").toLowerCase())).length}
-            </span>
-            <span style={{ padding: "6px 11px", borderRadius: 999, background: "#ffe4e6", color: "#9f1239", fontWeight: 700 }}>
-              طلب حساب: {billingLocked ? "نعم" : "لا"}
-            </span>
-            <span style={{ padding: "6px 11px", borderRadius: 999, background: "#e2e8f0", color: "#1e293b", fontWeight: 700 }}>
-              إجمالي السلة التقريبي: {cart.reduce((a, l) => a + l.qty * l.unitPrice, 0).toFixed(2)} ج.م
-            </span>
+
+          {/* Session Meta */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 12 }}>
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+              <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>الكابتن</div>
+              <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>{captainGate?.name || "—"}</div>
+            </div>
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+              <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>بدأت الجلسة</div>
+              <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
+                {(() => {
+                  const st = findCachedActiveSession(activeSessionId)?.startTime;
+                  if (!st) return "—";
+                  const d = new Date(st);
+                  return Number.isNaN(d.getTime()) ? st : d.toLocaleString("ar-EG", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+                })()}
+              </div>
+            </div>
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+              <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>الضيوف ({activeGuestSeatCount})</div>
+              <div style={{ fontSize: "0.85rem", fontWeight: 700, color: "#0f172a", lineHeight: 1.4 }}>
+                {Array.from({ length: activeGuestSeatCount }, (_, i) => i + 1)
+                  .map((n) => seatGuestLabels[n] || String(n))
+                  .join(" · ")}
+              </div>
+            </div>
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+              <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>مينيموم شارج</div>
+              <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
+                {effectiveMinimumChargePerSeat > 0 ? `${effectiveMinimumChargePerSeat.toFixed(0)} ج.م/ضيف = ${effectiveTableMinimum.toFixed(0)} ج.م` : "غير مفعّل"}
+              </div>
+            </div>
           </div>
-          <div style={{ marginTop: "0.6rem" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6, fontSize: "0.88rem" }}>طلبات الطاولة</div>
-            {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
+
+          {/* Orders Status Grid */}
+          {(() => {
+            const all = sessionOrders.length;
+            const cancelled = sessionOrders.filter((o) => String(o.status || "").toLowerCase() === "cancelled").length;
+            const inKitchen = sessionKitchenStats.pending + sessionKitchenStats.preparing + sessionKitchenStats.ready;
+            const delivered = sessionOrders.filter((o) => ["served", "paid"].includes(String(o.status || "").toLowerCase())).length;
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8, marginTop: 12 }}>
+                <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#1e40af" }}>{all}</div>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#3b82f6" }}>إجمالي الطلبات</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d" }}>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#92400e" }}>{inKitchen}</div>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#b45309" }}>في المطبخ</div>
+                  <div style={{ fontSize: "0.65rem", color: "#78716c" }}>انتظار {sessionKitchenStats.pending} · تحضير {sessionKitchenStats.preparing} · جاهز {sessionKitchenStats.ready}</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#f0fdf4", border: "1px solid #86efac" }}>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#15803d" }}>{delivered}</div>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#16a34a" }}>واصل للطاولة</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#991b1b" }}>{cancelled}</div>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#dc2626" }}>ملغى</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#5b21b6" }}>{sessionInvoices.length}</div>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#7c3aed" }}>شيكات</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fff7ed", border: "1px solid #fdba74" }}>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#9a3412" }}>{returnableLines.length}</div>
+                  <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#c2410c" }}>مرتجعات</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Financial Summary */}
+          <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+            <div style={{ fontWeight: 800, fontSize: "0.9rem", marginBottom: 8, color: "#0f172a" }}>التكلفة</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, fontSize: "0.86rem" }}>
+              <div><span style={{ color: "#64748b" }}>السلة:</span> <strong>{gross.toFixed(2)} ج.م</strong></div>
+              <div><span style={{ color: "#64748b" }}>الخدمة ({policy.servicePercent}%):</span> <strong>{serviceCharge.toFixed(2)}</strong></div>
+              <div><span style={{ color: "#64748b" }}>VAT ({policy.vatPercent}%):</span> <strong>{vatValue.toFixed(2)}</strong></div>
+              <div><span style={{ color: "#64748b" }}>بقشيش:</span> <strong>{(tipAmount || 0).toFixed(2)}</strong></div>
+              {minimumChargeDelta > 0 ? (
+                <div><span style={{ color: "#92400e" }}>فرق المينيموم:</span> <strong style={{ color: "#92400e" }}>{minimumChargeDelta.toFixed(2)}</strong></div>
+              ) : null}
+              {billingTotals.ownerTpl ? (
+                <div><span style={{ color: "#b45309" }}>سياسة مالك/VIP:</span> <strong style={{ color: "#b45309" }}>{String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}</strong></div>
+              ) : null}
+              {billingTotals.ownerDiscountPct > 0 ? (
+                <div><span style={{ color: "#b45309" }}>خصم مالك:</span> <strong style={{ color: "#b45309" }}>{billingTotals.ownerDiscountPct}%</strong></div>
+              ) : null}
+              <div><span style={{ color: "#0f172a" }}>الإجمالي:</span> <strong style={{ fontSize: "1rem", color: "#059669" }}>{total.toFixed(2)} ج.م</strong></div>
+            </div>
+          </div>
+
+          {/* Alerts */}
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+            {billingLocked ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontSize: "0.82rem", fontWeight: 800 }}>
+                ⚠️ طلب حساب معلق — لا يمكن إضافة أصناف جديدة
+              </div>
+            ) : null}
+            {orderTakingLocked ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem", fontWeight: 800 }}>
+                🔒 الطلب مقفل — مسند لكابتن آخر
+              </div>
+            ) : null}
+            {sessionKitchenStats.ready > 0 ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#dcfce7", color: "#14532d", fontSize: "0.82rem", fontWeight: 800 }}>
+                ✅ {sessionKitchenStats.ready} طلب/أصناف جاهزة بالمطبخ — استدعِ الرنر
+              </div>
+            ) : null}
+            {billingTotals.costPricingNote ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#e0e7ff", color: "#3730a3", fontSize: "0.82rem", fontWeight: 700 }}>
+                📋 تسعير تكلفة + هامش مفعّل على الأصناف الجديدة
+              </div>
+            ) : null}
+            {msg ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#e0f2fe", color: "#075985", fontSize: "0.82rem", fontWeight: 700 }}>
+                ℹ️ {msg}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Recent Orders */}
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontWeight: 800, marginBottom: 8, fontSize: "0.9rem", color: "#0f172a" }}>الطلبات المرسلة</div>
+            {sessionOrders.filter((o) => String(o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
               <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>لا توجد طلبات مرسلة بعد.</div>
             ) : (
-              <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                  gap: 10,
+                }}
+              >
                 {sessionOrders
-                  .filter((o) => (o.status || "").toLowerCase() !== "cancelled")
+                  .filter((o) => String(o.status || "").toLowerCase() !== "cancelled")
                   .slice()
                   .reverse()
                   .map((o) => {
@@ -2460,42 +3216,20 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       <div
                         key={`sum-${o.id}`}
                         style={{
-                          minWidth: 320,
-                          maxWidth: 380,
                           border: "1px solid #dbeafe",
                           borderRadius: 12,
-                          padding: "12px 14px",
+                          padding: "10px 12px",
                           background: "#f8fbff",
                         }}
                       >
-                        <div
-                          style={{
-                            fontSize: "0.84rem",
-                            fontWeight: 800,
-                            marginBottom: 6,
-                            color: "#0f172a",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 6,
-                          }}
-                        >
-                          <span>
-                            طلب #{o.id.slice(0, 8)} · {orderStatusLabelAr(st)}
-                            {o.generalOrder ? " · عام" : ""}
-                          </span>
+                        <div style={{ fontSize: "0.82rem", fontWeight: 800, marginBottom: 6, color: "#0f172a", display: "flex", justifyContent: "space-between", gap: 6 }}>
+                          <span>طلب #{o.id.slice(0, 8)} · {orderStatusLabelAr(st)} {o.generalOrder ? "· عام" : ""}</span>
                           {canCancel ? (
-                            <button
-                              type="button"
-                              className="waiter-pos__btn waiter-pos__btn--ghost"
-                              style={{ fontSize: "0.72rem", padding: "2px 6px" }}
-                              onClick={() => void cancelServerOrder(o.id)}
-                            >
-                              إلغاء
-                            </button>
+                            <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.7rem", padding: "2px 6px" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button>
                           ) : null}
                         </div>
-                        <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: "0.88rem", color: "#334155", lineHeight: 1.55 }}>
-                          {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-${idx}`}>{ln}</li>) : <li>بدون بنود نشطة</li>}
+                        <ul style={{ margin: 0, paddingInlineStart: 16, fontSize: "0.84rem", color: "#334155", lineHeight: 1.5 }}>
+                          {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-${idx}`}>{ln}</li>) : <li>بدون بنود</li>}
                         </ul>
                       </div>
                     );
@@ -2517,873 +3251,1596 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           />
         ) : null}
         <main className="waiter-pos__main">
-          <div className="waiter-pos__topbar">
-            {useCaptainMobileUi && captainTab === "menu" && assignmentMode === "per_seat" && captainDockSeats.length > 0 ? (
-              <div className="waiter-pos__captain-guest-strip" role="tablist" aria-label="اختصار أسماء الضيوف أعلى المنيو">
-                {captainDockSeats.map((n) => (
-                  <button
-                    key={`cap-seat-${n}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={selectedSeat === n}
-                    className={`waiter-pos__captain-guest-strip__btn${selectedSeat === n ? " waiter-pos__captain-guest-strip__btn--active" : ""}${n === SHARED_SEAT_NO ? " waiter-pos__captain-guest-strip__btn--shared" : ""
-                      }`}
-                    onClick={() => pickCaptainSeatForOrder(n)}
-                  >
-                    {truncateRailGuestLabel(seatGuestDisplay(n))}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <div
-              id="waiter-ot-sec-categories"
-              className="waiter-pos__top-card waiter-pos__top-card--categories waiter-pos__ot-scroll-target"
-              style={{ order: 10 }}
-            >
-              <h3 style={{ marginTop: 0 }}>التصنيف - الفئة</h3>
-              <div className="waiter-pos__cats waiter-pos__cats-inbar" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}>
-                <button
-                  type="button"
-                  className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
-                  onClick={() => setCategoryKey("all")}
-                  title="كل المجموعات"
-                >
-                  <div className="waiter-pos__cat-wrap">
-                    <span className="waiter-pos__cat-noimg" />
-                    <span className="waiter-pos__cat-label">الكل</span>
+          {useDesktopOrderWorkspace ? (
+            <div className="waiter-pos__workspace">
+              <section className="waiter-pos__menu-column">
+                <div className="waiter-pos__seat-pills-bar waiter-pos__workspace-block">
+                  {activeSessionId && desktopSeatPills.length > 0 ? (
+                    <>
+                      <div className="waiter-pos__seat-pills-bar__head">
+                        <span>المقعد الحالي للتسجيل</span>
+                        <button type="button" className="waiter-pos__seat-pills-bar__launch" onClick={() => void openMinimumChargeFlow()}>
+                          تعديل العدد
+                        </button>
+                      </div>
+                      <div className="waiter-pos__seat-pills">
+                        {desktopSeatPills.map((n) => {
+                          const stats = seatCartStats.get(n);
+                          const active = selectedSeat === n;
+                          const shared = n === SHARED_SEAT_NO;
+                          return (
+                            <button
+                              key={`desk-seat-pill-${n}`}
+                              type="button"
+                              className={`waiter-pos__seat-pill${active ? " waiter-pos__seat-pill--active" : ""}${shared ? " waiter-pos__seat-pill--shared" : ""}`}
+                              onClick={() => {
+                                setAssignmentMode("per_seat");
+                                setSelectedSeat(n);
+                              }}
+                              title={seatGuestDisplay(n)}
+                            >
+                              <span className="waiter-pos__seat-pill__label">{truncateRailGuestLabel(seatGuestDisplay(n))}</span>
+                              {stats?.qty ? <span className="waiter-pos__seat-pill__meta">{stats.qty}</span> : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <button type="button" className="waiter-pos__seat-pills-bar__prompt" onClick={() => void openMinimumChargeFlow()}>
+                      ابدأ من زر منيموم شارج ثم حدّد عدد الأفراد لتظهر المقاعد هنا
+                    </button>
+                  )}
+                </div>
+                <div className="waiter-pos__workspace-block" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <span style={{ fontSize: "0.78rem", color: "var(--muted)", fontWeight: 700 }}>عرض:</span>
+                    <button type="button" className={`waiter-pos__mini-toggle ${displayMode === "group" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => { setDisplayMode("group"); setCategoryKey("all"); }}>مجموعة</button>
+                    <button type="button" className={`waiter-pos__mini-toggle ${displayMode === "category" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => { setDisplayMode("category"); setCategoryKey("all"); }}>تصنيف</button>
                   </div>
-                </button>
-                {waiterMenuGroups.map((g) => (
-                  <button
-                    key={`side-${g.CardGuide}`}
-                    type="button"
-                    className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
-                    onClick={() => setCategoryKey(g.CardGuide)}
-                    title={g.GroupName}
-                  >
-                    <div className="waiter-pos__cat-wrap">
-                      <span className="waiter-pos__cat-noimg" />
-                      <span className="waiter-pos__cat-label">{g.GroupName}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div
-              id="waiter-ot-sec-navopts"
-              className="waiter-pos__top-card waiter-pos__top-card--navopts waiter-pos__ot-scroll-target"
-              style={{ order: 90 }}
-            >
-              <h3 style={{ marginTop: 0 }}>عمليات الطاولة</h3>
-              <div style={{ marginTop: 8, marginBottom: 8 }}>
-                <button
-                  type="button"
-                  className="waiter-pos__btn waiter-pos__btn--ghost"
-                  style={{ width: "100%", fontWeight: 800 }}
-                  disabled={!activeSessionId || returnableLines.length === 0}
-                  onClick={() => {
-                    setReturnModalLines(returnableLines);
-                    setReturnModalOpen(true);
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <span style={{ fontSize: "0.78rem", color: "var(--muted)", fontWeight: 700 }}>ترتيب:</span>
+                    <button type="button" className={`waiter-pos__mini-toggle ${sortMode === "default" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => setSortMode("default")}>افتراضي</button>
+                    <button type="button" className={`waiter-pos__mini-toggle ${sortMode === "name" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => setSortMode("name")}>الاسم</button>
+                    <button type="button" className={`waiter-pos__mini-toggle ${sortMode === "price" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => setSortMode("price")}>السعر</button>
+                  </div>
+                </div>
+                <div
+                  id="waiter-ot-sec-categories"
+                  className="waiter-pos__cat-strip waiter-pos__workspace-block"
+                  style={{
+                    width: "100%",
+                    minHeight: 52,
+                    maxHeight: 72,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                    padding: "6px 0",
                   }}
                 >
-                  طلب مرتجع ضيف
-                </button>
-              </div>
-              <div className="waiter-pos__split-box">
-                <div className="waiter-pos__field-stack waiter-pos__field-stack--table-pick" style={{ display: "grid", gap: 10 }}>
-                  <div className="waiter-pos__table-move-block">
-                    <div className="waiter-pos__table-move-block__title">تحويل</div>
-                    <div className="waiter-pos__table-pick-search-row">
-                      <input
-                        type="search"
-                        enterKeyHint="search"
-                        className="waiter-pos__table-pick-search"
-                        value={transferPickQuery}
-                        onChange={(e) => setTransferPickQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            runTransferTableSearch();
-                          }
-                        }}
-                        placeholder="ابحث عن طاولة فارغة…"
-                        autoComplete="off"
-                        aria-label="بحث طاولة للتحويل"
-                      />
-                      <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runTransferTableSearch()}>
-                        بحث
+                  {displayMode === "category" && categoryKey !== "all" ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                      <button
+                        type="button"
+                        className="waiter-pos__cat"
+                        onClick={() => { setCategoryKey("all"); setSubGroupKey("all"); }}
+                        title="رجوع للتصنيفات"
+                        style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                      >
+                        🔙 رجوع
                       </button>
+                      {groupsInSelectedCategory.map((g) => (
+                        <button
+                          key={`sub-${g.CardGuide}`}
+                          type="button"
+                          className={`waiter-pos__cat ${subGroupKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                          style={{ background: "#dbeafe", borderColor: "#3b82f6", color: "#1e40af", flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                          onClick={() => setSubGroupKey(subGroupKey === g.CardGuide ? "all" : g.CardGuide)}
+                          title={g.GroupName}
+                        >
+                          {g.GroupName}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                      <button
+                        type="button"
+                        className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
+                        onClick={() => setCategoryKey("all")}
+                        title={displayMode === "category" ? "كل التصنيفات" : "كل المجموعات"}
+                        style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                      >
+                        {displayMode === "category" ? "كل التصنيفات" : "كل المجموعات"}
+                      </button>
+                      {displayMode === "category"
+                        ? displayCategories.map((cat) => (
+                            <button
+                              key={`cat-${cat}`}
+                              type="button"
+                              className={`waiter-pos__cat ${categoryKey === cat ? "waiter-pos__cat--active" : ""}`}
+                              onClick={() => setCategoryKey(cat)}
+                              title={cat}
+                              style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                            >
+                              {cat}
+                            </button>
+                          ))
+                        : waiterMenuGroups.map((g) => (
+                            <button
+                              key={`side-${g.CardGuide}`}
+                              type="button"
+                              className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                              onClick={() => setCategoryKey(g.CardGuide)}
+                              title={g.GroupName}
+                              style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                            >
+                              {g.GroupName}
+                            </button>
+                          ))}
+                    </div>
+                  )}
+                </div>
+
+                {!wizardProduct ? (
+                  <div id="waiter-ot-sec-search" className="waiter-pos__search-wrap waiter-pos__ot-scroll-target waiter-pos__workspace-block" style={{ marginBottom: "0.5rem" }}>
+                    {menuScheduleRestriction.limited ? (
+                      <p style={{ margin: "0 0 0.5rem", fontSize: "0.88rem", color: "var(--wp-muted)" }}>
+                        القائمة اليومية: {menuEligibleProducts.length} صنفًا مسموحًا اليوم ({todayYmd()})
+                      </p>
+                    ) : null}
+                    <SmartProductSearch
+                      onSelect={(hit) =>
+                        beginAddProduct(
+                          products.find((p) => String(p.CardGuide) === String(hit.CardGuide)) || {
+                            CardGuide: hit.CardGuide,
+                            ProductName: hit.ProductName,
+                            Price: Number(hit.AgentPrice || 0) || 0,
+                            AgentPrice: Number(hit.AgentPrice || 0) || 0,
+                          },
+                        )
+                      }
+                      filterHit={(hit) => isOnWaiterMenu(hit.CardGuide, hit.ProductName)}
+                      isOutOfStock={(hit) => isKitchenStopped(hit.CardGuide)}
+                      placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
+                    />
+                  </div>
+                ) : null}
+
+                {wizardProduct ? (
+                  <div
+                    id="waiter-ot-sec-grid"
+                    className="waiter-pos__workspace-block"
+                    style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}
+                  >
+                    <ModifierWizard
+                      baseProduct={wizardProduct}
+                      groups={wizardGroups}
+                      onResult={(result) => {
+                        const selectionNames: string[] = [];
+                        const kitchenNotesParts: string[] = [];
+                        const cartModifiers: CartModifier[] = [];
+                        let totalPriceDelta = 0;
+                        for (const sel of result.selections) {
+                          const g = wizardGroups.find((x) => x.groupId === sel.groupId);
+                          if (!g) continue;
+                          for (const itemId of sel.selectedItemIds) {
+                            const it = g.items.find((x) => x.itemId === itemId);
+                            if (!it) continue;
+                            totalPriceDelta += it.priceDelta;
+                            cartModifiers.push({ groupId: g.groupId, groupName: g.nameAr, itemName: it.nameAr, priceDelta: it.priceDelta });
+                            if (g.type === "exclusion") {
+                              kitchenNotesParts.push(`بدون ${it.nameAr}`);
+                            } else if (g.type === "kitchen_note") {
+                              kitchenNotesParts.push(it.nameAr);
+                            } else {
+                              selectionNames.push(it.nameAr);
+                            }
+                          }
+                          const freeText = String(sel.note || "").trim();
+                          if (freeText) {
+                            cartModifiers.push({ groupId: g.groupId, groupName: g.nameAr, itemName: freeText, priceDelta: 0, source: "free_text" });
+                            if (g.type === "kitchen_note" || g.type === "exclusion") {
+                              kitchenNotesParts.push(freeText);
+                            } else {
+                              selectionNames.push(`${g.nameAr}: ${freeText}`);
+                            }
+                          }
+                        }
+                        const lineName = selectionNames.length ? `${result.baseProduct.name} (${selectionNames.join("، ")})` : result.baseProduct.name;
+                        const kn = kitchenNotesParts.join("؛ ");
+                        const sn = assignmentMode === "general" ? null : selectedSeat;
+                        const line: CartLine = {
+                          id: crypto.randomUUID(),
+                          productGuide: result.baseProduct.guide,
+                          name: lineName,
+                          qty: 1,
+                          unitPrice: result.baseProduct.price + totalPriceDelta,
+                          seatNo: sn,
+                          seatLabel: null,
+                          kitchenNotes: kn || undefined,
+                          addonIdsKey: "",
+                          modifiers: cartModifiers.length ? cartModifiers : undefined,
+                        };
+                        setCart((prev) => [...prev, line]);
+                        setWizardProduct(null);
+                        setWizardGroups([]);
+                        setWizardStepInfo(null);
+                      }}
+                      onCancel={() => {
+                        setWizardProduct(null);
+                        setWizardGroups([]);
+                        setWizardStepInfo(null);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div id="waiter-ot-sec-grid" className="waiter-pos__grid waiter-pos__ot-scroll-target waiter-pos__workspace-block">
+                    {filteredProducts.length === 0 ? (
+                      <div style={{ gridColumn: "1 / -1", padding: "1rem", color: "var(--wp-muted)", textAlign: "center" }}>
+                        {menuScheduleRestriction.limited
+                          ? "لا أصناف في القائمة اليومية لهذا اليوم — راجع إعدادات «المنيو والقائمة اليومية»."
+                          : "لا أصناف في هذه الفئة."}
+                      </div>
+                    ) : null}
+                    {filteredProducts.map((p) => {
+                      const stopped = isKitchenStopped(p.CardGuide);
+                      const stopNote = kitchenStopNote(p.CardGuide);
+                      const hue = hashHue(p.CardGuide);
+                      const bg = `linear-gradient(135deg, hsl(${hue}, 55%, 42%) 0%, hsl(${(hue + 40) % 360}, 45%, 32%) 100%)`;
+                      const initial = (p.ProductName || "?").trim().charAt(0);
+                      const imgSrc = resolveMediaUrl(p.imageUrl || p.image);
+                      const hasImage = !!imgSrc;
+                      return (
+                        <button
+                          key={p.CardGuide}
+                          type="button"
+                          className="waiter-pos__card"
+                          onClick={() => void handleProductClick(p)}
+                          style={{ opacity: stopped ? 0.55 : 1, position: "relative" }}
+                          title={stopped ? stopNote : undefined}
+                        >
+                          {stopped ? (
+                            <div style={{ position: "absolute", top: 6, left: 6, zIndex: 3, background: "#b91c1c", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
+                              Out of Stock
+                            </div>
+                          ) : null}
+                          <div className="waiter-pos__ribbon">{Math.round((p.Price || 0) * (1 + SERVICE_RATE_FOR_CARD_PRICE))} ج.م</div>
+                          {captainItemSelectionMode === "classic" && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                right: 0,
+                                top: 6,
+                                left: 0,
+                                zIndex: 4,
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 0,
+                                flexWrap: "nowrap",
+                                padding: "0 0",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleProductClick(p);
+                                }}
+                                style={{
+                                  background: "rgba(15,23,42,0.82)",
+                                  color: "#fff",
+                                  borderRadius: "999px 0 0 999px",
+                                  padding: "2px 7px",
+                                  fontSize: 11,
+                                  fontWeight: 900,
+                                  border: 0,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                عادي
+                              </button>
+                              {activeCatalogAddons.length > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    beginAddProduct(p);
+                                  }}
+                                  style={{
+                                    background: "rgba(245,158,11,0.95)",
+                                    color: "#111827",
+                                    borderRadius: "0 999px 999px 0",
+                                    padding: "2px 7px",
+                                    fontSize: 11,
+                                    fontWeight: 900,
+                                    border: 0,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  إضافات
+                                </button>
+                              ) : null}
+                            </div>
+                          )}
+                          <div className="waiter-pos__card-img" style={{ background: bg, position: "relative", overflow: "hidden" }}>
+                            {hasImage && (
+                              <img
+                                src={imgSrc}
+                                alt={p.ProductName}
+                                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            )}
+                            <div style={{ position: "relative", zIndex: 1 }}>{initial}</div>
+                          </div>
+                          <div className="waiter-pos__card-body">
+                            <div className="waiter-pos__card-name">{p.ProductName}</div>
+                            <div className="waiter-pos__card-meta">
+                              <span>🕐 {prepMinutes(p)} دقيقة</span>
+                              {p.GroupGuid && <span>{groupNameById.get(p.GroupGuid) ?? ""}</span>}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <aside className="waiter-pos__cart-column">
+                <div id="waiter-ot-sec-pending" className="waiter-pos__desk-card waiter-pos__ot-scroll-target">
+                  <div className="waiter-pos__desk-card__head">
+                    <div>
+                      <div className="waiter-pos__desk-card__title">السلة — قيد الإرسال</div>
+                      <div className="waiter-pos__desk-card__sub">
+                        {itemCount} صنف · تقدير أولي {gross.toFixed(2)} ج.م
+                      </div>
+                      <div className="waiter-pos__cart-seat-indicator">
+                        <span className="waiter-pos__cart-seat-indicator__label">التسجيل الآن:</span>
+                        <span className="waiter-pos__cart-seat-indicator__value">
+                          {activeSessionId && assignmentMode === "per_seat"
+                            ? seatGuestDisplay(selectedSeat)
+                            : "حدّد الأفراد أولًا"}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__summary-toggle" onClick={() => setShowCostDrawer((prev) => !prev)}>
+                        تفاصيل التكلفة
+                      </button>
+                      <button
+                        type="button"
+                        className="waiter-pos__btn waiter-pos__cart-submit"
+                        disabled={loading || billingLocked || cart.length === 0}
+                        onClick={() => void submitSale()}
+                      >
+                        {loading ? "جاري الإرسال…" : "إرسال الطلب"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="waiter-pos__order-box">
+                    {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
+                      <div key={`desk-line-${l.id}`} className="waiter-pos__order-line">
+                        <div style={{ flex: 1 }}>
+                          {(() => {
+                            const xn = seatNoFromLine(l);
+                            const tag = xn != null ? seatGuestDisplay(xn) : null;
+                            return tag ? `${l.name} · ${tag}` : l.name;
+                          })()}
+                          {l.modifiers && l.modifiers.length > 0 ? (
+                            <div style={{ marginTop: 3, paddingInlineStart: 12 }}>
+                              {l.modifiers.map((m, idx) => (
+                                <div key={idx} style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+                                  {m.groupName}: {m.itemName} {m.priceDelta > 0 ? `(+${m.priceDelta.toFixed(0)})` : ""}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                          {l.kitchenNotes?.trim() ? (
+                            <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2 }}>ملاحظة: {l.kitchenNotes.trim()}</div>
+                          ) : null}
+                        </div>
+                        <input type="number" min={1} value={l.qty} onChange={(e) => setQty(l.id, Number(e.target.value) || 0)} disabled={billingLocked} />
+                        <span>{Math.max(0, l.qty * l.unitPrice - (promoResult.lineDiscounts[l.id] || 0)).toFixed(0)} ج.م</span>
+                        {l.modifiers && l.modifiers.length > 0 && !billingLocked ? (
+                          <button
+                            type="button"
+                            className="waiter-pos__line-remove"
+                            style={{ background: "#0ea5e9", color: "#fff", marginInlineEnd: 4 }}
+                            onClick={() => {
+                              const p = products.find((x: Product) => x.CardGuide === l.productGuide);
+                              if (p) void handleProductClick(p);
+                            }}
+                            title="تعديل الإضافات"
+                          >
+                            ✎
+                          </button>
+                        ) : null}
+                        <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="waiter-pos__desk-card waiter-pos__desk-card--summary">
+                  <div className="waiter-pos__desk-card__head">
+                    <div>
+                      <div className="waiter-pos__desk-card__title">مرسل / جاهز بالمطبخ</div>
+                      <div className="waiter-pos__desk-card__sub">متابعة الطلبات المرسلة من الجلسة الحالية.</div>
+                    </div>
+                  </div>
+
+                  <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__sent--compact waiter-pos__ot-scroll-target">
+                    {ordersBusy && !sessionOrders.length ? (
+                      <div className="waiter-pos__summary-empty">جاري التحميل…</div>
+                    ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
+                      <div className="waiter-pos__summary-empty">لا توجد بعد.</div>
+                    ) : (
+                      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                        {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
+                          const st = (o.status || "").toLowerCase();
+                          const canCancel = st === "pending";
+                          const lines = activeOrderItems(o).map(formatOrderItemLine);
+                          return (
+                            <li key={`sent-desk-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "8px 0", fontSize: "0.82rem", color: "#e2e8f0" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                                <span><strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong> · {orderStatusLabelAr(st)}</span>
+                                {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
+                              </div>
+                              <ul style={{ margin: 0, paddingInlineStart: 16, color: "#cbd5e1", lineHeight: 1.45 }}>
+                                {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-desk-ln-${idx}`}>{ln}</li>) : <li>بدون بنود</li>}
+                              </ul>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+
+                  {showCostDrawer ? (
+                    <div id="waiter-ot-sec-totals" className="waiter-pos__footer-totals waiter-pos__cost-drawer waiter-pos__ot-scroll-target">
+                      <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 900, marginBottom: 4 }}>تفاصيل التكلفة</div>
+                      {billingTotals.ownerTpl ? (
+                        <div style={{ color: "#b45309", fontSize: "0.86rem", fontWeight: 800 }}>
+                          سياسة مالك/VIP ({String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}) · عميل القالب مُعرَّف على الجلسة
+                        </div>
+                      ) : null}
+                      {billingTotals.costPricingNote ? (
+                        <div style={{ color: "#64748b", fontSize: "0.8rem", fontWeight: 600 }}>
+                          تسعير تكلفة + هامش على الأصناف الجديدة — التقديم يعتمد على AgentPrice المحفوظ.
+                        </div>
+                      ) : null}
+                      {effectiveTableMinimum > 0 && minimumChargeDelta > 0 ? (
+                        <div style={{ color: "#92400e", fontSize: "0.85rem", fontWeight: 800, lineHeight: 1.35 }}>
+                          الحدّ الأدنى {effectiveMinimumChargePerSeat.toFixed(0)} ج.م/ضيف × {activeGuestSeatCount} = {effectiveTableMinimum.toFixed(0)} ج.م — الفرق {minimumChargeDelta.toFixed(0)} ج.م.
+                        </div>
+                      ) : null}
+                      {effectiveTableMinimum > 0 && minimumChargeDelta > 0 && !billingLocked && !orderTakingLocked ? (
+                        <div style={{ marginTop: 8 }}>
+                          <button
+                            type="button"
+                            className="waiter-pos__btn waiter-pos__btn--ghost"
+                            onClick={() => setShowGapPicks((prev) => !prev)}
+                            style={{ fontSize: "0.8rem", fontWeight: 800, color: "#92400e", borderColor: "rgba(217,119,6,0.45)", background: "rgba(251,191,36,0.1)", padding: "6px 10px" }}
+                          >
+                            {showGapPicks ? "▼" : "▶"} {gapPickHits.length} بدائل ضمن فرق {minimumChargeDelta.toFixed(0)} ج.م
+                          </button>
+                          {showGapPicks ? (
+                            <div
+                              style={{
+                                marginTop: 6,
+                                padding: "10px 12px",
+                                borderRadius: 10,
+                                border: "1px solid rgba(217,119,6,0.35)",
+                                background: "rgba(251,191,36,0.08)",
+                              }}
+                            >
+                              <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: 8, lineHeight: 1.35 }}>
+                                أصناف بسعر الوحدة ≤ {minimumChargeDelta.toFixed(2)} ج.م لتقليل الفرق.
+                              </div>
+                              {gapPickBusy ? (
+                                <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>جاري التحميل…</div>
+                              ) : gapPickHits.length === 0 ? (
+                                <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>لا توجد أصناف ضمن هذا السقف.</div>
+                              ) : (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                  {gapPickHits.slice(0, 14).map((p) => (
+                                    <button
+                                      key={`desk-gap-${p.CardGuide}`}
+                                      type="button"
+                                      className="waiter-pos__btn waiter-pos__btn--ghost"
+                                      style={{ fontSize: "0.76rem", padding: "5px 10px", maxWidth: "100%" }}
+                                      title={`إضافة ${p.ProductName} إلى السلة`}
+                                      onClick={() => void handleProductClick(p)}
+                                    >
+                                      {p.ProductName.slice(0, 42)}
+                                      {p.ProductName.length > 42 ? "…" : ""} <span style={{ opacity: 0.85 }}>({p.Price.toFixed(0)})</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {billingTotals.ownerDiscountPct > 0 ? (
+                        <div style={{ color: "#0f172a", fontSize: "0.88rem", fontWeight: 700 }}>
+                          خصم مالك بعد العروض {billingTotals.ownerDiscountPct}%: صافي قبل الضرائب {netAfterMinimum.toFixed(2)} ← {billingTotals.netPortion.toFixed(2)}
+                        </div>
+                      ) : null}
+                      <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
+                      <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>
+                        <span>بقشيش:</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={tipAmount}
+                          onChange={(e) => setTipAmount(Math.max(0, Number(e.target.value) || 0))}
+                          style={{ width: 86, padding: "6px 8px", borderRadius: 8, border: "1px solid #94a3b8", background: "#ffffff", color: "#0f172a", fontSize: "0.95rem", fontWeight: 800 }}
+                        />
+                      </div>
+                      <div style={{ fontWeight: 900, marginTop: 6, color: "#0b3b2e", fontSize: "1rem" }}>الإجمالي: {total.toFixed(2)} ج.م</div>
+                      <div className="waiter-pos__actions" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                        <button
+                          type="button"
+                          className="waiter-pos__btn"
+                          style={{
+                            padding: "8px 16px",
+                            fontSize: "1rem",
+                            fontWeight: 900,
+                            background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                            color: "#fff",
+                            border: "1px solid #15803d",
+                          }}
+                          onClick={() => void loadAll()}
+                        >
+                          تحديث
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </aside>
+            </div>
+          ) : (
+            <>
+              <div className="waiter-pos__topbar">
+                {useCaptainMobileUi && captainTab === "menu" && assignmentMode === "per_seat" && captainDockSeats.length > 0 ? (
+                  <div className="waiter-pos__captain-guest-strip" role="tablist" aria-label="اختصار أسماء الضيوف أعلى المنيو">
+                    {captainDockSeats.map((n) => (
+                      <button
+                        key={`cap-seat-${n}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={selectedSeat === n}
+                        className={`waiter-pos__captain-guest-strip__btn${selectedSeat === n ? " waiter-pos__captain-guest-strip__btn--active" : ""}${n === SHARED_SEAT_NO ? " waiter-pos__captain-guest-strip__btn--shared" : ""
+                          }`}
+                        onClick={() => pickCaptainSeatForOrder(n)}
+                      >
+                        {truncateRailGuestLabel(seatGuestDisplay(n))}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div
+                  id="waiter-ot-sec-navopts"
+                  className="waiter-pos__top-card waiter-pos__top-card--navopts waiter-pos__ot-scroll-target"
+                  style={{ order: 90 }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <h3 style={{ marginTop: 0 }}>عمليات الطاولة</h3>
+                    <div style={{ color: "#94a3b8", fontSize: "0.76rem", fontWeight: 700 }}>
+                      اضغط على العملية لفتح شريحة كبيرة مستقلة.
+                    </div>
+                  </div>
+                  <div className="waiter-pos__ops-launcher">
+                    {[
+                      { key: "returns" as const, label: "🔄 مرتجع", subtitle: "مرتجعات الجلسة الحالية", color: "#f59e0b", disabled: !activeSessionId || returnableLines.length === 0 },
+                      { key: "transfer" as const, label: "🔀 تحويل", subtitle: "نقل الجلسة إلى طاولة أخرى", color: "#3b82f6", disabled: !activeSessionId || sessionMoveBusy },
+                      { key: "merge" as const, label: "➕ دمج", subtitle: "دمج الجلسة مع طاولة نشطة", color: "#22c55e", disabled: !activeSessionId || sessionMoveBusy },
+                      { key: "reorder" as const, label: "🪑 نقل", subtitle: "تغيير مقاعد البنود والضيوف", color: "#8b5cf6", disabled: false },
+                      { key: "invoices" as const, label: "🧾 شيكات", subtitle: "معاينة وطباعة الشيكات", color: "#ec4899", disabled: false },
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        className="waiter-pos__ops-launcher-btn"
+                        disabled={tab.disabled}
+                        onClick={() => openNavoptsDialog(tab.key)}
+                        style={{
+                          borderColor: `${tab.color}55`,
+                          background: `${tab.color}14`,
+                          color: tab.disabled ? "#64748b" : tab.color,
+                          opacity: tab.disabled ? 0.5 : 1,
+                        }}
+                      >
+                        <span className="waiter-pos__ops-launcher-btn__title">{tab.label}</span>
+                        <span className="waiter-pos__ops-launcher-btn__sub">{tab.subtitle}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {activeSessionId ? (
+                    <div className="waiter-pos__table-kitchen-strip" style={{ marginTop: 10 }}>
+                      <div className="waiter-pos__table-kitchen-strip__title">مرسل / جاهز بالمطبخ (جلسة التسكين الحالية)</div>
+                      <div className="waiter-pos__table-kitchen-strip__counts" title="طلبات الجلسة الحالية المرسلة للمطبخ — حسب حالة التذكرة">
+                        انتظار {sessionKitchenStats.pending} · تحضير {sessionKitchenStats.preparing} · جاهز {sessionKitchenStats.ready}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div
+                  id="waiter-ot-sec-pending"
+                  className="waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__ot-scroll-target"
+                  style={{ order: 30 }}
+                >
+                  <>
+                    <h3 style={{ marginTop: 0 }}>السلة — قيد الإرسال</h3>
+                    <div className="waiter-pos__order-box">
+                      {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
+                        <div key={`top-line-${l.id}`} className="waiter-pos__order-line">
+                          <div style={{ flex: 1 }}>
+                            {(() => {
+                              const xn = seatNoFromLine(l);
+                              const tag = xn != null ? seatGuestDisplay(xn) : null;
+                              return tag ? `${l.name} · ${tag}` : l.name;
+                            })()}
+                            {l.modifiers && l.modifiers.length > 0 ? (
+                              <div style={{ marginTop: 3, paddingInlineStart: 12 }}>
+                                {l.modifiers.map((m, idx) => (
+                                  <div key={idx} style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+                                    {m.groupName}: {m.itemName} {m.priceDelta > 0 ? `(+${m.priceDelta.toFixed(0)})` : ""}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {l.kitchenNotes?.trim() ? (
+                              <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2 }}>ملاحظة: {l.kitchenNotes.trim()}</div>
+                            ) : null}
+                          </div>
+                          <input type="number" min={1} value={l.qty} onChange={(e) => setQty(l.id, Number(e.target.value) || 0)} disabled={billingLocked} />
+                          <span>{Math.max(0, l.qty * l.unitPrice - (promoResult.lineDiscounts[l.id] || 0)).toFixed(0)} ج.م</span>
+                          {l.modifiers && l.modifiers.length > 0 && !billingLocked ? (
+                            <button
+                              type="button"
+                              className="waiter-pos__line-remove"
+                              style={{ background: "#0ea5e9", color: "#fff", marginInlineEnd: 4 }}
+                              onClick={() => {
+                                // إعادة فتح المعالج لتعديل الاختيارات (بدون استعادة — نسخة أولية)
+                                const p = products.find((x: Product) => x.CardGuide === l.productGuide);
+                                if (p) void handleProductClick(p);
+                              }}
+                              title="تعديل الإضافات"
+                            >
+                              ✎
+                            </button>
+                          ) : null}
+                          <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="waiter-pos__btn"
+                      style={{
+                        marginTop: 8,
+                        padding: "10px 12px",
+                        fontSize: "1rem",
+                        fontWeight: 900,
+                        background:
+                          cart.length === 0
+                            ? "linear-gradient(180deg, #64748b 0%, #475569 100%)"
+                            : "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                        color: "#fff",
+                        border: cart.length === 0 ? "1px solid #64748b" : "1px solid #15803d",
+                        opacity: loading || billingLocked ? 0.65 : 1,
+                        cursor: loading || billingLocked || cart.length === 0 ? "not-allowed" : "pointer",
+                      }}
+                      disabled={loading || billingLocked || cart.length === 0}
+                      onClick={() => void submitSale()}
+                    >
+                      {loading ? "جاري الإرسال…" : "إرسال الطلب"}
+                    </button>
+                  </>
+                </div>
+
+                {!useDesktopOrderWorkspace ? (
+                  <div
+                    id="waiter-ot-sec-distribute"
+                    className="waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__top-card--seatpanel waiter-pos__top-card--seatlauncher waiter-pos__ot-scroll-target"
+                    style={{ order: 20 }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <h3 style={{ marginTop: 0, marginBottom: 4 }}>{assignmentMode === "per_seat" ? "إدارة الضيوف والكراسي" : "توزيع الطلب"}</h3>
+                        <div style={{ color: "#94a3b8", fontSize: "0.8rem", fontWeight: 700 }}>
+                          افتح شريحة كبيرة مستقلة بدل العمل داخل المساحة الضيقة.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
+                        style={{ width: "auto", minWidth: 180 }}
+                        onClick={openGuestSeatDialog}
+                      >
+                        {assignmentMode === "per_seat" ? "فتح شريحة الضيوف" : "فتح شريحة التوزيع"}
+                      </button>
+                    </div>
+                    <div className="waiter-pos__toggle-row">
+                      <button
+                        type="button"
+                        className={`waiter-pos__toggle waiter-pos__toggle--seat-mode ${assignmentMode === "per_seat" ? "waiter-pos__toggle--on" : ""}`}
+                        onClick={() => setAssignmentMode("per_seat")}
+                      >
+                        حسب المقعد (١–{activeGuestSeatCount})
+                      </button>
+                      <button
+                        type="button"
+                        className="waiter-pos__toggle waiter-pos__toggle--guestcount waiter-pos__toggle--on"
+                        onClick={() => {
+                          void openMinimumChargeFlow();
+                        }}
+                        disabled={billingLocked || sessionBusy}
+                      >
+                        ضع عدد الضيوف: {activeGuestSeatCount}
+                      </button>
+                      <button
+                        type="button"
+                        className={`waiter-pos__toggle waiter-pos__toggle--general-mode ${assignmentMode === "general" ? "waiter-pos__toggle--on" : ""}`}
+                        onClick={() => setAssignmentMode("general")}
+                      >
+                        طلب عام (بدون مقعد)
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="waiter-pos__top-card" style={{ order: 50 }}>
+                  <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__ot-scroll-target">
+                    <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>مرسل / جاهز بالمطبخ</h4>
+                    {ordersBusy && !sessionOrders.length ? (
+                      <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>جاري التحميل…</div>
+                    ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
+                      <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>لا توجد بعد.</div>
+                    ) : (
+                      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                        {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
+                          const st = (o.status || "").toLowerCase();
+                          const canCancel = st === "pending";
+                          const lines = activeOrderItems(o).map(formatOrderItemLine);
+                          return (
+                            <li key={`sent-top-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "8px 0", fontSize: "0.82rem", color: "#e2e8f0" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                                <span><strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong> · {orderStatusLabelAr(st)}</span>
+                                {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
+                              </div>
+                              <ul style={{ margin: 0, paddingInlineStart: 16, color: "#cbd5e1", lineHeight: 1.45 }}>
+                                {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-ln-${idx}`}>{ln}</li>) : <li>بدون بنود</li>}
+                              </ul>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                  <div id="waiter-ot-sec-totals" className="waiter-pos__footer-totals waiter-pos__ot-scroll-target">
+                    <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 900, marginBottom: 4 }}>التكلفة</div>
+                    {billingTotals.ownerTpl ? (
+                      <div style={{ color: "#b45309", fontSize: "0.86rem", fontWeight: 800 }}>
+                        سياسة مالك/VIP ({String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}) · عميل القالب مُعرَّف على الجلسة
+                      </div>
+                    ) : null}
+                    {billingTotals.costPricingNote ? (
+                      <div style={{ color: "#64748b", fontSize: "0.8rem", fontWeight: 600 }}>
+                        تسعير تكلفة + هامش على الأصناف الجديدة — التقديم يعتمد على AgentPrice المحفوظ.
+                      </div>
+                    ) : null}
+                    {effectiveTableMinimum > 0 && minimumChargeDelta > 0 ? (
+                      <div style={{ color: "#92400e", fontSize: "0.85rem", fontWeight: 800, lineHeight: 1.35 }}>
+                        الحدّ الأدنى {effectiveMinimumChargePerSeat.toFixed(0)} ج.م/ضيف × {activeGuestSeatCount} = {effectiveTableMinimum.toFixed(0)} ج.م — الفرق {minimumChargeDelta.toFixed(0)} ج.م.
+                      </div>
+                    ) : null}
+                    {effectiveTableMinimum > 0 && minimumChargeDelta > 0 && !billingLocked && !orderTakingLocked ? (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className="waiter-pos__btn waiter-pos__btn--ghost"
+                          onClick={() => setShowGapPicks((prev) => !prev)}
+                          style={{ fontSize: "0.8rem", fontWeight: 800, color: "#92400e", borderColor: "rgba(217,119,6,0.45)", background: "rgba(251,191,36,0.1)", padding: "6px 10px" }}
+                        >
+                          {showGapPicks ? "▼" : "▶"} {gapPickHits.length} بدائل ضمن فرق {minimumChargeDelta.toFixed(0)} ج.م
+                        </button>
+                        {showGapPicks ? (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: "1px solid rgba(217,119,6,0.35)",
+                              background: "rgba(251,191,36,0.08)",
+                            }}
+                          >
+                            <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: 8, lineHeight: 1.35 }}>
+                              أصناف بسعر الوحدة ≤ {minimumChargeDelta.toFixed(2)} ج.م لتقليل الفرق.
+                            </div>
+                            {gapPickBusy ? (
+                              <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>جاري التحميل…</div>
+                            ) : gapPickHits.length === 0 ? (
+                              <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>لا توجد أصناف ضمن هذا السقف.</div>
+                            ) : (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {gapPickHits.slice(0, 14).map((p) => (
+                                  <button
+                                    key={`gap-${p.CardGuide}`}
+                                    type="button"
+                                    className="waiter-pos__btn waiter-pos__btn--ghost"
+                                    style={{ fontSize: "0.76rem", padding: "5px 10px", maxWidth: "100%" }}
+                                    title={`إضافة ${p.ProductName} إلى السلة`}
+                                    onClick={() => void handleProductClick(p)}
+                                  >
+                                    {p.ProductName.slice(0, 42)}
+                                    {p.ProductName.length > 42 ? "…" : ""}{" "}
+                                    <span style={{ opacity: 0.85 }}>({p.Price.toFixed(0)})</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {billingTotals.ownerDiscountPct > 0 ? (
+                      <div style={{ color: "#0f172a", fontSize: "0.88rem", fontWeight: 700 }}>
+                        خصم مالك بعد العروض {billingTotals.ownerDiscountPct}%: صافي قبل الضرائب {netAfterMinimum.toFixed(2)} ←{" "}
+                        {billingTotals.netPortion.toFixed(2)}
+                      </div>
+                    ) : null}
+                    <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
+                    <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>
+                      <span>بقشيش:</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.5"
+                        value={tipAmount}
+                        onChange={(e) => setTipAmount(Math.max(0, Number(e.target.value) || 0))}
+                        style={{ width: 86, padding: "6px 8px", borderRadius: 8, border: "1px solid #94a3b8", background: "#ffffff", color: "#0f172a", fontSize: "0.95rem", fontWeight: 800 }}
+                      />
+                    </div>
+                    <div style={{ fontWeight: 900, marginTop: 6, color: "#0b3b2e", fontSize: "1rem" }}>الإجمالي: {total.toFixed(2)} ج.م</div>
+                    <div className="waiter-pos__actions" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                      <button
+                        type="button"
+                        className="waiter-pos__btn"
+                        style={{
+                          padding: "8px 16px",
+                          fontSize: "1rem",
+                          fontWeight: 900,
+                          background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                          color: "#fff",
+                          border: "1px solid #15803d",
+                        }}
+                        onClick={() => void loadAll()}
+                      >
+                        تحديث
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="waiter-pos__workspace-block" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4, padding: "0 12px" }}>
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--muted)", fontWeight: 700 }}>عرض:</span>
+                  <button type="button" className={`waiter-pos__mini-toggle ${displayMode === "group" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => { setDisplayMode("group"); setCategoryKey("all"); }}>مجموعة</button>
+                  <button type="button" className={`waiter-pos__mini-toggle ${displayMode === "category" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => { setDisplayMode("category"); setCategoryKey("all"); }}>تصنيف</button>
+                </div>
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--muted)", fontWeight: 700 }}>ترتيب:</span>
+                  <button type="button" className={`waiter-pos__mini-toggle ${sortMode === "default" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => setSortMode("default")}>افتراضي</button>
+                  <button type="button" className={`waiter-pos__mini-toggle ${sortMode === "name" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => setSortMode("name")}>الاسم</button>
+                  <button type="button" className={`waiter-pos__mini-toggle ${sortMode === "price" ? "waiter-pos__mini-toggle--on" : ""}`} onClick={() => setSortMode("price")}>السعر</button>
+                </div>
+              </div>
+
+              {/* Categories Strip - Full Width */}
+              <div
+                id="waiter-ot-sec-categories"
+                className="waiter-pos__cat-strip"
+                style={{
+                  width: "100%",
+                  minHeight: 52,
+                  maxHeight: 72,
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                  padding: "6px 0",
+                }}
+              >
+                {displayMode === "category" && categoryKey !== "all" ? (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                    <button
+                      type="button"
+                      className="waiter-pos__cat"
+                      onClick={() => { setCategoryKey("all"); setSubGroupKey("all"); }}
+                      title="رجوع للتصنيفات"
+                      style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                    >
+                      🔙 رجوع
+                    </button>
+                    {groupsInSelectedCategory.map((g) => (
+                      <button
+                        key={`sub-${g.CardGuide}`}
+                        type="button"
+                        className={`waiter-pos__cat ${subGroupKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                        style={{ background: "#dbeafe", borderColor: "#3b82f6", color: "#1e40af", flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                        onClick={() => setSubGroupKey(subGroupKey === g.CardGuide ? "all" : g.CardGuide)}
+                        title={g.GroupName}
+                      >
+                        {g.GroupName}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                    <button
+                      type="button"
+                      className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
+                      onClick={() => setCategoryKey("all")}
+                      title={displayMode === "category" ? "كل التصنيفات" : "كل المجموعات"}
+                      style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                    >
+                      {displayMode === "category" ? "كل التصنيفات" : "كل المجموعات"}
+                    </button>
+                    {displayMode === "category"
+                      ? displayCategories.map((cat) => (
+                          <button
+                            key={`cat-${cat}`}
+                            type="button"
+                            className={`waiter-pos__cat ${categoryKey === cat ? "waiter-pos__cat--active" : ""}`}
+                            onClick={() => setCategoryKey(cat)}
+                            title={cat}
+                            style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                          >
+                            {cat}
+                          </button>
+                        ))
+                      : waiterMenuGroups.map((g) => (
+                          <button
+                            key={`side-${g.CardGuide}`}
+                            type="button"
+                            className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                            onClick={() => setCategoryKey(g.CardGuide)}
+                            title={g.GroupName}
+                            style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                          >
+                            {g.GroupName}
+                          </button>
+                        ))}
+                  </div>
+                )}
+              </div>
+
+              {!wizardProduct ? (
+                <div
+                  id="waiter-ot-sec-search"
+                  className="waiter-pos__search-wrap waiter-pos__ot-scroll-target"
+                  style={{ marginBottom: "0.5rem" }}
+                >
+                  {menuScheduleRestriction.limited ? (
+                    <p style={{ margin: "0 0 0.5rem", fontSize: "0.88rem", color: "var(--wp-muted)" }}>
+                      القائمة اليومية: {menuEligibleProducts.length} صنفًا مسموحًا اليوم ({todayYmd()})
+                    </p>
+                  ) : null}
+                  <SmartProductSearch
+                    onSelect={(hit) =>
+                      beginAddProduct(
+                        products.find((p) => String(p.CardGuide) === String(hit.CardGuide)) || {
+                          CardGuide: hit.CardGuide,
+                          ProductName: hit.ProductName,
+                          Price: Number(hit.AgentPrice || 0) || 0,
+                          AgentPrice: Number(hit.AgentPrice || 0) || 0,
+                        },
+                      )
+                    }
+                    filterHit={(hit) => isOnWaiterMenu(hit.CardGuide, hit.ProductName)}
+                    isOutOfStock={(hit) => isKitchenStopped(hit.CardGuide)}
+                    placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
+                  />
+                </div>
+              ) : null}
+              {narrowOtViewport && mobileFlowToast.trim() ? (
+                <div className="waiter-pos__ot-flow-toast" role="status" aria-live="polite">
+                  <span className="waiter-pos__ot-flow-toast__text">{mobileFlowToast}</span>
+                  <button
+                    type="button"
+                    className="waiter-pos__ot-flow-toast__dismiss"
+                    aria-label="إغلاق التلميح"
+                    onClick={() => {
+                      clearMobileFlowToastTimer();
+                      setMobileFlowToast("");
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : null}
+              {!wizardProduct && (
+                <>
+                  <div className="waiter-pos__mb-sendbar" role="region" aria-label="إرسال الطلب للمطبخ">
+                    <div className="waiter-pos__mb-sendbar__meta">
+                      <span className="waiter-pos__mb-sendbar__title">قيد الإرسال</span>
+                      <span className="waiter-pos__mb-sendbar__sub">
+                        {itemCount} صنف · ~{gross.toFixed(0)} ج
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`waiter-pos__mb-sendbar__btn${cart.length === 0 ? " waiter-pos__mb-sendbar__btn--blocked" : ""}`}
+                      disabled={loading || billingLocked || cart.length === 0}
+                      onClick={() => void submitSale()}
+                    >
+                      {loading ? "جاري الإرسال…" : "إرسال الطلب"}
+                    </button>
+                  </div>
+                  <div className="waiter-pos__section-divider" />
+                </>
+              )}
+
+              {wizardProduct ? (
+                <div
+                  id="waiter-ot-sec-grid"
+                  className="waiter-pos__ot-scroll-target"
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    maxHeight: "calc(100vh - 340px)",
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                  }}
+                >
+                  <ModifierWizard
+                    baseProduct={wizardProduct}
+                    groups={wizardGroups}
+                    onResult={(result) => {
+                      const selectionNames: string[] = [];
+                      const kitchenNotesParts: string[] = [];
+                      const cartModifiers: CartModifier[] = [];
+                      let totalPriceDelta = 0;
+                      for (const sel of result.selections) {
+                        const g = wizardGroups.find((x) => x.groupId === sel.groupId);
+                        if (!g) continue;
+                        for (const itemId of sel.selectedItemIds) {
+                          const it = g.items.find((x) => x.itemId === itemId);
+                          if (!it) continue;
+                          totalPriceDelta += it.priceDelta;
+                          cartModifiers.push({ groupId: g.groupId, groupName: g.nameAr, itemName: it.nameAr, priceDelta: it.priceDelta });
+                          if (g.type === "exclusion") {
+                            kitchenNotesParts.push(`بدون ${it.nameAr}`);
+                          } else if (g.type === "kitchen_note") {
+                            kitchenNotesParts.push(it.nameAr);
+                          } else {
+                            selectionNames.push(it.nameAr);
+                          }
+                        }
+                        const freeText = String(sel.note || "").trim();
+                        if (freeText) {
+                          cartModifiers.push({ groupId: g.groupId, groupName: g.nameAr, itemName: freeText, priceDelta: 0, source: "free_text" });
+                          if (g.type === "kitchen_note" || g.type === "exclusion") {
+                            kitchenNotesParts.push(freeText);
+                          } else {
+                            selectionNames.push(`${g.nameAr}: ${freeText}`);
+                          }
+                        }
+                      }
+                      const lineName = selectionNames.length
+                        ? `${result.baseProduct.name} (${selectionNames.join("، ")})`
+                        : result.baseProduct.name;
+                      const kn = kitchenNotesParts.join("؛ ");
+                      const sn = assignmentMode === "general" ? null : selectedSeat;
+                      const line: CartLine = {
+                        id: crypto.randomUUID(),
+                        productGuide: result.baseProduct.guide,
+                        name: lineName,
+                        qty: 1,
+                        unitPrice: result.baseProduct.price + totalPriceDelta,
+                        seatNo: sn,
+                        seatLabel: null,
+                        kitchenNotes: kn || undefined,
+                        addonIdsKey: "",
+                        modifiers: cartModifiers.length ? cartModifiers : undefined,
+                      };
+                      setCart((prev) => [...prev, line]);
+                      setWizardProduct(null);
+                      setWizardGroups([]);
+                      setWizardStepInfo(null);
+                    }}
+                    onCancel={() => {
+                      setWizardProduct(null);
+                      setWizardGroups([]);
+                      setWizardStepInfo(null);
+                    }}
+                  />
+                </div>
+              ) : (
+                <div id="waiter-ot-sec-grid" className="waiter-pos__grid waiter-pos__ot-scroll-target">
+                  {filteredProducts.length === 0 ? (
+                    <div style={{ gridColumn: "1 / -1", padding: "1rem", color: "var(--wp-muted)", textAlign: "center" }}>
+                      {menuScheduleRestriction.limited
+                        ? "لا أصناف في القائمة اليومية لهذا اليوم — راجع إعدادات «المنيو والقائمة اليومية»."
+                        : "لا أصناف في هذه الفئة."}
+                    </div>
+                  ) : null}
+                  {filteredProducts.map((p) => {
+                    const stopped = isKitchenStopped(p.CardGuide);
+                    const stopNote = kitchenStopNote(p.CardGuide);
+                    const hue = hashHue(p.CardGuide);
+                    const bg = `linear-gradient(135deg, hsl(${hue}, 55%, 42%) 0%, hsl(${(hue + 40) % 360}, 45%, 32%) 100%)`;
+                    const initial = (p.ProductName || "?").trim().charAt(0);
+                    const imgSrc = resolveMediaUrl(p.imageUrl || p.image);
+                    const hasImage = !!imgSrc;
+                    return (
+                      <button
+                        key={p.CardGuide}
+                        type="button"
+                        className="waiter-pos__card"
+                        onClick={() => void handleProductClick(p)}
+                        style={{ opacity: stopped ? 0.55 : 1, position: "relative" }}
+                        title={stopped ? stopNote : undefined}
+                      >
+                        {stopped ? (
+                          <div style={{ position: "absolute", top: 6, left: 6, zIndex: 3, background: "#b91c1c", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
+                            Out of Stock
+                          </div>
+                        ) : null}
+                        <div className="waiter-pos__ribbon">{Math.round((p.Price || 0) * (1 + SERVICE_RATE_FOR_CARD_PRICE))} ج.م</div>
+                        {captainItemSelectionMode === "classic" && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: 6,
+                              left: 0,
+                              zIndex: 4,
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 0,
+                              flexWrap: "nowrap",
+                              padding: "0 0",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleProductClick(p);
+                              }}
+                              style={{
+                                background: "rgba(15,23,42,0.82)",
+                                color: "#fff",
+                                borderRadius: "999px 0 0 999px",
+                                padding: "2px 7px",
+                                fontSize: 11,
+                                fontWeight: 900,
+                                border: 0,
+                                cursor: "pointer",
+                              }}
+                            >
+                              عادي
+                            </button>
+                            {activeCatalogAddons.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  beginAddProduct(p);
+                                }}
+                                style={{
+                                  background: "rgba(245,158,11,0.95)",
+                                  color: "#111827",
+                                  borderRadius: "0 999px 999px 0",
+                                  padding: "2px 7px",
+                                  fontSize: 11,
+                                  fontWeight: 900,
+                                  border: 0,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                إضافات
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+                        <div className="waiter-pos__card-img" style={{ background: bg, position: "relative", overflow: "hidden" }}>
+                          {hasImage && (
+                            <img
+                              src={imgSrc}
+                              alt={p.ProductName}
+                              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          )}
+                          <div style={{ position: "relative", zIndex: 1 }}>{initial}</div>
+                        </div>
+                        <div className="waiter-pos__card-body">
+                          <div className="waiter-pos__card-name">{p.ProductName}</div>
+                          <div className="waiter-pos__card-meta">
+                            <span>🕐 {prepMinutes(p)} دقيقة</span>
+                            {p.GroupGuid && <span>{groupNameById.get(p.GroupGuid) ?? ""}</span>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+
+      {navoptsActiveTab ? (
+        <div className="waiter-pos__ops-modal-overlay" role="presentation" onClick={closeNavoptsDialog}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="waiter-ops-dialog-title"
+            className="waiter-pos__ops-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="waiter-pos__ops-modal__head">
+              <div className="waiter-pos__ops-modal__head-copy">
+                <h3 id="waiter-ops-dialog-title" className="waiter-pos__ops-modal__title">
+                  {navoptsDialogTitle}
+                </h3>
+                <div className="waiter-pos__ops-modal__note">{navoptsDialogNote}</div>
+              </div>
+              <button type="button" className="waiter-pos__ops-modal__close" onClick={closeNavoptsDialog} aria-label="إغلاق">
+                ×
+              </button>
+            </div>
+            <div className="waiter-pos__ops-modal__body">
+              {navoptsActiveTab === "returns" && (
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ color: "#94a3b8", fontSize: "0.9rem" }}>اختر طلبًا مرسلًا للمطبخ لطلب مرتجع من الجلسة الحالية فقط.</div>
+                  <button
+                    type="button"
+                    className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
+                    disabled={!activeSessionId || returnableLines.length === 0}
+                    onClick={() => {
+                      closeNavoptsDialog();
+                      setReturnModalLines(returnableLines);
+                      setReturnModalOpen(true);
+                    }}
+                  >
+                    فتح قائمة المرتجعات
+                  </button>
+                </div>
+              )}
+              {navoptsActiveTab === "transfer" && (
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div className="waiter-pos__table-move-block">
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#3b82f6" }}>تحويل الطاولة كاملة</div>
+                    <div className="waiter-pos__table-pick-hint">البحث حي تلقائيًا. انقر للتحديد أو دبل كليك للتنفيذ فورًا.</div>
+                    <div className="waiter-pos__table-pick-search-row">
+                      <input type="search" enterKeyHint="search" className="waiter-pos__table-pick-search" value={transferPickQuery} onChange={(e) => setTransferPickQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (transferSearchResults?.length === 1) { void transferTableTo(transferSearchResults[0]!.id); return; } runTransferTableSearch(); } }} placeholder="ابحث عن طاولة فارغة…" autoComplete="off" aria-label="بحث طاولة للتحويل" />
+                      <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runTransferTableSearch()}>بحث</button>
                     </div>
                     {transferSearchResults === null ? null : transferSearchResults.length === 0 ? (
                       <div className="waiter-pos__table-pick-empty">لا توجد نتائج.</div>
                     ) : (
-                      <div className="waiter-pos__table-pick-list" role="listbox" aria-label="طاولات للتحويل">
-                        {transferSearchResults.map((t) => (
-                          <button
-                            key={`tr-pick-${t.id}`}
-                            type="button"
-                            role="option"
-                            aria-selected={transferTargetTableId === t.id}
-                            className={`waiter-pos__table-pick-row${transferTargetTableId === t.id ? " is-selected" : ""}`}
-                            onClick={() => setTransferTargetTableId(t.id)}
-                          >
-                            {tableDisplayName(t)}
-                          </button>
-                        ))}
-                      </div>
+                      <>
+                        <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 6 }}>اضغط على طاولة لاختيارها:</div>
+                        <div className="waiter-pos__table-pick-list waiter-pos__table-pick-list--dialog" role="listbox" aria-label="طاولات للتحويل">
+                          {transferSearchResults.map((t) => (
+                            <button key={`tr-pick-${t.id}`} type="button" role="option" aria-selected={transferTargetTableId === t.id} className={`waiter-pos__table-pick-row${transferTargetTableId === t.id ? " is-selected" : ""}`} onClick={() => setTransferTargetTableId(t.id)} onDoubleClick={() => void transferTableTo(t.id)} title="انقر للتحديد أو دبل كليك لتنفيذ التحويل مباشرة">{tableDisplayName(t)}</button>
+                          ))}
+                        </div>
+                      </>
                     )}
                     {transferTargetTableId ? (
-                      <div className="waiter-pos__table-pick-selected">
-                        <span>
-                          المختار: <strong>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === transferTargetTableId)) || transferTargetTableId}</strong>
-                        </span>
-                        <button type="button" className="waiter-pos__table-pick-clear" onClick={() => setTransferTargetTableId("")}>
-                          مسح
-                        </button>
-                      </div>
+                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#60a5fa" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === transferTargetTableId)) || transferTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setTransferTargetTableId("")}>مسح</button></div>
                     ) : null}
-                    <button
-                      type="button"
-                      className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
-                      disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId}
-                      onClick={() => void transferTable()}
-                    >
-                      تحويل
-                    </button>
+                    <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: transferTargetTableId ? "#3b82f6" : undefined, opacity: transferTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTableByTarget(transferTargetTableId)}>⮕ تنفيذ التحويل</button>
                   </div>
-
+                </div>
+              )}
+              {navoptsActiveTab === "merge" && (
+                <div style={{ display: "grid", gap: 12 }}>
                   <div className="waiter-pos__table-move-block">
-                    <div className="waiter-pos__table-move-block__title">دمج</div>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#22c55e" }}>دمج مع طاولة أخرى</div>
+                    <div className="waiter-pos__table-pick-hint">البحث حي تلقائيًا. انقر للتحديد أو دبل كليك لتنفيذ الدمج مباشرة.</div>
                     <div className="waiter-pos__table-pick-search-row">
-                      <input
-                        type="search"
-                        enterKeyHint="search"
-                        className="waiter-pos__table-pick-search"
-                        value={mergePickQuery}
-                        onChange={(e) => setMergePickQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            runMergeTableSearch();
-                          }
-                        }}
-                        placeholder="ابحث عن طاولة للدمج…"
-                        autoComplete="off"
-                        aria-label="بحث طاولة للدمج"
-                      />
-                      <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runMergeTableSearch()}>
-                        بحث
-                      </button>
+                      <input type="search" enterKeyHint="search" className="waiter-pos__table-pick-search" value={mergePickQuery} onChange={(e) => setMergePickQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (mergeSearchResults?.length === 1) { void mergeIntoTableTo(mergeSearchResults[0]!.id); return; } runMergeTableSearch(); } }} placeholder="ابحث عن طاولة للدمج…" autoComplete="off" aria-label="بحث طاولة للدمج" />
+                      <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runMergeTableSearch()}>بحث</button>
                     </div>
                     {mergeSearchResults === null ? null : mergeSearchResults.length === 0 ? (
                       <div className="waiter-pos__table-pick-empty">لا توجد نتائج.</div>
                     ) : (
-                      <div className="waiter-pos__table-pick-list" role="listbox" aria-label="طاولات للدمج">
+                      <div className="waiter-pos__table-pick-list waiter-pos__table-pick-list--dialog" role="listbox" aria-label="طاولات للدمج">
                         {mergeSearchResults.map((t) => (
-                          <button
-                            key={`mg-pick-${t.id}`}
-                            type="button"
-                            role="option"
-                            aria-selected={mergeTargetTableId === t.id}
-                            className={`waiter-pos__table-pick-row${mergeTargetTableId === t.id ? " is-selected" : ""}`}
-                            onClick={() => setMergeTargetTableId(t.id)}
-                          >
-                            {tableDisplayName(t)}
-                          </button>
+                          <button key={`mg-pick-${t.id}`} type="button" role="option" aria-selected={mergeTargetTableId === t.id} className={`waiter-pos__table-pick-row${mergeTargetTableId === t.id ? " is-selected" : ""}`} onClick={() => setMergeTargetTableId(t.id)} onDoubleClick={() => void mergeIntoTableTo(t.id)} title="انقر للتحديد أو دبل كليك لتنفيذ الدمج مباشرة">{tableDisplayName(t)}</button>
                         ))}
                       </div>
                     )}
                     {mergeTargetTableId ? (
-                      <div className="waiter-pos__table-pick-selected">
-                        <span>
-                          المختار: <strong>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === mergeTargetTableId)) || mergeTargetTableId}</strong>
-                        </span>
-                        <button type="button" className="waiter-pos__table-pick-clear" onClick={() => setMergeTargetTableId("")}>
-                          مسح
-                        </button>
-                      </div>
+                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#4ade80" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === mergeTargetTableId)) || mergeTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setMergeTargetTableId("")}>مسح</button></div>
                     ) : null}
-                    <button
-                      type="button"
-                      className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
-                      disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId}
-                      onClick={() => void mergeIntoTable()}
-                    >
-                      دمج
-                    </button>
+                    <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: mergeTargetTableId ? "#22c55e" : undefined, opacity: mergeTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId} onClick={() => void mergeIntoTableTarget(mergeTargetTableId)}>⮕ تنفيذ الدمج</button>
                   </div>
-
+                </div>
+              )}
+              {navoptsActiveTab === "reorder" && (
+                <div style={{ display: "grid", gap: 12 }}>
                   <div className="waiter-pos__table-move-block">
-                    <div className="waiter-pos__table-move-block__title">إعادة ترتيب الطلبات</div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.78rem", marginBottom: 8 }}>
-                      مراجعة بنود الطاولة وتغيير المقعد قبل طلب الحساب.
-                    </div>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#8b5cf6" }}>نقل بين الضيوف</div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 8 }}>مراجعة بنود الطاولة وتغيير المقعد ضمن نافذة أوضح.</div>
                     {billingLocked ? (
-                      <div className="waiter-pos__table-pick-empty">تم طلب الحساب؛ إعادة الترتيب متوقفة حتى ينهي الكاشير العملية.</div>
+                      <div className="waiter-pos__table-pick-empty">تم طلب الحساب؛ الترتيب متوقف.</div>
                     ) : null}
                     {reviewSeatMoveRows.length === 0 ? (
-                      <div className="waiter-pos__table-pick-empty">لا توجد بنود حالية للمراجعة.</div>
+                      <div className="waiter-pos__table-pick-empty">لا توجد بنود للمراجعة.</div>
                     ) : (
                       <div style={{ display: "grid", gap: 8 }}>
                         {reviewSeatMoveRows.map((row) => {
                           const targetValue = Number(reorderSeatTargets[row.key] ?? row.seatNo ?? 0) || "";
                           const busy = reorderBusyKey === row.key;
                           return (
-                            <div
-                              key={row.key}
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "minmax(0,1.5fr) 110px 130px 86px",
-                                gap: 8,
-                                alignItems: "center",
-                                padding: "8px 10px",
-                                borderRadius: 12,
-                                background: "rgba(15,23,42,0.35)",
-                                border: "1px solid rgba(148,163,184,0.16)",
-                              }}
-                            >
+                            <div key={row.key} className="waiter-pos__ops-modal__grid-row">
                               <div style={{ minWidth: 0 }}>
-                                <div style={{ color: "#fff", fontWeight: 800, fontSize: "0.86rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                  {row.name}
-                                </div>
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.75rem" }}>
+                                <div style={{ color: "#fff", fontWeight: 800, fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.name}</div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.8rem" }}>
                                   <span style={{ color: row.statusTone === "cart" ? "#86efac" : "#93c5fd", fontWeight: 700 }}>{row.statusText}</span>
                                   <span style={{ color: "#94a3b8" }}>×{row.qty}</span>
                                 </div>
                               </div>
-                              <div style={{ color: "#cbd5e1", fontSize: "0.78rem", fontWeight: 700 }}>
-                                {row.seatNo != null ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}
-                              </div>
-                              <select
-                                value={targetValue}
-                                disabled={billingLocked || busy}
-                                onChange={(e) => {
-                                  const n = Number(e.target.value || 0);
-                                  setReorderSeatTargets((prev) => ({ ...prev, [row.key]: n }));
-                                }}
-                                style={{ width: "100%" }}
-                                aria-label={`اختر المقعد الجديد للبند ${row.name}`}
-                              >
+                              <div style={{ color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 700 }}>{row.seatNo != null ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}</div>
+                              <select value={targetValue} disabled={billingLocked || busy} onChange={(e) => { const n = Number(e.target.value || 0); setReorderSeatTargets((prev) => ({ ...prev, [row.key]: n })); }} style={{ width: "100%" }} aria-label={`اختر المقعد الجديد للبند ${row.name}`}>
                                 <option value="">اختر المقعد</option>
                                 {[...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1), SHARED_SEAT_NO].map((n) => (
-                                  <option key={`${row.key}-seat-${n}`} value={n}>
-                                    {seatGuestDisplay(n)}
-                                  </option>
+                                  <option key={`${row.key}-seat-${n}`} value={n}>{seatGuestDisplay(n)}</option>
                                 ))}
                               </select>
-                              <button
-                                type="button"
-                                className="waiter-pos__btn waiter-pos__btn--ghost"
-                                disabled={billingLocked || busy}
-                                onClick={() => void applySeatMove(row)}
-                                style={{ minWidth: 0, fontWeight: 800 }}
-                              >
-                                {busy ? "..." : "نقل"}
-                              </button>
+                              <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action" disabled={billingLocked || busy} onClick={() => void applySeatMove(row)}>{busy ? "..." : "نقل"}</button>
                             </div>
                           );
                         })}
                       </div>
                     )}
                   </div>
-
+                </div>
+              )}
+              {navoptsActiveTab === "invoices" && (
+                <div style={{ display: "grid", gap: 12 }}>
                   <div className="waiter-pos__table-move-block">
-                    <div className="waiter-pos__table-move-block__title">شيكات الطاولة</div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.78rem", marginBottom: 8 }}>
-                      الكابتن يراجع الحساب ويطبع الشيك مرة واحدة فقط. أي إعادة طباعة تكون من الكاشير أو المدير.
-                    </div>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#ec4899" }}>شيكات الطاولة</div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 8 }}>معاينة وطباعة الشيكات من نافذة كبيرة.</div>
                     {!billingLocked ? (
-                      <div className="waiter-pos__table-pick-empty">بعد طلب الحساب ستظهر الشيكات هنا للمعاينة والطباعة.</div>
+                      <div className="waiter-pos__table-pick-empty">بعد طلب الحساب ستظهر الشيكات هنا.</div>
                     ) : sessionInvoices.length === 0 ? (
-                      <div className="waiter-pos__table-pick-empty">لا توجد شيكات مسجلة لهذه الجلسة حتى الآن.</div>
+                      <div className="waiter-pos__table-pick-empty">لا توجد شيكات مسجلة.</div>
                     ) : (
                       <div style={{ display: "grid", gap: 8 }}>
                         {sessionInvoices.map((inv, idx) => {
                           const id = String(inv.invoiceId || "").trim();
                           const isWaiterLocked = String(user?.role || "").trim().toLowerCase() === "waiter" && Number(inv.printCount || 0) >= 1;
                           return (
-                            <div
-                              key={`session-invoice-${id || idx}`}
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "minmax(0,1.5fr) 110px 130px",
-                                gap: 8,
-                                alignItems: "center",
-                                padding: "8px 10px",
-                                borderRadius: 12,
-                                background: "rgba(15,23,42,0.35)",
-                                border: "1px solid rgba(148,163,184,0.16)",
-                              }}
-                            >
+                            <div key={`session-invoice-${id || idx}`} className="waiter-pos__ops-modal__grid-row waiter-pos__ops-modal__grid-row--invoice">
                               <div style={{ minWidth: 0 }}>
-                                <div style={{ color: "#fff", fontWeight: 800, fontSize: "0.86rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                  {String(inv.splitName || "").trim() || `شيك ${idx + 1}`}
-                                </div>
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.75rem", color: "#94a3b8" }}>
+                                <div style={{ color: "#fff", fontWeight: 800, fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{String(inv.splitName || "").trim() || `شيك ${idx + 1}`}</div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.8rem", color: "#94a3b8" }}>
                                   <span>فاتورة: {inv.billNumber != null ? String(inv.billNumber) : "—"}</span>
                                   <span>طباعة: {Number(inv.printCount || 0)}</span>
                                 </div>
                               </div>
-                              <div style={{ color: "#cbd5e1", fontSize: "0.78rem", fontWeight: 700 }}>{inv.total != null ? `${Number(inv.total).toFixed(2)} ج.م` : "—"}</div>
-                              <button
-                                type="button"
-                                className="waiter-pos__btn waiter-pos__btn--ghost"
-                                disabled={!id || isWaiterLocked}
-                                onClick={() => openCaptainInvoice(inv)}
-                                title={isWaiterLocked ? "تمت طباعة الشيك مرة من الكابتن؛ أي إعادة طباعة تكون من الكاشير أو المدير." : "معاينة وطباعة الشيك"}
-                                style={{ minWidth: 0, fontWeight: 800 }}
-                              >
-                                {isWaiterLocked ? "طبع الكابتن" : "معاينة / طباعة"}
-                              </button>
+                              <div style={{ color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 700 }}>{inv.total != null ? `${Number(inv.total).toFixed(2)} ج.م` : "—"}</div>
+                              <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action" disabled={!id || isWaiterLocked} onClick={() => openCaptainInvoice(inv)} title={isWaiterLocked ? "تمت طباعة الشيك مرة." : "معاينة وطباعة"}>{isWaiterLocked ? "طبع الكابتن" : "معاينة / طباعة"}</button>
                             </div>
                           );
                         })}
                       </div>
                     )}
                   </div>
-
                 </div>
-              </div>
-              {activeSessionId ? (
-                <div className="waiter-pos__table-kitchen-strip" style={{ marginTop: 10 }}>
-                  <div className="waiter-pos__table-kitchen-strip__title">مرسل / جاهز بالمطبخ (جلسة التسكين الحالية)</div>
-                  <div className="waiter-pos__table-kitchen-strip__counts" title="طلبات الجلسة الحالية المرسلة للمطبخ — حسب حالة التذكرة">
-                    انتظار {sessionKitchenStats.pending} · تحضير {sessionKitchenStats.preparing} · جاهز {sessionKitchenStats.ready}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div
-              id="waiter-ot-sec-table"
-              className="waiter-pos__top-card waiter-pos__top-card--tablemeta waiter-pos__ot-scroll-target"
-              style={{ order: 40 }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <div style={{ fontWeight: 900 }}>{selectedTable?.name ?? "طاولة"}</div>
-              </div>
-              <div style={{ color: "var(--wp-muted)", marginTop: 4, fontSize: "0.8rem" }}>عنصر {itemCount}</div>
-              {activeSessionId ? (
-                <div style={{ color: "var(--wp-muted)", marginTop: 2, fontSize: "0.76rem" }} title={activeSessionId}>
-                  دفعة طلب: {activeSessionId.slice(0, 8)}…
-                </div>
-              ) : null}
-            </div>
-
-            <div
-              id="waiter-ot-sec-pending"
-              className="waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__ot-scroll-target"
-              style={{ order: 30 }}
-            >
-              <h3 style={{ marginTop: 0 }}>السلة — قيد الإرسال</h3>
-              <div className="waiter-pos__order-box">
-                {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
-                  <div key={`top-line-${l.id}`} className="waiter-pos__order-line">
-                    <div>
-                      {(() => {
-                        const xn = seatNoFromLine(l);
-                        const tag = xn != null ? seatGuestDisplay(xn) : null;
-                        return tag ? `${l.name} · ${tag}` : l.name;
-                      })()}
-                      {l.kitchenNotes?.trim() ? (
-                        <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2 }}>ملاحظة: {l.kitchenNotes.trim()}</div>
-                      ) : null}
-                    </div>
-                    <input type="number" min={1} value={l.qty} onChange={(e) => setQty(l.id, Number(e.target.value) || 0)} disabled={billingLocked} />
-                    <span>{Math.max(0, l.qty * l.unitPrice - (promoResult.lineDiscounts[l.id] || 0)).toFixed(0)} ج.م</span>
-                    <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="waiter-pos__btn"
-                style={{
-                  marginTop: 8,
-                  padding: "10px 12px",
-                  fontSize: "1rem",
-                  fontWeight: 900,
-                  background:
-                    cart.length === 0
-                      ? "linear-gradient(180deg, #64748b 0%, #475569 100%)"
-                      : "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
-                  color: "#fff",
-                  border: cart.length === 0 ? "1px solid #64748b" : "1px solid #15803d",
-                  opacity: loading || billingLocked ? 0.65 : 1,
-                  cursor: loading || billingLocked || cart.length === 0 ? "not-allowed" : "pointer",
-                }}
-                disabled={loading || billingLocked || cart.length === 0}
-                onClick={() => void submitSale()}
-              >
-                {loading ? "جاري الإرسال…" : "إرسال الطلب"}
-              </button>
-            </div>
-
-            <div
-              id="waiter-ot-sec-distribute"
-              className={`waiter-pos__top-card waiter-pos__top-card--flexcol waiter-pos__top-card--seatpanel waiter-pos__ot-scroll-target${narrowOtViewport && seatPanelMobCollapsed && assignmentMode === "per_seat" ? " waiter-pos__seatpanel--mob-collapsed" : ""
-                }`}
-              style={{ order: 20 }}
-            >
-              <h3 style={{ marginTop: 0 }}>{assignmentMode === "per_seat" ? "تعريف الضيوف" : "توزيع الطلب"}</h3>
-              <div className="waiter-pos__toggle-row">
-                <button type="button" className={`waiter-pos__toggle ${assignmentMode === "per_seat" ? "waiter-pos__toggle--on" : ""}`} onClick={() => setAssignmentMode("per_seat")}>
-                  حسب المقعد (١–١٢)
-                </button>
-                <button type="button" className={`waiter-pos__toggle ${assignmentMode === "general" ? "waiter-pos__toggle--on" : ""}`} onClick={() => setAssignmentMode("general")}>
-                  طلب عام (بدون مقعد)
-                </button>
-              </div>
-              {assignmentMode === "per_seat" ? (
-                narrowOtViewport && seatPanelMobCollapsed ? (
-                  <button type="button" className="waiter-pos__seatpanel-mob-expand" onClick={() => setSeatPanelMobCollapsed(false)}>
-                    عرض تعريف الضيوف
-                  </button>
-                ) : (
-                  <>
-                    <div
-                      className="waiter-pos__seat-list-scroll waiter-pos__dropdown-wrap waiter-pos__seat-list-scroll--in-topbar"
-                      style={{ marginTop: 4 }}
-                    >
-                      <div className="waiter-pos__seats waiter-pos__seats--twelve waiter-pos__seats--twelve-list">
-                        {[SHARED_SEAT_NO, ...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1)].map((n) => {
-                          const seatLines = cart.filter((l) => seatNoFromLine(l) === n);
-                          const qty = seatLines.reduce((a, l) => a + l.qty, 0);
-                          const dn = seatGuestDisplay(n);
-                          const sharedRow = n === SHARED_SEAT_NO;
-                          return (
-                            <div
-                              key={`top-seat-${n}`}
-                              className={`waiter-pos__seat-slot waiter-pos__seat-slot--compact-row ${sharedRow ? "waiter-pos__seat-slot--shared" : ""} ${selectedSeat === n ? "waiter-pos__seat-slot--active-order" : ""}`}
-                              onClick={() => {
-                                if (billingLocked) return;
-                                if (narrowOtViewport) setSeatPanelMobCollapsed(false);
-                                setSelectedSeat(n);
-                                if (seatNameEditorSeat != null && seatNameEditorSeat !== n) setSeatNameEditorSeat(null);
-                              }}
-                              role="presentation"
-                            >
-                              <div className="waiter-pos__seat-slot-head">
-                                <span
-                                  className={`waiter-pos__seat-slot-no ${sharedRow ? "waiter-pos__seat-slot-no--shared" : ""}`}
-                                  title={
-                                    sharedRow
-                                      ? "مقعد ١٣ — طلب يُقسَّم بالتساوي على شيكات المقاعد عند تفعيل «سبليت — فاتورة لكل ضيف» في خيارات الطاولة"
-                                      : `مقعد ${n}`
-                                  }
-                                >
-                                  {sharedRow ? (
-                                    <>
-                                      {n}
-                                      <span className="waiter-pos__seat-slot-no__sub">مشترك</span>
-                                    </>
-                                  ) : (
-                                    n
-                                  )}
-                                </span>
-                                {seatNameEditorSeat === n ? (
-                                  <input
-                                    type="text"
-                                    dir="rtl"
-                                    autoFocus
-                                    className={`waiter-pos__seat-slot-input waiter-pos__seat-slot-input--compact ${selectedSeat === n ? "waiter-pos__seat-slot-input--sel" : ""}`}
-                                    placeholder={sharedRow ? "ملاحظة للمطبخ (اختياري)" : "اسم الضيف على الشيك"}
-                                    value={String(seatGuestLabels[n] ?? "")}
-                                    onFocus={() => setSelectedSeat(n)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onBlur={() => setSeatNameEditorSeat((cur) => (cur === n ? null : cur))}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Escape") {
-                                        e.stopPropagation();
-                                        setSeatNameEditorSeat(null);
-                                        (e.target as HTMLInputElement).blur();
-                                      }
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        if (narrowOtViewport) {
-                                          afterSeatNameConfirmGoCategories();
-                                        } else {
-                                          setSeatNameEditorSeat(null);
-                                          (e.target as HTMLInputElement).blur();
-                                        }
-                                      }
-                                    }}
-                                    onChange={(e) => onSeatGuestInputChange(n, e.target.value)}
-                                    disabled={billingLocked}
-                                    aria-label={sharedRow ? `ملاحظة اختيارية للطلب المشترك (مقعد ${n})` : `اسم الضيف على الشيك — مقعد ${n}`}
-                                    maxLength={120}
-                                  />
-                                ) : (
-                                  <button
-                                    type="button"
-                                    dir="rtl"
-                                    className={`waiter-pos__seat-slot-labelbtn waiter-pos__seat-slot-labelbtn--compact ${selectedSeat === n ? "waiter-pos__seat-slot-labelbtn--active" : ""}`}
-                                    title={
-                                      sharedRow
-                                        ? `${dn}${seatHasCustomLabel(n) ? "" : " — ملاحظة اختيارية للمطبخ"}`
-                                        : !seatHasCustomLabel(n)
-                                          ? "اضغط ثم اكتب اسم الضيف على الشيك (اختياري)"
-                                          : `${dn} — مقعد ${n}`
-                                    }
-                                    disabled={billingLocked}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (billingLocked) return;
-                                      setSelectedSeat(n);
-                                      setSeatNameEditorSeat(n);
-                                    }}
-                                  >
-                                    <span className="waiter-pos__seat-name-only">{dn}</span>
-                                  </button>
-                                )}
-                                {qty > 0 ? (
-                                  <span className="waiter-pos__seat-slot-inline-qty" title={`كمية المرسل لهذا المقعد: ${qty}`}>
-                                    {qty}
-                                  </span>
-                                ) : null}
-                                {qty > 0 ? (
-                                  <button
-                                    type="button"
-                                    className="waiter-pos__seat-clear waiter-pos__seat-clear--compact"
-                                    title="مسح بنود هذا المقعد"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      clearSeatLines(n);
-                                    }}
-                                  >
-                                    ×
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {seatNameEditorSeat != null ? (
-                        <div className="waiter-pos__seat-mob-actions" role="toolbar" aria-label="تأكيد اسم المقعد">
-                          <button type="button" className="waiter-pos__seat-mob-actions__btn waiter-pos__seat-mob-actions__btn--primary" onClick={afterSeatNameConfirmGoCategories}>
-                            ✓ تم
-                          </button>
-                          <button type="button" className="waiter-pos__seat-mob-actions__btn" onClick={afterSeatNameConfirmGoCategories}>
-                            الفئات
-                          </button>
-                          <button type="button" className="waiter-pos__seat-mob-actions__btn" onClick={goToNextSeatMobile}>
-                            التالي
-                          </button>
-                        </div>
-                      ) : null}
-                      <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 6, color: "#e5e7eb", lineHeight: 1.35 }}>
-                        <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
-                        سبليت — فاتورة لكل ضيف؛ المشترك ١٣ يُقسَّم بالتساوي
-                      </label>
-                    </div>
-                  </>
-                )
-              ) : null}
-            </div>
-
-            <div className="waiter-pos__top-card" style={{ order: 50 }}>
-              <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__ot-scroll-target">
-                <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>مرسل / جاهز بالمطبخ</h4>
-                {ordersBusy && !sessionOrders.length ? (
-                  <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>جاري التحميل…</div>
-                ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
-                  <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>لا توجد بعد.</div>
-                ) : (
-                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                    {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
-                      const st = (o.status || "").toLowerCase();
-                      const canCancel = st === "pending";
-                      const lines = activeOrderItems(o).map(formatOrderItemLine);
-                      return (
-                        <li key={`sent-top-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "8px 0", fontSize: "0.82rem", color: "#e2e8f0" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-                            <span><strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong> · {orderStatusLabelAr(st)}</span>
-                            {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
-                          </div>
-                          <ul style={{ margin: 0, paddingInlineStart: 16, color: "#cbd5e1", lineHeight: 1.45 }}>
-                            {lines.length ? lines.map((ln, idx) => <li key={`${o.id}-ln-${idx}`}>{ln}</li>) : <li>بدون بنود</li>}
-                          </ul>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-              <div id="waiter-ot-sec-totals" className="waiter-pos__footer-totals waiter-pos__ot-scroll-target">
-                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 900, marginBottom: 4 }}>التكلفة</div>
-                {billingTotals.ownerTpl ? (
-                  <div style={{ color: "#b45309", fontSize: "0.86rem", fontWeight: 800 }}>
-                    سياسة مالك/VIP ({String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}) · عميل القالب مُعرَّف على الجلسة
-                  </div>
-                ) : null}
-                {billingTotals.costPricingNote ? (
-                  <div style={{ color: "#64748b", fontSize: "0.8rem", fontWeight: 600 }}>
-                    تسعير تكلفة + هامش على الأصناف الجديدة — التقديم يعتمد على AgentPrice المحفوظ.
-                  </div>
-                ) : null}
-                {effectiveTableMinimum > 0 && minimumChargeDelta > 0 ? (
-                  <div style={{ color: "#92400e", fontSize: "0.85rem", fontWeight: 800, lineHeight: 1.35 }}>
-                    الحدّ الأدنى {effectiveTableMinimum.toFixed(2)} ج.م — فرق مطبَّق على الصافي {minimumChargeDelta.toFixed(2)} ج.م (بدون فرق كان{" "}
-                    {netBeforeTax.toFixed(2)}).
-                  </div>
-                ) : null}
-                {effectiveTableMinimum > 0 && minimumChargeDelta > 0 && !billingLocked && !orderTakingLocked ? (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      padding: "10px 12px",
-                      borderRadius: 10,
-                      border: "1px solid rgba(217,119,6,0.35)",
-                      background: "rgba(251,191,36,0.08)",
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, fontSize: "0.82rem", marginBottom: 6, color: "#92400e" }}>
-                      بدائل ضمن فرق المينيموم — أضِف صنفاً تستفيد به بدل دفع الفرق وحده
-                    </div>
-                    <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: 8, lineHeight: 1.35 }}>
-                      أصناف بسعر الوحدة ≤ {minimumChargeDelta.toFixed(2)} ج.م (قائمة الكتالوج). Minimum charge gap ≈{" "}
-                      {minimumChargeDelta.toFixed(2)} ج.م
-                    </div>
-                    {gapPickBusy ? (
-                      <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>جاري تحميل الاقتراحات…</div>
-                    ) : gapPickHits.length === 0 ? (
-                      <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
-                        لا توجد أصناف ضمن هذا السقف في الكتالوج — استخدم البحث أدناه أو راجع المدير.
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {gapPickHits.slice(0, 14).map((p) => (
-                          <button
-                            key={`gap-${p.CardGuide}`}
-                            type="button"
-                            className="waiter-pos__btn waiter-pos__btn--ghost"
-                            style={{ fontSize: "0.76rem", padding: "5px 10px", maxWidth: "100%" }}
-                            title={`إضافة ${p.ProductName} إلى السلة`}
-                            onClick={() => pushCartLineForProduct(p, [], "", 1)}
-                          >
-                            {p.ProductName.slice(0, 42)}
-                            {p.ProductName.length > 42 ? "…" : ""}{" "}
-                            <span style={{ opacity: 0.85 }}>({p.Price.toFixed(0)})</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-                {billingTotals.ownerDiscountPct > 0 ? (
-                  <div style={{ color: "#0f172a", fontSize: "0.88rem", fontWeight: 700 }}>
-                    خصم مالك بعد العروض {billingTotals.ownerDiscountPct}%: صافي قبل الضرائب {netAfterMinimum.toFixed(2)} ←{" "}
-                    {billingTotals.netPortion.toFixed(2)}
-                  </div>
-                ) : null}
-                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>خدمة {policy.servicePercent}%: {serviceCharge.toFixed(2)}</div>
-                <div style={{ color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>VAT {policy.vatPercent}%: {vatValue.toFixed(2)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, color: "#0f172a", fontSize: "0.92rem", fontWeight: 700 }}>
-                  <span>بقشيش:</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.5"
-                    value={tipAmount}
-                    onChange={(e) => setTipAmount(Math.max(0, Number(e.target.value) || 0))}
-                    style={{ width: 86, padding: "6px 8px", borderRadius: 8, border: "1px solid #94a3b8", background: "#ffffff", color: "#0f172a", fontSize: "0.95rem", fontWeight: 800 }}
-                  />
-                </div>
-                <div style={{ fontWeight: 900, marginTop: 6, color: "#0b3b2e", fontSize: "1rem" }}>الإجمالي: {total.toFixed(2)} ج.م</div>
-                <div className="waiter-pos__actions" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                  <button
-                    type="button"
-                    className="waiter-pos__btn"
-                    style={{
-                      padding: "8px 16px",
-                      fontSize: "1rem",
-                      fontWeight: 900,
-                      background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
-                      color: "#fff",
-                      border: "1px solid #15803d",
-                    }}
-                    onClick={() => void loadAll()}
-                  >
-                    تحديث
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           </div>
+        </div>
+      ) : null}
+      {guestSeatDialogOpen ? (
+        <div className="waiter-pos__ops-modal-overlay" role="presentation" onClick={closeGuestSeatDialog}>
           <div
-            id="waiter-ot-sec-search"
-            className="waiter-pos__search-wrap waiter-pos__ot-scroll-target"
-            style={{ marginBottom: "0.5rem" }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="waiter-guest-dialog-title"
+            className="waiter-pos__ops-modal"
+            onClick={(e) => e.stopPropagation()}
           >
-            {menuScheduleRestriction.limited ? (
-              <p style={{ margin: "0 0 0.5rem", fontSize: "0.88rem", color: "var(--wp-muted)" }}>
-                القائمة اليومية: {menuEligibleProducts.length} صنفًا مسموحًا اليوم ({todayYmd()})
-              </p>
-            ) : null}
-            <SmartProductSearch
-              onSelect={(hit) =>
-                beginAddProduct(
-                  products.find((p) => String(p.CardGuide) === String(hit.CardGuide)) || {
-                    CardGuide: hit.CardGuide,
-                    ProductName: hit.ProductName,
-                    Price: Number(hit.AgentPrice || 0) || 0,
-                    AgentPrice: Number(hit.AgentPrice || 0) || 0,
-                  },
-                )
-              }
-              filterHit={(hit) => isOnWaiterMenu(hit.CardGuide, hit.ProductName)}
-              isOutOfStock={(hit) => isKitchenStopped(hit.CardGuide)}
-              placeholder="ابحث سريعًا باسم الصنف أو جزء منه… (Enter لإضافة أول نتيجة)"
-            />
-          </div>
-          {narrowOtViewport && mobileFlowToast.trim() ? (
-            <div className="waiter-pos__ot-flow-toast" role="status" aria-live="polite">
-              <span className="waiter-pos__ot-flow-toast__text">{mobileFlowToast}</span>
-              <button
-                type="button"
-                className="waiter-pos__ot-flow-toast__dismiss"
-                aria-label="إغلاق التلميح"
-                onClick={() => {
-                  clearMobileFlowToastTimer();
-                  setMobileFlowToast("");
-                }}
-              >
+            <div className="waiter-pos__ops-modal__head">
+              <div className="waiter-pos__ops-modal__head-copy">
+                <h3 id="waiter-guest-dialog-title" className="waiter-pos__ops-modal__title">
+                  تسمية الضيوف والمقاعد
+                </h3>
+                <div className="waiter-pos__ops-modal__note">
+                  بعد اعتماد عدد الضيوف من زر المنيموم شارج، اكتب اسم كل ضيف على مقعده عند الحاجة.
+                </div>
+              </div>
+              <button type="button" className="waiter-pos__ops-modal__close" onClick={closeGuestSeatDialog} aria-label="إغلاق">
                 ×
               </button>
             </div>
-          ) : null}
-          <div className="waiter-pos__mb-sendbar" role="region" aria-label="إرسال الطلب للمطبخ">
-            <div className="waiter-pos__mb-sendbar__meta">
-              <span className="waiter-pos__mb-sendbar__title">قيد الإرسال</span>
-              <span className="waiter-pos__mb-sendbar__sub">
-                {itemCount} صنف · ~{gross.toFixed(0)} ج
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`waiter-pos__mb-sendbar__btn${cart.length === 0 ? " waiter-pos__mb-sendbar__btn--blocked" : ""}`}
-              disabled={loading || billingLocked || cart.length === 0}
-              onClick={() => void submitSale()}
-            >
-              {loading ? "جاري الإرسال…" : "إرسال الطلب"}
-            </button>
-          </div>
-          <div className="waiter-pos__section-divider" />
-
-          <div id="waiter-ot-sec-grid" className="waiter-pos__grid waiter-pos__ot-scroll-target">
-            {filteredProducts.length === 0 ? (
-              <div style={{ gridColumn: "1 / -1", padding: "1rem", color: "var(--wp-muted)", textAlign: "center" }}>
-                {menuScheduleRestriction.limited
-                  ? "لا أصناف في القائمة اليومية لهذا اليوم — راجع إعدادات «المنيو والقائمة اليومية»."
-                  : "لا أصناف في هذه الفئة."}
-              </div>
-            ) : null}
-            {filteredProducts.map((p) => {
-              const stopped = isKitchenStopped(p.CardGuide);
-              const stopNote = kitchenStopNote(p.CardGuide);
-              const hue = hashHue(p.CardGuide);
-              const bg = `linear-gradient(135deg, hsl(${hue}, 55%, 42%) 0%, hsl(${(hue + 40) % 360}, 45%, 32%) 100%)`;
-              const initial = (p.ProductName || "?").trim().charAt(0);
-              const imgSrc = resolveMediaUrl(p.imageUrl || p.image);
-              const hasImage = !!imgSrc;
-              return (
-                <button
-                  key={p.CardGuide}
-                  type="button"
-                  className="waiter-pos__card"
-                  onClick={() => pushCartLineForProduct(p, [])}
-                  style={{ opacity: stopped ? 0.55 : 1, position: "relative" }}
-                  title={stopped ? stopNote : undefined}
+            <div className="waiter-pos__ops-modal__body">
+              <div style={{ display: "grid", gap: 12 }}>
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    background: "rgba(15,23,42,0.42)",
+                    border: "1px solid rgba(56,189,248,0.22)",
+                    color: "#e2e8f0",
+                    fontSize: "0.84rem",
+                    fontWeight: 700,
+                    lineHeight: 1.55,
+                  }}
                 >
-                  {stopped ? (
-                    <div style={{ position: "absolute", top: 6, left: 6, zIndex: 3, background: "#b91c1c", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
-                      Out of Stock
+                  العدد المعتمد: {activeGuestSeatCount} ضيف
+                  {effectiveMinimumChargePerSeat > 0 ? ` · ${effectiveMinimumChargePerSeat.toFixed(2)} ج.م لكل كرسي` : ""}
+                  {" · "}اضغط على أي مقعد لكتابة اسم الضيف، ويظل المقعد 13 متاحًا كطلب مشترك.
+                </div>
+                <>
+                  {effectiveMinimumChargePerSeat > 0 ? (
+                    <div style={{ color: "#e2e8f0", fontSize: "0.84rem", fontWeight: 700, lineHeight: 1.5 }}>
+                      الحد الأدنى على مستوى الكرسي: {effectiveMinimumChargePerSeat.toFixed(2)} ج.م شامل الضريبة والخدمة
+                      {" · "}
+                      المطلوب للطاولة: {effectiveTableMinimum.toFixed(2)} ج.م
                     </div>
                   ) : null}
-                  <div className="waiter-pos__ribbon">{Math.round((p.Price || 0) * (1 + SERVICE_RATE_FOR_CARD_PRICE))} ج.م</div>
-                  <div
-                    style={{
-                      position: "absolute",
-                      right: 0,
-                      top: 6,
-                      left: 0,
-                      zIndex: 4,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 0,
-                      flexWrap: "nowrap",
-                      padding: "0 0",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        pushCartLineForProduct(p, []);
-                      }}
-                      style={{
-                        background: "rgba(15,23,42,0.82)",
-                        color: "#fff",
-                        borderRadius: "999px 0 0 999px",
-                        padding: "2px 7px",
-                        fontSize: 11,
-                        fontWeight: 900,
-                        border: 0,
-                        cursor: "pointer",
-                      }}
-                    >
-                      عادي
-                    </button>
-                    {activeCatalogAddons.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          beginAddProduct(p);
-                        }}
-                        style={{
-                          background: "rgba(245,158,11,0.95)",
-                          color: "#111827",
-                          borderRadius: "0 999px 999px 0",
-                          padding: "2px 7px",
-                          fontSize: 11,
-                          fontWeight: 900,
-                          border: 0,
-                          cursor: "pointer",
-                        }}
-                      >
-                        إضافات
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="waiter-pos__card-img" style={{ background: bg, position: "relative", overflow: "hidden" }}>
-                    {hasImage && (
-                      <img
-                        src={imgSrc}
-                        alt={p.ProductName}
-                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    )}
-                    <div style={{ position: "relative", zIndex: 1 }}>{initial}</div>
-                  </div>
-                  <div className="waiter-pos__card-body">
-                    <div className="waiter-pos__card-name">{p.ProductName}</div>
-                    <div className="waiter-pos__card-meta">
-                      <span>🕐 {prepMinutes(p)} دقيقة</span>
-                      {p.GroupGuid && <span>{groupNameById.get(p.GroupGuid) ?? ""}</span>}
+                  <div className="waiter-pos__seat-list-scroll waiter-pos__dropdown-wrap" style={{ marginTop: 4 }}>
+                    <div className="waiter-pos__seats waiter-pos__seats--twelve waiter-pos__seats--twelve-list">
+                      {guestSeatNumbers.map((n) => {
+                        const qty = seatCartStats.get(n)?.qty ?? 0;
+                        const dn = seatGuestDisplay(n);
+                        const sharedRow = n === SHARED_SEAT_NO;
+                        return (
+                          <div
+                            key={`guest-dialog-seat-${n}`}
+                            className={`waiter-pos__seat-slot waiter-pos__seat-slot--compact-row ${sharedRow ? "waiter-pos__seat-slot--shared" : ""} ${selectedSeat === n ? "waiter-pos__seat-slot--active-order" : ""}`}
+                            onClick={() => {
+                              if (billingLocked) return;
+                              setSelectedSeat(n);
+                              if (seatNameEditorSeat != null && seatNameEditorSeat !== n) setSeatNameEditorSeat(null);
+                            }}
+                            role="presentation"
+                          >
+                            <div className="waiter-pos__seat-slot-head">
+                              <span
+                                className={`waiter-pos__seat-slot-no ${sharedRow ? "waiter-pos__seat-slot-no--shared" : ""}`}
+                                title={
+                                  sharedRow
+                                    ? "مقعد ١٣ — طلب يُقسَّم بالتساوي على شيكات المقاعد عند تفعيل «سبليت — فاتورة لكل ضيف» في خيارات الطاولة"
+                                    : `مقعد ${n}`
+                                }
+                              >
+                                {sharedRow ? (
+                                  <>
+                                    {n}
+                                    <span className="waiter-pos__seat-slot-no__sub">مشترك</span>
+                                  </>
+                                ) : (
+                                  n
+                                )}
+                              </span>
+                              {seatNameEditorSeat === n ? (
+                                <input
+                                  type="text"
+                                  dir="rtl"
+                                  autoFocus
+                                  className={`waiter-pos__seat-slot-input waiter-pos__seat-slot-input--compact ${selectedSeat === n ? "waiter-pos__seat-slot-input--sel" : ""}`}
+                                  placeholder={sharedRow ? "ملاحظة للمطبخ (اختياري)" : "اسم الضيف على الشيك"}
+                                  value={String(seatGuestLabels[n] ?? "")}
+                                  onFocus={() => setSelectedSeat(n)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onBlur={() => setSeatNameEditorSeat((cur) => (cur === n ? null : cur))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") {
+                                      e.stopPropagation();
+                                      setSeatNameEditorSeat(null);
+                                      (e.target as HTMLInputElement).blur();
+                                    }
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      if (narrowOtViewport) {
+                                        afterSeatNameConfirmGoCategories();
+                                      } else {
+                                        setSeatNameEditorSeat(null);
+                                        (e.target as HTMLInputElement).blur();
+                                      }
+                                    }
+                                  }}
+                                  onChange={(e) => onSeatGuestInputChange(n, e.target.value)}
+                                  disabled={billingLocked}
+                                  aria-label={sharedRow ? `ملاحظة اختيارية للطلب المشترك (مقعد ${n})` : `اسم الضيف على الشيك — مقعد ${n}`}
+                                  maxLength={120}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  dir="rtl"
+                                  className={`waiter-pos__seat-slot-labelbtn waiter-pos__seat-slot-labelbtn--compact ${selectedSeat === n ? "waiter-pos__seat-slot-labelbtn--active" : ""}`}
+                                  title={
+                                    sharedRow
+                                      ? `${dn}${seatHasCustomLabel(n) ? "" : " — ملاحظة اختيارية للمطبخ"}`
+                                      : !seatHasCustomLabel(n)
+                                        ? "اضغط ثم اكتب اسم الضيف على الشيك (اختياري)"
+                                        : `${dn} — مقعد ${n}`
+                                  }
+                                  disabled={billingLocked}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (billingLocked) return;
+                                    setSelectedSeat(n);
+                                    setSeatNameEditorSeat(n);
+                                  }}
+                                >
+                                  <span className="waiter-pos__seat-name-only">{dn}</span>
+                                </button>
+                              )}
+                              {qty > 0 ? (
+                                <span className="waiter-pos__seat-slot-inline-qty" title={`كمية المرسل لهذا المقعد: ${qty}`}>
+                                  {qty}
+                                </span>
+                              ) : null}
+                              {qty > 0 ? (
+                                <button
+                                  type="button"
+                                  className="waiter-pos__seat-clear waiter-pos__seat-clear--compact"
+                                  title="مسح بنود هذا المقعد"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    clearSeatLines(n);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
+                    {seatNameEditorSeat != null ? (
+                      <div className="waiter-pos__seat-mob-actions" role="toolbar" aria-label="تأكيد اسم المقعد">
+                        <button type="button" className="waiter-pos__seat-mob-actions__btn waiter-pos__seat-mob-actions__btn--primary" onClick={afterSeatNameConfirmGoCategories}>
+                          ✓ تم
+                        </button>
+                        <button type="button" className="waiter-pos__seat-mob-actions__btn" onClick={afterSeatNameConfirmGoCategories}>
+                          الفئات
+                        </button>
+                        <button type="button" className="waiter-pos__seat-mob-actions__btn" onClick={goToNextSeatMobile}>
+                          التالي
+                        </button>
+                      </div>
+                    ) : null}
+                    <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 6, color: "#e5e7eb", lineHeight: 1.35 }}>
+                      <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
+                      سبليت — فاتورة لكل ضيف؛ المشترك ١٣ يُقسَّم بالتساوي
+                    </label>
                   </div>
-                </button>
-              );
-            })}
+                </>
+              </div>
+            </div>
           </div>
-        </main>
-      </div>
+        </div>
+      ) : null}
 
       {useCaptainMobileUi ? (
         <nav className="waiter-pos__ot-captain-bar" aria-label="تبويبات الكابتن (جوال)">
@@ -3399,6 +4856,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
                   if (t.id === "table" || t.id === "guests") setSeatPanelMobCollapsed(false);
+                  if (t.id === "guests") {
+                    setGuestSeatDialogOpen(true);
+                  } else if (guestSeatDialogOpen) {
+                    setGuestSeatDialogOpen(false);
+                  }
                   setCaptainTab(t.id);
                 }}
               >
@@ -3540,6 +5002,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         returnableCount={returnableLines.length}
         printerHint={captainPrinterHint}
         lines={billReviewLines}
+        returnedLines={returnedReviewLines}
         totals={{
           subtotal: reviewBillingTotals.netPortion,
           serviceCharge: reviewBillingTotals.serviceCharge,

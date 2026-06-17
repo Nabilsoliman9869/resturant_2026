@@ -24,11 +24,14 @@ type TableSession = {
   captainName?: string;
   captainRole?: string;
   captainClaimedAt?: string;
+  guestCount?: number | string;
+  minimumChargePerSeat?: number | string;
   noOrderSnoozedUntil?: string;
   noOrderSnoozeCount?: number;
   noOrderWatchStage?: string;
   noOrderEscalatedAt?: string;
   noOrderFinalAlertAt?: string;
+  guestSession?: boolean;
   billingProfile?: {
     active?: boolean;
     source?: string;
@@ -54,14 +57,30 @@ type TableReport = {
   tableName: string;
   sessionId: string | null;
   startTime: string | null;
+  captainName: string | null;
+  guestCount: number;
+  minimumChargePerSeat: number;
   orderCount: number;
   qtyTotal: number;
   qtyArrived: number;
   qtyKitchen: number;
+  pendingCount: number;
+  preparingCount: number;
+  readyCount: number;
+  servedCount: number;
+  cancelledCount: number;
   totalCost: number;
   pendingCost: number;
   noOrderDelayMinutes?: number;
-  lines: Array<{ id: string; time: string; status: string; qty: number; total: number }>;
+  guestSession?: boolean;
+  lines: Array<{
+    id: string;
+    time: string;
+    status: string;
+    qty: number;
+    total: number;
+    items: Array<{ name: string; quantity: number; unitPrice: number }>;
+  }>;
 };
 
 export default function WaiterTablesPage() {
@@ -77,7 +96,7 @@ export default function WaiterTablesPage() {
   const [sessions, setSessions] = useState<TableSession[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [report, setReport] = useState<TableReport | null>(null);
-  const [reportPos, setReportPos] = useState({ x: 0, y: 0 });
+  const [policy, setPolicy] = useState({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
   const [exclusiveOn, setExclusiveOn] = useState(false);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [reassignSid, setReassignSid] = useState<string | null>(null);
@@ -89,6 +108,7 @@ export default function WaiterTablesPage() {
   const [alertBusyByTable, setAlertBusyByTable] = useState<Record<string, boolean>>({});
   const [minChargeDraftByTable, setMinChargeDraftByTable] = useState<Record<string, string>>({});
   const [minChargeBusyByTable, setMinChargeBusyByTable] = useState<Record<string, boolean>>({});
+  const [guestSessionByTable, setGuestSessionByTable] = useState<Record<string, boolean>>({});
   const [vipTemplates, setVipTemplates] = useState<VipTemplate[]>([]);
   const [ownersVipAgents, setOwnersVipAgents] = useState<OwnersVipAgent[]>([]);
   const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
@@ -141,6 +161,14 @@ export default function WaiterTablesPage() {
     const d = new Date(iso);
     if (!Number.isFinite(d.getTime())) return 0;
     return Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  }
+
+  function sessionRecencyValue(row: TableSession | null | undefined): string {
+    return String(row?.startTime || "").trim();
+  }
+
+  function compareSessionRecencyDesc(a: TableSession, b: TableSession): number {
+    return sessionRecencyValue(b).localeCompare(sessionRecencyValue(a));
   }
 
   const jumpToTableCard = useCallback(() => {
@@ -249,6 +277,15 @@ export default function WaiterTablesPage() {
         setAlertPresets([]);
       }
 
+      try {
+        const svc = Number((opsj as Record<string, unknown>)["servicePercent"] ?? 12);
+        const vat = Number((opsj as Record<string, unknown>)["vatPercent"] ?? 14);
+        const before = Boolean((opsj as Record<string, unknown>)["serviceBeforeVat"] ?? true);
+        setPolicy({ servicePercent: Number.isFinite(svc) ? svc : 12, vatPercent: Number.isFinite(vat) ? vat : 14, serviceBeforeVat: before });
+      } catch {
+        setPolicy({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
+      }
+
       const apiTables: RestTable[] = Array.isArray(jt["tables"]) ? (jt["tables"] as RestTable[]) : [];
       const planRaw = fpj["plan"];
       const statusById = new Map<string, string>();
@@ -274,15 +311,16 @@ export default function WaiterTablesPage() {
         return next;
       });
       const m = new Map<string, string>();
-      const sessions = (Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
+      const sessions = ((Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
         isTodayIso(String((s as TableSession)?.startTime || "")),
-      ) as TableSession[];
+      ) as TableSession[]).slice().sort(compareSessionRecencyDesc);
       setSessions(sessions);
       for (const s of sessions) {
         const st = String(s?.status || "").toLowerCase();
         const tid = s?.tableId != null ? String(s.tableId) : "";
         const sid = s?.id != null ? String(s.id) : "";
-        if (tid && sid && st === "active") m.set(tid, sid);
+        // نحتفظ بأحدث session فقط لكل طاولة حتى لو تغيّر ترتيب الـ API.
+        if (tid && sid && st === "active" && !m.has(tid)) m.set(tid, sid);
       }
       setSessionByTable(m);
 
@@ -491,15 +529,22 @@ export default function WaiterTablesPage() {
     );
   }
 
-  function clearCompletedSessionLocally(sessionId: string, tableId: string, tableStatus: "ready" | "dirty") {
+  function clearCompletedSessionLocally(sessionId: string | null, tableId: string, tableStatus: "ready" | "dirty") {
     const sid = String(sessionId || "").trim();
     const tid = String(tableId || "").trim();
-    if (!sid || !tid) return;
-    setSessions((prev) => prev.filter((s) => String(s?.id || "") !== sid));
+    if (!tid) return;
+    if (sid) {
+      setSessions((prev) => prev.filter((s) => String(s?.id || "") !== sid));
+      setVipChoiceBySession((prev) => {
+        const next = { ...prev };
+        delete next[sid];
+        return next;
+      });
+    }
     setSessionByTable((prev) => {
       const next = new Map(prev);
       const mapped = String(next.get(tid) || "").trim();
-      if (mapped === sid) next.delete(tid);
+      if (!sid || mapped === sid) next.delete(tid);
       return next;
     });
     setBusyIds((prev) => {
@@ -510,6 +555,28 @@ export default function WaiterTablesPage() {
     setBillReqIds((prev) => {
       const next = new Set(prev);
       next.delete(tid);
+      return next;
+    });
+    setOrders((prev) => prev.filter((o) => String(o?.tableId || "") !== tid));
+    setReport((prev) => {
+      if (!prev) return prev;
+      const targetName = tables.find((t) => String(t?.id || "") === tid)?.name || "";
+      if (targetName && prev.tableName === targetName) return null;
+      return prev;
+    });
+    setMinChargeDraftByTable((prev) => {
+      const next = { ...prev };
+      delete next[tid];
+      return next;
+    });
+    setAlertPickByTable((prev) => {
+      const next = { ...prev };
+      delete next[tid];
+      return next;
+    });
+    setAlertBusyByTable((prev) => {
+      const next = { ...prev };
+      delete next[tid];
       return next;
     });
     setTables((prev) =>
@@ -556,6 +623,7 @@ export default function WaiterTablesPage() {
         );
         okMessage = "تم تسكينك كابتن على هذه الجلسة.";
       } else {
+        const isGuest = !!guestSessionByTable[tableId];
         r = await safeFetch(`${base}/api/restaurant/table-sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -565,6 +633,7 @@ export default function WaiterTablesPage() {
             assignOrderTaker: true,
             startedByRole: actor.role,
             startReason: "captain_seat_from_table_card",
+            guestSession: isGuest,
           }),
           timeoutMs: claimTimeoutMs,
         });
@@ -730,6 +799,7 @@ export default function WaiterTablesPage() {
         return;
       }
       setMsg("تم تنفيذ Reset للطاولة وتنظيف حالتها بالكامل.");
+      clearCompletedSessionLocally(null, tid, "ready");
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
@@ -894,7 +964,7 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      setMsg("تم حفظ minimum charge للطاولة.");
+      setMsg("تم حفظ الحد الأدنى لكل كرسي على هذه الطاولة.");
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
@@ -958,21 +1028,31 @@ export default function WaiterTablesPage() {
   const isArrived = (status: string) => ["ready", "served", "completed", "delivered"].includes(status);
   const isKitchen = (status: string) => ["pending", "preparing"].includes(status);
 
-  const costByTableId = useCallback(
-    (tableId: string, sessionId: string | null) => {
-      const tid = String(tableId || "");
-      const sid = sessionId ? String(sessionId) : "";
-      const related = orders
-        .filter((o) => (sid ? String(o?.sessionId || "") === sid : String(o?.tableId || "") === tid))
-        .filter((o) => isTodayIso(String(o?.createdAt || "")));
+  const tableCosts = useMemo(() => {
+    const m = new Map<string, { totalCost: number; pendingCost: number; orderCount: number }>();
+    const todayOrders = orders.filter((o) => isTodayIso(String(o?.createdAt || "")));
+    const sessionToTable = new Map<string, string>();
+    for (const [tid, sid] of sessionByTable.entries()) {
+      if (tid && sid) sessionToTable.set(sid, tid);
+    }
+    const byTable: Record<string, OrderRow[]> = {};
+    for (const o of todayOrders) {
+      const sid = String(o?.sessionId || "");
+      const tid = String(o?.tableId || "");
+      const key = sid ? (sessionToTable.get(sid) || tid) : tid;
+      if (!key) continue;
+      if (!byTable[key]) byTable[key] = [];
+      byTable[key].push(o);
+    }
+    for (const [tid, related] of Object.entries(byTable)) {
       const totalCost = related.reduce((a, o) => a + orderTotal(o), 0);
       const pendingCost = related
         .filter((o) => isKitchen(String(o?.status || "").toLowerCase()))
         .reduce((a, o) => a + orderTotal(o), 0);
-      return { totalCost, pendingCost, orderCount: related.length };
-    },
-    [orders],
-  );
+      m.set(tid, { totalCost, pendingCost, orderCount: related.length });
+    }
+    return m;
+  }, [orders, sessionByTable]);
   const showTableReport = (t: RestTable, ev: ReactMouseEvent<HTMLElement>) => {
     ev.preventDefault();
     const tid = String(t.id);
@@ -985,12 +1065,21 @@ export default function WaiterTablesPage() {
     const lines = related.map((o) => {
       const st = String(o?.status || "").toLowerCase();
       const qty = orderQty(o);
+      const rawItems = Array.isArray(o?.items) ? o.items : [];
+      const items = rawItems
+        .map((it) => ({
+          name: String(it?.name || "").trim() || "—",
+          quantity: Math.max(0, Number(it?.quantity ?? 0)),
+          unitPrice: Math.max(0, Number(it?.unitPrice ?? 0)),
+        }))
+        .filter((it) => it.quantity > 0);
       return {
         id: String(o?.id || "").slice(0, 8),
         time: String(o?.createdAt || "").replace("T", " ").slice(0, 16),
         status: st || "pending",
         qty,
         total: orderTotal(o),
+        items,
       };
     });
     const qtyTotal = lines.reduce((a, l) => a + l.qty, 0);
@@ -1000,21 +1089,45 @@ export default function WaiterTablesPage() {
     const pendingCost = lines.filter((l) => isKitchen(l.status)).reduce((a, l) => a + l.total, 0);
     const persistedDelay = Number((session as any)?.firstOrderDelayMinutes || 0);
     const noOrderDelayMinutes = lines.length === 0 ? diffMinutesFromIso(session?.startTime || undefined) : persistedDelay;
+    const pendingCount = lines.filter((l) => l.status === "pending").length;
+    const preparingCount = lines.filter((l) => l.status === "preparing").length;
+    const readyCount = lines.filter((l) => l.status === "ready").length;
+    const servedCount = lines.filter((l) => l.status === "served").length;
+    const cancelledCount = lines.filter((l) => l.status === "cancelled").length;
+    const guestCount = Math.max(1, Number(session?.guestCount ?? 1) || 1);
+    const minimumChargePerSeat = Math.max(0, Number(session?.minimumChargePerSeat ?? 0) || 0);
     setReport({
       tableName: t.name,
       sessionId: sid,
       startTime: session?.startTime || null,
+      captainName: String(session?.captainName || session?.captainLogin || "").trim() || null,
+      guestCount,
+      minimumChargePerSeat,
       orderCount: lines.length,
       qtyTotal,
       qtyArrived,
       qtyKitchen,
+      pendingCount,
+      preparingCount,
+      readyCount,
+      servedCount,
+      cancelledCount,
       totalCost,
       pendingCost,
       noOrderDelayMinutes,
+      guestSession: Boolean(session?.guestSession),
       lines,
     });
-    setReportPos({ x: ev.clientX, y: ev.clientY });
   };
+
+  const reportFinancials = useMemo(() => {
+    if (!report) return null;
+    const net = report.totalCost;
+    const svc = (net * policy.servicePercent) / 100;
+    const vat = policy.serviceBeforeVat ? ((net + svc) * policy.vatPercent) / 100 : (net * policy.vatPercent) / 100;
+    const total = Math.max(0, net + svc + vat);
+    return { net, svc, vat, total };
+  }, [report, policy]);
 
   const orderTakerBase = location.pathname.startsWith("/app/manager")
     ? "/app/manager"
@@ -1093,6 +1206,7 @@ export default function WaiterTablesPage() {
             const snoozedUntilTs = snoozedUntilIso ? Date.parse(snoozedUntilIso) : Number.NaN;
             const snoozeActive = Number.isFinite(snoozedUntilTs) && snoozedUntilTs > Date.now();
             const needsImmediateResolution = watchStage === "final_decision" || snoozeCount >= 2;
+            const isGuestSession = Boolean(sessRow?.guestSession);
             const bp = sessRow?.billingProfile;
             const vipOwnerLabel =
               bp && typeof bp === "object" && bp.active !== false
@@ -1100,7 +1214,7 @@ export default function WaiterTablesPage() {
                 : "";
             const isVipTable = Boolean(t.features?.vipSection);
             const cardTone = notReady ? "blocked" : isBusy ? "busy" : "ready";
-            const money = costByTableId(String(t.id), sidStr || null);
+            const money = tableCosts.get(String(t.id)) || { totalCost: 0, pendingCost: 0, orderCount: 0 };
             const minRaw = String(minChargeDraftByTable[String(t.id)] ?? "").trim();
             const minCharge = Number(minRaw);
             const minOk = Number.isFinite(minCharge) ? Math.max(0, minCharge) : 0;
@@ -1151,7 +1265,7 @@ export default function WaiterTablesPage() {
                       ? `الجلسة مسندة إلى ${captainLabel || "كابتن آخر"}`
                       : "ربط الجلسة على الكابتن"
                     : "بدء جلسة وتسكين نفسك على الطاولة";
-            const openOrderTakerForTable = () => {
+            const openOrderTakerForTable = async () => {
               if (notReady) {
                 setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
                 return;
@@ -1167,6 +1281,25 @@ export default function WaiterTablesPage() {
                 const nm = captainLabel || "كابتن آخر";
                 setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
                 return;
+              }
+              // اذا في اختيار VIP/Owner غير مطبّق، نطبّقه تلقائياً قبل فتح الطلب
+              if (sidStr) {
+                const bp = sessRow?.billingProfile;
+                const src = String(bp?.source || "").toLowerCase();
+                const currentMode =
+                  bp?.active === false
+                    ? ""
+                    : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
+                      ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
+                      : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                        ? String(bp?.vipTemplateId || "").trim()
+                        : bp && String(bp?.source || "").trim()
+                          ? "__ops_defaults__"
+                          : "";
+                const chosen = vipChoiceBySession[sidStr] ?? "";
+                if (chosen && chosen !== currentMode) {
+                  await applyVipBilling(sidStr, chosen);
+                }
               }
               const q =
                 `tableId=${encodeURIComponent(t.id)}` + (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
@@ -1194,6 +1327,7 @@ export default function WaiterTablesPage() {
                       <span className="waiter-tblcard__spec-id-text">{displayLabel}</span>
                       {isVipTable ? <span className="waiter-tables-vip-pill">VIP</span> : null}
                       {vipOwnerLabel ? <span className="waiter-tables-owner-pill">{vipOwnerLabel}</span> : null}
+                      {isGuestSession ? <span className="waiter-tables-owner-pill" style={{ background: "rgba(16,185,129,0.15)", borderColor: "rgba(16,185,129,0.4)", color: "#047857" }}>ضيف</span> : null}
                     </div>
                     <div className="waiter-tblcard__spec-meta-row">
                       <span className="waiter-tblcard__spec-seats">المقاعد: {t.seats ?? "—"}</span>
@@ -1219,6 +1353,32 @@ export default function WaiterTablesPage() {
 
                   <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
                     <div className="waiter-tblcard__pill-row">
+                      {(user?.role === "manager" || user?.role === "developer") && !sidStr ? (
+                        <label
+                          className="waiter-tblcard__pill"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            cursor: "pointer",
+                            background: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.15)" : undefined,
+                            borderColor: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.4)" : undefined,
+                          }}
+                          title="تسجيل الجلسة كضيف — تُحوّل الفاتورة لاحقاً على حساب العميل الوهمي 'ضيف'"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!guestSessionByTable[String(t.id)]}
+                            onChange={(e) =>
+                              setGuestSessionByTable((prev) => ({
+                                ...prev,
+                                [String(t.id)]: e.target.checked,
+                              }))
+                            }
+                          />
+                          <span style={{ fontSize: "0.78rem", fontWeight: 700 }}>ضيف</span>
+                        </label>
+                      ) : null}
                       <button
                         type="button"
                         className="waiter-tblcard__pill waiter-tblcard__pill--assign"
@@ -1448,25 +1608,25 @@ export default function WaiterTablesPage() {
                           value={minChargeDraftByTable[String(t.id)] ?? ""}
                           onChange={(e) => setMinChargeDraftByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
                           disabled={Boolean(minChargeBusyByTable[String(t.id)])}
-                          title="Minimum charge للطاولة"
+                          title="الحد الأدنى لكل كرسي على هذه الطاولة"
                         />
                       ) : (
                         <div className="waiter-tblcard__money-min-readout">{minOk.toFixed(0)}</div>
                       )}
-                      <div className="waiter-tblcard__money-min-hint">minimum</div>
+                      <div className="waiter-tblcard__money-min-hint">لكل كرسي</div>
                     </div>
                     <div className="waiter-tblcard__money-min-label" onClick={(e) => e.stopPropagation()}>
                       {canEditMin ? (
                         <InlinePinConfirm
                           label={Boolean(minChargeBusyByTable[String(t.id)]) ? "…" : "حفظ"}
                           reason="minimum_charge_override"
-                          promptHint="تعديل ميني-موم"
+                          promptHint="تعديل الحد الأدنى لكل كرسي"
                           variant="warn"
                           disabled={Boolean(minChargeBusyByTable[String(t.id)])}
                           onConfirm={() => saveMinimumCharge(String(t.id))}
                         />
                       ) : (
-                        <span className="waiter-tblcard__spec-muted">حد أدنى للطاولة</span>
+                        <span className="waiter-tblcard__spec-muted">حد أدنى لكل كرسي</span>
                       )}
                     </div>
                   </div>
@@ -1584,62 +1744,175 @@ export default function WaiterTablesPage() {
         </div>
       ) : null}
       {report ? (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "fixed",
-            top: Math.min(reportPos.y + 8, window.innerHeight - 360),
-            left: Math.min(reportPos.x + 8, window.innerWidth - 440),
-            width: 420,
-            maxWidth: "95vw",
-            maxHeight: "72vh",
-            overflow: "auto",
-            zIndex: 1000,
-            background: "#ffffff",
-            border: "2px solid #0ea5e9",
-            borderRadius: 14,
-            boxShadow: "0 16px 40px rgba(2,6,23,0.25)",
-            padding: "0.8rem 0.9rem",
-            direction: "rtl",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <div style={{ fontSize: "1.1rem", fontWeight: 900 }}>تقرير الطاولة {report.tableName}</div>
-            <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "2px 10px" }} onClick={() => setReport(null)}>
-              ×
-            </button>
-          </div>
-          <div style={{ marginTop: 6, fontSize: "0.86rem", color: "#0f172a", display: "grid", gap: 4 }}>
-            <div>وقت التسكين: {report.startTime ? new Date(report.startTime).toLocaleString("ar-EG") : "غير متاح"}</div>
-            <div>عدد الطلبات: {report.orderCount}</div>
-            <div>إجمالي العناصر: {report.qtyTotal}</div>
-            <div>وصل منها: {report.qtyArrived}</div>
-            <div>باقي بالمطبخ: {report.qtyKitchen}</div>
-            <div>التكلفة الحالية: {report.totalCost.toFixed(2)} ج.م</div>
-            <div>قيمة المتبقي حتى الوصول: {report.pendingCost.toFixed(2)} ج.م</div>
-            {Number(report.noOrderDelayMinutes || 0) >= 10 ? (
-              <div style={{ color: "#7c3aed", fontWeight: 800 }}>
-                تنبيه: تأخر أخذ الطلب بعد التسكين ({report.noOrderDelayMinutes} دقيقة)
+        <>
+          {/* Backdrop */}
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(2,6,23,0.45)",
+              zIndex: 999,
+            }}
+            onClick={() => setReport(null)}
+          />
+          {/* Modal */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(720px, 95vw)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              zIndex: 1000,
+              background: "#ffffff",
+              border: "2px solid #0ea5e9",
+              borderRadius: 14,
+              boxShadow: "0 20px 50px rgba(2,6,23,0.35)",
+              padding: "1rem 1.1rem",
+              direction: "rtl",
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, borderBottom: "1px solid #e2e8f0", paddingBottom: 10 }}>
+              <div style={{ fontSize: "1.15rem", fontWeight: 900, display: "flex", alignItems: "center", gap: 8 }}>
+                {report.tableName} — ملخص الجلسة
+                {report.guestSession ? (
+                  <span style={{ fontSize: "0.72rem", background: "rgba(16,185,129,0.15)", color: "#047857", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 6, padding: "2px 8px" }}>ضيف</span>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-          <div style={{ marginTop: 10, borderTop: "1px solid #cbd5e1", paddingTop: 8, display: "grid", gap: 6 }}>
-            {report.lines.length === 0 ? (
-              <div style={{ color: "#64748b" }}>لا توجد طلبات على هذه الطاولة.</div>
-            ) : (
-              report.lines.map((l) => (
-                <div key={l.id + l.time} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 8px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
-                    <span>طلب {l.id || "—"}</span>
-                    <span>{l.status}</span>
-                  </div>
-                  <div style={{ fontSize: "0.82rem", color: "#475569", marginTop: 2 }}>{l.time || "—"}</div>
-                  <div style={{ fontSize: "0.86rem", marginTop: 3 }}>العناصر: {l.qty} · القيمة: {l.total.toFixed(2)} ج.م</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem" }} onClick={() => window.print()}>
+                  🖨️ طباعة
+                </button>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "2px 10px" }} onClick={() => setReport(null)}>
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Session Meta */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>الكابتن</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>{report.captainName || "—"}</div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>بدأت الجلسة</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
+                  {report.startTime ? new Date(report.startTime).toLocaleString("ar-EG", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "غير متاح"}
                 </div>
-              ))
-            )}
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>الضيوف</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>{report.guestCount} ضيف</div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>مينيموم شارج</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
+                  {report.minimumChargePerSeat > 0 ? `${report.minimumChargePerSeat.toFixed(0)} ج.م/ضيف = ${(report.minimumChargePerSeat * report.guestCount).toFixed(0)} ج.م` : "غير مفعّل"}
+                </div>
+              </div>
+            </div>
+
+            {/* Orders Status Grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8, marginTop: 12 }}>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#1e40af" }}>{report.orderCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#3b82f6" }}>إجمالي الطلبات</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#92400e" }}>{report.pendingCount + report.preparingCount + report.readyCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#b45309" }}>في المطبخ</div>
+                <div style={{ fontSize: "0.65rem", color: "#78716c" }}>انتظار {report.pendingCount} · تحضير {report.preparingCount} · جاهز {report.readyCount}</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#f0fdf4", border: "1px solid #86efac" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#15803d" }}>{report.servedCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#16a34a" }}>واصل للطاولة</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#991b1b" }}>{report.cancelledCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#dc2626" }}>ملغى</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#e2e8f0", border: "1px solid #cbd5e1" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#1e293b" }}>{report.qtyTotal}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#475569" }}>إجمالي العناصر</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#5b21b6" }}>{report.totalCost.toFixed(0)}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#7c3aed" }}>السلة ج.م</div>
+              </div>
+            </div>
+
+            {/* Financial Summary */}
+            <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontWeight: 800, fontSize: "0.9rem", marginBottom: 8, color: "#0f172a" }}>التكلفة</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, fontSize: "0.86rem" }}>
+                <div><span style={{ color: "#64748b" }}>السلة:</span> <strong>{report.totalCost.toFixed(2)} ج.م</strong></div>
+                <div><span style={{ color: "#64748b" }}>الخدمة ({policy.servicePercent}%):</span> <strong>{reportFinancials?.svc.toFixed(2)}</strong></div>
+                <div><span style={{ color: "#64748b" }}>VAT ({policy.vatPercent}%):</span> <strong>{reportFinancials?.vat.toFixed(2)}</strong></div>
+                <div><span style={{ color: "#64748b" }}>واصل للطاولة (قيمة):</span> <strong>{(report.totalCost - report.pendingCost).toFixed(2)}</strong></div>
+                <div><span style={{ color: "#0f172a" }}>الإجمالي:</span> <strong style={{ fontSize: "1rem", color: "#059669" }}>{reportFinancials?.total.toFixed(2)} ج.م</strong></div>
+              </div>
+            </div>
+
+            {/* Alerts */}
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              {report.sessionId && billReqIds.has(report.sessionId) ? (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontSize: "0.82rem", fontWeight: 800 }}>
+                  ⚠️ طلب حساب معلق — لا يمكن إضافة أصناف جديدة
+                </div>
+              ) : null}
+              {Number(report.noOrderDelayMinutes || 0) >= 10 ? (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem", fontWeight: 800 }}>
+                  ⏱️ تأخر أخذ الطلب بعد التسكين ({report.noOrderDelayMinutes} دقيقة)
+                </div>
+              ) : null}
+              {report.readyCount > 0 ? (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#dcfce7", color: "#14532d", fontSize: "0.82rem", fontWeight: 800 }}>
+                  ✅ {report.readyCount} طلب جاهز بالمطبخ — استدعِ الرنر
+                </div>
+              ) : null}
+            </div>
+
+            {/* Recent Orders */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8, fontSize: "0.9rem", color: "#0f172a" }}>الطلبات المرسلة</div>
+              {report.lines.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "0.85rem" }}>لا توجد طلبات على هذه الطاولة.</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
+                  {report.lines.map((l) => (
+                    <div key={l.id + l.time} style={{ border: "1px solid #dbeafe", borderRadius: 10, padding: "8px 10px", background: "#f8fbff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "0.82rem", color: "#0f172a" }}>
+                        <span>طلب {l.id || "—"} · {(() => {
+                          const s = String(l.status || "").toLowerCase();
+                          const map: Record<string, string> = { pending: "انتظار", preparing: "تحضير", ready: "جاهز", served: "مُقدَّم", cancelled: "ملغى", paid: "مدفوع" };
+                          return map[s] || s;
+                        })()}</span>
+                        <span style={{ color: "#64748b", fontWeight: 600 }}>{l.qty} عنصر</span>
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "#475569", marginTop: 2 }}>{l.time || "—"}</div>
+                      <div style={{ fontSize: "0.86rem", marginTop: 3, color: "#0f172a", fontWeight: 700 }}>القيمة: {l.total.toFixed(2)} ج.م</div>
+                      {l.items.length > 0 ? (
+                        <ul style={{ margin: "6px 0 0", padding: "0 14px 0 0", listStyle: "disc", fontSize: "0.78rem", color: "#334155", lineHeight: 1.6 }}>
+                          {l.items.map((it, idx) => (
+                            <li key={idx}>
+                              {it.quantity} × {it.name}
+                              {it.unitPrice > 0 ? ` — ${Math.round(it.unitPrice)} ج.م` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
     </div>
   );

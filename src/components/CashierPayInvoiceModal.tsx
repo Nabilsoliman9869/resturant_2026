@@ -50,6 +50,13 @@ export type CashierInvoiceRow = {
   tipAmount?: number;
   lines?: CashierInvoiceLine[];
   sourceLines?: CashierInvoiceSourceLine[];
+  billingProfile?: {
+    active?: boolean;
+    noService?: boolean;
+    noVat?: boolean;
+    discountPct?: number;
+    source?: string;
+  } | null;
   /** من السيرفر: تسمية الطاولة للعرض (مثل «طاولة 5») */
   tableLabel?: string;
   tableNumber?: number;
@@ -64,6 +71,11 @@ export type CashierInvoiceRow = {
   lastPrintedAt?: string | null;
   lastPrintedByRole?: string | null;
   lastPrintedByName?: string | null;
+  /** اسم العميل المربوط بالفاتورة (مالك / VIP / عميل آجل) */
+  agentName?: string | null;
+  agentGuid?: string | null;
+  paymentStatus?: string | null;
+  onAccountAt?: string | null;
 };
 
 type CashierPricingSnapshot = {
@@ -551,6 +563,8 @@ export function CashierPayInvoiceModal({
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [onAccount, setOnAccount] = useState(false);
+  const [onAccountBusy, setOnAccountBusy] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [msg, setMsg] = useState("");
   const autoPrintedRef = useRef(false);
@@ -613,17 +627,24 @@ export function CashierPayInvoiceModal({
       setDetailHint("");
       setDiscountInput("");
       setApplyServiceCharge(true);
+      setApplyVatCharge(true);
       setPricingSnapshot(null);
       setCash("");
       setVisa("");
       setWallet("");
       setInstapay("");
       setCloseSession(true);
+      setOnAccount(false);
       setMsg("");
       return;
     }
     if (initialRow && String(initialRow.invoiceId || "") === invoiceId) {
       setRow(initialRow);
+      const bp = initialRow.billingProfile;
+      if (bp && typeof bp === "object" && bp.active !== false) {
+        if (bp.noService === true) setApplyServiceCharge(false);
+        if (bp.noVat === true) setApplyVatCharge(false);
+      }
     } else {
       setRow(null);
     }
@@ -686,10 +707,21 @@ export function CashierPayInvoiceModal({
           setNotes("");
           const ht = typeof invRow.tax === "number" ? invRow.tax : 0;
           const hs = typeof invRow.serviceCharge === "number" ? invRow.serviceCharge : 0;
-          setHeaderDiscount(typeof invRow.discount === "number" ? invRow.discount : 0);
+          const hd = typeof invRow.discount === "number" ? invRow.discount : 0;
+          const bp = invRow.billingProfile;
+          const hasActiveBillingProfile = !!(bp && typeof bp === "object" && bp.active !== false);
+          setHeaderDiscount(hd);
           setHeaderTax(ht);
           setHeaderService(hs);
-          setLockedFromSource(Math.abs(ht) > 0.001 || Math.abs(hs) > 0.001);
+          setLockedFromSource(
+            Math.abs(ht) > 0.001 || Math.abs(hs) > 0.001 || Math.abs(hd) > 0.001 || hasActiveBillingProfile,
+          );
+          if (hasActiveBillingProfile) {
+            if (bp.noService === true) setApplyServiceCharge(false);
+            else setApplyServiceCharge(true);
+            if (bp.noVat === true) setApplyVatCharge(false);
+            else setApplyVatCharge(true);
+          }
           setDiscountInput(
             typeof invRow.discount === "number" && invRow.discount > 0 ? String(invRow.discount) : "",
           );
@@ -714,10 +746,20 @@ export function CashierPayInvoiceModal({
             typeof j.LocalAdministrativeTax === "number"
               ? j.LocalAdministrativeTax
               : parseFloat(String(j.LocalAdministrativeTax)) || 0;
+          const bp2 = invRow.billingProfile;
+          const hasActiveBillingProfile2 = !!(bp2 && typeof bp2 === "object" && bp2.active !== false);
           setHeaderDiscount(hd);
           setHeaderTax(ht);
           setHeaderService(hs);
-          setLockedFromSource(Math.abs(ht) > 0.001 || Math.abs(hs) > 0.001);
+          setLockedFromSource(
+            Math.abs(ht) > 0.001 || Math.abs(hs) > 0.001 || Math.abs(hd) > 0.001 || hasActiveBillingProfile2,
+          );
+          if (hasActiveBillingProfile2) {
+            if (bp2.noService === true) setApplyServiceCharge(false);
+            else setApplyServiceCharge(true);
+            if (bp2.noVat === true) setApplyVatCharge(false);
+            else setApplyVatCharge(true);
+          }
           setDiscountInput(hd > 0.001 ? String(hd) : "");
           setDetailHint("");
           return;
@@ -777,16 +819,26 @@ export function CashierPayInvoiceModal({
         setAgentName("");
         setNotes("");
         setHeaderDiscount(0);
+        const bp3 = invRow.billingProfile;
+        const hasActiveBillingProfile3 = !!(bp3 && typeof bp3 === "object" && bp3.active !== false);
         if (aggSub > 0 || aggTax > 0 || aggSvc > 0) {
           const ht = round2(aggTax);
           const hs = round2(aggSvc);
           setHeaderTax(ht);
           setHeaderService(hs);
-          setLockedFromSource(Math.abs(ht) > 0.001 || Math.abs(hs) > 0.001);
+          setLockedFromSource(
+            Math.abs(ht) > 0.001 || Math.abs(hs) > 0.001 || hasActiveBillingProfile3,
+          );
         } else {
           setHeaderTax(0);
           setHeaderService(0);
-          setLockedFromSource(false);
+          setLockedFromSource(hasActiveBillingProfile3);
+        }
+        if (hasActiveBillingProfile3) {
+          if (bp3.noService === true) setApplyServiceCharge(false);
+          else setApplyServiceCharge(true);
+          if (bp3.noVat === true) setApplyVatCharge(false);
+          else setApplyVatCharge(true);
         }
         setDetailHint("تفاصيل مُستخرجة من طلبات الجلسة (احتياطي).");
       } catch {
@@ -895,7 +947,7 @@ export function CashierPayInvoiceModal({
       row?.invoiceId &&
       !loading &&
       !detailLoading &&
-      sumOk &&
+      (onAccount || sumOk) &&
       totalDue >= 0 &&
       (lines.length === 0 || ledger.linesSum > 0.0001 || ledger.grand > 0.0001),
   );
@@ -1089,6 +1141,36 @@ export function CashierPayInvoiceModal({
       setMsg(String(e));
     } finally {
       setPaying(false);
+    }
+  }
+
+  async function submitOnAccount() {
+    const id = String(row?.invoiceId || "").trim();
+    if (!id) return;
+    setOnAccountBusy(true);
+    setMsg("");
+    try {
+      const body = {
+        invoiceId: id,
+        closeSession: closeSession ?? true,
+      };
+      const r = await fetch(`${base}/api/restaurant/invoices-local/mark-on-account`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const txt = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(txt) ?? {};
+        throw new Error(typeof j.detail === "string" ? j.detail : txt.slice(0, 200) || "فشل الترحيل على الحساب");
+      }
+      onPaid();
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setOnAccountBusy(false);
     }
   }
 
@@ -1383,6 +1465,21 @@ export function CashierPayInvoiceModal({
 
             {allowPayment ? (
               <>
+            <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "1px dashed rgba(148,163,184,0.55)", background: onAccount ? "rgba(234,179,8,0.08)" : "rgba(0,0,0,0.02)" }}>
+              <label style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={onAccount} onChange={(e) => setOnAccount(e.target.checked)} />
+                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>ترحيل على حساب العميل (بدون سداد فوري)</span>
+              </label>
+              <p style={{ margin: "0.35rem 0 0", fontSize: "0.78rem", color: "var(--muted)" }}>
+                يُسجّل الفاتورة كمديونية على حساب العميل المربوط بالجلسة (مالك / VIP / عميل آجل).
+              </p>
+              {onAccount && row?.agentName ? (
+                <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", fontWeight: 700 }}>العميل: {row.agentName}</p>
+              ) : null}
+            </div>
+
+            {!onAccount ? (
+              <>
             <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.35rem" }}>توزيع السداد وسياسة السبليت</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.65rem", fontSize: "0.8rem" }}>
               <span style={{ color: "var(--muted)" }}>سياسة السبليت</span>
@@ -1649,6 +1746,15 @@ export function CashierPayInvoiceModal({
             </label>
               </>
             ) : null}
+
+            {onAccount ? (
+              <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "2px solid rgba(234,179,8,0.45)", background: "rgba(234,179,8,0.06)", textAlign: "center" }}>
+                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>سيتم ترحيل الفاتورة على حساب العميل بدون سداد فوري.</div>
+                <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>الفاتورة تُسجّل كمديونية ويُمكن متابعتها لاحقاً من شاشة كشف الحساب.</div>
+              </div>
+            ) : null}
+              </>
+            ) : null}
           </>
         ) : null}
         {msg ? (
@@ -1668,9 +1774,15 @@ export function CashierPayInvoiceModal({
             إلغاء
           </button>
           {allowPayment ? (
-            <button type="button" className="btn btn-primary" disabled={!canSubmit || paying || printing} onClick={() => void submit()}>
-              {paying ? "…" : "تأكيد التسديد"}
-            </button>
+            onAccount ? (
+              <button type="button" className="btn btn-primary" disabled={!canSubmit || onAccountBusy || printing} onClick={() => void submitOnAccount()} style={{ background: "#ca8a04", borderColor: "#ca8a04" }}>
+                {onAccountBusy ? "…" : "ترحيل على الحساب"}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" disabled={!canSubmit || paying || printing} onClick={() => void submit()}>
+                {paying ? "…" : "تأكيد التسديد"}
+              </button>
+            )
           ) : null}
         </div>
       </div>
