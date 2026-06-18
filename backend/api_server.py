@@ -4869,7 +4869,7 @@ def get_products(group_guide: Optional[str] = None, refresh: bool = Query(False)
     imgs_map = img_manifest_data.get("images") if isinstance(img_manifest_data.get("images"), dict) else {}
     products = [_api_product_from_tbl007_row(r, imgs_map) for r in rows]
     result = {"products": products}
-    cache_set(cache_key, result, ttl=15)
+    cache_set(cache_key, result, ttl=60)
     return result
 
 
@@ -5030,14 +5030,14 @@ def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
 
 @app.get("/api/restaurant/order-taker-bootstrap")
 async def restaurant_order_taker_bootstrap(refresh: bool = Query(False)):
-    """تحميل صفحة الطلب في طلب HTTP واحد (كتالوج مضغوط + تشغيل) — مع Redis cache 8s."""
+    """تحميل صفحة الطلب في طلب HTTP واحد (كتالوج مضغوط + تشغيل) — مع Redis cache 60s."""
     cache_key = f"mat3am:restaurant:order-taker-bootstrap:r={refresh}"
     if not refresh:
         cached = cache_get(cache_key)
         if cached:
             return cached
     result = await run_in_threadpool(_order_taker_bootstrap_sync, refresh=refresh)
-    cache_set(cache_key, result, ttl=8)
+    cache_set(cache_key, result, ttl=60)
     return result
 
 
@@ -16851,13 +16851,13 @@ def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
 
 @app.get("/api/restaurant/operational-snapshot")
 async def restaurant_operational_snapshot(includeUsers: bool = Query(False, alias="includeUsers")):
-    """لقطة تشغيلية واحدة (JSON) — تقليل 6+ اتصالات ODBC من الواجهة + Redis cache 5s."""
+    """لقطة تشغيلية واحدة (JSON) — تقليل 6+ اتصالات ODBC من الواجهة + Redis cache 30s."""
     cache_key = f"mat3am:restaurant:operational-snapshot:u={includeUsers}"
     cached = cache_get(cache_key)
     if cached:
         return cached
     result = await run_in_threadpool(_restaurant_operational_snapshot_sync, includeUsers)
-    cache_set(cache_key, result, ttl=10)
+    cache_set(cache_key, result, ttl=30)
     return result
 
 
