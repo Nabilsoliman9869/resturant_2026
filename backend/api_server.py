@@ -13,10 +13,10 @@ from typing import Any, List, Optional, Tuple
 import pyodbc
 from datetime import date as date_cls
 from datetime import datetime, timezone, timedelta
+import json
 import uuid
 import subprocess
 import hashlib
-import json
 import os
 import re
 import random
@@ -231,7 +231,21 @@ def _looks_like_initial_setup_username(login_name: str) -> bool:
     nl = _norm_setup_login(login_name)
     return nl == "dev" or nl == _norm_setup_login(MAT3AM_INITIAL_DEV_LOGIN)
 
-app = FastAPI(title="إكسترا ويب — نظام موازي", version="2.0.0")
+class UTF8JSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+app = FastAPI(
+    title="إكسترا ويب — نظام موازي",
+    version="2.0.0",
+    default_response_class=UTF8JSONResponse,
+)
 
 
 @app.get("/__whoami", include_in_schema=False)
@@ -266,15 +280,17 @@ def _resolve_mat3am_data_dir() -> Path:
     env_base = (os.environ.get("MAT3AM_BASE_DIR") or "").strip()
     if env_base:
         return Path(env_base).resolve()
-    # توحيد السلوك بين EXE والتشغيل المحلي:
-    # إذا وُجد مخزن دائم سبق أن استخدمه EXE أو launcher المحلي، اجعله هو DATA_DIR أيضاً.
-    persist = _mat3am_persistent_data_root()
-    if persist:
-        try:
-            if (persist / "config" / "settings.json").is_file() or (persist / "config" / "restaurant").is_dir():
-                return persist
-        except Exception:
-            pass
+    # التشغيل المحلي (غير EXE) يستخدم دائماً مجلد المشروع.
+    # EXE فقط يستخدم AppData — لا نُجبر التشغيل المحلي على AppData
+    # حتى لو سبق أن أنشأه EXE، وإلا تختفي الإعدادات والبيانات المحلية.
+    if _frozen:
+        persist = _mat3am_persistent_data_root()
+        if persist:
+            try:
+                if (persist / "config" / "settings.json").is_file() or (persist / "config" / "restaurant").is_dir():
+                    return persist
+            except Exception:
+                pass
     return BUNDLE_DIR
 
 DATA_DIR = _resolve_mat3am_data_dir()
@@ -4863,6 +4879,7 @@ def _build_catalog_products_groups(*, refresh: bool = False) -> tuple:
                 "MainGuide": row.get("MainGuide") or "",
                 "LatinName": row.get("LatinName") or "",
                 "GroupName": row.get("GroupName"),
+                "DisplayCategory": row.get("DisplayCategory") or "",
                 "image": f"/api/product-groups/{gid}/image",
                 "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/product-groups/{gid}/image-auto"),
             }
@@ -5683,6 +5700,7 @@ def get_product_groups(refresh: bool = Query(False)):
                 "MainGuide": row.get("MainGuide") or "",
                 "LatinName": row.get("LatinName") or "",
                 "GroupName": row.get("GroupName"),
+                "DisplayCategory": row.get("DisplayCategory") or "",
                 "image": f"/api/product-groups/{gid}/image",
                 "imageUrl": _image_url_db_first(img_db, img_manifest, f"/api/product-groups/{gid}/image-auto"),
             }
@@ -5899,6 +5917,38 @@ def product_group_image_link_set(group_guide: str, body: dict):
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.patch("/api/product-groups/{group_guide}/display-category")
+def product_group_patch_display_category(group_guide: str, body: dict):
+    """تحديث تصنيف العرض (TextValue02) لمجموعة في TBL006."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    category = str(body.get("displayCategory") or "").strip()
+    guid = str(group_guide or "").strip().upper()
+    if not guid:
+        raise HTTPException(status_code=400, detail="group_guide مطلوب")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE dbo.TBL006 SET TextValue02 = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            (category, guid),
+        )
+        conn.commit()
+        from mat3am_sql_cache import invalidate_tbl006
+        invalidate_tbl006()
+        cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
+        return {"ok": True, "CardGuide": guid, "DisplayCategory": category}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:400])
     finally:
         try:
             conn.close()
@@ -9526,6 +9576,140 @@ def _build_captains_flash_report(report_day_raw: Optional[str]) -> dict:
     }
 
 
+def _build_flash_report(report_day_raw: Optional[str]) -> dict:
+    """Flash Report — ملخص مالي يومي عام (All Orders) من الفواتير المحلية + تسديدات SQL."""
+    report_day = _captains_flash_report_date(report_day_raw)
+    day_iso = report_day.isoformat()
+
+    invoices = _restaurant_load("invoices", [])
+    if not isinstance(invoices, list):
+        invoices = []
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+
+    gross_sales = 0.0
+    check_discounts = 0.0
+    item_discounts = 0.0
+    taxes = 0.0
+    service_charges = 0.0
+    tips = 0.0
+    guest_count = 0
+    void_count = 0
+
+    for inv in invoices:
+        if not isinstance(inv, dict):
+            continue
+        inv_date = _parse_iso_dt_local(inv.get("paidAt") or inv.get("requestedAt"))
+        if not inv_date or inv_date.date() != report_day:
+            continue
+        subtotal = float(inv.get("subtotal") or 0)
+        discount = float(inv.get("discount") or 0)
+        gross_sales += subtotal + discount
+        check_discounts += discount
+        taxes += float(inv.get("tax") or 0)
+        service_charges += float(inv.get("serviceCharge") or 0)
+        tips += float(inv.get("tipAmount") or 0)
+        for ln in inv.get("lines") or []:
+            if isinstance(ln, dict):
+                # أي خصم على السطر يُحتسب هنا
+                line_disc = float(ln.get("discount") or 0)
+                if line_disc:
+                    item_discounts += line_disc
+
+    for s in sessions:
+        if isinstance(s, dict):
+            st = _parse_iso_dt_local(s.get("startTime"))
+            if st and st.date() == report_day:
+                guest_count += max(1, int(s.get("guestCount") or 1))
+
+    for o in orders:
+        if isinstance(o, dict) and str(o.get("status") or "").lower() == "cancelled":
+            created = _parse_iso_dt_local(o.get("createdAt"))
+            if created and created.date() == report_day:
+                void_count += 1
+
+    net_sales = max(0.0, gross_sales - check_discounts - item_discounts)
+    subtotal = net_sales + taxes
+    total = subtotal + tips
+
+    # تفاصيل الدفع من SQL
+    payment_summary: list[dict] = []
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT RouteKey, COUNT(*), ISNULL(SUM(Amount), 0)
+                FROM dbo.MAT3AM_INV_PAYMENT_LINE
+                WHERE CONVERT(date, CreatedAt) = CAST(? AS date)
+                GROUP BY RouteKey
+                """,
+                (day_iso,),
+            )
+            for row in cursor.fetchall():
+                rk = str(row[0] or "unknown")
+                qty = int(row[1] or 0)
+                amount = float(row[2] or 0)
+                label = rk
+                if rk == "cash":
+                    label = "Cash"
+                elif rk == "visa":
+                    label = "Credit Car"
+                elif rk == "wallet":
+                    label = "C L"
+                elif rk == "instapay":
+                    label = "C L"
+                payment_summary.append({"qty": qty, "type": label, "amount": amount, "tip": 0.0})
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if not payment_summary:
+        payment_summary = [
+            {"qty": 0, "type": "Cash", "amount": 0.0, "tip": 0.0},
+            {"qty": 0, "type": "Credit Car", "amount": 0.0, "tip": 0.0},
+        ]
+
+    guest_amount = float(guest_count) * 233.5 if guest_count > 0 else 0.0  # placeholder; will be derived from data
+
+    return {
+        "reportId": "flash",
+        "reportDate": day_iso,
+        "time": datetime.now().strftime("%I:%M %p"),
+        "session": "—",
+        "filter": "All Orders",
+        "guestCount": guest_count,
+        "voidCount": void_count,
+        "guestAmount": round(guest_amount, 2),
+        "payments": payment_summary,
+        "salesSummary": {
+            "grossSales": round(gross_sales, 2),
+            "checkDiscounts": round(check_discounts, 2),
+            "itemDiscounts": round(item_discounts, 2),
+            "priceAdjust": 0.0,
+            "twoForOneDiscount": 0.0,
+            "groupDiscount": 0.0,
+            "coupons": 0.0,
+            "guest": round(-guest_amount, 2) if guest_amount > 0 else 0.0,
+        },
+        "netSales": round(net_sales, 2),
+        "taxes": round(taxes, 2),
+        "subtotal": round(subtotal, 2),
+        "tips": round(tips, 2),
+        "hashTotal": 0.0,
+        "total": round(total, 2),
+    }
+
+
 @app.get("/api/reports/{report_id}/run")
 def run_report(
     report_id: str,
@@ -9543,6 +9727,8 @@ def run_report(
     """تشغيل تقرير — محاكاة إكسترا (كشف حساب عميل، مراقبة كميات الارتباطات، أعمار زمنية، ...)"""
     if report_id == "captains_flash":
         return _build_captains_flash_report(from_date or to_date)
+    if report_id == "flash":
+        return _build_flash_report(from_date or to_date)
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
@@ -11970,6 +12156,8 @@ _RESTAURANT_SQL_KEYS = frozenset(
     {
         "orders",
         "table_sessions",
+        "modifier_groups",
+        "product_modifiers",
         "invoices",
         "kitchen_notifications",
         "daily_menu",
@@ -13023,21 +13211,22 @@ def _restaurant_read_venue() -> dict:
     """نوع المنشأ: restaurant | coffee_shop — يغيّر افتراضيات الواجهة دون تفرع مشروع."""
     p = _restaurant_venue_path()
     if not os.path.exists(p):
-        return {"venueType": "restaurant"}
+        return {"venueType": "restaurant", "venueName": ""}
     try:
         with open(p, "r", encoding="utf-8") as f:
             d = json.load(f)
         if not isinstance(d, dict):
-            return {"venueType": "restaurant"}
+            return {"venueType": "restaurant", "venueName": ""}
         vt = str(d.get("venueType") or "restaurant").strip().lower().replace("-", "_")
         aliases_coffee = ("coffee_shop", "coffeeshop", "coffee", "cafe", "café")
         if vt in aliases_coffee:
             vt = "coffee_shop"
         elif vt != "restaurant":
             vt = "restaurant"
-        return {"venueType": vt}
+        vn = str(d.get("venueName") or "").strip()
+        return {"venueType": vt, "venueName": vn}
     except Exception:
-        return {"venueType": "restaurant"}
+        return {"venueType": "restaurant", "venueName": ""}
 
 
 def _restaurant_workflow_default() -> dict:
@@ -14418,6 +14607,8 @@ def _restaurant_ops_default() -> dict:
         "vipOwnerTemplatesJson": "[]",
         # عند التفعيل: جرسون/استقبال/مناولة/طلبات سريعة لا يدخلون إلا إن لهم صف جدولة يغطي اليوم
         "enforceRoleScheduleForShift": "off",  # on | off
+        # وضع اختيار الأصناف عند الكابتن: classic (عادي) | wizard (معالج موجّه)
+        "captainItemSelectionMode": "classic",  # classic | wizard
     }
 
 
@@ -14892,7 +15083,8 @@ def _restaurant_write_venue(body: dict) -> dict:
         vt = "coffee_shop"
     else:
         vt = "restaurant"
-    out = {"venueType": vt}
+    vn = str((body or {}).get("venueName") or "").strip()
+    out = {"venueType": vt, "venueName": vn}
     with open(_restaurant_venue_path(), "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
     return out
@@ -15501,6 +15693,64 @@ def _approved_guest_return_qty_map_for_session(session_id: str) -> dict[tuple[st
     return out
 
 
+def _restaurant_find_session_row(session_id: str) -> Optional[dict]:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    for row in _restaurant_load("table_sessions", []):
+        if isinstance(row, dict) and str(row.get("id") or "").strip() == sid:
+            return row
+    return None
+
+
+def _guest_return_resolve_order_line(session_id: str, order_id: str, line_id: str) -> dict:
+    sid = str(session_id or "").strip()
+    oid = str(order_id or "").strip()
+    lid = str(line_id or "").strip()
+    if not sid or not oid or not lid:
+        raise HTTPException(status_code=400, detail="بيانات البند غير مكتملة")
+    orders = _restaurant_load("orders", [])
+    for order in orders if isinstance(orders, list) else []:
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("id") or "").strip() != oid:
+            continue
+        order_session_id = str(order.get("sessionId") or "").strip()
+        if order_session_id != sid:
+            raise HTTPException(status_code=409, detail="البند المطلوب لا يتبع الجلسة الحالية")
+        order_status = str(order.get("status") or "").strip().lower()
+        if order_status == "cancelled":
+            raise HTTPException(status_code=409, detail="الطلب ملغي ولا يقبل مرتجعًا جديدًا")
+        for raw_item in order.get("items") or []:
+            if not isinstance(raw_item, dict):
+                continue
+            item = _kds_normalize_item(raw_item)
+            current_line_id = str(item.get("lineId") or raw_item.get("lineId") or "").strip()
+            if current_line_id != lid:
+                continue
+            try:
+                quantity = float(item.get("quantity") or raw_item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                quantity = 0.0
+            if bool(item.get("cancelled")) or quantity <= 0:
+                raise HTTPException(status_code=409, detail="البند غير متاح حاليًا للمرتجع")
+            return {
+                "orderId": oid,
+                "lineId": lid,
+                "sessionId": order_session_id,
+                "tableId": str(order.get("tableId") or "").strip(),
+                "productGuide": str(item.get("productGuide") or raw_item.get("productGuide") or raw_item.get("menuItemId") or ""),
+                "name": str(item.get("name") or raw_item.get("name") or "صنف"),
+                "quantity": quantity,
+                "unitPrice": float(item.get("unitPrice") or raw_item.get("unitPrice") or 0),
+                "seatNo": item.get("seatNo") if item.get("seatNo") is not None else raw_item.get("seatNo"),
+                "lineStatus": str(item.get("lineStatus") or raw_item.get("lineStatus") or order_status).strip().lower(),
+                "orderStatus": order_status,
+            }
+        raise HTTPException(status_code=404, detail="البند المطلوب غير موجود داخل الطلب")
+    raise HTTPException(status_code=404, detail="الطلب المطلوب غير موجود")
+
+
 def _invoice_source_lines_from_part_items(part_items: list) -> list[dict]:
     out: list[dict] = []
     for ln in part_items or []:
@@ -15734,7 +15984,15 @@ def restaurant_guest_returns_post(body: dict):
     lines_in = body.get("lines")
     if not isinstance(lines_in, list) or not lines_in:
         raise HTTPException(status_code=400, detail="lines مطلوبة (بند واحد على الأقل)")
+    request_table_id = str(body.get("tableId") or "").strip()
+    session_row = _restaurant_find_session_row(session_id)
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=404, detail="الجلسة الحالية غير موجودة")
+    session_table_id = str(session_row.get("tableId") or "").strip()
+    if request_table_id and session_table_id and not _restaurant_table_ids_equal(request_table_id, session_table_id):
+        raise HTTPException(status_code=409, detail="المرتجع لا يطابق طاولة الجلسة الحالية")
     reason_map = _guest_return_reason_map()
+    approved_qty_map = _approved_guest_return_qty_map_for_session(session_id)
     norm_lines = []
     for ln in lines_in[:40]:
         if not isinstance(ln, dict):
@@ -15755,20 +16013,32 @@ def restaurant_guest_returns_post(body: dict):
             rq = 0
         if rq <= 0:
             continue
+        source_line = _guest_return_resolve_order_line(session_id, order_id, line_id)
+        source_table_id = str(source_line.get("tableId") or "").strip()
+        if request_table_id and source_table_id and not _restaurant_table_ids_equal(request_table_id, source_table_id):
+            raise HTTPException(status_code=409, detail="البند المطلوب لا يتبع الطاولة الحالية")
+        source_qty = float(source_line.get("quantity") or 0.0)
+        approved_qty = float(approved_qty_map.get((order_id, line_id), 0.0) or 0.0)
+        available_qty = max(0.0, source_qty - min(source_qty, approved_qty))
+        if available_qty <= 0:
+            raise HTTPException(status_code=409, detail="هذا البند استُهلك مرتجعه المعتمد بالكامل سابقًا")
+        if rq - available_qty > 0.000001:
+            raise HTTPException(status_code=409, detail=f"كمية المرتجع تتجاوز المتاح للبند ({available_qty:g})")
         rr = reason_map[rc]
-        line_status = str(ln.get("lineStatus") or "").strip().lower()
-        order_status = str(ln.get("orderStatus") or "").strip().lower()
+        line_status = str(source_line.get("lineStatus") or "").strip().lower()
+        order_status = str(source_line.get("orderStatus") or "").strip().lower()
         decision = _guest_return_decision(rc, str(rr.get("category") or ""), line_status, order_status)
         norm_lines.append(
             {
                 "orderId": order_id[:80],
                 "lineId": line_id[:80],
-                "productGuide": str(ln.get("productGuide") or "")[:80],
-                "name": str(ln.get("name") or "")[:300],
-                "quantity": float(ln.get("quantity") or rq),
+                "productGuide": str(source_line.get("productGuide") or "")[:80],
+                "name": str(source_line.get("name") or "")[:300],
+                "quantity": source_qty,
+                "availableQty": available_qty,
                 "returnQty": rq,
-                "unitPrice": float(ln.get("unitPrice") or 0),
-                "seatNo": ln.get("seatNo"),
+                "unitPrice": float(source_line.get("unitPrice") or 0),
+                "seatNo": source_line.get("seatNo"),
                 "reasonCode": rc,
                 "reasonLabel": str(rr.get("label") or rc)[:200],
                 "reasonCategory": str(rr.get("category") or "")[:80],
@@ -17241,7 +17511,7 @@ def restaurant_update_table_minimum_charge(table_id: str, body: dict):
 
 
 def _get_table_minimum_charge(st_row: dict | None) -> float:
-    """اقرأ minimumCharge: أولاً من override الطاولة، ثم من الإعدادات الافتراضية."""
+    """اقرأ minimumCharge للطاولة/الكرسي: أولاً من override الطاولة، ثم من الإعدادات الافتراضية."""
     try:
         if isinstance(st_row, dict):
             mc = float(st_row.get("minimumCharge") or 0)
@@ -17258,6 +17528,52 @@ def _get_table_minimum_charge(st_row: dict | None) -> float:
     except Exception:
         pass
     return 0.0
+
+
+def _normalize_session_guest_count(value, default: int = 1) -> int:
+    try:
+        dv = int(float(default))
+    except (TypeError, ValueError):
+        dv = 1
+    dv = max(1, min(12, dv))
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return dv
+    return max(1, min(12, n))
+
+
+def _auto_numbered_seat_guest_labels(guest_count: int, existing: Optional[dict] = None) -> dict:
+    out: dict[str, str] = {}
+    count = _normalize_session_guest_count(guest_count, 1)
+    shared_text = ""
+    if isinstance(existing, dict):
+        raw_shared = existing.get("13")
+        if raw_shared is None:
+            raw_shared = existing.get(13)
+        if raw_shared is not None:
+            shared_text = str(raw_shared or "").strip()[:120]
+    for i in range(1, count + 1):
+        out[str(i)] = str(i)
+    if shared_text:
+        out["13"] = shared_text
+    return out
+
+
+def _session_minimum_charge_per_seat(session_row: Optional[dict] = None, table_id: str = "") -> float:
+    if isinstance(session_row, dict):
+        try:
+            snap = float(session_row.get("minimumChargePerSeat") or 0)
+            if snap > 0:
+                return snap
+        except Exception:
+            pass
+        if not table_id:
+            table_id = str(session_row.get("tableId") or "").strip()
+    st_row = None
+    if table_id:
+        st_row = _local_table_state_map().get(str(table_id).strip().upper())
+    return _get_table_minimum_charge(st_row)
 
 
 def _restaurant_clear_table_minimum_charge_override(table_id: str) -> None:
@@ -17834,10 +18150,17 @@ def restaurant_create_session(body: dict):
             s["tableId"] = table_id
             gc = body.get("guestCount")
             if gc is not None:
-                try:
-                    s["guestCount"] = max(1, int(gc))
-                except (TypeError, ValueError):
-                    pass
+                s["guestCount"] = _normalize_session_guest_count(gc, s.get("guestCount") or 1)
+                if body.get("autoNumberSeats") is not False:
+                    s["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
+                        int(s.get("guestCount") or 1),
+                        s.get("seatGuestLabels") if isinstance(s.get("seatGuestLabels"), dict) else None,
+                    )
+            elif not isinstance(s.get("seatGuestLabels"), dict) or not s.get("seatGuestLabels"):
+                s["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
+                    _normalize_session_guest_count(s.get("guestCount") or 1, 1),
+                    s.get("seatGuestLabels") if isinstance(s.get("seatGuestLabels"), dict) else None,
+                )
             cc = body.get("childrenCount")
             if cc is not None:
                 try:
@@ -17856,6 +18179,11 @@ def restaurant_create_session(body: dict):
                 s["seatedByUserId"] = actor_id
                 s["seatedByLogin"] = actor_login
                 s["seatedByName"] = actor_name
+            try:
+                if float(s.get("minimumChargePerSeat") or 0) <= 0:
+                    s["minimumChargePerSeat"] = _session_minimum_charge_per_seat(s, table_id)
+            except Exception:
+                s["minimumChargePerSeat"] = _session_minimum_charge_per_seat(s, table_id)
             _restaurant_save("table_sessions", data)
             try:
                 restaurant_update_table_status(table_id, {"status": "occupied"})
@@ -17882,18 +18210,21 @@ def restaurant_create_session(body: dict):
             ),
         )
     sid = str(uuid.uuid4())
+    guest_count = _normalize_session_guest_count(body.get("guestCount", 1), 1)
     rec = {
         "id": sid,
         "tableId": table_id,
         "projectId": body.get("projectId"),
         "hostId": body.get("hostId"),
-        "guestCount": body.get("guestCount", 1),
+        "guestCount": guest_count,
         "childrenCount": body.get("childrenCount", 0),
         "preferences": body.get("preferences", {}) if isinstance(body.get("preferences"), dict) else {},
         "startTime": datetime.now().isoformat(),
         "status": "active",
         "startedByRole": started_by_role or None,
         "startReason": start_reason or None,
+        "minimumChargePerSeat": _session_minimum_charge_per_seat(None, table_id),
+        "seatGuestLabels": _auto_numbered_seat_guest_labels(guest_count),
     }
     if actor_id:
         rec["seatedByUserId"] = actor_id
@@ -19371,7 +19702,9 @@ def restaurant_cashier_table_overview():
             if dt_bill:
                 bill_age = max(0, int((datetime.now() - dt_bill).total_seconds() // 60))
         st_row = local_state.get(tid.strip().upper()) if tid else None
-        minimum_charge = _get_table_minimum_charge(st_row)
+        guest_count = _normalize_session_guest_count(s.get("guestCount") or 1, 1)
+        minimum_per_seat = _session_minimum_charge_per_seat(s, tid)
+        minimum_charge = round(max(0.0, minimum_per_seat) * guest_count, 2)
         minimum_gap = max(0.0, round(minimum_charge - round(subtotal, 2), 2)) if minimum_charge > 0 else 0.0
         items_out.append(
             {
@@ -19387,6 +19720,7 @@ def restaurant_cashier_table_overview():
                 "kitchenInProgressCount": kitchen_pending,
                 "linesPreview": prev or "—",
                 "itemsSubtotal": round(subtotal, 2),
+                "minimumChargePerSeat": round(minimum_per_seat, 2),
                 "minimumCharge": round(minimum_charge, 2),
                 "minimumGap": minimum_gap,
             }
@@ -19524,13 +19858,30 @@ def restaurant_patch_session(session_id: str, body: dict):
     if str(found.get("status") or "").lower() != "active":
         raise HTTPException(status_code=400, detail="لا يمكن تعديل جلسة غير نشطة")
     if str(found.get("billingRequestedAt") or "").strip() and (
-        "seatGuestLabels" in body
+        "guestCount" in body
+        or body.get("autoNumberSeats") is not None
+        or "seatGuestLabels" in body
         or "seatBillingOverrides" in body
         or str(body.get("tableId") or "").strip()
     ):
         raise HTTPException(status_code=409, detail="لا يمكن تعديل الجلسة أو نقلها بعد طلب الحساب.")
 
     did = False
+    if "guestCount" in body:
+        found["guestCount"] = _normalize_session_guest_count(body.get("guestCount"), found.get("guestCount") or 1)
+        if body.get("autoNumberSeats") is not False:
+            found["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
+                int(found.get("guestCount") or 1),
+                found.get("seatGuestLabels") if isinstance(found.get("seatGuestLabels"), dict) else None,
+            )
+        did = True
+    elif body.get("autoNumberSeats") is True:
+        found["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
+            _normalize_session_guest_count(found.get("guestCount") or 1, 1),
+            found.get("seatGuestLabels") if isinstance(found.get("seatGuestLabels"), dict) else None,
+        )
+        did = True
+
     if "seatGuestLabels" in body:
         slab = body.get("seatGuestLabels")
         if isinstance(slab, dict):
@@ -19542,7 +19893,7 @@ def restaurant_patch_session(session_id: str, body: dict):
                 if not ks.isdigit():
                     continue
                 n = int(ks)
-                if n < 1 or n > 12:
+                if n < 1 or n > 13:
                     continue
                 merged[str(n)] = str(v or "").strip()[:120]
             found["seatGuestLabels"] = merged
@@ -19610,6 +19961,7 @@ def restaurant_patch_session(session_id: str, body: dict):
         did = True
         old_table = found.get("tableId")
         found["tableId"] = new_table
+        found["minimumChargePerSeat"] = _session_minimum_charge_per_seat(None, new_table)
         actor = _mat3am_actor_from_body(body)
         aid = str(actor.get("id") or "").strip()
         if aid and not str(found.get("captainUserId") or "").strip():
@@ -19644,7 +19996,7 @@ def restaurant_patch_session(session_id: str, body: dict):
         )
 
     if not did:
-        raise HTTPException(status_code=400, detail="أرسل tableId أو seatGuestLabels أو seatBillingOverrides")
+        raise HTTPException(status_code=400, detail="أرسل guestCount أو autoNumberSeats أو tableId أو seatGuestLabels أو seatBillingOverrides")
 
     _restaurant_save("table_sessions", data)
     cache_invalidate_restaurant()
@@ -19790,6 +20142,353 @@ def restaurant_daily_menu_put(body: dict):
 
 
 # --- Daily menu schedule: date ranges mapped to explicit TBL007 products ---
+# --- Modifier Groups (Guided Modifier Wizard) ---
+def _sanitize_modifier_item(raw: Any) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    item_id = str(raw.get("itemId") or "").strip()[:80]
+    if not item_id:
+        return None
+    try:
+        price_delta = max(0.0, round(float(raw.get("priceDelta") or 0), 2))
+    except (TypeError, ValueError):
+        price_delta = 0.0
+    return {
+        "itemId": item_id,
+        "nameAr": str(raw.get("nameAr") or "")[:120],
+        "nameEn": str(raw.get("nameEn") or "")[:120],
+        "priceDelta": price_delta,
+        "sortOrder": int(raw.get("sortOrder") or 0),
+        "isDefault": bool(raw.get("isDefault", False)),
+    }
+
+
+def _sanitize_modifier_group(raw: Any) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    group_id = str(raw.get("groupId") or "").strip()[:40]
+    if not group_id:
+        return None
+    safe_items: list[dict] = []
+    for item in raw.get("items") or []:
+        clean_item = _sanitize_modifier_item(item)
+        if clean_item:
+            safe_items.append(clean_item)
+    safe_items.sort(key=lambda x: x["sortOrder"])
+    free_text_max_length = int(raw.get("freeTextMaxLength") or 120)
+    free_text_max_length = max(20, min(500, free_text_max_length))
+    name_ar = str(raw.get("nameAr") or "")[:80]
+    free_text_label = str(raw.get("freeTextLabel") or "").strip()[:120]
+    free_text_placeholder = str(raw.get("freeTextPlaceholder") or "").strip()[:200]
+    if not free_text_label:
+        free_text_label = f"مواصفات {name_ar}".strip() if name_ar else "مواصفات إضافية"
+    if not free_text_placeholder:
+        free_text_placeholder = f"اكتب أي مواصفات إضافية تخص {name_ar}".strip() if name_ar else "اكتب أي مواصفات إضافية"
+    return {
+        "groupId": group_id,
+        "nameAr": name_ar,
+        "nameEn": str(raw.get("nameEn") or "")[:80],
+        "type": str(raw.get("type") or "choice")[:20],
+        "minSelect": max(0, int(raw.get("minSelect") or 0)),
+        "maxSelect": max(0, int(raw.get("maxSelect") or 1)),
+        "isRequired": bool(raw.get("isRequired", False)),
+        "sortOrder": int(raw.get("sortOrder") or 0),
+        "allowFreeText": True,
+        "freeTextRequired": bool(raw.get("freeTextRequired", False)),
+        "freeTextLabel": free_text_label,
+        "freeTextPlaceholder": free_text_placeholder,
+        "freeTextMaxLength": free_text_max_length,
+        "items": safe_items,
+    }
+
+
+def _normalize_modifier_groups_payload(groups: Any) -> list[dict]:
+    safe: list[dict] = []
+    if not isinstance(groups, list):
+        return safe
+    for raw in groups:
+        clean_group = _sanitize_modifier_group(raw)
+        if clean_group:
+            safe.append(clean_group)
+    safe.sort(key=lambda x: x["sortOrder"])
+    return safe
+
+
+def _sanitize_product_modifier_entry(raw: Any, fallback_sort_order: int = 0) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    group_id = str(raw.get("groupId") or "").strip()[:40]
+    if not group_id:
+        return None
+
+    def _optional_int(value: Any) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
+
+    def _optional_bool(value: Any) -> Optional[bool]:
+        if value is None or value == "":
+            return None
+        return bool(value)
+
+    out = {
+        "groupId": group_id,
+        "sortOrder": int(raw.get("sortOrder") if raw.get("sortOrder") is not None else fallback_sort_order),
+        "isEnabled": False if raw.get("isEnabled") is False else True,
+        "isRequired": _optional_bool(raw.get("isRequired")),
+        "minSelect": _optional_int(raw.get("minSelect")),
+        "maxSelect": _optional_int(raw.get("maxSelect")),
+        "allowFreeText": _optional_bool(raw.get("allowFreeText")),
+        "freeTextRequired": _optional_bool(raw.get("freeTextRequired")),
+        "freeTextLabel": str(raw.get("freeTextLabel") or "")[:120],
+        "freeTextPlaceholder": str(raw.get("freeTextPlaceholder") or "")[:200],
+    }
+    if out["minSelect"] is not None and out["maxSelect"] is not None and out["maxSelect"] < out["minSelect"]:
+        out["maxSelect"] = out["minSelect"]
+    return out
+
+
+def _normalize_product_modifier_entries(entries: Any) -> list[dict]:
+    safe: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(entries, list):
+        return safe
+    for idx, raw in enumerate(entries):
+        clean_entry = _sanitize_product_modifier_entry(raw, idx)
+        if not clean_entry:
+            continue
+        gid = str(clean_entry.get("groupId") or "")
+        if not gid or gid in seen:
+            continue
+        seen.add(gid)
+        safe.append(clean_entry)
+    safe.sort(key=lambda x: int(x.get("sortOrder") or 0))
+    return safe
+
+
+def _modifier_groups_seed():
+    return {
+        "groups": [
+            {
+                "groupId": "cooking",
+                "nameAr": "درجة السواء",
+                "nameEn": "Cooking",
+                "type": "cooking",
+                "minSelect": 1,
+                "maxSelect": 1,
+                "isRequired": True,
+                "sortOrder": 1,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "مواصفات درجة السواء",
+                "freeTextPlaceholder": "مثال: بين Medium و Well Done أو مشوي خفيف",
+                "freeTextMaxLength": 120,
+                "items": [
+                    {"itemId": "well_done", "nameAr": "Well Done", "nameEn": "Well Done", "priceDelta": 0, "sortOrder": 1, "isDefault": True},
+                    {"itemId": "medium", "nameAr": "Medium", "nameEn": "Medium", "priceDelta": 0, "sortOrder": 2},
+                    {"itemId": "medium_rare", "nameAr": "Mid Rare", "nameEn": "Medium Rare", "priceDelta": 0, "sortOrder": 3},
+                    {"itemId": "rare", "nameAr": "Rare", "nameEn": "Rare", "priceDelta": 0, "sortOrder": 4},
+                ],
+            },
+            {
+                "groupId": "side1",
+                "nameAr": "طبق جانبي أول",
+                "nameEn": "Side 1",
+                "type": "choice",
+                "minSelect": 0,
+                "maxSelect": 1,
+                "isRequired": False,
+                "sortOrder": 2,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "مواصفات إضافية للطبق الجانبي",
+                "freeTextPlaceholder": "مثال: رز أبيض فقط أو خضار سوتيه",
+                "freeTextMaxLength": 140,
+                "items": [
+                    {"itemId": "rice", "nameAr": "Rice", "nameEn": "Rice", "priceDelta": 0, "sortOrder": 1, "isDefault": True},
+                    {"itemId": "mash_potato", "nameAr": "Mash Potato", "nameEn": "Mash Potato", "priceDelta": 0, "sortOrder": 2},
+                    {"itemId": "pasta", "nameAr": "Pasta", "nameEn": "Pasta", "priceDelta": 0, "sortOrder": 3},
+                ],
+            },
+            {
+                "groupId": "side2",
+                "nameAr": "طبق جانبي ثاني",
+                "nameEn": "Side 2",
+                "type": "choice",
+                "minSelect": 0,
+                "maxSelect": 1,
+                "isRequired": False,
+                "sortOrder": 3,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "مواصفات إضافية للطبق الجانبي",
+                "freeTextPlaceholder": "مثال: شوربة اليوم أو سلطة بدون بصل",
+                "freeTextMaxLength": 140,
+                "items": [
+                    {"itemId": "salad", "nameAr": "Salad", "nameEn": "Salad", "priceDelta": 0, "sortOrder": 1, "isDefault": True},
+                    {"itemId": "soup", "nameAr": "Soup", "nameEn": "Soup", "priceDelta": 0, "sortOrder": 2},
+                    {"itemId": "bread", "nameAr": "Bread", "nameEn": "Bread", "priceDelta": 0, "sortOrder": 3},
+                ],
+            },
+            {
+                "groupId": "sauce",
+                "nameAr": "صوص",
+                "nameEn": "Sauce",
+                "type": "choice",
+                "minSelect": 0,
+                "maxSelect": 1,
+                "isRequired": False,
+                "sortOrder": 4,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "مواصفات الصوص",
+                "freeTextPlaceholder": "مثال: الصوص على الجانب أو زيادة ثوم",
+                "freeTextMaxLength": 140,
+                "items": [
+                    {"itemId": "mushroom", "nameAr": "Mushroom Sauce", "nameEn": "Mushroom Sauce", "priceDelta": 0, "sortOrder": 1, "isDefault": True},
+                    {"itemId": "garlic", "nameAr": "Garlic Sauce", "nameEn": "Garlic Sauce", "priceDelta": 0, "sortOrder": 2},
+                    {"itemId": "bbq", "nameAr": "BBQ", "nameEn": "BBQ", "priceDelta": 0, "sortOrder": 3},
+                ],
+            },
+            {
+                "groupId": "addon",
+                "nameAr": "إضافة",
+                "nameEn": "Add-on",
+                "type": "addon",
+                "minSelect": 0,
+                "maxSelect": 3,
+                "isRequired": False,
+                "sortOrder": 5,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "إضافة مكتوبة",
+                "freeTextPlaceholder": "اكتب أي إضافة غير موجودة في القائمة",
+                "freeTextMaxLength": 120,
+                "items": [
+                    {"itemId": "extra_cheese", "nameAr": "Extra Cheese", "nameEn": "Extra Cheese", "priceDelta": 15, "sortOrder": 1},
+                    {"itemId": "bacon", "nameAr": "Bacon", "nameEn": "Bacon", "priceDelta": 20, "sortOrder": 2},
+                ],
+            },
+            {
+                "groupId": "exclusion",
+                "nameAr": "استبعاد",
+                "nameEn": "Exclusion",
+                "type": "exclusion",
+                "minSelect": 0,
+                "maxSelect": 5,
+                "isRequired": False,
+                "sortOrder": 6,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "استبعاد إضافي",
+                "freeTextPlaceholder": "مثال: بدون زيت أو بدون فلفل",
+                "freeTextMaxLength": 140,
+                "items": [
+                    {"itemId": "no_onion", "nameAr": "بدون بصل", "nameEn": "No Onion", "priceDelta": 0, "sortOrder": 1},
+                    {"itemId": "no_garlic", "nameAr": "بدون ثوم", "nameEn": "No Garlic", "priceDelta": 0, "sortOrder": 2},
+                ],
+            },
+            {
+                "groupId": "kitchen_note",
+                "nameAr": "ملاحظة مطبخ",
+                "nameEn": "Kitchen Note",
+                "type": "kitchen_note",
+                "minSelect": 0,
+                "maxSelect": 3,
+                "isRequired": False,
+                "sortOrder": 7,
+                "allowFreeText": True,
+                "freeTextRequired": False,
+                "freeTextLabel": "مواصفة مكتوبة للمطبخ",
+                "freeTextPlaceholder": "اكتب أي تعليمات خاصة مثل: السكر خفيف أو مانوع الريحة",
+                "freeTextMaxLength": 180,
+                "items": [
+                    {"itemId": "spicy", "nameAr": "Spicy", "nameEn": "Spicy", "priceDelta": 0, "sortOrder": 1},
+                    {"itemId": "less_salt", "nameAr": "Less Salt", "nameEn": "Less Salt", "priceDelta": 0, "sortOrder": 2},
+                ],
+            },
+        ]
+    }
+
+
+@app.get("/api/restaurant/modifier-groups")
+def restaurant_modifier_groups_get():
+    d = _restaurant_load("modifier_groups", {"groups": []})
+    if not isinstance(d, dict) or not isinstance(d.get("groups"), list):
+        return _modifier_groups_seed()
+    safe = _normalize_modifier_groups_payload(d.get("groups"))
+    if len(safe) == 0:
+        return _modifier_groups_seed()
+    return {"groups": safe}
+
+
+@app.put("/api/restaurant/modifier-groups")
+def restaurant_modifier_groups_put(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    groups = body.get("groups")
+    if not isinstance(groups, list):
+        raise HTTPException(status_code=400, detail="groups يجب أن يكون مصفوفة")
+    safe = _normalize_modifier_groups_payload(groups)
+    _restaurant_save("modifier_groups", {"groups": safe})
+    return {"ok": True, "groups": safe}
+
+
+@app.get("/api/restaurant/product-modifiers/{product_guide}")
+def restaurant_product_modifiers_get(product_guide: str):
+    d = _restaurant_load("product_modifiers", {"links": []})
+    if not isinstance(d, dict) or not isinstance(d.get("links"), list):
+        return {"productGuide": product_guide, "groupIds": [], "entries": []}
+    raw_links = [x for x in d["links"] if isinstance(x, dict) and str(x.get("productGuide") or "").upper() == product_guide.upper()]
+    entries = _normalize_product_modifier_entries(raw_links)
+    group_ids = [str(x.get("groupId") or "") for x in entries if str(x.get("groupId") or "")]
+    return {"productGuide": product_guide, "groupIds": group_ids, "entries": entries}
+
+
+@app.put("/api/restaurant/product-modifiers/{product_guide}")
+def restaurant_product_modifiers_put(product_guide: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    d = _restaurant_load("product_modifiers", {"links": []})
+    if not isinstance(d, dict) or not isinstance(d.get("links"), list):
+        d = {"links": []}
+    rest = [x for x in d["links"] if isinstance(x, dict) and str(x.get("productGuide") or "").upper() != product_guide.upper()]
+    entries = _normalize_product_modifier_entries(body.get("entries"))
+    if not entries:
+        group_ids = body.get("groupIds")
+        if not isinstance(group_ids, list):
+            group_ids = []
+        entries = _normalize_product_modifier_entries([
+            {"groupId": str(gid or "").strip(), "sortOrder": i}
+            for i, gid in enumerate(group_ids)
+            if str(gid or "").strip()
+        ])
+    for entry in entries:
+        rest.append({
+            "productGuide": product_guide.upper().strip(),
+            "groupId": str(entry.get("groupId") or "")[:40],
+            "sortOrder": int(entry.get("sortOrder") or 0),
+            "isEnabled": False if entry.get("isEnabled") is False else True,
+            "isRequired": entry.get("isRequired"),
+            "minSelect": entry.get("minSelect"),
+            "maxSelect": entry.get("maxSelect"),
+            "allowFreeText": entry.get("allowFreeText"),
+            "freeTextRequired": entry.get("freeTextRequired"),
+            "freeTextLabel": str(entry.get("freeTextLabel") or "")[:120],
+            "freeTextPlaceholder": str(entry.get("freeTextPlaceholder") or "")[:200],
+        })
+    _restaurant_save("product_modifiers", {"links": rest})
+    return {
+        "ok": True,
+        "productGuide": product_guide,
+        "groupIds": [str(x.get("groupId") or "") for x in entries if str(x.get("groupId") or "")],
+        "entries": entries,
+    }
+
+
 @app.get("/api/restaurant/daily-menu-schedule")
 def restaurant_daily_menu_schedule_get():
     """جدولة القائمة اليومية حسب الأصناف: entries[{dateFrom,dateTo,items[{ProductGuide,ProductName}]}]"""
@@ -19927,18 +20626,21 @@ def restaurant_invoices_local(
             continue
         awaiting = bool(inv.get("awaitingPayment"))
         paid_at = str(inv.get("paidAt") or "").strip()
+        on_account = str(inv.get("paymentStatus") or "").strip() == "on_account"
         if ps == "awaiting" and not awaiting:
             continue
         if ps == "paid" and not paid_at:
             continue
-        ref = paid_at if paid_at else str(inv.get("requestedAt") or inv.get("paidAt") or "")
+        if ps == "on_account" and not on_account:
+            continue
+        ref = paid_at if paid_at else str(inv.get("requestedAt") or inv.get("onAccountAt") or inv.get("paidAt") or "")
         day = ref[:10] if len(ref) >= 10 else ""
         if date_from and day and day < date_from[:10]:
             continue
         if date_to and day and day > date_to[:10]:
             continue
         rows.append(_restaurant_enrich_invoice_with_table(_restaurant_invoice_apply_guest_return_settlements(inv)))
-    rows.sort(key=lambda x: str(x.get("requestedAt") or x.get("paidAt") or ""), reverse=True)
+    rows.sort(key=lambda x: str(x.get("requestedAt") or x.get("onAccountAt") or x.get("paidAt") or ""), reverse=True)
     return {"invoices": rows, "count": len(rows)}
 
 
@@ -20255,6 +20957,103 @@ def restaurant_invoices_local_mark_paid(body: dict):
                     except Exception:
                         pass
     return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso}
+
+
+@app.post("/api/restaurant/invoices-local/mark-on-account")
+def restaurant_invoices_local_mark_on_account(body: dict):
+    """ترحيل فاتورة على حساب عميل (مالك / VIP / عميل آجل) — بدون سداد فوري.
+    تُسجّل الفاتورة كمديونية على حساب العميل في TBL022 وتُغلق الجلسة حسب الطلب."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    invoice_id = str(body.get("invoiceId") or "").strip()
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    found = None
+    for inv in raw:
+        if isinstance(inv, dict) and str(inv.get("invoiceId") or "") == invoice_id:
+            found = inv
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+    if str(found.get("paidAt") or "").strip():
+        raise HTTPException(status_code=409, detail="الفاتورة مُسدَّدة مسبقاً")
+    if str(found.get("paymentStatus") or "").strip() == "on_account":
+        raise HTTPException(status_code=409, detail="الفاتورة مرحّلة على حساب مسبقاً")
+
+    now_iso = datetime.now().isoformat()
+    sid = str(found.get("sessionId") or "").strip()
+    agent_guid = str(found.get("agentGuid") or found.get("AgentGuide") or "").strip()
+
+    def _apply_found_on_account_state() -> None:
+        found["awaitingPayment"] = False
+        found["paymentStatus"] = "on_account"
+        found["onAccountAt"] = now_iso
+        found["paymentMethod"] = "on_account"
+        found["paymentBreakdown"] = None
+        if not agent_guid:
+            found["onAccountAgentGuid"] = agent_guid
+
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            # لا نُحدّث Paid في TBL022 (تبقى 0) لأنها لم تُسدّد
+            # نسجّل حركة ترحيل في جدول المدفوعات إن وُجد
+            _ensure_payment_routing_schema(cur)
+            cur.execute(
+                "UPDATE TBL022 SET PayMethod = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                (2, invoice_id),
+            )
+            det = f"on_account;agent={agent_guid or 'none'}"
+            if len(det) > 990:
+                det = det[:990] + "…"
+            _audit_log(cur, "INV_ON_ACCOUNT", "TBL022", invoice_id, None, det)
+            conn.commit()
+            _apply_found_on_account_state()
+            _restaurant_save("invoices", raw)
+        except HTTPException:
+            raise
+        except Exception as ex:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail=f"تعذر تسجيل الترحيل على الحساب في قاعدة البيانات: {ex}") from ex
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    else:
+        _apply_found_on_account_state()
+        _restaurant_save("invoices", raw)
+
+    if sid:
+        should_close = bool(body.get("closeSession", True))
+        if should_close:
+            sess = _restaurant_load("table_sessions", [])
+            if isinstance(sess, list):
+                table_id = None
+                for s in sess:
+                    if isinstance(s, dict) and str(s.get("id") or "") == sid:
+                        s["endTime"] = now_iso
+                        s["status"] = "completed"
+                        table_id = str(s.get("tableId") or "").strip()
+                        break
+                _restaurant_save("table_sessions", sess)
+                try:
+                    _restaurant_cancel_open_kitchen_orders_for_session(sid)
+                except Exception:
+                    pass
+                if table_id:
+                    try:
+                        _workflow_apply_cleaning_policy(table_id, event="payment_completed")
+                    except Exception:
+                        pass
+    return {"ok": True, "invoiceId": invoice_id, "onAccountAt": now_iso}
 
 
 @app.get("/api/restaurant/orders")
@@ -23964,6 +24763,7 @@ def restaurant_sessions_request_bill(body: dict):
                     "discount": float(part.get("discount") or 0.0),
                     "lines": part.get("lines") if isinstance(part.get("lines"), list) else [],
                     "sourceLines": part.get("sourceLines") if isinstance(part.get("sourceLines"), list) else [],
+                    "billingProfile": dict(session_billing_profile) if isinstance(session_billing_profile, dict) else None,
                     "printCount": 0,
                     "firstPrintedAt": None,
                     "firstPrintedByRole": None,
