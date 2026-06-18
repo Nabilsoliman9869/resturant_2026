@@ -1,7 +1,10 @@
 @echo off
 chcp 65001 >nul
 set "HERE=%~dp0"
-if not defined MAT3AM_BASE_DIR set "MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS"
+REM Local runs use project folder by default (good for development).
+REM EXE uses AppData automatically.
+REM To make local match EXE exactly, uncomment next line:
+REM set "MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS"
 set "MAT3AM_PY="
 where python >nul 2>&1 && set "MAT3AM_PY=python"
 if not defined MAT3AM_PY where py >nul 2>&1 && set "MAT3AM_PY=py"

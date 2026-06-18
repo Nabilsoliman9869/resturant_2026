@@ -12,11 +12,11 @@
   "specialTableDefaultPriceMode": "menu",
   "specialTableDefaultCostMarkupPct": "0.0",
   "tableDefaultMinimumCharge": "250.0",
-  "tableCashierAlertPresetsJson": "[{\"id\":\"kitchen_rush\",\"type\":\"kitchen_urgent\",\"label\":\"ÃÂÃÂ§ÃÂÃÂ³ÃÂÃÂªÃÂÃÂ¹ÃÂÃÂ¬ÃÂÃÂ§ÃÂÃÂ ÃÂÃÂ§ÃÂÃÂÃÂÃÂÃÂÃÂ·ÃÂÃÂ¨ÃÂÃÂ®\"},{\"id\":\"tbl_quick_clean\",\"type\":\"quick_clean\",\"label\":\"ÃÂÃÂÃÂÃÂ¸ÃÂÃÂ§ÃÂÃÂÃÂÃÂ© ÃÂÃÂ³ÃÂÃÂ±ÃÂÃÂÃÂÃÂ¹ÃÂÃÂ©\"},{\"id\":\"tbl_call_manager\",\"type\":\"call_manager\",\"label\":\"ÃÂÃÂ§ÃÂÃÂ³ÃÂÃÂªÃÂÃÂ¯ÃÂÃÂ¹ÃÂÃÂ§ÃÂÃÂ¡ ÃÂÃÂÃÂÃÂ¯ÃÂÃÂÃÂÃÂ±\"}]",
+  "tableCashierAlertPresetsJson": "[{\"id\":\"kitchen_rush\",\"type\":\"kitchen_urgent\",\"label\":\"استعجال المطبخ\"},{\"id\":\"tbl_quick_clean\",\"type\":\"quick_clean\",\"label\":\"نظافة سريعة\"},{\"id\":\"tbl_call_manager\",\"type\":\"call_manager\",\"label\":\"استدعاء مدير\"}]",
   "kidsAreaSeparateTickets": "on",
   "auditRetentionDays": "365",
   "auditLogClientActions": "on",
   "deliveryChannelStrictFinancialModes": "on",
-  "vipOwnerTemplatesJson": "[{\"id\":\"72d688e1-48e2-4016-9510-bdd5f8410efd\",\"agentGuid\":\"83CF304E-398E-48AD-8A6C-F0A8BDBD0089\",\"label\":\"ÃÂ§ÃÂ³ÃÂ 1\",\"noService\":true,\"noVat\":true,\"discountEnabled\":true,\"discountPct\":0.0,\"costPricingEnabled\":true,\"costMarkupPct\":10.0},{\"id\":\"3f776533-ce51-4c78-83b7-fa0c264c94f7\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":false,\"noVat\":false,\"discountEnabled\":true,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0},{\"id\":\"0dd7b13b-a036-4663-a050-eb5dfd1042cd\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":false,\"noVat\":false,\"discountEnabled\":true,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0}]",
+  "vipOwnerTemplatesJson": "[{\"id\":\"72d688e1-48e2-4016-9510-bdd5f8410efd\",\"agentGuid\":\"83CF304E-398E-48AD-8A6C-F0A8BDBD0089\",\"label\":\"اسم 1\",\"noService\":true,\"noVat\":true,\"discountEnabled\":true,\"discountPct\":0.0,\"costPricingEnabled\":true,\"costMarkupPct\":10.0},{\"id\":\"3f776533-ce51-4c78-83b7-fa0c264c94f7\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":false,\"noVat\":false,\"discountEnabled\":true,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0},{\"id\":\"0dd7b13b-a036-4663-a050-eb5dfd1042cd\",\"agentGuid\":\"\",\"label\":\"\",\"noService\":false,\"noVat\":false,\"discountEnabled\":true,\"discountPct\":0.0,\"costPricingEnabled\":false,\"costMarkupPct\":0.0}]",
   "enforceRoleScheduleForShift": "on"
 }

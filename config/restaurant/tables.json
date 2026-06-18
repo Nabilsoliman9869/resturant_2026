@@ -209,5 +209,65 @@
     "status": "occupied",
     "name": "T11",
     "statusUpdatedAt": "2026-05-12T21:40:32.462117"
+  },
+  {
+    "id": "7B14A454-9070-4513-8B2F-CE5AED71BCE6",
+    "status": "occupied",
+    "name": "T12",
+    "statusUpdatedAt": "2026-06-12T00:24:21.135401"
+  },
+  {
+    "id": "A5C3430F-A60B-49C8-81E2-DB9542734565",
+    "status": "occupied",
+    "name": "T13",
+    "statusUpdatedAt": "2026-06-16T13:08:50.963509"
+  },
+  {
+    "id": "B9A1DB04-D991-4F23-82C6-837C4D7116F0",
+    "status": "occupied",
+    "name": "T100",
+    "statusUpdatedAt": "2026-06-13T12:11:53.254305"
+  },
+  {
+    "id": "2FF21A35-0066-4378-81E6-434F08F010FA",
+    "status": "occupied",
+    "name": "T22",
+    "statusUpdatedAt": "2026-06-15T01:33:27.311076"
+  },
+  {
+    "id": "3D6796DF-65E5-4CDE-8302-5C33070AEB25",
+    "status": "occupied",
+    "name": "T30",
+    "statusUpdatedAt": "2026-06-17T00:37:23.625684"
+  },
+  {
+    "id": "4A9C81BD-8390-4720-9803-97D4D0E1FCD4",
+    "status": "occupied",
+    "name": "T23",
+    "statusUpdatedAt": "2026-06-17T01:04:59.065163"
+  },
+  {
+    "id": "6947E632-5EBC-487F-982D-5F8B6A88A959",
+    "status": "occupied",
+    "name": "T24",
+    "statusUpdatedAt": "2026-06-18T04:29:04.345129"
+  },
+  {
+    "id": "5B111EC1-2065-4B1C-ADD5-2EE36D3437AF",
+    "status": "occupied",
+    "name": "T101",
+    "statusUpdatedAt": "2026-06-18T12:24:00.429215"
+  },
+  {
+    "id": "53ECD6E2-CBC0-4727-8DEF-267C19CFF5A2",
+    "status": "occupied",
+    "name": "T150",
+    "statusUpdatedAt": "2026-06-18T12:24:34.534972"
+  },
+  {
+    "id": "A3EC9284-A2D8-4B97-AD51-4BC8635655F5",
+    "status": "occupied",
+    "name": "T151",
+    "statusUpdatedAt": "2026-06-18T12:40:29.922793"
   }
 ]

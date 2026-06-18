@@ -1326,7 +1326,8 @@ def _audit_log(cursor, action: str, entity: str, entity_id: Optional[str], actor
 
 # Database Connection — يفضّل إعدادات config/settings.json إن وُجدت
 def get_connection():
-    """الاتصال بقاعدة البيانات"""
+    """الاتصال بقاعدة البيانات مع ضبط الترميز لـ UTF-8 لضمان سلامة اللغة العربية"""
+    conn = None
     if os.path.exists(_settings_path):
         try:
             with open(_settings_path, "r", encoding="utf-8") as f:
@@ -1339,25 +1340,40 @@ def get_connection():
             if s and db and uid:
                 from odbc_driver import pyodbc_connect_compat
 
-                return pyodbc_connect_compat(s, port, db, uid, pwd, timeout=10)
+                conn = pyodbc_connect_compat(s, port, db, uid, pwd, timeout=10)
         except Exception as e:
             print(f"[DB] فشل الاتصال من settings.json: {e}")
-    conn_str = _get_connection_string_from_settings()
-    if conn_str:
+
+    if not conn:
+        conn_str = _get_connection_string_from_settings()
+        if conn_str:
+            try:
+                conn = pyodbc.connect(conn_str, timeout=10)
+            except Exception as e:
+                print(f"[DB] فشل الاتصال من settings.json: {e}")
+
+    if not conn:
         try:
-            return pyodbc.connect(conn_str, timeout=10)
-        except Exception as e:
-            print(f"[DB] فشل الاتصال من settings.json: {e}")
-    try:
-        conn_str = get_connection_string()
-        return pyodbc.connect(conn_str, timeout=10)
-    except Exception:
+            conn_str = get_connection_string()
+            conn = pyodbc.connect(conn_str, timeout=10)
+        except Exception:
+            try:
+                conn_str = get_connection_string_driver13()
+                conn = pyodbc.connect(conn_str, timeout=10)
+            except Exception as e:
+                print(f"خطأ الاتصال: {e}")
+
+    if conn:
         try:
-            conn_str = get_connection_string_driver13()
-            return pyodbc.connect(conn_str, timeout=10)
+            # ضبط الترميز لضمان قراءة وكتابة اللغة العربية بشكل صحيح عبر pyodbc
+            conn.setencoding(encoding='utf-8')
+            conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
+            conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
+            conn.setdecoding(pyodbc.SQL_WMETADATA, encoding='utf-16le')
         except Exception as e:
-            print(f"خطأ الاتصال: {e}")
-            return None
+            print(f"[DB] تحذير: فشل ضبط ترميز الاتصال: {e}")
+
+    return conn
 
 
 # ========== TBL007 — بطاقة المادة (إكسترا) ديناميكي حسب أعمدة الجدول ==========
@@ -16907,6 +16923,9 @@ def _restaurant_get_tables_payload(
         for o in orders_now:
             if not isinstance(o, dict):
                 continue
+            # تحسين: لا نعتبر الطلب نشطاً للطاولة إلا إذا كان من تاريخ اليوم (تجنباً للطلبات اليتيمة القديمة)
+            if not _is_today_iso(str(o.get("createdAt") or "")):
+                continue
             st = str(o.get("status") or "").strip().lower()
             if st not in ("pending", "preparing", "ready"):
                 continue
@@ -16917,8 +16936,11 @@ def _restaurant_get_tables_payload(
     def _normalized_table_status(table_id: str, raw_status: Any) -> str:
         st = str(raw_status or "ready").strip().lower() or "ready"
         tid = str(table_id or "").strip().upper()
-        # لا نعرض occupied من حالة محفوظة قديمة إذا لا توجد جلسة/طلب نشط فعلياً.
-        if st == "occupied" and tid and tid not in active_table_ids_upper:
+        # 1) إذا كان للطاولة جلسة أو طلب نشط فعلياً اليوم، فهي "مشغولة" حتماً
+        if tid in active_table_ids_upper:
+            return "occupied"
+        # 2) إذا كانت الحالة "occupied" لكن لا يوجد نشاط فعلي، فهي "جاهزة"
+        if st == "occupied":
             return "ready"
         return st
 
@@ -17643,7 +17665,7 @@ def _restaurant_session_order_counts() -> dict:
 
 
 def _restaurant_open_orders_for_table(table_id: str) -> list[dict]:
-    """كل الطلبات المفتوحة الفعلية على طاولة بعينها بغض النظر عن الجلسة الحالية."""
+    """كل الطلبات المفتوحة الفعلية على طاولة بعينها بغض النظر عن الجلسة الحالية، بشرط أن تكون من تاريخ اليوم."""
     tid = _norm_session_table_id(str(table_id or "").strip())
     if not tid:
         return []
@@ -17652,6 +17674,9 @@ def _restaurant_open_orders_for_table(table_id: str) -> list[dict]:
         if not isinstance(order, dict):
             continue
         if _norm_session_table_id(str(order.get("tableId") or "").strip()) != tid:
+            continue
+        # تحسين: لا نمنع التسكين بسبب طلبات قديمة جداً (ليست من اليوم)
+        if not _is_today_iso(str(order.get("createdAt") or "")):
             continue
         st = str(order.get("status") or "").strip().lower()
         if st not in ("pending", "preparing", "ready"):
@@ -18225,6 +18250,7 @@ def restaurant_create_session(body: dict):
         "startReason": start_reason or None,
         "minimumChargePerSeat": _session_minimum_charge_per_seat(None, table_id),
         "seatGuestLabels": _auto_numbered_seat_guest_labels(guest_count),
+        "guestSession": body.get("guestSession") is True,
     }
     if actor_id:
         rec["seatedByUserId"] = actor_id
@@ -18269,6 +18295,12 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
             continue
         if str(s.get("status") or "").lower() != "active":
             raise HTTPException(status_code=400, detail="لا يمكن تعديل جلسة غير نشطة")
+        # منع تحويل جلسة الضيف لملاك/VIP
+        if s.get("guestSession") is True and not clear and (vip_ag or vip_tid or body.get("applyOpsDefaults") in (True, "1", "true", "yes", "on", 1)):
+            raise HTTPException(
+                status_code=409,
+                detail="جلسة ضيف — لا يمكن تحويلها لملاك/VIP. أغلق الجلسة وأعد فتحها كجلسة عادية أولاً.",
+            )
         _assert_actor_may_manage_session_billing(s, body)
         if clear:
             s.pop("billingProfile", None)

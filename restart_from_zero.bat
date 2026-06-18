@@ -1,6 +1,9 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+REM Local runs use project folder by default.
+REM EXE uses AppData. To match EXE exactly, uncomment:
+REM set "MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS"
 
 echo ========================================
 echo  إعادة تشغيل من الصفر — مطاعم XTRA

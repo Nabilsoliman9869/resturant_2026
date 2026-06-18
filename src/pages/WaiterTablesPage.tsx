@@ -339,7 +339,8 @@ export default function WaiterTablesPage() {
       for (const o of orders) {
         const tid = String(o?.tableId || "");
         const st = String(o?.status || "").toLowerCase();
-        if (tid && ["pending", "preparing"].includes(st)) busy.add(tid);
+        // الطاولة تعتبر مشغولة إذا كان هناك طلب في الانتظار، قيد التحضير، أو جاهز للتسليم
+        if (tid && ["pending", "preparing", "ready"].includes(st)) busy.add(tid);
       }
       setBusyIds(busy);
       setBillReqIds(billreq);
@@ -660,7 +661,9 @@ export default function WaiterTablesPage() {
       }
       applyClaimedSessionLocally(session, String(tableId));
       setMsg(okMessage);
-      window.setTimeout(() => void loadTables(), 250);
+      const newSessionId = session?.id || sessionId;
+      const q = `tableId=${encodeURIComponent(tableId)}` + (newSessionId ? `&sessionId=${encodeURIComponent(String(newSessionId))}` : "");
+      navigate(`${orderTakerBase}/order-taker?${q}`);
     } catch (e) {
       setMsg(briefNetworkHint(e));
     } finally {
@@ -1517,65 +1520,75 @@ export default function WaiterTablesPage() {
                       onClick={(e) => e.stopPropagation()}
                       data-tooltip="ربط الطاولة على Owner/VIP"
                     >
-                      <select
-                        className="waiter-pos__select"
-                        style={{ minWidth: 0, width: "100%" }}
-                        value={(() => {
-                          const bp = sessRow?.billingProfile;
-                          const src = String(bp?.source || "").toLowerCase();
-                          const currentMode =
-                            bp?.active === false
-                              ? ""
-                              : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
-                                ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
-                                : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
-                                  ? String(bp?.vipTemplateId || "").trim()
-                                  : bp && String(bp?.source || "").trim()
-                                    ? "__ops_defaults__"
-                                    : "";
-                          return vipChoiceBySession[sidStr] ?? currentMode;
-                        })()}
-                        onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
-                      >
-                        <option value="">عادي (بدون Owner/VIP)</option>
-                        <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
-                        {activeVipTemplates.length ? (
-                          <optgroup label="قوالب">
-                            {activeVipTemplates.map((tpl) => {
-                              const ownerName = tpl.agentGuid
-                                ? (ownersVipAgents.find((a) => a.CardGuide === tpl.agentGuid)?.AgentName || "")
-                                : "";
-                              const display = tpl.label || ownerName || "Owner/VIP";
-                              return (
-                                <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
-                                  {display}
+                      {isGuestSession ? (
+                        <div style={{ fontSize: "0.72rem", color: "#047857", fontWeight: 600, padding: "4px 0", textAlign: "center" }}>
+                          جلسة ضيف — لا يمكن تحويلها لملاك/VIP
+                        </div>
+                      ) : (
+                        <select
+                          className="waiter-pos__select"
+                          style={{ minWidth: 0, width: "100%" }}
+                          value={(() => {
+                            const bp = sessRow?.billingProfile;
+                            const src = String(bp?.source || "").toLowerCase();
+                            const currentMode =
+                              bp?.active === false
+                                ? ""
+                                : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
+                                  ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
+                                  : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                                    ? String(bp?.vipTemplateId || "").trim()
+                                    : bp && String(bp?.source || "").trim()
+                                      ? "__ops_defaults__"
+                                      : "";
+                            return vipChoiceBySession[sidStr] ?? currentMode;
+                          })()}
+                          onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
+                        >
+                          <option value="">عادي (بدون Owner/VIP)</option>
+                          <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
+                          {activeVipTemplates.length ? (
+                            <optgroup label="قوالب">
+                              {activeVipTemplates.map((tpl) => {
+                                const ownerName = tpl.agentGuid
+                                  ? (ownersVipAgents.find((a) => a.CardGuide === tpl.agentGuid)?.AgentName || "")
+                                  : "";
+                                const display = tpl.label || ownerName || "Owner/VIP";
+                                return (
+                                  <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
+                                    {display}
+                                  </option>
+                                );
+                              })}
+                            </optgroup>
+                          ) : null}
+                          {ownersVipAgentsDeduped.length ? (
+                            <optgroup label="عملاء ملاك (غير مكرّرين في القوالب)">
+                              {ownersVipAgentsDeduped.map((a) => (
+                                <option key={`vip-ag-${a.CardGuide}`} value={`__agent__:${a.CardGuide}`}>
+                                  {a.AgentName || a.CardGuide}
                                 </option>
-                              );
-                            })}
-                          </optgroup>
-                        ) : null}
-                        {ownersVipAgentsDeduped.length ? (
-                          <optgroup label="عملاء ملاك (غير مكرّرين في القوالب)">
-                            {ownersVipAgentsDeduped.map((a) => (
-                              <option key={`vip-ag-${a.CardGuide}`} value={`__agent__:${a.CardGuide}`}>
-                                {a.AgentName || a.CardGuide}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ) : null}
-                      </select>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                        </select>
+                      )}
                       <button
                         type="button"
                         className="btn btn-ghost"
                         style={{ fontWeight: 900, whiteSpace: "nowrap", padding: "0.35rem 0.5rem", width: "100%", minWidth: 0 }}
-                        disabled={vipBusySessionId === sidStr}
+                        disabled={vipBusySessionId === sidStr || isGuestSession}
                         onClick={() => {
+                          if (isGuestSession) {
+                            setMsg("جلسة ضيف — لا يمكن تحويلها لملاك/VIP");
+                            return;
+                          }
                           const chosen = vipChoiceBySession[sidStr] ?? "";
                           void applyVipBilling(sidStr, chosen);
                         }}
-                        data-tooltip="تطبيق Owner/VIP على الجلسة"
+                        data-tooltip={isGuestSession ? "جلسة ضيف — لا يمكن تطبيق Owner/VIP" : "تطبيق Owner/VIP على الجلسة"}
                       >
-                        {vipBusySessionId === sidStr ? "…" : "تطبيق"}
+                        {vipBusySessionId === sidStr ? "…" : isGuestSession ? "—" : "تطبيق"}
                       </button>
                     </div>
                   ) : null}

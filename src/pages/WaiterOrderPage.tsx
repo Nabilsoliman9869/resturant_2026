@@ -70,6 +70,7 @@ type OrderTakerSessionRow = {
   startTime?: string;
   guestCount?: number | string;
   minimumChargePerSeat?: number | string;
+  guestSession?: boolean;
   captainUserId?: string;
   captainName?: string;
   captainLogin?: string;
@@ -460,6 +461,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [cart, setCart] = useState<CartLine[]>([]);
   const [msg, setMsg] = useState("");
+  const [unauthorizedAccessTable, setUnauthorizedAccessTable] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [dailyMenuState, setDailyMenuState] = useState<DailyMenuState | null>(null);
   const [dailyMenuScheduleEntries, setDailyMenuScheduleEntries] = useState<DailyMenuScheduleEntry[]>([]);
@@ -685,6 +687,26 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     setSessionGuestCount(guestCount);
     setGuestCountDraft(String(guestCount));
     setSessionMinimumChargePerSeat(Math.max(0, toNum(row?.minimumChargePerSeat, 0)));
+
+    // التحديد التلقائي للعميل إذا كانت الجلسة للضيف
+    if (row?.guestSession) {
+      const guestAgent = agents.find((a) => {
+        const n = String(a?.AgentName || "").toLowerCase();
+        return n.includes("guest") || n.includes("ضيف");
+      });
+      if (guestAgent) setSelectedAgentGuid(guestAgent.CardGuide);
+    } else {
+      // إذا كانت الجلسة عادية، والعميل الحالي هو "ضيف"، نعيده للعميل النقدي الافتراضي
+      const currentAgent = agents.find((a) => a.CardGuide === selectedAgentGuid);
+      const isCurrentGuest = currentAgent && (currentAgent.AgentName.toLowerCase().includes("guest") || currentAgent.AgentName.includes("ضيف"));
+      if (isCurrentGuest) {
+        const cashAgent = agents.find((a) => {
+          const n = String(a?.AgentName || "").toLowerCase();
+          return n.includes("cash") || n.includes("عميل نقدي") || n.includes("نقدا") || n.includes("نقدي");
+        });
+        if (cashAgent) setSelectedAgentGuid(cashAgent.CardGuide);
+      }
+    }
   }
 
   function applySeatGuestLabelsFromRow(row: OrderTakerSessionRow | null | undefined) {
@@ -876,12 +898,24 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setOrderTakerExclusiveTable(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
 
       const fromUrl = searchParams.get("tableId");
+      // التحقق: هل الطاولة المطلوبة في الرابط المباشر تخص كابتن آخر؟
+      let unauthorizedTableName = "";
+      if (fromUrl && !mgrDev && !outFiltered.some((x: any) => x.id === fromUrl)) {
+        // الطاولة موجودة في outList لكنها ليست من طاولات الكابتن
+        const foreignTable = outList.find((t: any) => t.id === fromUrl);
+        if (foreignTable) {
+          unauthorizedTableName = String(foreignTable.name || foreignTable.id || "هذه الطاولة");
+        }
+      }
+      setUnauthorizedAccessTable(unauthorizedTableName);
       setTables(outFiltered);
 
       setSelectedTableId((prev) => {
         const arr = outFiltered;
+        // إذا كانت الطاولة المطلوبة من الرابط المباشر ملكاً للكابتن، نختارها
         if (fromUrl && arr.some((x: any) => x.id === fromUrl)) return fromUrl;
         if (prev && arr.some((x: any) => x.id === prev)) return prev;
+        // إذا وصل برابط مباشر لطاولة كابتن آخر → لا نختارها، ننتقي أول طابقته
         return arr.length ? arr[0].id : "";
       });
 
@@ -2917,11 +2951,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 {agents.length === 0 ? (
                   <option value="">اسم العميل</option>
                 ) : (
-                  agents.map((a) => (
-                    <option key={a.CardGuide} value={a.CardGuide}>
-                      {a.AgentName}
-                    </option>
-                  ))
+                  agents
+                    .filter((a) => {
+                      const n = String(a?.AgentName || "").toLowerCase();
+                      const isGuest = n.includes("guest") || n.includes("ضيف");
+                      // نخفي عملاء الضيوف من القائمة المنسدلة إلا إذا كان العميل محدد بالفعل (ليظهر الاسم)
+                      return !isGuest || selectedAgentGuid === a.CardGuide;
+                    })
+                    .map((a) => (
+                      <option key={a.CardGuide} value={a.CardGuide}>
+                        {a.AgentName}
+                      </option>
+                    ))
                 )}
               </select>
               <input
@@ -2965,7 +3006,27 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }
       />
 
-      {orderTakingLocked && captainGate?.name ? (
+      {unauthorizedAccessTable ? (
+        <div
+          role="alert"
+          style={{
+            margin: "0 1rem 0.5rem",
+            padding: "10px 14px",
+            borderRadius: 12,
+            background: "rgba(127, 29, 29, 0.15)",
+            border: "1px solid rgba(185, 28, 28, 0.5)",
+            color: "#991b1b",
+            fontWeight: 800,
+            fontSize: "0.92rem",
+            lineHeight: 1.5,
+            textAlign: "right",
+          }}
+        >
+          <strong>⚠️ هذه الطاولة ({unauthorizedAccessTable}) تخص كابتن آخر.</strong>
+          <br />
+          تم توجيهك لطاولتك المسجلة. لا يمكنك الوصول لهذه الطاولة — تواصل مع الكابتن أو المدير لتحويل الجلسة.
+        </div>
+      ) : orderTakingLocked && captainGate?.name ? (
         <div
           role="status"
           style={{
@@ -3318,7 +3379,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     padding: "6px 0",
                   }}
                 >
-                  {displayMode === "category" && categoryKey !== "all" ? (
+                  {loading && groups.length === 0 ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <span key={`skel-${i}`} className="waiter-pos__cat" style={{ flexShrink: 0, width: 72, height: 32, background: "#e2e8f0", borderColor: "transparent", color: "transparent", cursor: "default" }}>
+                          &nbsp;
+                        </span>
+                      ))}
+                    </div>
+                  ) : displayMode === "category" && categoryKey !== "all" ? (
                     <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
                       <button
                         type="button"
@@ -3355,29 +3424,29 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       </button>
                       {displayMode === "category"
                         ? displayCategories.map((cat) => (
-                            <button
-                              key={`cat-${cat}`}
-                              type="button"
-                              className={`waiter-pos__cat ${categoryKey === cat ? "waiter-pos__cat--active" : ""}`}
-                              onClick={() => setCategoryKey(cat)}
-                              title={cat}
-                              style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
-                            >
-                              {cat}
-                            </button>
-                          ))
+                          <button
+                            key={`cat-${cat}`}
+                            type="button"
+                            className={`waiter-pos__cat ${categoryKey === cat ? "waiter-pos__cat--active" : ""}`}
+                            onClick={() => setCategoryKey(cat)}
+                            title={cat}
+                            style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                          >
+                            {cat}
+                          </button>
+                        ))
                         : waiterMenuGroups.map((g) => (
-                            <button
-                              key={`side-${g.CardGuide}`}
-                              type="button"
-                              className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
-                              onClick={() => setCategoryKey(g.CardGuide)}
-                              title={g.GroupName}
-                              style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
-                            >
-                              {g.GroupName}
-                            </button>
-                          ))}
+                          <button
+                            key={`side-${g.CardGuide}`}
+                            type="button"
+                            className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                            onClick={() => setCategoryKey(g.CardGuide)}
+                            title={g.GroupName}
+                            style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                          >
+                            {g.GroupName}
+                          </button>
+                        ))}
                     </div>
                   )}
                 </div>
@@ -4200,29 +4269,29 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     </button>
                     {displayMode === "category"
                       ? displayCategories.map((cat) => (
-                          <button
-                            key={`cat-${cat}`}
-                            type="button"
-                            className={`waiter-pos__cat ${categoryKey === cat ? "waiter-pos__cat--active" : ""}`}
-                            onClick={() => setCategoryKey(cat)}
-                            title={cat}
-                            style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
-                          >
-                            {cat}
-                          </button>
-                        ))
+                        <button
+                          key={`cat-${cat}`}
+                          type="button"
+                          className={`waiter-pos__cat ${categoryKey === cat ? "waiter-pos__cat--active" : ""}`}
+                          onClick={() => setCategoryKey(cat)}
+                          title={cat}
+                          style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                        >
+                          {cat}
+                        </button>
+                      ))
                       : waiterMenuGroups.map((g) => (
-                          <button
-                            key={`side-${g.CardGuide}`}
-                            type="button"
-                            className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
-                            onClick={() => setCategoryKey(g.CardGuide)}
-                            title={g.GroupName}
-                            style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
-                          >
-                            {g.GroupName}
-                          </button>
-                        ))}
+                        <button
+                          key={`side-${g.CardGuide}`}
+                          type="button"
+                          className={`waiter-pos__cat ${categoryKey === g.CardGuide ? "waiter-pos__cat--active" : ""}`}
+                          onClick={() => setCategoryKey(g.CardGuide)}
+                          title={g.GroupName}
+                          style={{ flexShrink: 0, width: "auto", whiteSpace: "nowrap" }}
+                        >
+                          {g.GroupName}
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>

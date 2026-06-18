@@ -48,5 +48,13 @@
     "captainUserId": "6905CB4A-E016-4FB4-899F-F08FE10BA825",
     "captainLogin": "captain1",
     "actorRole": "waiter"
+  },
+  {
+    "at": "2026-06-13T12:11:50.696151",
+    "action": "transfer_table",
+    "sessionId": "fc03df0c-1bf0-446f-8001-248794b439fe",
+    "fromTableId": "A5C3430F-A60B-49C8-81E2-DB9542734565",
+    "toTableId": "B9A1DB04-D991-4F23-82C6-837C4D7116F0",
+    "actor": "waiter"
   }
 ]
