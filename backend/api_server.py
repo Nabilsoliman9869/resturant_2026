@@ -18128,7 +18128,7 @@ def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = Tru
         out.append(row)
     out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
     result = {"sessions": out}
-    cache_set(cache_key, result, ttl=10)
+    cache_set(cache_key, result, ttl=2)
     return result
 
 
@@ -19648,7 +19648,7 @@ def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Q
         out.append(item)
     out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
     result = {"ok": True, "items": out[:80], "count": len(out)}
-    cache_set(cache_key, result, ttl=20)
+    cache_set(cache_key, result, ttl=3)
     return result
 
 
