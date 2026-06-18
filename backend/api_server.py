@@ -967,11 +967,8 @@ def _auto_group_svg(group_name: str) -> bytes:
 # Routes للملفات HTML
 @app.get("/")
 def read_root():
-    """الصفحة الرئيسية"""
-    html_path = os.path.join(static_dir, "index.html")
-    if os.path.exists(html_path):
-        return FileResponse(html_path)
-    return {"message": "POS System API", "docs": "/docs"}
+    """الصفحة الرئيسية — توجيه تلقائي للواجهة"""
+    return RedirectResponse(url="/app/waiter", status_code=307)
 
 @app.get("/pos_system.html")
 def pos_system():
