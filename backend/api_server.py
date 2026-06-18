@@ -124,9 +124,14 @@ def cache_delete_pattern(pattern: str):
                 _MEM_CACHE.pop(k, None)
 
 def cache_invalidate_restaurant():
-    # disabled: invalidation was clearing cache too aggressively across 2 uvicorn workers
-    # data refreshes automatically via TTL (5s table-sessions, 20s role-inbox, etc.)
-    pass
+    """Clear restaurant caches after mutations (safe with Redis shared across workers)."""
+    try:
+        cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
+        cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
+        cache_delete_pattern("mat3am:restaurant:tables")
+        cache_delete_pattern("mat3am:restaurant:products:*")
+    except Exception:
+        pass
 
 try:
     # Railway يضع PORT — نفس الخدمة تخدم الواجهة والـ API
@@ -3883,8 +3888,15 @@ def api_root():
 
 @app.get("/api/health")
 def health_check():
-    """فحص الاتصال بقاعدة البيانات"""
+    """فحص الاتصال بقاعدة البيانات و Redis"""
     conn = None
+    redis_ok = False
+    try:
+        r = _get_redis()
+        if r:
+            redis_ok = r.ping()
+    except Exception:
+        redis_ok = False
     try:
         conn = get_connection()
         if conn:
@@ -3897,8 +3909,8 @@ def health_check():
                         db_label = (_d.get("database") or "").strip()
                 except Exception:
                     pass
-            return {"status": "connected", "database": db_label}
-        return {"status": "disconnected", "error": "فشل الاتصال بقاعدة البيانات"}
+            return {"status": "connected", "database": db_label, "redis": redis_ok}
+        return {"status": "disconnected", "error": "فشل الاتصال بقاعدة البيانات", "redis": redis_ok}
     finally:
         try:
             if conn:
@@ -4340,10 +4352,14 @@ def _ensure_tbl015_group_by_name(cursor, conn, group_name: str) -> str:
 
 @app.get("/api/agents/by-group-name")
 def get_agents_by_group_name(group_name: str):
-    """قائمة عملاء من TBL016 ضمن مجموعة TBL015 بالاسم (مثل owners&vip) — للدروب داون."""
+    """قائمة عملاء من TBL016 ضمن مجموعة TBL015 بالاسم (مثل owners&vip) — للدروب داون. Redis cache 5min."""
     gn = (group_name or "").strip()
     if not gn:
         raise HTTPException(status_code=400, detail="group_name مطلوب")
+    cache_key = f"mat3am:agents:group-name:{gn.lower()}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
@@ -4360,6 +4376,7 @@ def get_agents_by_group_name(group_name: str):
         )
         gr = cursor.fetchone()
         if not gr or not gr[0]:
+            cache_set(cache_key, {"agents": []}, ttl=300)
             return {"agents": []}
         gid = str(gr[0]).strip().upper()
         supplier_guide = '26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500'
@@ -4378,7 +4395,9 @@ def get_agents_by_group_name(group_name: str):
         out = []
         for r in cursor.fetchall() or []:
             out.append({"CardGuide": str(r[0]), "AgentName": r[1] or ""})
-        return {"agents": out, "groupGuide": gid, "count": len(out)}
+        result = {"agents": out, "groupGuide": gid, "count": len(out)}
+        cache_set(cache_key, result, ttl=300)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
     finally:
@@ -4615,7 +4634,8 @@ def create_agent(agent: dict):
         ))
         
         conn.commit()
-        
+        cache_delete_pattern("mat3am:agents:group-name:*")
+        cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
         return {
             "success": True,
             "CardGuide": card_guide,
@@ -4694,6 +4714,8 @@ def owners_vip_create_agent(body: dict):
             (card_guide, name, phone or None, mobile or None, address or None, main_group, acct_guid),
         )
         conn.commit()
+        cache_delete_pattern("mat3am:agents:group-name:*")
+        cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
         return {"success": True, "deduped": False, "CardGuide": card_guide, "AgentName": name, "MainGroupGuide": main_group}
     except HTTPException:
         raise
@@ -17071,8 +17093,14 @@ def _restaurant_get_tables_payload(
 
 @app.get("/api/restaurant/tables")
 def restaurant_get_tables():
-    """جلب الطاولات — من مراكز التكلفة (TBL005) أولاً، ثم من ملف، ثم افتراضي"""
-    return _restaurant_get_tables_payload()
+    """جلب الطاولات — من مراكز التكلفة (TBL005) أولاً، ثم من ملف، ثم افتراضي. Redis cache 15s."""
+    cache_key = "mat3am:restaurant:tables"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    result = _restaurant_get_tables_payload()
+    cache_set(cache_key, result, ttl=15)
+    return result
 
 
 def _restaurant_pos_channels_default_doc() -> dict:
