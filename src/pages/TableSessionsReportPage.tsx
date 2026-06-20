@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { getApiBase } from "../lib/apiBase";
 import { safeFetch } from "../lib/safeFetch";
 import { tryParseJson } from "../lib/tryParseJson";
@@ -460,7 +461,7 @@ export default function TableSessionsReportPage() {
                         )}
                       </td>
                       <td style={{ padding: "0.55rem", verticalAlign: "top" }}>
-                        {r.session.captainName || r.session.captainLogin || "—"}
+                        {repairArabicDisplayText(r.session.captainName || r.session.captainLogin || "") || "—"}
                       </td>
                       <td style={{ padding: "0.55rem", verticalAlign: "top", whiteSpace: "nowrap" }}>
                         {formatDateShort(r.session.startTime)}

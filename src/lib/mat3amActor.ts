@@ -1,4 +1,5 @@
 import type { SessionUser } from "../auth/AuthContext";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { getTerminalId, getTerminalToken } from "./terminalSession";
 
 /** يُرسل مع طلبات المطعم لمسار الصلاحيات والتدقيق (يثق بالعميل حتى يُضاف JWT لاحقاً).
@@ -21,7 +22,7 @@ export function buildMat3amActor(user: SessionUser | null | undefined): Mat3amAc
   const a: Mat3amActor = {
     id: String(user.id),
     login: String(user.login || "").trim(),
-    name: String(user.name || "").trim(),
+    name: repairArabicDisplayText(String(user.name || "").trim()),
     role: String(user.role || "").trim().toLowerCase(),
     terminalId: tid,
   };

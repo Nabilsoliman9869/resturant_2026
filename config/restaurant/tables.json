@@ -269,5 +269,17 @@
     "status": "occupied",
     "name": "T151",
     "statusUpdatedAt": "2026-06-18T12:40:29.922793"
+  },
+  {
+    "id": "5C5A0B38-A06B-49DA-8E8A-5AC89BAAD1B6",
+    "status": "occupied",
+    "name": "T31",
+    "statusUpdatedAt": "2026-06-20T01:28:36.998267"
+  },
+  {
+    "id": "4D66D93E-C55A-4FF3-B4CE-916C297712ED",
+    "status": "occupied",
+    "name": "T20",
+    "statusUpdatedAt": "2026-06-20T11:33:54.378393"
   }
 ]

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { useLocation, useNavigate } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { getApiBase } from "../lib/apiBase";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { InlinePinConfirm } from "../components/InlinePinConfirm";
@@ -1103,7 +1104,7 @@ export default function WaiterTablesPage() {
       tableName: t.name,
       sessionId: sid,
       startTime: session?.startTime || null,
-      captainName: String(session?.captainName || session?.captainLogin || "").trim() || null,
+      captainName: repairArabicDisplayText(String(session?.captainName || session?.captainLogin || "").trim()) || null,
       guestCount,
       minimumChargePerSeat,
       orderCount: lines.length,
@@ -1144,6 +1145,20 @@ export default function WaiterTablesPage() {
       : user?.role === "developer"
         ? "شريحات الطاولات — مطوّر"
         : "جارسون الطلبات";
+
+  const handlePrint = useCallback(() => {
+    const el = document.querySelector<HTMLElement>(".print-only");
+    if (!el || !report) return;
+    const w = window.open("", "_blank");
+    if (!w) return;
+    const s = w.document;
+    s.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${report.tableName}</title><style>@page{size:A4 portrait;margin:12mm}body{font-family:"IBM Plex Sans Arabic",Arial,sans-serif;font-size:11pt;line-height:1.5;direction:rtl;text-align:right;color:#000;background:#fff;margin:0;padding:16px 20px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th,td{padding:6px 10px;border:1px solid #ccc;font-size:10pt}th{background:#f5f5f5;font-weight:700;color:#333}td{color:#222;background:#fff}span,strong,em,b,i,small,label{display:inline;color:#000}.print-header{font-size:16pt;font-weight:900;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:12px;color:#000}.print-subheader{font-size:12pt;font-weight:700;color:#444;margin:12px 0 6px;border-bottom:1px solid #ddd;padding-bottom:4px}.print-row{display:flex;flex-direction:row;justify-content:space-between;gap:12px;margin-bottom:8px;page-break-inside:avoid}.print-col{display:flex;flex-direction:column;flex:1}.print-meta-box{border:1px solid #ccc;padding:8px 10px;border-radius:4px;background:#fafafa;margin-bottom:6px;page-break-inside:avoid}.print-meta-label{font-size:9pt;color:#666;font-weight:600;margin-bottom:2px}.print-meta-value{font-size:11pt;font-weight:800;color:#000}.print-alert{padding:6px 10px;border-radius:4px;margin:4px 0;font-size:10pt;font-weight:700;page-break-inside:avoid}.print-alert-warning{background:#fff8e1;border:1px solid #ffc107;color:#856404}.print-alert-danger{background:#ffebee;border:1px solid #f44336;color:#c62828}.print-alert-success{background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32}.print-footer{margin-top:20px;padding-top:10px;border-top:1px solid #ccc;font-size:9pt;color:#666;text-align:center}.avoid-break{page-break-inside:avoid}</style></head><body>`);
+    s.write(el.innerHTML);
+    s.write("</body></html>");
+    s.close();
+    w.focus();
+    w.print();
+  }, [report]);
 
   return (
     <div className="role-op waiter-pos" onClick={() => setReport(null)}>
@@ -1200,7 +1215,7 @@ export default function WaiterTablesPage() {
               (s) => String(s?.tableId || "") === String(t.id) && String(s?.status || "").toLowerCase() === "active",
             );
             const captainLabel = sessRow
-              ? String(sessRow.captainName || sessRow.captainLogin || "").trim() || ""
+              ? repairArabicDisplayText(String(sessRow.captainName || sessRow.captainLogin || "").trim()) || ""
               : "";
             const capId = sessRow ? String(sessRow.captainUserId || "").trim() : "";
             const watchStage = String(sessRow?.noOrderWatchStage || "").trim();
@@ -1795,7 +1810,7 @@ export default function WaiterTablesPage() {
                 ) : null}
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem" }} onClick={() => window.print()}>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem" }} onClick={handlePrint}>
                   🖨️ طباعة
                 </button>
                 <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "2px 10px" }} onClick={() => setReport(null)}>
@@ -1924,6 +1939,200 @@ export default function WaiterTablesPage() {
             </div>
           </div>
         </>
+      ) : null}
+
+      {/* ===== Print-Only Report (A4 Clean Print) ===== */}
+      {report ? (
+        <div className="print-only" dir="rtl">
+          {/* Header */}
+          <div className="print-header">
+            {report.tableName} — ملخص الجلسة
+            {report.guestSession ? (
+              <span style={{ fontSize: "10pt", fontWeight: 400, marginRight: 8, color: "#666" }}>
+                (جلسة ضيف)
+              </span>
+            ) : null}
+          </div>
+
+          {/* Meta Grid */}
+          <div className="print-subheader">معلومات الجلسة</div>
+          <div className="print-row">
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">الكابتن</div>
+                <div className="print-meta-value">{report.captainName || "—"}</div>
+              </div>
+            </div>
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">بدأت الجلسة</div>
+                <div className="print-meta-value">
+                  {report.startTime
+                    ? new Date(report.startTime).toLocaleString("ar-EG", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })
+                    : "غير متاح"}
+                </div>
+              </div>
+            </div>
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">الضيوف</div>
+                <div className="print-meta-value">{report.guestCount} ضيف</div>
+              </div>
+            </div>
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">مينيموم شارج</div>
+                <div className="print-meta-value">
+                  {report.minimumChargePerSeat > 0
+                    ? `${report.minimumChargePerSeat.toFixed(0)} ج.م/ضيف = ${(report.minimumChargePerSeat * report.guestCount).toFixed(0)} ج.م`
+                    : "غير مفعّل"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Orders Status */}
+          <div className="print-subheader">حالة الطلبات</div>
+          <table style={{ width: "100%", marginBottom: 12 }}>
+            <thead>
+              <tr>
+                <th>إجمالي الطلبات</th>
+                <th>في المطبخ</th>
+                <th>واصل للطاولة</th>
+                <th>ملغى</th>
+                <th>إجمالي العناصر</th>
+                <th>السلة ج.م</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.orderCount}</td>
+                <td style={{ textAlign: "center" }}>
+                  {report.pendingCount + report.preparingCount + report.readyCount}
+                  <div style={{ fontSize: "9pt", color: "#666", marginTop: 2 }}>
+                    انتظار {report.pendingCount} · تحضير {report.preparingCount} · جاهز {report.readyCount}
+                  </div>
+                </td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.servedCount}</td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.cancelledCount}</td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.qtyTotal}</td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.totalCost.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Financial Summary */}
+          <div className="print-subheader">التكلفة</div>
+          <table style={{ width: "100%", marginBottom: 12 }}>
+            <tbody>
+              <tr>
+                <td style={{ fontWeight: 700 }}>السلة</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{report.totalCost.toFixed(2)} ج.م</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>الخدمة ({policy.servicePercent}%)</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{reportFinancials?.svc.toFixed(2)} ج.م</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>VAT ({policy.vatPercent}%)</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{reportFinancials?.vat.toFixed(2)} ج.م</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>واصل للطاولة (قيمة)</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{(report.totalCost - report.pendingCost).toFixed(2)} ج.م</td>
+              </tr>
+              <tr style={{ background: "#f5f5f5" }}>
+                <td style={{ fontWeight: 900, fontSize: "11pt" }}>الإجمالي</td>
+                <td style={{ textAlign: "left", fontWeight: 900, fontSize: "11pt", color: "#000" }}>
+                  {reportFinancials?.total.toFixed(2)} ج.م
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Alerts */}
+          {report.sessionId && billReqIds.has(report.sessionId) ? (
+            <div className="print-alert print-alert-danger">
+              ⚠️ طلب حساب معلق — لا يمكن إضافة أصناف جديدة
+            </div>
+          ) : null}
+          {Number(report.noOrderDelayMinutes || 0) >= 10 ? (
+            <div className="print-alert print-alert-warning">
+              ⏱️ تأخر أخذ الطلب بعد التسكين ({report.noOrderDelayMinutes} دقيقة)
+            </div>
+          ) : null}
+          {report.readyCount > 0 ? (
+            <div className="print-alert print-alert-success">
+              ✅ {report.readyCount} طلب جاهز بالمطبخ — استدعِ الرنر
+            </div>
+          ) : null}
+
+          {/* Recent Orders */}
+          <div className="print-subheader">الطلبات المرسلة</div>
+          {report.lines.length === 0 ? (
+            <div style={{ color: "#666", fontSize: "10pt", padding: "8px 0" }}>لا توجد طلبات على هذه الطاولة.</div>
+          ) : (
+            <table style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th style={{ width: "15%" }}>رقم الطلب</th>
+                  <th style={{ width: "15%" }}>الحالة</th>
+                  <th style={{ width: "20%" }}>الوقت</th>
+                  <th style={{ width: "10%" }}>العناصر</th>
+                  <th style={{ width: "20%" }}>القيمة</th>
+                  <th style={{ width: "20%" }}>التفاصيل</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.lines.map((l) => {
+                  const s = String(l.status || "").toLowerCase();
+                  const map: Record<string, string> = {
+                    pending: "انتظار",
+                    preparing: "تحضير",
+                    ready: "جاهز",
+                    served: "مُقدَّم",
+                    cancelled: "ملغى",
+                    paid: "مدفوع",
+                  };
+                  return (
+                    <tr key={l.id + l.time} className="avoid-break">
+                      <td style={{ textAlign: "center", fontWeight: 700 }}>{l.id || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{map[s] || s}</td>
+                      <td style={{ textAlign: "center", fontSize: "9pt" }}>{l.time || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{l.qty}</td>
+                      <td style={{ textAlign: "left", fontWeight: 700 }}>{l.total.toFixed(2)} ج.م</td>
+                      <td style={{ fontSize: "9pt" }}>
+                        {l.items.length > 0 ? (
+                          <ul style={{ margin: 0, padding: "0 14px 0 0", listStyle: "disc" }}>
+                            {l.items.map((it, idx) => (
+                              <li key={idx}>
+                                {it.quantity} × {it.name}
+                                {it.unitPrice > 0 ? ` — ${Math.round(it.unitPrice)} ج.م` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {/* Footer */}
+          <div className="print-footer">
+            تم إنشاء هذا التقرير في {new Date().toLocaleString("ar-EG")} — نظام إدارة المطاعم
+          </div>
+        </div>
       ) : null}
     </div>
   );

@@ -1042,7 +1042,7 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-06-18T04:29:01.911865",
-    "status": "active",
+    "status": "completed",
     "startedByRole": "waiter",
     "startReason": "captain_seat_from_table_card",
     "minimumChargePerSeat": 0.0,
@@ -1056,7 +1056,8 @@
     "captainLogin": "waiter",
     "captainName": "جارسون الطلبات",
     "captainRole": "waiter",
-    "captainClaimedAt": "2026-06-18T04:29:01.914033"
+    "captainClaimedAt": "2026-06-18T04:29:01.914033",
+    "endTime": "2026-06-20T01:27:27.495102"
   },
   {
     "id": "cf20d18d-3c1b-41c0-9ab5-af5e736bdd78",
@@ -1067,7 +1068,7 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-06-18T12:23:57.893130",
-    "status": "active",
+    "status": "completed",
     "startedByRole": "waiter",
     "startReason": "captain_seat_from_table_card",
     "minimumChargePerSeat": 0.0,
@@ -1084,7 +1085,8 @@
     "captainClaimedAt": "2026-06-18T12:23:57.895688",
     "noOrderFirstAlertAt": "2026-06-18T12:34:16.212700",
     "noOrderWatchStage": "captain_first",
-    "noOrderLastAlertAt": "2026-06-18T12:34:16.212700"
+    "noOrderLastAlertAt": "2026-06-18T12:34:16.212700",
+    "endTime": "2026-06-20T01:27:27.495102"
   },
   {
     "id": "a43a033a-cbcc-4182-a666-6ee56596f20c",
@@ -1095,7 +1097,7 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-06-18T12:24:24.582678",
-    "status": "active",
+    "status": "completed",
     "startedByRole": "waiter",
     "startReason": "captain_seat_from_table_card",
     "minimumChargePerSeat": 0.0,
@@ -1112,7 +1114,8 @@
     "captainClaimedAt": "2026-06-18T12:24:24.584709",
     "noOrderFirstAlertAt": "2026-06-18T12:36:39.511558",
     "noOrderWatchStage": "captain_first",
-    "noOrderLastAlertAt": "2026-06-18T12:36:39.511558"
+    "noOrderLastAlertAt": "2026-06-18T12:36:39.511558",
+    "endTime": "2026-06-20T01:27:27.495102"
   },
   {
     "id": "4a106e56-28e9-4dec-b828-67d249c98c44",
@@ -1123,7 +1126,7 @@
     "childrenCount": 0,
     "preferences": {},
     "startTime": "2026-06-18T12:40:27.483593",
-    "status": "active",
+    "status": "completed",
     "startedByRole": "waiter",
     "startReason": "captain_seat_from_table_card",
     "minimumChargePerSeat": 0.0,
@@ -1140,6 +1143,33 @@
     "captainClaimedAt": "2026-06-18T12:40:27.485699",
     "noOrderFirstAlertAt": "2026-06-18T12:53:03.208056",
     "noOrderWatchStage": "captain_first",
-    "noOrderLastAlertAt": "2026-06-18T12:53:03.208056"
+    "noOrderLastAlertAt": "2026-06-18T12:53:03.208056",
+    "endTime": "2026-06-20T01:27:27.495102"
+  },
+  {
+    "id": "dc166de5-cc1d-43b7-a138-160196ccd28c",
+    "tableId": "5C5A0B38-A06B-49DA-8E8A-5AC89BAAD1B6",
+    "projectId": null,
+    "hostId": null,
+    "guestCount": 1,
+    "childrenCount": 0,
+    "preferences": {},
+    "startTime": "2026-06-20T01:28:34.561390",
+    "status": "active",
+    "startedByRole": "waiter",
+    "startReason": "captain_seat_from_table_card",
+    "minimumChargePerSeat": 0.0,
+    "seatGuestLabels": {
+      "1": "1"
+    },
+    "seatedByUserId": "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
+    "seatedByLogin": "waiter",
+    "seatedByName": "جارسون الطلبات",
+    "captainUserId": "F75CBF0A-2C94-4433-B5C7-D83BA5A1A80E",
+    "captainLogin": "waiter",
+    "captainName": "جارسون الطلبات",
+    "captainRole": "waiter",
+    "captainClaimedAt": "2026-06-20T01:28:34.563385",
+    "noOrderLastResolvedAt": "2026-06-20T11:35:48.838210"
   }
 ]

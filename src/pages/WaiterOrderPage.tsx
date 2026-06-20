@@ -21,7 +21,7 @@ import GuestReturnRequestModal, { type GuestReturnOrderLine } from "../component
 import { CashierPayInvoiceModal, type CashierInvoiceRow } from "../components/CashierPayInvoiceModal";
 import CaptainBillReviewModal, { type CaptainBillReviewLine } from "../components/CaptainBillReviewModal";
 import { useAuth } from "../auth/AuthContext";
-import { sessionDisplayName } from "../auth/displayUser";
+import { repairArabicDisplayText, sessionDisplayName } from "../auth/displayUser";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
@@ -678,7 +678,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   function applySessionMetaRow(row: OrderTakerSessionRow | null | undefined) {
     const cid = String(row?.captainUserId || "").trim();
-    const cname = String(row?.captainName || row?.captainLogin || "").trim();
+    const cname = repairArabicDisplayText(String(row?.captainName || row?.captainLogin || "").trim());
     setCaptainGate(cid ? { id: cid, name: cname || "مسند الطلب" } : null);
     const bp = row?.billingProfile;
     setSessionBillingProfile(bp && typeof bp === "object" ? bp : null);

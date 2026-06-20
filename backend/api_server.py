@@ -61,6 +61,15 @@ def _get_redis():
         _redis_client = False
         return None
 
+_CACHE_STATS = {"hits": 0, "misses": 0, "last_ops": []}
+
+def _cache_stat(op: str, key: str, source: str = ""):
+    if op in ("HIT", "MISS"):
+        _CACHE_STATS["hits" if op == "HIT" else "misses"] += 1
+    _CACHE_STATS["last_ops"].append({"t": datetime.now().isoformat(), "op": op, "key": key[:80], "src": source})
+    if len(_CACHE_STATS["last_ops"]) > 200:
+        _CACHE_STATS["last_ops"] = _CACHE_STATS["last_ops"][-100:]
+
 def cache_get(key: str):
     global _redis_client
     r = _get_redis()
@@ -69,6 +78,7 @@ def cache_get(key: str):
             v = r.get(key)
             if v:
                 print(f"[cache] HIT  {key} (redis)")
+                _cache_stat("HIT", key, "redis")
                 return json.loads(v)
         except Exception as e:
             print(f"[cache] Redis get error: {e}")
@@ -77,9 +87,11 @@ def cache_get(key: str):
         entry = _MEM_CACHE.get(key)
         if entry and _time.time() <= entry["expires"]:
             print(f"[cache] HIT  {key} (memory)")
+            _cache_stat("HIT", key, "memory")
             return entry["data"]
         _MEM_CACHE.pop(key, None)
     print(f"[cache] MISS {key}")
+    _cache_stat("MISS", key, "")
     return None
 
 def cache_set(key: str, data, ttl: int = 10):
@@ -5057,10 +5069,10 @@ async def restaurant_order_taker_bootstrap(refresh: bool = Query(False)):
     if not refresh:
         cached = cache_get(cache_key)
         if cached:
-            return cached
+            return JSONResponse(content=cached, headers={"X-Cache-Status": "HIT"})
     result = await run_in_threadpool(_order_taker_bootstrap_sync, refresh=refresh)
     cache_set(cache_key, result, ttl=60)
-    return result
+    return JSONResponse(content=result, headers={"X-Cache-Status": "MISS"})
 
 
 def _order_taker_catalog_payload(*, refresh: bool = False) -> dict:
@@ -16553,6 +16565,33 @@ async def mat3am_sql_cache_status(sql_probe: bool = Query(False, alias="sqlProbe
         out["restaurantSqlReadyLive"] = await run_in_threadpool(_restaurant_sql_ready)
     return out
 
+@app.get("/api/dev/cache-stats", include_in_schema=False)
+def dev_cache_stats():
+    """تشخيص Redis / Memory cache — hits, misses, last operations."""
+    r = _get_redis()
+    redis_info = {"connected": bool(r)}
+    if r:
+        try:
+            redis_info["keys_count"] = r.dbsize()
+            redis_info["info_memory"] = r.info("memory")
+        except Exception as e:
+            redis_info["error"] = str(e)
+    with _CACHE_LOCK:
+        mem_keys = len(_MEM_CACHE)
+    total = _CACHE_STATS["hits"] + _CACHE_STATS["misses"]
+    hit_rate = round(_CACHE_STATS["hits"] / total * 100, 1) if total > 0 else 0
+    return {
+        "redis": redis_info,
+        "memory_cache_keys": mem_keys,
+        "stats": {
+            "hits": _CACHE_STATS["hits"],
+            "misses": _CACHE_STATS["misses"],
+            "total": total,
+            "hit_rate_percent": hit_rate,
+        },
+        "last_operations": _CACHE_STATS["last_ops"][-20:],
+    }
+
 
 def _mat3am_reference_data_refresh_sync(body: dict) -> dict:
     body = body if isinstance(body, dict) else {}
@@ -18085,11 +18124,11 @@ def _body_wants_special_table(body: dict) -> bool:
 
 @app.get("/api/restaurant/table-sessions")
 def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = True):
-    """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير. Cache TTL 5s."""
+    """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير. Cache TTL 2s."""
     cache_key = f"mat3am:restaurant:table-sessions:st={status}:today={today_only}"
     cached = cache_get(cache_key)
     if cached:
-        return cached
+        return JSONResponse(content=cached, headers={"X-Cache-Status": "HIT"})
     _close_stale_active_sessions()
     try:
         threading.Thread(
@@ -18129,7 +18168,7 @@ def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = Tru
     out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
     result = {"sessions": out}
     cache_set(cache_key, result, ttl=2)
-    return result
+    return JSONResponse(content=result, headers={"X-Cache-Status": "MISS"})
 
 
 def _norm_session_table_id(table_id: str) -> str:
@@ -19593,11 +19632,11 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
 @app.get("/api/restaurant/cashier/role-inbox")
 @app.get("/api/restaurant/role-inbox")
 def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Query(default="")):
-    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.  Cache TTL 20s."""
+    """وارد موجّه لكل دور — يستهلكه جرس RestaurantDualBells.  Cache TTL 3s."""
     cache_key = f"mat3am:restaurant:role-inbox:role={forRole}:uid={userId}"
     cached = cache_get(cache_key)
     if cached:
-        return cached
+        return JSONResponse(content=cached, headers={"X-Cache-Status": "HIT"})
     role = str(forRole or "").strip().lower()
     uid_filter = _mat3am_guid_norm(userId)
     rows = _role_inbox_load_rows()
@@ -19649,7 +19688,7 @@ def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Q
     out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
     result = {"ok": True, "items": out[:80], "count": len(out)}
     cache_set(cache_key, result, ttl=3)
-    return result
+    return JSONResponse(content=result, headers={"X-Cache-Status": "MISS"})
 
 
 @app.patch("/api/restaurant/cashier/role-inbox/{item_id}/dismiss")

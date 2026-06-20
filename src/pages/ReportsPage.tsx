@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { apiBase } from "../lib/apiBase";
 
 type ReportMeta = {
@@ -339,7 +340,7 @@ export default function ReportsPage() {
                     {flashResult.captains.map((row, index) => (
                       <tr key={`${row.captainUserId || row.captainLogin || row.captainName || "captain"}-${index}`} style={{ borderTop: "1px solid var(--border)" }}>
                         <td style={{ padding: "0.55rem", verticalAlign: "top" }}>
-                          <div style={{ fontWeight: 700 }}>{row.captainName || row.captainLogin || "غير محدد"}</div>
+                          <div style={{ fontWeight: 700 }}>{repairArabicDisplayText(row.captainName || row.captainLogin || "") || "غير محدد"}</div>
                           <div style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{row.captainLogin || row.baseRoleLabel || ""}</div>
                         </td>
                         <td style={{ padding: "0.55rem", verticalAlign: "top" }}>{row.scheduledRoleLabel || row.baseRoleLabel || "غير محدد"}</td>
