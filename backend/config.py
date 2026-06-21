@@ -4,12 +4,13 @@ Database Connection Settings
 """
 import json
 
-# إعدادات السيرفر الحقيقي
-SERVER = 'xtra.webhop.me,1411'
-DATABASE = 'La7_ahmedsalman2026'
-USERNAME = 'LA7'
-PASSWORD = 'LA72020'
-USE_WINDOWS_AUTH = False  # استخدام SQL Server Authentication
+# Fallback defaults (only used if settings.json is missing).
+# Keep localhost so accidental runs never hit a remote production server.
+SERVER = '127.0.0.1,1433'
+DATABASE = 'Mat3amLocal'
+USERNAME = 'sa'
+PASSWORD = ''
+USE_WINDOWS_AUTH = True  # Prefer Windows Auth for local dev fallback
 
 # إعدادات الاتصال القديمة (للاختبار المحلي)
 # SERVER = 'localhost'

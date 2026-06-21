@@ -11,6 +11,19 @@ export type GuestReturnDisposition = {
   hint?: string;
 };
 
+export type GuestReturnItemStage =
+  | "pending"
+  | "preparing"
+  | "ready"
+  | "served"
+  | "paid"
+  | "cancelled"
+  | "unknown";
+
+export type GuestReturnKind = "cancel_before_prep" | "quality_after_service" | "sealed_unused_return";
+
+export type GuestReturnApprovalMode = "cancel_if_not_started" | "manager_review_required" | "direct_accept_recommended";
+
 export const GUEST_RETURN_DISPOSITIONS: GuestReturnDisposition[] = [
   { code: "deduct_waiter", label: "تخصم على الويتر", hint: "مسؤولية خدمة الصالة" },
   { code: "deduct_kitchen", label: "تخصم على المطبخ", hint: "خطأ تحضير أو جودة" },
@@ -64,4 +77,79 @@ export function groupReasonsByCategory(reasons: GuestReturnReason[]): { category
 
 export function dispositionLabel(code: string): string {
   return GUEST_RETURN_DISPOSITIONS.find((d) => d.code === code)?.label || code;
+}
+
+export function guestReturnItemStageLabel(stage: string): string {
+  const s = String(stage || "").trim().toLowerCase();
+  if (s === "pending") return "لم يبدأ";
+  if (s === "preparing") return "قيد التحضير";
+  if (s === "ready") return "جاهز";
+  if (s === "served") return "وصل للطاولة";
+  if (s === "paid") return "مدفوع";
+  if (s === "cancelled") return "ملغى";
+  return "غير محدد";
+}
+
+export function guestReturnKindLabel(kind: string): string {
+  const k = String(kind || "").trim().toLowerCase();
+  if (k === "cancel_before_prep") return "إلغاء قبل التحضير";
+  if (k === "quality_after_service") return "اعتراض بعد التقديم";
+  if (k === "sealed_unused_return") return "إرجاع صنف مغلق غير مستخدم";
+  return kind || "—";
+}
+
+export function guestReturnApprovalModeLabel(mode: string): string {
+  const m = String(mode || "").trim().toLowerCase();
+  if (m === "cancel_if_not_started") return "قابل للإلغاء إذا لم يبدأ";
+  if (m === "manager_review_required") return "يحتاج مراجعة مدير";
+  if (m === "direct_accept_recommended") return "مؤهل لاعتماد مباشر";
+  return mode || "—";
+}
+
+export function resolveGuestReturnStage(lineStatus?: string, orderStatus?: string): GuestReturnItemStage {
+  const ls = String(lineStatus || "").trim().toLowerCase();
+  const os = String(orderStatus || "").trim().toLowerCase();
+  if (os === "paid" || ls === "paid") return "paid";
+  if (os === "cancelled" || ls === "cancelled") return "cancelled";
+  if (os === "served" || ls === "served" || ls === "sent") return "served";
+  if (ls === "ready" || os === "ready") return "ready";
+  if (ls === "preparing" || os === "preparing") return "preparing";
+  if (ls === "pending" || os === "pending") return "pending";
+  return "unknown";
+}
+
+export function resolveGuestReturnDecision(args: {
+  reasonCode?: string;
+  reasonCategory?: string;
+  lineStatus?: string;
+  orderStatus?: string;
+}) {
+  const reasonCode = String(args.reasonCode || "").trim().toLowerCase();
+  const reasonCategory = String(args.reasonCategory || "").trim();
+  const stage = resolveGuestReturnStage(args.lineStatus, args.orderStatus);
+  if (reasonCode === "unused_drink") {
+    return {
+      stage,
+      kind: "sealed_unused_return" as GuestReturnKind,
+      approvalMode: "direct_accept_recommended" as GuestReturnApprovalMode,
+      recommendedDisposition: "stock_return",
+      policyHint: "صنف مغلق غير مستخدم، ويفضّل اعتماده مباشرة مع تسوية الفاتورة.",
+    };
+  }
+  if (stage === "pending") {
+    return {
+      stage,
+      kind: "cancel_before_prep" as GuestReturnKind,
+      approvalMode: "cancel_if_not_started" as GuestReturnApprovalMode,
+      recommendedDisposition: reasonCategory === "خدمة وتوقيت" ? "deduct_waiter" : "shift_charge",
+      policyHint: "البند لم يبدأ بعد، ويعامل كإلغاء قبل التحضير إذا كان المرجع المطَبخي يؤكد ذلك.",
+    };
+  }
+  return {
+    stage,
+    kind: "quality_after_service" as GuestReturnKind,
+    approvalMode: "manager_review_required" as GuestReturnApprovalMode,
+    recommendedDisposition: reasonCategory === "خدمة وتوقيت" ? "deduct_waiter" : "deduct_kitchen",
+    policyHint: "هذا المسار يحتاج مراجعة واعتماد مدير مع قرار مالي وتشغيلي واضح.",
+  };
 }

@@ -25,6 +25,7 @@ const ALL_ROLES: RoleId[] = [
   "host",
   "waiter",
   "kitchen",
+  "kitchen_specialist",
   "speed_order",
   "server",
   "kids_guard",

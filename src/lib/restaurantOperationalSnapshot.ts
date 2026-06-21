@@ -25,6 +25,7 @@ export async function fetchOperationalSnapshot(
   const t = opts?.cacheBust !== false ? `&t=${Date.now()}` : "";
   const res = await safeFetch(
     `${base}/api/restaurant/operational-snapshot?includeUsers=${includeUsers}${t}`,
+    { timeoutMs: 90_000 },
   );
   const raw = await res.text().catch(() => "");
   const data = tryParseJson<OperationalSnapshot>(raw);

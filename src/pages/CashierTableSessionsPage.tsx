@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
+import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { tryParseJson } from "../lib/tryParseJson";
 
 type RestTable = { id: string; name: string; number?: number; seats?: number };
@@ -21,8 +22,7 @@ function displayNameForSession(s: TableSession, tables: RestTable[]): string {
   const tid = String(s.tableId || "").trim();
   if (!tid) return "بدون طاولة";
   const hit = tables.find((t) => String(t.id) === tid);
-  if (hit?.name) return hit.name;
-  if (hit?.number != null) return `طاولة ${hit.number}`;
+  if (hit) return normalizeTableDisplayLabel(hit.name, hit.number, hit.id);
   const compact = tid.replace(/-/g, "");
   const short = compact.length >= 6 ? compact.slice(-6).toUpperCase() : tid.slice(0, 8);
   return `طاولة ·${short}`;
@@ -345,7 +345,7 @@ function SessionRow({
               .filter((t) => String(t.id) !== current)
               .map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name || (t.number != null ? `طاولة ${t.number}` : String(t.id).slice(0, 10))}
+                  {normalizeTableDisplayLabel(t.name, t.number, t.id)}
                 </option>
               ))}
           </select>

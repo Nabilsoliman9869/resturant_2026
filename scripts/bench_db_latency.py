@@ -41,6 +41,14 @@ def run_via_api(base: str, cold: bool, repeat: int) -> int:
         print(f"  /api/ping FAILED: {e}")
         return 1
 
+    try:
+        ct_ms, ct = fetch_json(f"{base}/api/mat3am/client-timing", timeout=180)
+        print(f"\n  /api/mat3am/client-timing       {ct_ms:>8.1f} ms  total={ct.get('totalMs')}")
+        for step in ct.get("steps") or []:
+            print(f"    {step.get('name', '?'):<28} {step.get('ms', 0):>8.1f} ms  ok={step.get('ok')}")
+    except Exception as e:
+        print(f"  client-timing skipped: {e}")
+
     for i in range(repeat):
         label = f"run {i + 1}/{repeat}"
         url = f"{base}/api/mat3am/perf-probe?cold={'1' if cold else '0'}"

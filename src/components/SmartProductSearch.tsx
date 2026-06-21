@@ -109,7 +109,22 @@ export default function SmartProductSearch({
     };
 
     return (
-        <div style={{ position: "relative", marginBottom: "0.75rem" }}>
+        <div style={{ position: "relative", marginBottom: "0.75rem", width: "100%", boxSizing: "border-box" }}>
+            <span
+                aria-hidden="true"
+                style={{
+                    position: "absolute",
+                    right: "calc(50% - 235px)",
+                    top: 12,
+                    zIndex: 2,
+                    fontSize: "1.15rem",
+                    lineHeight: 1,
+                    color: "#0f766e",
+                    pointerEvents: "none",
+                }}
+            >
+                🔍
+            </span>
             <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -117,8 +132,10 @@ export default function SmartProductSearch({
                 placeholder={placeholder}
                 style={{
                     width: "100%",
+                    boxSizing: "border-box",
                     fontSize: "1.15rem",
-                    padding: "12px 14px",
+                    padding: "12px 42px 12px 14px",
+                    textAlign: "center",
                     border: "2px solid var(--border)",
                     borderRadius: 12,
                     boxShadow: "inset 0 1px 2px rgba(0,0,0,0.04)",

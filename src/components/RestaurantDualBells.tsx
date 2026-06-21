@@ -19,6 +19,14 @@ type InboxItem = {
   createdAt?: string;
   transferRequestId?: string;
   sessionId?: string;
+  tableId?: string;
+  tableDisplayName?: string;
+  noOrderWatchStage?: string;
+  allowSnooze?: boolean;
+  allowClose?: boolean;
+  allowResetReady?: boolean;
+  snoozeCount?: number;
+  maxSnoozes?: number;
 };
 
 /** أدوار يمكن إرسال تنبيه عام إليها (معرّف API = RoleId) */
@@ -81,6 +89,7 @@ function RedInboxBell({
   const [items, setItems] = useState<InboxItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyTransferId, setBusyTransferId] = useState<string | null>(null);
+  const [busyNoOrderId, setBusyNoOrderId] = useState<string | null>(null);
   const [transferMsg, setTransferMsg] = useState("");
   const [loadErr, setLoadErr] = useState("");
   const inboxBases = ["/api/restaurant/cashier/role-inbox", "/api/restaurant/role-inbox"];
@@ -204,6 +213,52 @@ function RedInboxBell({
       }
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const applyNoOrderAction = async (it: InboxItem, action: "snooze" | "close" | "reset_ready") => {
+    setTransferMsg("");
+    if (!mat3amActor?.id || !it.sessionId) {
+      setTransferMsg("تعذر تحديد الجلسة أو المستخدم.");
+      return;
+    }
+    const reason =
+      action === "close"
+        ? (window.prompt("سبب إنهاء التسكين:", "") || "").trim()
+        : action === "reset_ready"
+          ? (window.prompt("سبب إرجاع الطاولة إلى جاهزة:", "") || "").trim()
+          : "";
+    if ((action === "close" || action === "reset_ready") && !reason) return;
+    setBusyNoOrderId(it.id);
+    try {
+      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(it.sessionId)}/no-order-watch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          reason: reason || undefined,
+          mat3amActor,
+        }),
+      });
+      const txt = await r.text();
+      const j = tryParseJson<{ detail?: unknown }>(txt);
+      if (!r.ok) {
+        const d = j?.detail;
+        setTransferMsg(typeof d === "string" ? d : txt.slice(0, 160) || `HTTP ${r.status}`);
+        return;
+      }
+      setTransferMsg(
+        action === "snooze"
+          ? "تم منح مدة إضافية 10 دقائق."
+          : action === "reset_ready"
+            ? "تم إرجاع الطاولة إلى جاهزة."
+            : "تم إنهاء التسكين.",
+      );
+      await load();
+    } catch (e) {
+      setTransferMsg(String(e));
+    } finally {
+      setBusyNoOrderId(null);
     }
   };
 
@@ -353,6 +408,55 @@ function RedInboxBell({
                         >
                           {busyTransferId === it.transferRequestId ? "جاري القبول…" : "قبول التحويل"}
                         </button>
+                      ) : null}
+                      {it.sessionId && (it.type === "no_order_session_watch" || it.type === "no_order_session_escalation" || it.type === "no_order_session_final") ? (
+                        <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                          {it.allowSnooze ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ width: "100%", fontWeight: 800 }}
+                              disabled={busyNoOrderId === it.id}
+                              onClick={(ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                void applyNoOrderAction(it, "snooze");
+                              }}
+                            >
+                              {busyNoOrderId === it.id ? "جاري الحفظ…" : "مدة إضافية 10 د"}
+                            </button>
+                          ) : null}
+                          {it.allowResetReady ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ width: "100%", fontWeight: 800, borderColor: "rgba(16,185,129,0.45)", color: "#d1fae5" }}
+                              disabled={busyNoOrderId === it.id}
+                              onClick={(ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                void applyNoOrderAction(it, "reset_ready");
+                              }}
+                            >
+                              {busyNoOrderId === it.id ? "جاري الإرجاع…" : "إرجاع الطاولة جاهزة"}
+                            </button>
+                          ) : null}
+                          {it.allowClose ? (
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ width: "100%", fontWeight: 800 }}
+                              disabled={busyNoOrderId === it.id}
+                              onClick={(ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                void applyNoOrderAction(it, "close");
+                              }}
+                            >
+                              {busyNoOrderId === it.id ? "جاري الإنهاء…" : "إنهاء التسكين"}
+                            </button>
+                          ) : null}
+                        </div>
                       ) : null}
                     </span>
                   </label>

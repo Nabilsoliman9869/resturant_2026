@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ROLE_ROUTES, type RoleId } from "../auth/roles";
 import type { SessionUser } from "../auth/AuthContext";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { getApiBase } from "../lib/apiBase";
 import { safeFetch } from "../lib/safeFetch";
 import { DbConnectionBar } from "../components/DbConnectionBar";
@@ -15,6 +16,7 @@ const ROLE_SET = new Set<RoleId>([
   "host",
   "waiter",
   "kitchen",
+  "kitchen_specialist",
   "speed_order",
   "server",
   "kids_guard",
@@ -80,9 +82,10 @@ export default function LoginPage() {
       const loginSaved = String(j.user.login || L || "");
       const sessionUser: SessionUser = {
         id: String(j.user.id),
-        name: String(j.user.name || loginSaved || ""),
+        name: repairArabicDisplayText(String(j.user.name || loginSaved || "")),
         login: loginSaved,
         role,
+        specialistStationCode: String(j.user.specialistStationCode || "").trim().toLowerCase(),
       };
       const route = ROLE_ROUTES[role];
       login(sessionUser);

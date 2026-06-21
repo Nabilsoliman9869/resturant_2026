@@ -1,13 +1,13 @@
 {
   "receiveGuestBy": "waiter",
   "takeOrderBy": "waiter",
-  "deliverFromKitchenBy": "server",
-  "cleanTableBy": "server",
+  "deliverFromKitchenBy": "waiter",
+  "cleanTableBy": "waiter",
   "checkRequestBy": "waiter",
   "cashierDispatchMode": "both",
   "cleaningStartTrigger": "payment_completed",
-  "cleaningExecutionBy": "server",
-  "cleaningReviewBy": "manager",
+  "cleaningExecutionBy": "waiter",
+  "cleaningReviewBy": "none",
   "cleaningStartStatus": "dirty",
   "orderTakerExclusiveTable": "on"
 }

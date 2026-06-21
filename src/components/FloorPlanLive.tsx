@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { normalizeFloorPlanDocument } from "../lib/floorPlanDocument";
+import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
+import { safeFetch } from "../lib/safeFetch";
 import { type FloorPlan, type FloorTable, type TableLiveMap, type TableLiveStatus } from "../lib/floorPlanModel";
 import { FloorPlanSvgView } from "./FloorPlanSvgView";
 
@@ -27,7 +29,7 @@ type OrderRec = {
 type PlanStatus = "api" | "missing" | "invalid" | "unavailable";
 
 function tableLabel(t: TableRec) {
-  return (t.name || "").trim() || `طاولة ${t.number ?? t.id.slice(0, 6)}`;
+  return normalizeTableDisplayLabel(t.name, t.number, t.id);
 }
 
 function orderStatusWeight(s: string) {
@@ -278,27 +280,52 @@ export default function FloorPlanLive() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const t0 = performance.now();
     try {
+      const [fpRes, tblRes] = await Promise.all([
+        safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`, { timeoutMs: 45_000 }),
+        safeFetch(`${base}/api/restaurant/tables`, { timeoutMs: 45_000 }),
+      ]);
+      const fpj = await fpRes.json().catch(() => ({}));
+      const rawPlan = fpj?.plan ?? null;
+      const normFast = rawPlan != null ? normalizeFloorPlanDocument(rawPlan) : null;
+      const flistFast = normFast?.floors ?? [];
+      if (flistFast.length || rawPlan != null) {
+        setFloors(flistFast);
+        setActiveFloorId((cur) => {
+          if (!flistFast.length) return null;
+          if (cur && flistFast.some((f) => f.id === cur)) return cur;
+          return normFast?.activeFloorId ?? flistFast[0].id;
+        });
+        setPlanStatus(fpRes.ok ? (normFast ? "api" : "invalid") : "unavailable");
+      }
+      const tj = await tblRes.json().catch(() => ({}));
+      const tl = Array.isArray(tj.tables) ? (tj.tables as TableRec[]) : [];
+      if (tl.length) setTables(tl);
+      if (!fpRes.ok && !tblRes.ok) {
+        setMsg(`تعذر التحميل السريع (مخطط ${fpRes.status} / طاولات ${tblRes.status})`);
+      }
+
       const snapRes = await fetchOperationalSnapshot(base, { includeUsers: false });
       if (snapRes.ok && snapRes.data) {
         applySnapshot(snapRes.data);
         const err = snapRes.data.tableDataSource?.error;
-        if (err) setMsg(`تحذير SQL: ${err}`);
+        const ms = Math.round(performance.now() - t0);
+        setMsg(err ? `تحذير SQL: ${err} · ${ms}ms` : ms > 4000 ? `تم التحميل · ${ms}ms` : "");
         return;
       }
 
-      const r = await fetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`);
-      const fpj = await r.json().catch(() => ({}));
-      const rawPlan = fpj?.plan ?? null;
-      const norm = rawPlan != null ? normalizeFloorPlanDocument(rawPlan) : null;
-      const flist = norm?.floors ?? [];
-      setFloors(flist);
-      setPlanStatus(r.ok ? (norm ? "api" : "invalid") : "unavailable");
-      if (!r.ok) setMsg(`تعذر تحميل المخطط (HTTP ${r.status})`);
-      const tr = await fetch(`${base}/api/restaurant/tables`);
-      const tj = await tr.json().catch(() => ({}));
-      const tl = Array.isArray(tj.tables) ? tj.tables : [];
-      setTables(tl);
+      if (flistFast.length || tl.length) {
+        setMsg(
+          (m) =>
+            m ||
+            `لقطة كاملة غير متاحة — عرض جزئي (مخطط/طاولات). HTTP ${snapRes.status}`,
+        );
+        return;
+      }
+
+      setPlanStatus("unavailable");
+      setMsg(`تعذر تحميل المخطط والطاولات (لقطة HTTP ${snapRes.status})`);
       setLive({});
     } catch (e) {
       setMsg(String(e));

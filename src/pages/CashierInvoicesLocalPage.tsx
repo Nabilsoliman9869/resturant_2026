@@ -5,7 +5,7 @@ import { tryParseJson } from "../lib/tryParseJson";
 import SmartProductSearch from "../components/SmartProductSearch";
 import { CashierPayInvoiceModal, type CashierInvoiceRow } from "../components/CashierPayInvoiceModal";
 
-type PaymentFilter = "awaiting" | "paid" | "all";
+type PaymentFilter = "awaiting" | "paid" | "on_account" | "all";
 
 export default function CashierInvoicesLocalPage() {
   const base = getApiBase();
@@ -76,6 +76,9 @@ export default function CashierInvoicesLocalPage() {
         open={payOpen}
         invoiceId={payInvoiceId}
         initialRow={payInitialRow}
+        onChanged={() => {
+          void load();
+        }}
         onClose={() => {
           setPayOpen(false);
           setPayInvoiceId(null);
@@ -97,6 +100,7 @@ export default function CashierInvoicesLocalPage() {
           >
             <option value="awaiting">في انتظار التسديد</option>
             <option value="paid">مُسدَّدة</option>
+            <option value="on_account">على حساب</option>
             <option value="all">الكل</option>
           </select>
         </label>
@@ -143,21 +147,23 @@ export default function CashierInvoicesLocalPage() {
               {rows.map((inv, i) => {
                 const id = String(inv.invoiceId || "");
                 const awaiting = Boolean(inv.awaitingPayment);
+                const onAccount = (inv.paymentStatus || "") === "on_account";
                 const req = (inv.requestedAt || "").replace("T", " ").slice(0, 19) || "—";
                 const paid = (inv.paidAt || "").replace("T", " ").slice(0, 19) || "—";
+                const onAccountAt = (inv.onAccountAt || "").replace("T", " ").slice(0, 19) || "—";
                 const billNo = inv.billNumber != null ? String(inv.billNumber) : "—";
                 const tableTitle = (inv.tableName && inv.tableName.trim()) || inv.tableLabel || "—";
                 return (
                   <tr key={`${id}-${i}`} style={{ borderBottom: "1px solid var(--border)" }}>
                     <td style={{ padding: "0.6rem", whiteSpace: "nowrap" }}>{req}</td>
-                    <td style={{ padding: "0.6rem", whiteSpace: "nowrap" }}>{paid}</td>
+                    <td style={{ padding: "0.6rem", whiteSpace: "nowrap" }}>{onAccount ? `على حساب — ${onAccountAt}` : paid}</td>
                     <td style={{ padding: "0.6rem" }}>{inv.total != null ? Number(inv.total).toFixed(2) : "—"}</td>
                     <td style={{ padding: "0.6rem", fontWeight: 700 }}>{billNo}</td>
                     <td style={{ padding: "0.6rem" }}>{tableTitle}</td>
                     <td style={{ padding: "0.6rem", verticalAlign: "middle" }}>
-                      {awaiting && id ? (
-                        <button type="button" className="btn btn-primary" style={{ fontSize: "0.85rem" }} onClick={() => openPay(inv)}>
-                          تسديد
+                      {id ? (
+                        <button type="button" className={awaiting ? "btn btn-primary" : onAccount ? "btn btn-ghost" : "btn btn-ghost"} style={{ fontSize: "0.85rem" }} onClick={() => openPay(inv)}>
+                          {awaiting ? "تسديد / طباعة" : onAccount ? "معاينة" : "معاينة / طباعة"}
                         </button>
                       ) : (
                         <span style={{ color: "var(--muted)" }}>—</span>

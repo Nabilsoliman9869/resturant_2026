@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { useLocation, useNavigate } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { getApiBase } from "../lib/apiBase";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { InlinePinConfirm } from "../components/InlinePinConfirm";
@@ -22,7 +23,16 @@ type TableSession = {
   captainUserId?: string;
   captainLogin?: string;
   captainName?: string;
+  captainRole?: string;
   captainClaimedAt?: string;
+  guestCount?: number | string;
+  minimumChargePerSeat?: number | string;
+  noOrderSnoozedUntil?: string;
+  noOrderSnoozeCount?: number;
+  noOrderWatchStage?: string;
+  noOrderEscalatedAt?: string;
+  noOrderFinalAlertAt?: string;
+  guestSession?: boolean;
   billingProfile?: {
     active?: boolean;
     source?: string;
@@ -48,14 +58,30 @@ type TableReport = {
   tableName: string;
   sessionId: string | null;
   startTime: string | null;
+  captainName: string | null;
+  guestCount: number;
+  minimumChargePerSeat: number;
   orderCount: number;
   qtyTotal: number;
   qtyArrived: number;
   qtyKitchen: number;
+  pendingCount: number;
+  preparingCount: number;
+  readyCount: number;
+  servedCount: number;
+  cancelledCount: number;
   totalCost: number;
   pendingCost: number;
   noOrderDelayMinutes?: number;
-  lines: Array<{ id: string; time: string; status: string; qty: number; total: number }>;
+  guestSession?: boolean;
+  lines: Array<{
+    id: string;
+    time: string;
+    status: string;
+    qty: number;
+    total: number;
+    items: Array<{ name: string; quantity: number; unitPrice: number }>;
+  }>;
 };
 
 export default function WaiterTablesPage() {
@@ -71,23 +97,26 @@ export default function WaiterTablesPage() {
   const [sessions, setSessions] = useState<TableSession[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [report, setReport] = useState<TableReport | null>(null);
-  const [reportPos, setReportPos] = useState({ x: 0, y: 0 });
+  const [policy, setPolicy] = useState({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
   const [exclusiveOn, setExclusiveOn] = useState(false);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [reassignSid, setReassignSid] = useState<string | null>(null);
   const [reassignPickId, setReassignPickId] = useState("");
-  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimBusyTableId, setClaimBusyTableId] = useState<string>("");
   const [reassignBusy, setReassignBusy] = useState(false);
   const [alertPresets, setAlertPresets] = useState<AlertPreset[]>([]);
   const [alertPickByTable, setAlertPickByTable] = useState<Record<string, string>>({});
   const [alertBusyByTable, setAlertBusyByTable] = useState<Record<string, boolean>>({});
   const [minChargeDraftByTable, setMinChargeDraftByTable] = useState<Record<string, string>>({});
   const [minChargeBusyByTable, setMinChargeBusyByTable] = useState<Record<string, boolean>>({});
+  const [guestSessionByTable, setGuestSessionByTable] = useState<Record<string, boolean>>({});
   const [vipTemplates, setVipTemplates] = useState<VipTemplate[]>([]);
   const [ownersVipAgents, setOwnersVipAgents] = useState<OwnersVipAgent[]>([]);
   const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
   const [vipBusySessionId, setVipBusySessionId] = useState<string>("");
   const [captainTransferBusySessionId, setCaptainTransferBusySessionId] = useState<string>("");
+  const [noOrderBusySessionId, setNoOrderBusySessionId] = useState<string>("");
+  const [tableResetBusyId, setTableResetBusyId] = useState<string>("");
   const [tableJumpQuery, setTableJumpQuery] = useState("");
   const [tableJumpHighlightId, setTableJumpHighlightId] = useState<string | null>(null);
   const tableCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -133,6 +162,14 @@ export default function WaiterTablesPage() {
     const d = new Date(iso);
     if (!Number.isFinite(d.getTime())) return 0;
     return Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  }
+
+  function sessionRecencyValue(row: TableSession | null | undefined): string {
+    return String(row?.startTime || "").trim();
+  }
+
+  function compareSessionRecencyDesc(a: TableSession, b: TableSession): number {
+    return sessionRecencyValue(b).localeCompare(sessionRecencyValue(a));
   }
 
   const jumpToTableCard = useCallback(() => {
@@ -241,6 +278,15 @@ export default function WaiterTablesPage() {
         setAlertPresets([]);
       }
 
+      try {
+        const svc = Number((opsj as Record<string, unknown>)["servicePercent"] ?? 12);
+        const vat = Number((opsj as Record<string, unknown>)["vatPercent"] ?? 14);
+        const before = Boolean((opsj as Record<string, unknown>)["serviceBeforeVat"] ?? true);
+        setPolicy({ servicePercent: Number.isFinite(svc) ? svc : 12, vatPercent: Number.isFinite(vat) ? vat : 14, serviceBeforeVat: before });
+      } catch {
+        setPolicy({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
+      }
+
       const apiTables: RestTable[] = Array.isArray(jt["tables"]) ? (jt["tables"] as RestTable[]) : [];
       const planRaw = fpj["plan"];
       const statusById = new Map<string, string>();
@@ -266,14 +312,16 @@ export default function WaiterTablesPage() {
         return next;
       });
       const m = new Map<string, string>();
-      const sessions = (Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
+      const sessions = ((Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
         isTodayIso(String((s as TableSession)?.startTime || "")),
-      ) as TableSession[];
+      ) as TableSession[]).slice().sort(compareSessionRecencyDesc);
       setSessions(sessions);
       for (const s of sessions) {
+        const st = String(s?.status || "").toLowerCase();
         const tid = s?.tableId != null ? String(s.tableId) : "";
         const sid = s?.id != null ? String(s.id) : "";
-        if (tid && sid) m.set(tid, sid);
+        // نحتفظ بأحدث session فقط لكل طاولة حتى لو تغيّر ترتيب الـ API.
+        if (tid && sid && st === "active" && !m.has(tid)) m.set(tid, sid);
       }
       setSessionByTable(m);
 
@@ -292,7 +340,8 @@ export default function WaiterTablesPage() {
       for (const o of orders) {
         const tid = String(o?.tableId || "");
         const st = String(o?.status || "").toLowerCase();
-        if (tid && ["pending", "preparing"].includes(st)) busy.add(tid);
+        // الطاولة تعتبر مشغولة إذا كان هناك طلب في الانتظار، قيد التحضير، أو جاهز للتسليم
+        if (tid && ["pending", "preparing", "ready"].includes(st)) busy.add(tid);
       }
       setBusyIds(busy);
       setBillReqIds(billreq);
@@ -446,6 +495,104 @@ export default function WaiterTablesPage() {
     };
   }, [base]);
 
+  function applyClaimedSessionLocally(session: TableSession | null | undefined, fallbackTableId: string) {
+    const tableId = String(session?.tableId || fallbackTableId || "").trim();
+    const sessionId = String(session?.id || "").trim();
+    if (!tableId || !sessionId) return;
+    const normalized: TableSession = {
+      ...session,
+      id: sessionId,
+      tableId,
+      status: String(session?.status || "active"),
+    };
+    setSessions((prev) => {
+      const rest = prev.filter((s) => String(s?.id || "") !== sessionId);
+      return [normalized, ...rest];
+    });
+    setSessionByTable((prev) => {
+      const next = new Map(prev);
+      next.set(tableId, sessionId);
+      return next;
+    });
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      next.add(tableId);
+      return next;
+    });
+    setTables((prev) =>
+      prev.map((t) =>
+        String(t?.id || "") === tableId
+          ? {
+            ...t,
+            status: "occupied",
+          }
+          : t,
+      ),
+    );
+  }
+
+  function clearCompletedSessionLocally(sessionId: string | null, tableId: string, tableStatus: "ready" | "dirty") {
+    const sid = String(sessionId || "").trim();
+    const tid = String(tableId || "").trim();
+    if (!tid) return;
+    if (sid) {
+      setSessions((prev) => prev.filter((s) => String(s?.id || "") !== sid));
+      setVipChoiceBySession((prev) => {
+        const next = { ...prev };
+        delete next[sid];
+        return next;
+      });
+    }
+    setSessionByTable((prev) => {
+      const next = new Map(prev);
+      const mapped = String(next.get(tid) || "").trim();
+      if (!sid || mapped === sid) next.delete(tid);
+      return next;
+    });
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      next.delete(tid);
+      return next;
+    });
+    setBillReqIds((prev) => {
+      const next = new Set(prev);
+      next.delete(tid);
+      return next;
+    });
+    setOrders((prev) => prev.filter((o) => String(o?.tableId || "") !== tid));
+    setReport((prev) => {
+      if (!prev) return prev;
+      const targetName = tables.find((t) => String(t?.id || "") === tid)?.name || "";
+      if (targetName && prev.tableName === targetName) return null;
+      return prev;
+    });
+    setMinChargeDraftByTable((prev) => {
+      const next = { ...prev };
+      delete next[tid];
+      return next;
+    });
+    setAlertPickByTable((prev) => {
+      const next = { ...prev };
+      delete next[tid];
+      return next;
+    });
+    setAlertBusyByTable((prev) => {
+      const next = { ...prev };
+      delete next[tid];
+      return next;
+    });
+    setTables((prev) =>
+      prev.map((t) =>
+        String(t?.id || "") === tid
+          ? {
+            ...t,
+            status: tableStatus,
+          }
+          : t,
+      ),
+    );
+  }
+
   /**
    * تسكين كابتن من شريحة الطاولة:
    * - بدون جلسة نشطة → ننشئها بـ POST؛ الخادم يُسكِّن المُرسِل تلقائياً (waiter/host/manager/developer)
@@ -455,13 +602,14 @@ export default function WaiterTablesPage() {
    */
   async function claimCaptain(args: { tableId: string; sessionId?: string | null }) {
     const { tableId, sessionId } = args;
+    const claimTimeoutMs = 12000;
     setMsg("");
     const actor = buildMat3amActor(user);
     if (!actor?.id) {
       setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
       return;
     }
-    setClaimBusy(true);
+    setClaimBusyTableId(String(tableId));
     try {
       let r: Response;
       let okMessage = "";
@@ -472,10 +620,12 @@ export default function WaiterTablesPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mat3amActor: actor }),
+            timeoutMs: claimTimeoutMs,
           },
         );
         okMessage = "تم تسكينك كابتن على هذه الجلسة.";
       } else {
+        const isGuest = !!guestSessionByTable[tableId];
         r = await safeFetch(`${base}/api/restaurant/table-sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -485,7 +635,9 @@ export default function WaiterTablesPage() {
             assignOrderTaker: true,
             startedByRole: actor.role,
             startReason: "captain_seat_from_table_card",
+            guestSession: isGuest,
           }),
+          timeoutMs: claimTimeoutMs,
         });
         okMessage = "تم فتح جلسة وتسكينك كابتن على الطاولة.";
       }
@@ -500,12 +652,23 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
+      const j = tryParseJson<TableSession | { session?: TableSession }>(t);
+      const session = j && typeof j === "object" && "session" in j ? j.session : (j as TableSession | null);
+      if (session && !String(session.captainUserId || "").trim()) {
+        session.captainUserId = actor.id;
+        session.captainLogin = actor.login;
+        session.captainName = actor.name || actor.login;
+        session.captainRole = actor.role;
+      }
+      applyClaimedSessionLocally(session, String(tableId));
       setMsg(okMessage);
-      await loadTables();
+      const newSessionId = session?.id || sessionId;
+      const q = `tableId=${encodeURIComponent(tableId)}` + (newSessionId ? `&sessionId=${encodeURIComponent(String(newSessionId))}` : "");
+      navigate(`${orderTakerBase}/order-taker?${q}`);
     } catch (e) {
       setMsg(briefNetworkHint(e));
     } finally {
-      setClaimBusy(false);
+      setClaimBusyTableId("");
     }
   }
 
@@ -543,6 +706,109 @@ export default function WaiterTablesPage() {
       setMsg(briefNetworkHint(e));
     } finally {
       setCaptainTransferBusySessionId("");
+    }
+  }
+
+  async function applyNoOrderWatchAction(sessionId: string, action: "snooze" | "close" | "reset_ready" | "reset_table", reason?: string) {
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
+    setNoOrderBusySessionId(sessionId);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/no-order-watch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          reason: reason || undefined,
+          mat3amActor: actor,
+        }),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      const j = tryParseJson<{ session?: TableSession } & Record<string, unknown>>(t);
+      const done = j?.session;
+      const doneTableId = String(done?.tableId || "").trim();
+      if (done && doneTableId && action !== "snooze") {
+        clearCompletedSessionLocally(sessionId, doneTableId, action === "close" ? "dirty" : "ready");
+      }
+      setMsg(
+        action === "snooze"
+          ? "تم منح مدة إضافية 10 دقائق."
+          : action === "reset_table"
+            ? "تم تنفيذ Reset للطاولة وتنظيف حالتها بالكامل."
+            : action === "reset_ready"
+              ? "تم إلغاء التسكين وإرجاع الطاولة إلى جاهزة."
+              : "تم إنهاء التسكين وإغلاق الجلسة.",
+      );
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setNoOrderBusySessionId("");
+    }
+  }
+
+  async function snoozeNoOrderSession(sessionId: string) {
+    await applyNoOrderWatchAction(sessionId, "snooze");
+  }
+
+  async function resetReadyNoOrderSession(sessionId: string) {
+    const reason = window.prompt("سبب إرجاع الطاولة إلى جاهزة:", "") || "";
+    const txt = reason.trim();
+    if (!txt) return;
+    await applyNoOrderWatchAction(sessionId, "reset_ready", txt);
+  }
+
+  async function closeNoOrderSession(sessionId: string) {
+    await applyNoOrderWatchAction(sessionId, "reset_ready");
+  }
+
+  async function resetTableByTableId(tableId: string) {
+    const tid = String(tableId || "").trim();
+    if (!tid) return;
+    const actor = buildMat3amActor(user);
+    if (!actor?.id) {
+      setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
+      return;
+    }
+    const reason =
+      window.prompt("سبب Reset للطاولة (تنظيف كامل للجلسة والطلبات المفتوحة على الطاولة):", "تنظيف كامل للطاولة") || "";
+    const txt = reason.trim();
+    if (!txt) return;
+    setTableResetBusyId(tid);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/tables/${encodeURIComponent(tid)}/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: txt,
+          mat3amActor: actor,
+        }),
+      });
+      const t = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(t);
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg("تم تنفيذ Reset للطاولة وتنظيف حالتها بالكامل.");
+      clearCompletedSessionLocally(null, tid, "ready");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setTableResetBusyId("");
     }
   }
 
@@ -702,7 +968,7 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      setMsg("تم حفظ minimum charge للطاولة.");
+      setMsg("تم حفظ الحد الأدنى لكل كرسي على هذه الطاولة.");
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
@@ -766,39 +1032,58 @@ export default function WaiterTablesPage() {
   const isArrived = (status: string) => ["ready", "served", "completed", "delivered"].includes(status);
   const isKitchen = (status: string) => ["pending", "preparing"].includes(status);
 
-  const costByTableId = useCallback(
-    (tableId: string, sessionId: string | null) => {
-      const tid = String(tableId || "");
-      const sid = sessionId ? String(sessionId) : "";
-      const related = orders
-        .filter((o) => String(o?.tableId || "") === tid || (sid ? String(o?.sessionId || "") === sid : false))
-        .filter((o) => isTodayIso(String(o?.createdAt || "")));
+  const tableCosts = useMemo(() => {
+    const m = new Map<string, { totalCost: number; pendingCost: number; orderCount: number }>();
+    const todayOrders = orders.filter((o) => isTodayIso(String(o?.createdAt || "")));
+    const sessionToTable = new Map<string, string>();
+    for (const [tid, sid] of sessionByTable.entries()) {
+      if (tid && sid) sessionToTable.set(sid, tid);
+    }
+    const byTable: Record<string, OrderRow[]> = {};
+    for (const o of todayOrders) {
+      const sid = String(o?.sessionId || "");
+      const tid = String(o?.tableId || "");
+      const key = sid ? (sessionToTable.get(sid) || tid) : tid;
+      if (!key) continue;
+      if (!byTable[key]) byTable[key] = [];
+      byTable[key].push(o);
+    }
+    for (const [tid, related] of Object.entries(byTable)) {
       const totalCost = related.reduce((a, o) => a + orderTotal(o), 0);
       const pendingCost = related
         .filter((o) => isKitchen(String(o?.status || "").toLowerCase()))
         .reduce((a, o) => a + orderTotal(o), 0);
-      return { totalCost, pendingCost, orderCount: related.length };
-    },
-    [orders],
-  );
+      m.set(tid, { totalCost, pendingCost, orderCount: related.length });
+    }
+    return m;
+  }, [orders, sessionByTable]);
   const showTableReport = (t: RestTable, ev: ReactMouseEvent<HTMLElement>) => {
     ev.preventDefault();
     const tid = String(t.id);
     const session = sessions.find((s) => String(s?.tableId || "") === tid && String(s?.status || "").toLowerCase() === "active") || null;
     const sid = session?.id ? String(session.id) : null;
     const related = orders
-      .filter((o) => String(o?.tableId || "") === tid || (sid ? String(o?.sessionId || "") === sid : false))
+      .filter((o) => (sid ? String(o?.sessionId || "") === sid : String(o?.tableId || "") === tid))
       .filter((o) => isTodayIso(String(o?.createdAt || "")))
       .sort((a, b) => String(a?.createdAt || "").localeCompare(String(b?.createdAt || "")));
     const lines = related.map((o) => {
       const st = String(o?.status || "").toLowerCase();
       const qty = orderQty(o);
+      const rawItems = Array.isArray(o?.items) ? o.items : [];
+      const items = rawItems
+        .map((it) => ({
+          name: String(it?.name || "").trim() || "—",
+          quantity: Math.max(0, Number(it?.quantity ?? 0)),
+          unitPrice: Math.max(0, Number(it?.unitPrice ?? 0)),
+        }))
+        .filter((it) => it.quantity > 0);
       return {
         id: String(o?.id || "").slice(0, 8),
         time: String(o?.createdAt || "").replace("T", " ").slice(0, 16),
         status: st || "pending",
         qty,
         total: orderTotal(o),
+        items,
       };
     });
     const qtyTotal = lines.reduce((a, l) => a + l.qty, 0);
@@ -808,21 +1093,45 @@ export default function WaiterTablesPage() {
     const pendingCost = lines.filter((l) => isKitchen(l.status)).reduce((a, l) => a + l.total, 0);
     const persistedDelay = Number((session as any)?.firstOrderDelayMinutes || 0);
     const noOrderDelayMinutes = lines.length === 0 ? diffMinutesFromIso(session?.startTime || undefined) : persistedDelay;
+    const pendingCount = lines.filter((l) => l.status === "pending").length;
+    const preparingCount = lines.filter((l) => l.status === "preparing").length;
+    const readyCount = lines.filter((l) => l.status === "ready").length;
+    const servedCount = lines.filter((l) => l.status === "served").length;
+    const cancelledCount = lines.filter((l) => l.status === "cancelled").length;
+    const guestCount = Math.max(1, Number(session?.guestCount ?? 1) || 1);
+    const minimumChargePerSeat = Math.max(0, Number(session?.minimumChargePerSeat ?? 0) || 0);
     setReport({
       tableName: t.name,
       sessionId: sid,
       startTime: session?.startTime || null,
+      captainName: repairArabicDisplayText(String(session?.captainName || session?.captainLogin || "").trim()) || null,
+      guestCount,
+      minimumChargePerSeat,
       orderCount: lines.length,
       qtyTotal,
       qtyArrived,
       qtyKitchen,
+      pendingCount,
+      preparingCount,
+      readyCount,
+      servedCount,
+      cancelledCount,
       totalCost,
       pendingCost,
       noOrderDelayMinutes,
+      guestSession: Boolean(session?.guestSession),
       lines,
     });
-    setReportPos({ x: ev.clientX, y: ev.clientY });
   };
+
+  const reportFinancials = useMemo(() => {
+    if (!report) return null;
+    const net = report.totalCost;
+    const svc = (net * policy.servicePercent) / 100;
+    const vat = policy.serviceBeforeVat ? ((net + svc) * policy.vatPercent) / 100 : (net * policy.vatPercent) / 100;
+    const total = Math.max(0, net + svc + vat);
+    return { net, svc, vat, total };
+  }, [report, policy]);
 
   const orderTakerBase = location.pathname.startsWith("/app/manager")
     ? "/app/manager"
@@ -836,6 +1145,20 @@ export default function WaiterTablesPage() {
       : user?.role === "developer"
         ? "شريحات الطاولات — مطوّر"
         : "جارسون الطلبات";
+
+  const handlePrint = useCallback(() => {
+    const el = document.querySelector<HTMLElement>(".print-only");
+    if (!el || !report) return;
+    const w = window.open("", "_blank");
+    if (!w) return;
+    const s = w.document;
+    s.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${report.tableName}</title><style>@page{size:A4 portrait;margin:12mm}body{font-family:"IBM Plex Sans Arabic",Arial,sans-serif;font-size:11pt;line-height:1.5;direction:rtl;text-align:right;color:#000;background:#fff;margin:0;padding:16px 20px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th,td{padding:6px 10px;border:1px solid #ccc;font-size:10pt}th{background:#f5f5f5;font-weight:700;color:#333}td{color:#222;background:#fff}span,strong,em,b,i,small,label{display:inline;color:#000}.print-header{font-size:16pt;font-weight:900;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:12px;color:#000}.print-subheader{font-size:12pt;font-weight:700;color:#444;margin:12px 0 6px;border-bottom:1px solid #ddd;padding-bottom:4px}.print-row{display:flex;flex-direction:row;justify-content:space-between;gap:12px;margin-bottom:8px;page-break-inside:avoid}.print-col{display:flex;flex-direction:column;flex:1}.print-meta-box{border:1px solid #ccc;padding:8px 10px;border-radius:4px;background:#fafafa;margin-bottom:6px;page-break-inside:avoid}.print-meta-label{font-size:9pt;color:#666;font-weight:600;margin-bottom:2px}.print-meta-value{font-size:11pt;font-weight:800;color:#000}.print-alert{padding:6px 10px;border-radius:4px;margin:4px 0;font-size:10pt;font-weight:700;page-break-inside:avoid}.print-alert-warning{background:#fff8e1;border:1px solid #ffc107;color:#856404}.print-alert-danger{background:#ffebee;border:1px solid #f44336;color:#c62828}.print-alert-success{background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32}.print-footer{margin-top:20px;padding-top:10px;border-top:1px solid #ccc;font-size:9pt;color:#666;text-align:center}.avoid-break{page-break-inside:avoid}</style></head><body>`);
+    s.write(el.innerHTML);
+    s.write("</body></html>");
+    s.close();
+    w.focus();
+    w.print();
+  }, [report]);
 
   return (
     <div className="role-op waiter-pos" onClick={() => setReport(null)}>
@@ -879,7 +1202,7 @@ export default function WaiterTablesPage() {
                 </div>
               );
             }
-            const num = t.number != null ? `#${t.number}` : t.name;
+            const displayLabel = t.name || "طاولة";
             const tStatus = normalizeTableStatus(String((t as any).status || ""));
             const notReady = tStatus === "dirty" || tStatus === "cleaning";
             const cleanupOverdue = Boolean((t as any).cleanupOverdue);
@@ -892,9 +1215,16 @@ export default function WaiterTablesPage() {
               (s) => String(s?.tableId || "") === String(t.id) && String(s?.status || "").toLowerCase() === "active",
             );
             const captainLabel = sessRow
-              ? String(sessRow.captainName || sessRow.captainLogin || "").trim() || ""
+              ? repairArabicDisplayText(String(sessRow.captainName || sessRow.captainLogin || "").trim()) || ""
               : "";
             const capId = sessRow ? String(sessRow.captainUserId || "").trim() : "";
+            const watchStage = String(sessRow?.noOrderWatchStage || "").trim();
+            const snoozeCount = Math.max(0, Number(sessRow?.noOrderSnoozeCount || 0));
+            const snoozedUntilIso = String(sessRow?.noOrderSnoozedUntil || "").trim();
+            const snoozedUntilTs = snoozedUntilIso ? Date.parse(snoozedUntilIso) : Number.NaN;
+            const snoozeActive = Number.isFinite(snoozedUntilTs) && snoozedUntilTs > Date.now();
+            const needsImmediateResolution = watchStage === "final_decision" || snoozeCount >= 2;
+            const isGuestSession = Boolean(sessRow?.guestSession);
             const bp = sessRow?.billingProfile;
             const vipOwnerLabel =
               bp && typeof bp === "object" && bp.active !== false
@@ -902,7 +1232,7 @@ export default function WaiterTablesPage() {
                 : "";
             const isVipTable = Boolean(t.features?.vipSection);
             const cardTone = notReady ? "blocked" : isBusy ? "busy" : "ready";
-            const money = costByTableId(String(t.id), sidStr || null);
+            const money = tableCosts.get(String(t.id)) || { totalCost: 0, pendingCost: 0, orderCount: 0 };
             const minRaw = String(minChargeDraftByTable[String(t.id)] ?? "").trim();
             const minCharge = Number(minRaw);
             const minOk = Number.isFinite(minCharge) ? Math.max(0, minCharge) : 0;
@@ -910,7 +1240,50 @@ export default function WaiterTablesPage() {
             const alertPick = alertPickByTable[String(t.id)] ?? "";
             const alertBusy = Boolean(alertBusyByTable[String(t.id)]);
             const canEditMin = user?.role === "manager" || user?.role === "developer";
-            const openOrderTakerForTable = () => {
+            const billAgeMinutes = diffMinutesFromIso(sessRow?.billingRequestedAt || undefined);
+            const canForceResetTable = Boolean(
+              (user?.role === "manager" || user?.role === "developer") &&
+              (tStatus === "occupied" || sidStr || money.orderCount > 0 || billReq),
+            );
+            const noOrderWatchActive = Boolean(
+              sidStr && money.orderCount === 0 && (noOrderMinutes >= 10 || snoozeActive || watchStage),
+            );
+            const billWatchActive = Boolean(sidStr && sessRow?.billingRequestedAt);
+            const noOrderStatusLabel = snoozeActive
+              ? `مدة إضافية حتى ${new Date(snoozedUntilTs).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}`
+              : needsImmediateResolution
+                ? `حسم فوري بعد ${noOrderMinutes} د`
+                : watchStage === "manager_escalated"
+                  ? `تصعيد بعد ${noOrderMinutes} د`
+                  : noOrderOverdue
+                    ? `فوات أوان التسكين ${noOrderMinutes} د`
+                    : "";
+            const billStatusLabel = billWatchActive
+              ? billAgeMinutes >= 1
+                ? `طلب الحساب ${billAgeMinutes} د`
+                : "طلب حساب"
+              : "";
+            const claimButtonLabel =
+              claimBusyTableId === String(t.id)
+                ? "جاري التسكين…"
+                : capId && user?.id && String(capId) === String(user.id)
+                  ? "أنت الكابتن ✓"
+                  : sidStr
+                    ? capId
+                      ? "الطاولة مسندة"
+                      : "تسكين كابتن"
+                    : "ابدأ التسكين";
+            const claimButtonTitle =
+              claimBusyTableId === String(t.id)
+                ? "جارٍ تنفيذ أمر التسكين لهذه الطاولة"
+                : capId && user?.id && String(capId) === String(user.id)
+                  ? "أنت الكابتن على هذه الجلسة"
+                  : sidStr
+                    ? capId
+                      ? `الجلسة مسندة إلى ${captainLabel || "كابتن آخر"}`
+                      : "ربط الجلسة على الكابتن"
+                    : "بدء جلسة وتسكين نفسك على الطاولة";
+            const openOrderTakerForTable = async () => {
               if (notReady) {
                 setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
                 return;
@@ -927,6 +1300,25 @@ export default function WaiterTablesPage() {
                 setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
                 return;
               }
+              // اذا في اختيار VIP/Owner غير مطبّق، نطبّقه تلقائياً قبل فتح الطلب
+              if (sidStr) {
+                const bp = sessRow?.billingProfile;
+                const src = String(bp?.source || "").toLowerCase();
+                const currentMode =
+                  bp?.active === false
+                    ? ""
+                    : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
+                      ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
+                      : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                        ? String(bp?.vipTemplateId || "").trim()
+                        : bp && String(bp?.source || "").trim()
+                          ? "__ops_defaults__"
+                          : "";
+                const chosen = vipChoiceBySession[sidStr] ?? "";
+                if (chosen && chosen !== currentMode) {
+                  await applyVipBilling(sidStr, chosen);
+                }
+              }
               const q =
                 `tableId=${encodeURIComponent(t.id)}` + (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
               navigate(`${orderTakerBase}/order-taker?${q}`);
@@ -942,298 +1334,395 @@ export default function WaiterTablesPage() {
                   else tableCardRefs.current.delete(tid);
                 }}
               >
-              <div
-                className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}`}
-                onClick={openOrderTakerForTable}
-                onContextMenu={(ev) => showTableReport(t, ev)}
-                aria-label={`بطاقة طاولة ${num}`}
-              >
-                <div className="waiter-tblcard__spec-top">
-                  <div className="waiter-tblcard__spec-id">
-                    <span className="waiter-tblcard__spec-id-text">{num}</span>
-                    {isVipTable ? <span className="waiter-tables-vip-pill">VIP</span> : null}
-                    {vipOwnerLabel ? <span className="waiter-tables-owner-pill">{vipOwnerLabel}</span> : null}
+                <div
+                  className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}`}
+                  onClick={openOrderTakerForTable}
+                  onContextMenu={(ev) => showTableReport(t, ev)}
+                  aria-label={`بطاقة طاولة ${displayLabel}`}
+                >
+                  <div className="waiter-tblcard__spec-top">
+                    <div className="waiter-tblcard__spec-id">
+                      <span className="waiter-tblcard__spec-id-text">{displayLabel}</span>
+                      {isVipTable ? <span className="waiter-tables-vip-pill">VIP</span> : null}
+                      {vipOwnerLabel ? <span className="waiter-tables-owner-pill">{vipOwnerLabel}</span> : null}
+                      {isGuestSession ? <span className="waiter-tables-owner-pill" style={{ background: "rgba(16,185,129,0.15)", borderColor: "rgba(16,185,129,0.4)", color: "#047857" }}>ضيف</span> : null}
+                    </div>
+                    <div className="waiter-tblcard__spec-meta-row">
+                      <span className="waiter-tblcard__spec-seats">المقاعد: {t.seats ?? "—"}</span>
+                      <span className="waiter-tblcard__mini-chip">{tStatus === "dirty" ? "متسخة" : tStatus === "cleaning" ? "قيد التنظيف" : isBusy ? "مشغولة" : "جاهزة"}</span>
+                      {billReq ? (
+                        <span className="waiter-tblcard__mini-chip" style={{ borderColor: "rgba(59,130,246,0.5)", background: "rgba(59,130,246,0.12)" }}>
+                          {billStatusLabel || "طلب حساب"}
+                        </span>
+                      ) : null}
+                      {noOrderStatusLabel ? <span className="waiter-tblcard__mini-chip" data-tooltip="متابعة التسكين بلا طلبات">⏱ {noOrderStatusLabel}</span> : null}
+                    </div>
+                    <div className="waiter-tblcard__spec-seated-by">
+                      {captainLabel ? (
+                        <span className="waiter-tblcard__spec-captain">كابتن: {captainLabel}</span>
+                      ) : sidStr ? (
+                        <span className="waiter-tblcard__spec-muted">لم يُسكَّن كابتن بعد</span>
+                      ) : (
+                        <span className="waiter-tblcard__spec-muted">لا توجد جلسة نشطة</span>
+                      )}
+                    </div>
+                    {cleanupOverdue ? <div className="waiter-tblcard__session-gap">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div> : null}
                   </div>
-                  <div className="waiter-tblcard__spec-meta-row">
-                    <span className="waiter-tblcard__spec-seats">المقاعد: {t.seats ?? "—"}</span>
-                    <span className="waiter-tblcard__mini-chip">{tStatus === "dirty" ? "متسخة" : tStatus === "cleaning" ? "قيد التنظيف" : isBusy ? "مشغولة" : "جاهزة"}</span>
-                    {billReq ? <span className="waiter-tblcard__mini-chip" style={{ borderColor: "rgba(59,130,246,0.5)", background: "rgba(59,130,246,0.12)" }}>طلب حساب</span> : null}
-                    {noOrderOverdue ? <span className="waiter-tblcard__mini-chip" title="تأخر أخذ الطلب">⏱ {noOrderMinutes} د</span> : null}
-                  </div>
-                  <div className="waiter-tblcard__spec-seated-by">
-                    {captainLabel ? (
-                      <span className="waiter-tblcard__spec-captain">كابتن: {captainLabel}</span>
-                    ) : sidStr ? (
-                      <span className="waiter-tblcard__spec-muted">لم يُسكَّن كابتن بعد</span>
-                    ) : (
-                      <span className="waiter-tblcard__spec-muted">لا توجد جلسة نشطة</span>
-                    )}
-                  </div>
-                  {cleanupOverdue ? <div className="waiter-tblcard__session-gap">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div> : null}
-                </div>
 
-                <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
-                  <div className="waiter-tblcard__pill-row">
-                    <button
-                      type="button"
-                      className="waiter-tblcard__pill waiter-tblcard__pill--assign"
-                      disabled={
-                        claimBusy ||
-                        notReady ||
-                        Boolean(
-                          exclusiveOn &&
+                  <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
+                    <div className="waiter-tblcard__pill-row">
+                      {(user?.role === "manager" || user?.role === "developer" || user?.role === "waiter") && !sidStr ? (
+                        <label
+                          className="waiter-tblcard__pill"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            cursor: "pointer",
+                            background: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.15)" : undefined,
+                            borderColor: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.4)" : undefined,
+                          }}
+                          data-tooltip="تسجيل الجلسة كضيف — تُحوّل الفاتورة لاحقاً على حساب العميل الوهمي 'ضيف'"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!guestSessionByTable[String(t.id)]}
+                            onChange={(e) =>
+                              setGuestSessionByTable((prev) => ({
+                                ...prev,
+                                [String(t.id)]: e.target.checked,
+                              }))
+                            }
+                          />
+                          <span style={{ fontSize: "0.78rem", fontWeight: 700 }}>ضيف</span>
+                        </label>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="waiter-tblcard__pill waiter-tblcard__pill--assign"
+                        disabled={
+                          claimBusyTableId === String(t.id) ||
+                          notReady ||
+                          Boolean(
+                            exclusiveOn &&
                             capId &&
                             user?.id &&
                             String(capId) !== String(user.id) &&
                             user.role !== "manager" &&
                             user.role !== "developer",
-                        )
-                      }
-                      onClick={() => void claimCaptain({ tableId: String(t.id), sessionId: sidStr || null })}
-                      title={
-                        capId && user?.id && String(capId) === String(user.id)
-                          ? "أنت الكابتن على هذه الجلسة"
-                          : sidStr
-                            ? "تسكين كابتن (ربط الطاولة على المسند)"
-                            : "بدء جلسة وتسكين نفسك على الطاولة"
-                      }
-                    >
-                      {capId && user?.id && String(capId) === String(user.id)
-                        ? "أنت الكابتن ✓"
-                        : sidStr
-                          ? "تسكين كابتن"
-                          : "ابدأ التسكين"}
-                    </button>
+                          )
+                        }
+                        onClick={() => void claimCaptain({ tableId: String(t.id), sessionId: sidStr || null })}
+                        title={claimButtonTitle}
+                      >
+                        {claimButtonLabel}
+                      </button>
 
-                    {sidStr &&
-                    capId &&
-                    user?.id &&
-                    String(capId) === String(user.id) &&
-                    (user.role === "waiter" || user.role === "host") ? (
+                      {sidStr &&
+                        capId &&
+                        user?.id &&
+                        String(capId) === String(user.id) &&
+                        (user.role === "waiter" || user.role === "host") ? (
+                        <button
+                          type="button"
+                          className="waiter-tblcard__pill"
+                          disabled={notReady || captainTransferBusySessionId === sidStr}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void requestCaptainTransfer(sidStr);
+                          }}
+                          data-tooltip="إرسال تنبيه للزملاء بنفس الدور الفعّال اليوم — قبول من الجرس الأحمر"
+                        >
+                          {captainTransferBusySessionId === sidStr ? "…" : "طلب تحويل"}
+                        </button>
+                      ) : null}
+
+                      {(user?.role === "manager" || user?.role === "developer") && sidStr ? (
+                        <button
+                          type="button"
+                          className="waiter-tblcard__pill"
+                          disabled={notReady}
+                          onClick={() => {
+                            setReassignSid(sidStr);
+                            setReassignPickId("");
+                          }}
+                          data-tooltip="تغيير/تحويل الكابتن"
+                        >
+                          تغيير كابتن
+                        </button>
+                      ) : null}
+                    </div>
+
+                  </div>
+
+                  {canForceResetTable ? (
+                    <div
+                      className="waiter-tblcard__spec-alert"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}
+                    >
                       <button
                         type="button"
-                        className="waiter-tblcard__pill"
-                        disabled={notReady || captainTransferBusySessionId === sidStr}
+                        className="waiter-tblcard__send"
+                        disabled={tableResetBusyId === String(t.id)}
+                        onClick={() => void resetTableByTableId(String(t.id))}
+                        data-tooltip="Reset للطاولة: تنظيف كامل للجلسات والطلبات المفتوحة وإرجاع الطاولة إلى جاهزة حتى لو لم تعد هناك جلسة نشطة"
+                        style={{ background: "rgba(244,114,182,0.16)", borderColor: "rgba(244,114,182,0.45)", color: "#fbcfe8" }}
+                      >
+                        {tableResetBusyId === String(t.id) ? "…" : "Reset للطاولة"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {sidStr && noOrderWatchActive ? (
+                    <div
+                      className="waiter-tblcard__spec-alert"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}
+                    >
+                      {snoozeCount < 2 ? (
+                        <button
+                          type="button"
+                          className="waiter-tblcard__send"
+                          disabled={noOrderBusySessionId === sidStr}
+                          onClick={() => void snoozeNoOrderSession(sidStr)}
+                          data-tooltip="منح مدة إضافية 10 دقائق"
+                        >
+                          {noOrderBusySessionId === sidStr ? "…" : "مدة إضافية 10 د"}
+                        </button>
+                      ) : null}
+                      {needsImmediateResolution ? (
+                        <button
+                          type="button"
+                          className="waiter-tblcard__send"
+                          disabled={noOrderBusySessionId === sidStr}
+                          onClick={() => void resetReadyNoOrderSession(sidStr)}
+                          data-tooltip="إلغاء التسكين وإرجاع الطاولة إلى جاهزة"
+                          style={{ background: "rgba(16,185,129,0.18)", borderColor: "rgba(16,185,129,0.55)", color: "#d1fae5" }}
+                        >
+                          {noOrderBusySessionId === sidStr ? "…" : "إلغاء التسكين"}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="waiter-tblcard__send"
+                        disabled={noOrderBusySessionId === sidStr}
+                        onClick={() => void closeNoOrderSession(sidStr)}
+                        data-tooltip="إلغاء التسكين إذا لم توجد طلبات على الطاولة"
+                      >
+                        {noOrderBusySessionId === sidStr ? "…" : "إلغاء التسكين"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {!noOrderWatchActive && (billWatchActive || minGap > 0) ? (
+                    <div
+                      className="waiter-tblcard__spec-alert"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}
+                    >
+                      {billWatchActive && billAgeMinutes >= 10 ? (
+                        <span className="waiter-tblcard__pill waiter-tblcard__pill--busy">متأخر</span>
+                      ) : minGap > 0 ? (
+                        <span className="waiter-tblcard__pill waiter-tblcard__pill--dirty">تنبيه مالي</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {sidStr ? (
+                    <div
+                      style={{ position: "relative", marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr) 86px", gap: 8, width: "100%", alignItems: "center" }}
+                      onClick={(e) => e.stopPropagation()}
+                      data-tooltip="ربط الطاولة على Owner/VIP"
+                    >
+                      {isGuestSession ? (
+                        <div style={{ fontSize: "0.72rem", color: "#047857", fontWeight: 600, padding: "4px 0", textAlign: "center" }}>
+                          جلسة ضيف — لا يمكن تحويلها لملاك/VIP
+                        </div>
+                      ) : (
+                        <select
+                          className="waiter-pos__select"
+                          style={{ minWidth: 0, width: "100%" }}
+                          value={(() => {
+                            const bp = sessRow?.billingProfile;
+                            const src = String(bp?.source || "").toLowerCase();
+                            const currentMode =
+                              bp?.active === false
+                                ? ""
+                                : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
+                                  ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
+                                  : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+                                    ? String(bp?.vipTemplateId || "").trim()
+                                    : bp && String(bp?.source || "").trim()
+                                      ? "__ops_defaults__"
+                                      : "";
+                            return vipChoiceBySession[sidStr] ?? currentMode;
+                          })()}
+                          onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
+                        >
+                          <option value="">عادي (بدون Owner/VIP)</option>
+                          <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
+                          {activeVipTemplates.length ? (
+                            <optgroup label="قوالب">
+                              {activeVipTemplates.map((tpl) => {
+                                const ownerName = tpl.agentGuid
+                                  ? (ownersVipAgents.find((a) => a.CardGuide === tpl.agentGuid)?.AgentName || "")
+                                  : "";
+                                const display = tpl.label || ownerName || "Owner/VIP";
+                                return (
+                                  <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
+                                    {display}
+                                  </option>
+                                );
+                              })}
+                            </optgroup>
+                          ) : null}
+                          {ownersVipAgentsDeduped.length ? (
+                            <optgroup label="عملاء ملاك (غير مكرّرين في القوالب)">
+                              {ownersVipAgentsDeduped.map((a) => (
+                                <option key={`vip-ag-${a.CardGuide}`} value={`__agent__:${a.CardGuide}`}>
+                                  {a.AgentName || a.CardGuide}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontWeight: 900, whiteSpace: "nowrap", padding: "0.35rem 0.5rem", width: "100%", minWidth: 0 }}
+                        disabled={vipBusySessionId === sidStr || isGuestSession}
+                        onClick={() => {
+                          if (isGuestSession) {
+                            setMsg("جلسة ضيف — لا يمكن تحويلها لملاك/VIP");
+                            return;
+                          }
+                          const chosen = vipChoiceBySession[sidStr] ?? "";
+                          void applyVipBilling(sidStr, chosen);
+                        }}
+                        data-tooltip={isGuestSession ? "جلسة ضيف — لا يمكن تطبيق Owner/VIP" : "تطبيق Owner/VIP على الجلسة"}
+                      >
+                        {vipBusySessionId === sidStr ? "…" : isGuestSession ? "—" : "تطبيق"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="waiter-tblcard__spec-open">
+                    <button
+                      type="button"
+                      className="waiter-tblcard__open-order"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openOrderTakerForTable();
+                      }}
+                    >
+                      فتح الطلب
+                    </button>
+                  </div>
+
+                  <div className="waiter-tblcard__spec-money">
+                    <div className="waiter-tblcard__money-est">
+                      <div className="waiter-tblcard__money-est-label">قيمة تقديرية</div>
+                      <div className="waiter-tblcard__money-est-val">{money.totalCost.toFixed(0)} ج</div>
+                    </div>
+                    <div className="waiter-tblcard__money-min-stack" onClick={(e) => e.stopPropagation()} data-tooltip="الحد الأدنى لكل كرسي على هذه الطاولة">
+                      {canEditMin ? (
+                        <input
+                          className="waiter-tblcard__money-input"
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={minChargeDraftByTable[String(t.id)] ?? ""}
+                          onChange={(e) => setMinChargeDraftByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
+                          disabled={Boolean(minChargeBusyByTable[String(t.id)])}
+                        />
+                      ) : (
+                        <div className="waiter-tblcard__money-min-readout">{minOk.toFixed(0)}</div>
+                      )}
+                      <div className="waiter-tblcard__money-min-hint">لكل كرسي</div>
+                    </div>
+                    <div className="waiter-tblcard__money-min-label" onClick={(e) => e.stopPropagation()}>
+                      {canEditMin ? (
+                        <InlinePinConfirm
+                          label={Boolean(minChargeBusyByTable[String(t.id)]) ? "…" : "حفظ"}
+                          reason="minimum_charge_override"
+                          promptHint="تعديل الحد الأدنى لكل كرسي"
+                          variant="warn"
+                          disabled={Boolean(minChargeBusyByTable[String(t.id)])}
+                          onConfirm={() => saveMinimumCharge(String(t.id))}
+                        />
+                      ) : (
+                        <span className="waiter-tblcard__spec-muted">حد أدنى لكل كرسي</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {minGap > 0 ? (
+                    <div className="waiter-tblcard__spec-min-gap">فرق الحد الأدنى: {minGap.toFixed(0)} ج</div>
+                  ) : null}
+
+                  <div className="waiter-tblcard__spec-alert" onClick={(e) => e.stopPropagation()} data-tooltip="تنبيه كاشير سريع من إعدادات التشغيل — ليست قائمة عملاء الملاك">
+                    <button
+                      type="button"
+                      className="waiter-tblcard__send"
+                      disabled={alertBusy || !sidStr}
+                      onClick={() => void sendTableAlert(String(t.id), sidStr || null)}
+                    >
+                      {alertBusy ? "…" : "تنبيه"}
+                    </button>
+                    <select
+                      className="waiter-tblcard__alert-select"
+                      value={alertPick}
+                      onChange={(e) => setAlertPickByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
+                      disabled={alertBusy || alertPresets.length === 0}
+                    >
+                      <option value="">— اختر —</option>
+                      {alertPresets.map((x) => (
+                        <option key={`al-${x.id}`} value={x.id}>
+                          {x.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="waiter-tblcard__spec-footer" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="waiter-tblcard__report"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        showTableReport(t, e);
+                      }}
+                    >
+                      تقرير سريع
+                    </button>
+                    {tStatus === "dirty" ? (
+                      <button
+                        type="button"
+                        className="waiter-tblcard__pill waiter-tblcard__pill--clean-go"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void requestCaptainTransfer(sidStr);
+                          void changeTableStatus(String(t.id), "cleaning");
                         }}
-                        title="إرسال تنبيه للزملاء بنفس الدور الفعّال اليوم — قبول من الجرس الأحمر"
                       >
-                        {captainTransferBusySessionId === sidStr ? "…" : "طلب تحويل"}
+                        بدء تنظيف
                       </button>
                     ) : null}
-
-                    {(user?.role === "manager" || user?.role === "developer") && sidStr ? (
+                    {tStatus === "cleaning" ? (
                       <button
                         type="button"
-                        className="waiter-tblcard__pill"
-                        disabled={notReady}
-                        onClick={() => {
-                          setReassignSid(sidStr);
-                          setReassignPickId("");
+                        className="waiter-tblcard__pill waiter-tblcard__pill--clean-done"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void changeTableStatus(String(t.id), "ready");
                         }}
-                        title="تغيير/تحويل الكابتن"
                       >
-                        تغيير كابتن
+                        تم التنظيف
                       </button>
                     ) : null}
                   </div>
-
-                  <div className="waiter-tblcard__pill-row waiter-tblcard__pill-row--solo">
-                    <span className={`waiter-tblcard__pill ${notReady ? "waiter-tblcard__pill--dirty" : isBusy ? "waiter-tblcard__pill--busy" : "waiter-tblcard__pill--ready"}`}>
-                      {notReady ? (tStatus === "dirty" ? "متسخة" : "قيد التنظيف") : isBusy ? "مشغولة" : "جاهزة"}
-                    </span>
-                    {billReq ? <span className="waiter-tblcard__pill">طلب حساب</span> : null}
-                  </div>
                 </div>
-
-                {sidStr ? (
-                  <div
-                    style={{ marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr) 86px", gap: 8, width: "100%", alignItems: "center" }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <select
-                      className="waiter-pos__select"
-                      style={{ minWidth: 0, width: "100%" }}
-                      value={(() => {
-                        const bp = sessRow?.billingProfile;
-                        const src = String(bp?.source || "").toLowerCase();
-                        const currentMode =
-                          bp?.active === false
-                            ? ""
-                            : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
-                              ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
-                              : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
-                                ? String(bp?.vipTemplateId || "").trim()
-                                : bp && String(bp?.source || "").trim()
-                                  ? "__ops_defaults__"
-                                  : "";
-                        return vipChoiceBySession[sidStr] ?? currentMode;
-                      })()}
-                      onChange={(e) => setVipChoiceBySession((prev) => ({ ...prev, [sidStr]: e.target.value }))}
-                      title="ربط الطاولة على Owner/VIP"
-                    >
-                      <option value="">عادي (بدون Owner/VIP)</option>
-                      <option value="__ops_defaults__">Owner/VIP (افتراضيات الإعدادات)</option>
-                      {activeVipTemplates.length ? (
-                        <optgroup label="قوالب">
-                          {activeVipTemplates.map((tpl) => {
-                            const ownerName = tpl.agentGuid
-                              ? (ownersVipAgents.find((a) => a.CardGuide === tpl.agentGuid)?.AgentName || "")
-                              : "";
-                            const display = tpl.label || ownerName || "Owner/VIP";
-                            return (
-                              <option key={`vip-tpl-${tpl.id}`} value={tpl.id}>
-                                {display}
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      ) : null}
-                      {ownersVipAgentsDeduped.length ? (
-                        <optgroup label="عملاء ملاك (غير مكرّرين في القوالب)">
-                          {ownersVipAgentsDeduped.map((a) => (
-                            <option key={`vip-ag-${a.CardGuide}`} value={`__agent__:${a.CardGuide}`}>
-                              {a.AgentName || a.CardGuide}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontWeight: 900, whiteSpace: "nowrap", padding: "0.35rem 0.5rem", width: "100%", minWidth: 0 }}
-                      disabled={vipBusySessionId === sidStr}
-                      onClick={() => {
-                        const chosen = vipChoiceBySession[sidStr] ?? "";
-                        void applyVipBilling(sidStr, chosen);
-                      }}
-                      title="تطبيق Owner/VIP على الجلسة"
-                    >
-                      {vipBusySessionId === sidStr ? "…" : "تطبيق"}
-                    </button>
-                  </div>
-                ) : null}
-
-                <div className="waiter-tblcard__spec-open">
-                  <button
-                    type="button"
-                    className="waiter-tblcard__open-order"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openOrderTakerForTable();
-                    }}
-                  >
-                    فتح الطلب
-                  </button>
-                </div>
-
-                <div className="waiter-tblcard__spec-money">
-                  <div className="waiter-tblcard__money-est">
-                    <div className="waiter-tblcard__money-est-label">قيمة تقديرية</div>
-                    <div className="waiter-tblcard__money-est-val">{money.totalCost.toFixed(0)} ج</div>
-                  </div>
-                  <div className="waiter-tblcard__money-min-stack" onClick={(e) => e.stopPropagation()}>
-                    {canEditMin ? (
-                      <input
-                        className="waiter-tblcard__money-input"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={minChargeDraftByTable[String(t.id)] ?? ""}
-                        onChange={(e) => setMinChargeDraftByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
-                        disabled={Boolean(minChargeBusyByTable[String(t.id)])}
-                        title="Minimum charge للطاولة"
-                      />
-                    ) : (
-                      <div className="waiter-tblcard__money-min-readout">{minOk.toFixed(0)}</div>
-                    )}
-                    <div className="waiter-tblcard__money-min-hint">minimum</div>
-                  </div>
-                  <div className="waiter-tblcard__money-min-label" onClick={(e) => e.stopPropagation()}>
-                    {canEditMin ? (
-                      <InlinePinConfirm
-                        label={Boolean(minChargeBusyByTable[String(t.id)]) ? "…" : "حفظ"}
-                        reason="minimum_charge_override"
-                        promptHint="تعديل ميني-موم"
-                        variant="warn"
-                        disabled={Boolean(minChargeBusyByTable[String(t.id)])}
-                        onConfirm={() => saveMinimumCharge(String(t.id))}
-                      />
-                    ) : (
-                      <span className="waiter-tblcard__spec-muted">حد أدنى للطاولة</span>
-                    )}
-                  </div>
-                </div>
-
-                {minGap > 0 ? (
-                  <div className="waiter-tblcard__spec-min-gap">فرق الحد الأدنى: {minGap.toFixed(0)} ج</div>
-                ) : null}
-
-                <div className="waiter-tblcard__spec-alert" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="waiter-tblcard__send"
-                    disabled={alertBusy || !sidStr}
-                    onClick={() => void sendTableAlert(String(t.id), sidStr || null)}
-                  >
-                    {alertBusy ? "…" : "تنبيه"}
-                  </button>
-                  <select
-                    className="waiter-tblcard__alert-select"
-                    value={alertPick}
-                    onChange={(e) => setAlertPickByTable((p) => ({ ...p, [String(t.id)]: e.target.value }))}
-                    disabled={alertBusy || alertPresets.length === 0}
-                    title="تنبيه كاشير سريع من إعدادات التشغيل — ليست قائمة عملاء الملاك"
-                  >
-                    <option value="">— اختر —</option>
-                    {alertPresets.map((x) => (
-                      <option key={`al-${x.id}`} value={x.id}>
-                        {x.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="waiter-tblcard__spec-footer" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="waiter-tblcard__report"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      showTableReport(t, e);
-                    }}
-                  >
-                    تقرير سريع
-                  </button>
-                  {tStatus === "dirty" ? (
-                    <button
-                      type="button"
-                      className="waiter-tblcard__pill waiter-tblcard__pill--clean-go"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void changeTableStatus(String(t.id), "cleaning");
-                      }}
-                    >
-                      بدء تنظيف
-                    </button>
-                  ) : null}
-                  {tStatus === "cleaning" ? (
-                    <button
-                      type="button"
-                      className="waiter-tblcard__pill waiter-tblcard__pill--clean-done"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void changeTableStatus(String(t.id), "ready");
-                      }}
-                    >
-                      تم التنظيف
-                    </button>
-                  ) : null}
-                </div>
-              </div>
               </div>
             );
           })}
@@ -1281,60 +1770,367 @@ export default function WaiterTablesPage() {
         </div>
       ) : null}
       {report ? (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "fixed",
-            top: Math.min(reportPos.y + 8, window.innerHeight - 360),
-            left: Math.min(reportPos.x + 8, window.innerWidth - 440),
-            width: 420,
-            maxWidth: "95vw",
-            maxHeight: "72vh",
-            overflow: "auto",
-            zIndex: 1000,
-            background: "#ffffff",
-            border: "2px solid #0ea5e9",
-            borderRadius: 14,
-            boxShadow: "0 16px 40px rgba(2,6,23,0.25)",
-            padding: "0.8rem 0.9rem",
-            direction: "rtl",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <div style={{ fontSize: "1.1rem", fontWeight: 900 }}>تقرير الطاولة {report.tableName}</div>
-            <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "2px 10px" }} onClick={() => setReport(null)}>
-              ×
-            </button>
-          </div>
-          <div style={{ marginTop: 6, fontSize: "0.86rem", color: "#0f172a", display: "grid", gap: 4 }}>
-            <div>وقت التسكين: {report.startTime ? new Date(report.startTime).toLocaleString("ar-EG") : "غير متاح"}</div>
-            <div>عدد الطلبات: {report.orderCount}</div>
-            <div>إجمالي العناصر: {report.qtyTotal}</div>
-            <div>وصل منها: {report.qtyArrived}</div>
-            <div>باقي بالمطبخ: {report.qtyKitchen}</div>
-            <div>التكلفة الحالية: {report.totalCost.toFixed(2)} ج.م</div>
-            <div>قيمة المتبقي حتى الوصول: {report.pendingCost.toFixed(2)} ج.م</div>
-            {Number(report.noOrderDelayMinutes || 0) >= 10 ? (
-              <div style={{ color: "#7c3aed", fontWeight: 800 }}>
-                تنبيه: تأخر أخذ الطلب بعد التسكين ({report.noOrderDelayMinutes} دقيقة)
+        <>
+          {/* Backdrop */}
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(2,6,23,0.45)",
+              zIndex: 999,
+            }}
+            onClick={() => setReport(null)}
+          />
+          {/* Modal */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(720px, 95vw)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              zIndex: 1000,
+              background: "#ffffff",
+              border: "2px solid #0ea5e9",
+              borderRadius: 14,
+              boxShadow: "0 20px 50px rgba(2,6,23,0.35)",
+              padding: "1rem 1.1rem",
+              direction: "rtl",
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, borderBottom: "1px solid #e2e8f0", paddingBottom: 10 }}>
+              <div style={{ fontSize: "1.15rem", fontWeight: 900, display: "flex", alignItems: "center", gap: 8 }}>
+                {report.tableName} — ملخص الجلسة
+                {report.guestSession ? (
+                  <span style={{ fontSize: "0.72rem", background: "rgba(16,185,129,0.15)", color: "#047857", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 6, padding: "2px 8px" }}>ضيف</span>
+                ) : null}
               </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.78rem" }} onClick={handlePrint}>
+                  🖨️ طباعة
+                </button>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ padding: "2px 10px" }} onClick={() => setReport(null)}>
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Session Meta */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>الكابتن</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>{report.captainName || "—"}</div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>بدأت الجلسة</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
+                  {report.startTime ? new Date(report.startTime).toLocaleString("ar-EG", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "غير متاح"}
+                </div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>الضيوف</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>{report.guestCount} ضيف</div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "#f1f5f9" }}>
+                <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>مينيموم شارج</div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
+                  {report.minimumChargePerSeat > 0 ? `${report.minimumChargePerSeat.toFixed(0)} ج.م/ضيف = ${(report.minimumChargePerSeat * report.guestCount).toFixed(0)} ج.م` : "غير مفعّل"}
+                </div>
+              </div>
+            </div>
+
+            {/* Orders Status Grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8, marginTop: 12 }}>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#1e40af" }}>{report.orderCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#3b82f6" }}>إجمالي الطلبات</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#92400e" }}>{report.pendingCount + report.preparingCount + report.readyCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#b45309" }}>في المطبخ</div>
+                <div style={{ fontSize: "0.65rem", color: "#78716c" }}>انتظار {report.pendingCount} · تحضير {report.preparingCount} · جاهز {report.readyCount}</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#f0fdf4", border: "1px solid #86efac" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#15803d" }}>{report.servedCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#16a34a" }}>واصل للطاولة</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#991b1b" }}>{report.cancelledCount}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#dc2626" }}>ملغى</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#e2e8f0", border: "1px solid #cbd5e1" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#1e293b" }}>{report.qtyTotal}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#475569" }}>إجمالي العناصر</div>
+              </div>
+              <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#5b21b6" }}>{report.totalCost.toFixed(0)}</div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#7c3aed" }}>السلة ج.م</div>
+              </div>
+            </div>
+
+            {/* Financial Summary */}
+            <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontWeight: 800, fontSize: "0.9rem", marginBottom: 8, color: "#0f172a" }}>التكلفة</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, fontSize: "0.86rem" }}>
+                <div><span style={{ color: "#64748b" }}>السلة:</span> <strong>{report.totalCost.toFixed(2)} ج.م</strong></div>
+                <div><span style={{ color: "#64748b" }}>الخدمة ({policy.servicePercent}%):</span> <strong>{reportFinancials?.svc.toFixed(2)}</strong></div>
+                <div><span style={{ color: "#64748b" }}>VAT ({policy.vatPercent}%):</span> <strong>{reportFinancials?.vat.toFixed(2)}</strong></div>
+                <div><span style={{ color: "#64748b" }}>واصل للطاولة (قيمة):</span> <strong>{(report.totalCost - report.pendingCost).toFixed(2)}</strong></div>
+                <div><span style={{ color: "#0f172a" }}>الإجمالي:</span> <strong style={{ fontSize: "1rem", color: "#059669" }}>{reportFinancials?.total.toFixed(2)} ج.م</strong></div>
+              </div>
+            </div>
+
+            {/* Alerts */}
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              {report.sessionId && billReqIds.has(report.sessionId) ? (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontSize: "0.82rem", fontWeight: 800 }}>
+                  ⚠️ طلب حساب معلق — لا يمكن إضافة أصناف جديدة
+                </div>
+              ) : null}
+              {Number(report.noOrderDelayMinutes || 0) >= 10 ? (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem", fontWeight: 800 }}>
+                  ⏱️ تأخر أخذ الطلب بعد التسكين ({report.noOrderDelayMinutes} دقيقة)
+                </div>
+              ) : null}
+              {report.readyCount > 0 ? (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#dcfce7", color: "#14532d", fontSize: "0.82rem", fontWeight: 800 }}>
+                  ✅ {report.readyCount} طلب جاهز بالمطبخ — استدعِ الرنر
+                </div>
+              ) : null}
+            </div>
+
+            {/* Recent Orders */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8, fontSize: "0.9rem", color: "#0f172a" }}>الطلبات المرسلة</div>
+              {report.lines.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "0.85rem" }}>لا توجد طلبات على هذه الطاولة.</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
+                  {report.lines.map((l) => (
+                    <div key={l.id + l.time} style={{ border: "1px solid #dbeafe", borderRadius: 10, padding: "8px 10px", background: "#f8fbff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "0.82rem", color: "#0f172a" }}>
+                        <span>طلب {l.id || "—"} · {(() => {
+                          const s = String(l.status || "").toLowerCase();
+                          const map: Record<string, string> = { pending: "انتظار", preparing: "تحضير", ready: "جاهز", served: "مُقدَّم", cancelled: "ملغى", paid: "مدفوع" };
+                          return map[s] || s;
+                        })()}</span>
+                        <span style={{ color: "#64748b", fontWeight: 600 }}>{l.qty} عنصر</span>
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "#475569", marginTop: 2 }}>{l.time || "—"}</div>
+                      <div style={{ fontSize: "0.86rem", marginTop: 3, color: "#0f172a", fontWeight: 700 }}>القيمة: {l.total.toFixed(2)} ج.م</div>
+                      {l.items.length > 0 ? (
+                        <ul style={{ margin: "6px 0 0", padding: "0 14px 0 0", listStyle: "disc", fontSize: "0.78rem", color: "#334155", lineHeight: 1.6 }}>
+                          {l.items.map((it, idx) => (
+                            <li key={idx}>
+                              {it.quantity} × {it.name}
+                              {it.unitPrice > 0 ? ` — ${Math.round(it.unitPrice)} ج.م` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {/* ===== Print-Only Report (A4 Clean Print) ===== */}
+      {report ? (
+        <div className="print-only" dir="rtl">
+          {/* Header */}
+          <div className="print-header">
+            {report.tableName} — ملخص الجلسة
+            {report.guestSession ? (
+              <span style={{ fontSize: "10pt", fontWeight: 400, marginRight: 8, color: "#666" }}>
+                (جلسة ضيف)
+              </span>
             ) : null}
           </div>
-          <div style={{ marginTop: 10, borderTop: "1px solid #cbd5e1", paddingTop: 8, display: "grid", gap: 6 }}>
-            {report.lines.length === 0 ? (
-              <div style={{ color: "#64748b" }}>لا توجد طلبات على هذه الطاولة.</div>
-            ) : (
-              report.lines.map((l) => (
-                <div key={l.id + l.time} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 8px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
-                    <span>طلب {l.id || "—"}</span>
-                    <span>{l.status}</span>
-                  </div>
-                  <div style={{ fontSize: "0.82rem", color: "#475569", marginTop: 2 }}>{l.time || "—"}</div>
-                  <div style={{ fontSize: "0.86rem", marginTop: 3 }}>العناصر: {l.qty} · القيمة: {l.total.toFixed(2)} ج.م</div>
+
+          {/* Meta Grid */}
+          <div className="print-subheader">معلومات الجلسة</div>
+          <div className="print-row">
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">الكابتن</div>
+                <div className="print-meta-value">{report.captainName || "—"}</div>
+              </div>
+            </div>
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">بدأت الجلسة</div>
+                <div className="print-meta-value">
+                  {report.startTime
+                    ? new Date(report.startTime).toLocaleString("ar-EG", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })
+                    : "غير متاح"}
                 </div>
-              ))
-            )}
+              </div>
+            </div>
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">الضيوف</div>
+                <div className="print-meta-value">{report.guestCount} ضيف</div>
+              </div>
+            </div>
+            <div className="print-col">
+              <div className="print-meta-box avoid-break">
+                <div className="print-meta-label">مينيموم شارج</div>
+                <div className="print-meta-value">
+                  {report.minimumChargePerSeat > 0
+                    ? `${report.minimumChargePerSeat.toFixed(0)} ج.م/ضيف = ${(report.minimumChargePerSeat * report.guestCount).toFixed(0)} ج.م`
+                    : "غير مفعّل"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Orders Status */}
+          <div className="print-subheader">حالة الطلبات</div>
+          <table style={{ width: "100%", marginBottom: 12 }}>
+            <thead>
+              <tr>
+                <th>إجمالي الطلبات</th>
+                <th>في المطبخ</th>
+                <th>واصل للطاولة</th>
+                <th>ملغى</th>
+                <th>إجمالي العناصر</th>
+                <th>السلة ج.م</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.orderCount}</td>
+                <td style={{ textAlign: "center" }}>
+                  {report.pendingCount + report.preparingCount + report.readyCount}
+                  <div style={{ fontSize: "9pt", color: "#666", marginTop: 2 }}>
+                    انتظار {report.pendingCount} · تحضير {report.preparingCount} · جاهز {report.readyCount}
+                  </div>
+                </td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.servedCount}</td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.cancelledCount}</td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.qtyTotal}</td>
+                <td style={{ textAlign: "center", fontWeight: 800 }}>{report.totalCost.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Financial Summary */}
+          <div className="print-subheader">التكلفة</div>
+          <table style={{ width: "100%", marginBottom: 12 }}>
+            <tbody>
+              <tr>
+                <td style={{ fontWeight: 700 }}>السلة</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{report.totalCost.toFixed(2)} ج.م</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>الخدمة ({policy.servicePercent}%)</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{reportFinancials?.svc.toFixed(2)} ج.م</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>VAT ({policy.vatPercent}%)</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{reportFinancials?.vat.toFixed(2)} ج.م</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>واصل للطاولة (قيمة)</td>
+                <td style={{ textAlign: "left", fontWeight: 800 }}>{(report.totalCost - report.pendingCost).toFixed(2)} ج.م</td>
+              </tr>
+              <tr style={{ background: "#f5f5f5" }}>
+                <td style={{ fontWeight: 900, fontSize: "11pt" }}>الإجمالي</td>
+                <td style={{ textAlign: "left", fontWeight: 900, fontSize: "11pt", color: "#000" }}>
+                  {reportFinancials?.total.toFixed(2)} ج.م
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Alerts */}
+          {report.sessionId && billReqIds.has(report.sessionId) ? (
+            <div className="print-alert print-alert-danger">
+              ⚠️ طلب حساب معلق — لا يمكن إضافة أصناف جديدة
+            </div>
+          ) : null}
+          {Number(report.noOrderDelayMinutes || 0) >= 10 ? (
+            <div className="print-alert print-alert-warning">
+              ⏱️ تأخر أخذ الطلب بعد التسكين ({report.noOrderDelayMinutes} دقيقة)
+            </div>
+          ) : null}
+          {report.readyCount > 0 ? (
+            <div className="print-alert print-alert-success">
+              ✅ {report.readyCount} طلب جاهز بالمطبخ — استدعِ الرنر
+            </div>
+          ) : null}
+
+          {/* Recent Orders */}
+          <div className="print-subheader">الطلبات المرسلة</div>
+          {report.lines.length === 0 ? (
+            <div style={{ color: "#666", fontSize: "10pt", padding: "8px 0" }}>لا توجد طلبات على هذه الطاولة.</div>
+          ) : (
+            <table style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th style={{ width: "15%" }}>رقم الطلب</th>
+                  <th style={{ width: "15%" }}>الحالة</th>
+                  <th style={{ width: "20%" }}>الوقت</th>
+                  <th style={{ width: "10%" }}>العناصر</th>
+                  <th style={{ width: "20%" }}>القيمة</th>
+                  <th style={{ width: "20%" }}>التفاصيل</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.lines.map((l) => {
+                  const s = String(l.status || "").toLowerCase();
+                  const map: Record<string, string> = {
+                    pending: "انتظار",
+                    preparing: "تحضير",
+                    ready: "جاهز",
+                    served: "مُقدَّم",
+                    cancelled: "ملغى",
+                    paid: "مدفوع",
+                  };
+                  return (
+                    <tr key={l.id + l.time} className="avoid-break">
+                      <td style={{ textAlign: "center", fontWeight: 700 }}>{l.id || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{map[s] || s}</td>
+                      <td style={{ textAlign: "center", fontSize: "9pt" }}>{l.time || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{l.qty}</td>
+                      <td style={{ textAlign: "left", fontWeight: 700 }}>{l.total.toFixed(2)} ج.م</td>
+                      <td style={{ fontSize: "9pt" }}>
+                        {l.items.length > 0 ? (
+                          <ul style={{ margin: 0, padding: "0 14px 0 0", listStyle: "disc" }}>
+                            {l.items.map((it, idx) => (
+                              <li key={idx}>
+                                {it.quantity} × {it.name}
+                                {it.unitPrice > 0 ? ` — ${Math.round(it.unitPrice)} ج.م` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {/* Footer */}
+          <div className="print-footer">
+            تم إنشاء هذا التقرير في {new Date().toLocaleString("ar-EG")} — نظام إدارة المطاعم
           </div>
         </div>
       ) : null}

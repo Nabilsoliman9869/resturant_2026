@@ -16,7 +16,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:06:11.581064",
-        "sentAt": "2026-04-17T20:06:20.653256"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:06:20.653256",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "79cc502c-168f-4287-aa8e-946827333a7e",
@@ -29,7 +32,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "status": "preparing",
@@ -57,7 +63,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "2b8047a9-3fc9-4eee-9ded-52602bcf14d5",
@@ -70,7 +79,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "e11aea46-a537-4e11-8efa-9813b18dc64d",
@@ -83,7 +95,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -118,7 +133,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "c4525d0c-7d94-4569-9a4f-f152e193cd5c",
@@ -131,7 +149,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -166,7 +187,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "7a0452ba-8b50-4d15-aca0-380858ac40bb",
@@ -179,7 +203,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "0759e24e-353a-41da-98b4-7fabb9219a10",
@@ -192,7 +219,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -227,7 +257,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f7ce9f58-bac8-45ca-ba8e-bd5f5fcb12dd",
@@ -240,7 +273,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "71af8a35-7a44-48a9-8361-be2c9a599b43",
@@ -253,7 +289,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "1d593c7f-8925-45cf-829f-dce234c32d57",
@@ -266,7 +305,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "0ffede79-f135-46e1-a530-d02cb67a1a4f",
@@ -279,7 +321,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -314,7 +359,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "c01b0b6d-ff0d-44bd-9aa2-382bd2f23e55",
@@ -327,7 +375,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "8bdd7f35-6956-4457-934b-332a91401ca0",
@@ -340,7 +391,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6cf60bf7-bfc9-4e7d-9339-4256e14649ad",
@@ -353,7 +407,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "547ee856-2669-454b-93ec-d3d8a917b8da",
@@ -366,7 +423,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "90ab6133-e5aa-4920-bbea-4765c86b6067",
@@ -379,7 +439,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -414,7 +477,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9b974d28-aed4-49db-9c80-93d8ace60df4",
@@ -427,7 +493,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5a61f205-c5a0-44ed-a9e8-de7301b4425f",
@@ -440,7 +509,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -477,7 +549,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "66c6eeea-f6ab-4b84-9f1a-eeaad3a77928",
@@ -490,7 +565,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5caef26f-9a06-45dc-b869-1eca2dabed82",
@@ -503,7 +581,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -540,7 +621,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "7301fa05-98db-4873-af0b-96882c0fabb9",
@@ -553,7 +637,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "3c3bb99d-8f74-4d55-b6b9-a5c8817bb7a2",
@@ -566,7 +653,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "952bceac-8306-4e81-9be0-84f6c457c745",
@@ -579,7 +669,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -616,7 +709,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6186bdfc-4c3a-4d1a-bdc7-10bbdb4b29ea",
@@ -629,7 +725,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f5e80b74-02ff-44c8-a8e3-817dc85d5131",
@@ -642,7 +741,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "00a88b42-9636-4cae-99d8-6912480eb899",
@@ -655,7 +757,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "b7c3f395-01b7-4966-9f5b-789ae2df94f3",
@@ -668,7 +773,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "09fad079-5fae-4fcb-a341-5080f1dde386",
@@ -681,7 +789,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6d96aa35-1c8f-4643-b864-d8425d520648",
@@ -694,7 +805,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6d8d6b6e-e1fb-4ebb-822a-20154ed7a107",
@@ -707,7 +821,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "10cde9a3-7e18-4d26-8eba-3c4349321f4e",
@@ -720,7 +837,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "ae5b7b3e-53a3-46b9-b34e-140b6282a817",
@@ -733,7 +853,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9007d5ea-5bb6-433c-af11-2b69df869b3d",
@@ -746,7 +869,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "17463519-aad3-43c4-9648-81491f9997de",
@@ -759,7 +885,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -797,7 +926,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "ea6dee61-4650-48f7-afdf-5d56a804a0b7",
@@ -810,7 +942,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "d3ee755f-915c-46b9-a7b0-190a18358a87",
@@ -823,7 +958,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "26f45916-9ca3-445b-8691-b9d664ef025c",
@@ -836,7 +974,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -874,7 +1015,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:45:53.364175",
-        "sentAt": "2026-04-17T20:45:56.794957"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:45:56.794957",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "0c721197-9db5-417b-93bd-56207742b371",
@@ -887,7 +1031,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:46:30.011589",
-        "sentAt": "2026-04-17T20:46:54.684338"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:46:54.684338",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5e40ae2c-a0d6-4341-8f52-1b4b2f5b9943",
@@ -900,7 +1047,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:07.305037",
-        "sentAt": "2026-04-17T20:47:14.857957"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:14.857957",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "68037111-f3e8-4d24-8a6d-844654f4357e",
@@ -913,7 +1063,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:29.684498",
-        "sentAt": "2026-04-17T20:47:57.315113"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:57.315113",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "05062032-ed7f-4eed-a2c7-1118b2dadf6c",
@@ -926,7 +1079,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:49.415758",
-        "sentAt": "2026-04-17T20:47:58.001632"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:58.001632",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "bbbd5bf8-07c7-4d33-83c1-84b25015873f",
@@ -939,7 +1095,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:51.257187",
-        "sentAt": "2026-04-17T20:47:58.826183"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:58.826183",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "ff815630-ef0e-42a4-9c11-f8c8f86aacb5",
@@ -952,7 +1111,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:52.499775",
-        "sentAt": "2026-04-17T20:47:59.643613"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:47:59.643613",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6e6e8428-e3ae-4ee2-8e7a-d99c6fadb82a",
@@ -965,7 +1127,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:53.531438",
-        "sentAt": "2026-04-17T20:48:00.531211"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:48:00.531211",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f52d20ae-df14-4879-a0fe-8f1a29b4fe74",
@@ -978,7 +1143,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T20:47:54.652526",
-        "sentAt": "2026-04-17T20:48:01.418563"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T20:48:01.418563",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1016,7 +1184,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T22:02:35.177440",
-        "sentAt": "2026-04-17T22:04:08.337512"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T22:04:08.337512",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "7d1fb257-20b1-4601-83e5-0da23d80dded",
@@ -1029,7 +1200,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-17T22:03:01.168936",
-        "sentAt": "2026-04-17T22:04:09.303968"
+        "handoffAt": null,
+        "sentAt": "2026-04-17T22:04:09.303968",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "5c20edfd-b703-4f66-85b8-33f80e4f4b9a",
@@ -1042,7 +1216,10 @@
         "prepared": true,
         "sent": false,
         "preparedAt": "2026-04-17T22:05:17.570674",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6d7b686c-c282-4ba5-9744-1a031bfffc98",
@@ -1055,7 +1232,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "44e53e1c-e63c-423a-a3c2-6a43736a3394",
@@ -1068,7 +1248,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9e1130cf-be3c-439c-a6cd-e9ac05acbd0d",
@@ -1081,7 +1264,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1118,7 +1304,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6b8803e7-b832-4ff4-b71b-f4790108c7d1",
@@ -1131,7 +1320,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "200607f8-4f59-471e-a6e6-114cc068fb92",
@@ -1144,7 +1336,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "6a2e2a39-1007-400c-849a-e2eec5b1ace1",
@@ -1157,7 +1352,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "1ad28d18-1da7-42f8-a25d-6ecbc0f797e0",
@@ -1170,7 +1368,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "376f842e-b10a-4b73-bcb3-0617389f2e82",
@@ -1183,7 +1384,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "650513a8-26a8-414e-beca-89593162ea99",
@@ -1196,7 +1400,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "a6cdcaf0-c983-410d-aa8e-9b2fcf05c5da",
@@ -1209,7 +1416,10 @@
         "prepared": false,
         "sent": false,
         "preparedAt": null,
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1241,11 +1451,15 @@
         "unitPrice": 0.0,
         "productGuide": "205A4BC0-5DB2-461B-A0C4-B7683CBCA839",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:35.401014",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "78f1279d-1ebf-409f-a4a6-16cb7078d112",
@@ -1254,11 +1468,15 @@
         "unitPrice": 0.0,
         "productGuide": "E408B0CB-52A2-4FD9-A46F-59F50FE28517",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:34.088774",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f738c9b7-359c-4c8a-981f-566dc20b4cb7",
@@ -1267,11 +1485,15 @@
         "unitPrice": 0.0,
         "productGuide": "0958ABAE-2D2D-4AEF-BC71-9DE80A44635F",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:30.361846",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "1746d0b3-4a4a-41f3-b899-2e1ecae01cfe",
@@ -1280,11 +1502,15 @@
         "unitPrice": 0.0,
         "productGuide": "5A265FCE-AED8-4FF3-B1BA-34923EDAD02A",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:28.482656",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "9972985f-5e39-4cb4-ac20-64d709d081cf",
@@ -1293,11 +1519,15 @@
         "unitPrice": 0.0,
         "productGuide": "8A438221-C66E-41C0-B802-BA0AC79F0A93",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:27.672988",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "c028c1b4-8a50-4701-9c0d-432e73945cc7",
@@ -1306,11 +1536,15 @@
         "unitPrice": 0.0,
         "productGuide": "C662C5BF-68F6-4F91-895A-C80407DAC8C9",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:26.791276",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "65e2e5b2-ff2f-4782-a2a2-00c7c59b2c1f",
@@ -1319,11 +1553,15 @@
         "unitPrice": 0.0,
         "productGuide": "F65F67AB-B26A-4A53-8811-724350BF171B",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:03:37.721045",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "b2ac4430-b3f8-49bd-b2e9-8000751fcfe6",
@@ -1332,11 +1570,15 @@
         "unitPrice": 0.0,
         "productGuide": "B7D36066-C404-44F4-A095-07D98F705E3E",
         "seatNo": null,
-        "lineStatus": "ready",
+        "lineStatus": "sent",
         "prepared": true,
-        "sent": false,
+        "preparedQty": 1.0,
+        "sent": true,
         "preparedAt": "2026-04-17T22:05:25.815051",
-        "sentAt": null
+        "handoffAt": null,
+        "sentAt": "2026-06-16T13:15:25.586882",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1345,11 +1587,11 @@
       "serviceCharge": 0.0,
       "total": 0.0
     },
-    "status": "ready",
+    "status": "served",
     "generalOrder": false,
     "createdAt": "2026-04-17T21:59:32.569264",
     "ticketNo": 14,
-    "completedAt": null,
+    "completedAt": "2026-06-16T13:15:25.586882",
     "prepStartTime": "2026-04-17T22:03:37.721045"
   },
   {
@@ -1373,7 +1615,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:20.753173",
-        "sentAt": "2026-04-18T22:15:37.405343"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:37.405343",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f5247d74-d73d-47a4-93fc-ead2dbdc71b2",
@@ -1386,7 +1631,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:23.552230",
-        "sentAt": "2026-04-18T22:15:38.165290"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:38.165290",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "8d782430-8b39-4bbb-ab9e-9b35cae540d7",
@@ -1399,7 +1647,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:28.098575",
-        "sentAt": "2026-04-18T22:15:39.009521"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:39.009521",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "13e58da0-86be-49e9-8bd0-907b97fa71b5",
@@ -1412,7 +1663,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:30.179721",
-        "sentAt": "2026-04-18T22:15:40.438716"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:40.438716",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "f683d229-ca29-4f9d-be99-1554baa33a5e",
@@ -1425,7 +1679,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:32.779366",
-        "sentAt": "2026-04-18T22:15:41.278719"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:41.278719",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "92552d51-5f45-41ae-aa0f-f6b34ea14804",
@@ -1438,7 +1695,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:15:34.041233",
-        "sentAt": "2026-04-18T22:15:41.974189"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:15:41.974189",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1476,7 +1736,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:21:50.294329",
-        "sentAt": "2026-04-18T22:22:29.736242"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:22:29.736242",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "e9f62cd2-9a96-49d2-9754-279a70e35d68",
@@ -1489,7 +1752,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:22:22.979662",
-        "sentAt": "2026-04-18T22:22:30.392756"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:22:30.392756",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "82d447c7-a05b-43aa-afda-3a58c7979ab7",
@@ -1502,7 +1768,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:41:31.001834",
-        "sentAt": "2026-04-18T22:41:35.468959"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:41:35.468959",
+        "cancelled": false,
+        "cancelledAt": null
       },
       {
         "lineId": "d2313d90-6903-4312-adb0-eeb8015c8b30",
@@ -1515,7 +1784,10 @@
         "prepared": true,
         "sent": true,
         "preparedAt": "2026-04-18T22:41:33.087882",
-        "sentAt": "2026-04-18T22:41:36.284438"
+        "handoffAt": null,
+        "sentAt": "2026-04-18T22:41:36.284438",
+        "cancelled": false,
+        "cancelledAt": null
       }
     ],
     "kitchenTotals": {
@@ -1658,5 +1930,1048 @@
     "ticketNo": 18,
     "completedAt": null,
     "updatedAt": "2026-05-17T01:05:20.309646"
+  },
+  {
+    "id": "85baafdb-d3a0-4990-adef-8ef11cc3dc50",
+    "sessionId": "2542513c-e289-43e9-a6fa-b35cdbcee9b2",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "60d46838-95a6-468b-ab65-8bef42fc69ca",
+        "name": "anchoves (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "34CDA0A5-8E82-4FBC-8C3F-CE6ED11CE11B",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:58:57.752532",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "27cdf73b-fb79-4a9a-8925-48a8797d94b8",
+        "name": "Alexandarian Liver (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5E06E933-E836-4515-B94A-94739E0D5B9C",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:05.581132",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "f715c604-41d8-4563-9f2e-61a343c100b3",
+        "name": "Alexandarian Liver (DONE ) (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "369A4EB8-C56E-4E70-BD1F-AE777C051414",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:12.040276",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "0351435c-7545-4445-a6e5-efae70d79b8b",
+        "name": "Asfour Soup (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "F9837514-5C0C-45F2-AA30-2B7D0E90EC58",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:13.323525",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "bcdce931-df66-4055-8a01-ddfa0dcff0d9",
+        "name": "Asfor With Meat Tagine (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "178B5DCE-0312-47CF-9CA7-EEA2697B6AC1",
+        "seatNo": 1,
+        "lineStatus": "ready",
+        "prepared": true,
+        "sent": false,
+        "preparedAt": "2026-05-21T04:59:14.527910",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 250.0,
+      "tax": 39.2,
+      "serviceCharge": 30.0,
+      "total": 319.2
+    },
+    "status": "ready",
+    "generalOrder": false,
+    "createdAt": "2026-05-21T04:56:32.701692",
+    "ticketNo": 19,
+    "completedAt": null,
+    "prepStartTime": "2026-05-21T04:58:49.948118"
+  },
+  {
+    "id": "20ce0aea-b4b5-44b5-8a84-eba9524329b7",
+    "sessionId": "94eeae17-1d64-421b-92af-366dc463a313",
+    "tableId": "VIP-E2E-01",
+    "tableGuid": "VIP-E2E-01",
+    "tableLabel": "VIP-E2E-01",
+    "waiterId": "vip-test-user",
+    "items": [
+      {
+        "lineId": "f0f2149f-7cb5-4198-8f65-fbc0e729cb7e",
+        "name": "Alex Liver Sandwich (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T00:49:13.680757",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T00:49:13.680757",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T00:49:13.198751",
+    "prepTargetMinutes": null,
+    "ticketNo": 20,
+    "completedAt": "2026-05-22T00:49:13.680757",
+    "finalInvoiceId": "3C3DDFD6-78CC-498D-AF10-89B17905605F",
+    "billedAt": "2026-05-22T00:49:14.619271",
+    "billingSessionId": "94eeae17-1d64-421b-92af-366dc463a313",
+    "prepStartTime": "2026-05-23T02:11:56.602813",
+    "kpiLeadMinutes": 0.01
+  },
+  {
+    "id": "c5468615-936a-4abc-b4e2-ea5697fa07c4",
+    "sessionId": "2a1e5039-2552-45e5-8106-b65e81deaa33",
+    "tableId": "VIP-E2E-02",
+    "tableGuid": "VIP-E2E-02",
+    "tableLabel": "VIP-E2E-02",
+    "waiterId": "vip-test-user",
+    "items": [
+      {
+        "lineId": "e7f602e1-5ed7-4bcb-abfc-c2187b7da920",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T00:53:52.197553",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T00:53:52.197553",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T00:53:52.045696",
+    "prepTargetMinutes": null,
+    "ticketNo": 21,
+    "completedAt": "2026-05-22T00:53:52.197553",
+    "finalInvoiceId": "7C8AA101-5F0B-4273-82A5-3B62CA6638CF",
+    "billedAt": "2026-05-22T00:53:53.225184",
+    "billingSessionId": "2a1e5039-2552-45e5-8106-b65e81deaa33",
+    "prepStartTime": "2026-05-23T02:11:56.602874",
+    "kpiLeadMinutes": 0.0
+  },
+  {
+    "id": "e5c446cb-054d-4fb2-b2a1-98381df75342",
+    "sessionId": "7cc8ad3d-5e60-4fd4-93f0-ee0e002106b0",
+    "tableId": "VIP-PY-01",
+    "tableGuid": "VIP-PY-01",
+    "tableLabel": "VIP-PY-01",
+    "waiterId": "vip-py-test",
+    "items": [
+      {
+        "lineId": "6db240bf-96c8-4271-8a3a-a46f6adc7035",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T04:34:40.776540",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T04:34:40.776540",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T04:34:40.261545",
+    "prepTargetMinutes": null,
+    "ticketNo": 22,
+    "completedAt": "2026-05-22T04:34:40.776540",
+    "finalInvoiceId": "8C68E76C-21D2-4590-A9DB-5B3A20BC48A9",
+    "billedAt": "2026-05-22T04:34:43.051442",
+    "billingSessionId": "7cc8ad3d-5e60-4fd4-93f0-ee0e002106b0",
+    "prepStartTime": "2026-05-23T02:11:56.602910",
+    "kpiLeadMinutes": 0.01
+  },
+  {
+    "id": "dc93404c-4e83-4238-9b44-1a7862147d18",
+    "sessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "tableId": "PRINT-TEST-01",
+    "tableGuid": "PRINT-TEST-01",
+    "tableLabel": "PRINT-TEST-01",
+    "waiterId": "print-test-waiter",
+    "items": [
+      {
+        "lineId": "234bafdc-4b0e-4742-99d5-472ac222f546",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T15:15:40.822438",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T15:15:40.822438",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T15:15:40.737425",
+    "prepTargetMinutes": null,
+    "ticketNo": 23,
+    "completedAt": "2026-05-22T15:15:40.822438",
+    "finalInvoiceId": "1AFDB044-9816-4BE7-A7C6-D9B319F6AB18",
+    "billedAt": "2026-05-22T15:15:41.473353",
+    "billingSessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "prepStartTime": "2026-05-23T02:11:56.602956",
+    "kpiLeadMinutes": 0.0
+  },
+  {
+    "id": "302e3198-ddec-4f7e-80ac-986402b6fec4",
+    "sessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "tableId": "PRINT-TEST-01",
+    "tableGuid": "PRINT-TEST-01",
+    "tableLabel": "PRINT-TEST-01",
+    "waiterId": "print-test-waiter",
+    "items": [
+      {
+        "lineId": "46a5c712-be2c-4027-af87-c6820e3b7e49",
+        "name": "بصل أبيض (كرسي 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "75FE768D-3049-49CE-A106-0FD01A92FE12",
+        "seatNo": 1,
+        "lineStatus": "sent",
+        "prepared": true,
+        "sent": true,
+        "preparedAt": "2026-05-22T15:16:48.084032",
+        "handoffAt": null,
+        "sentAt": "2026-05-22T15:16:48.084032",
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "status": "served",
+    "createdAt": "2026-05-22T15:16:48.022233",
+    "prepTargetMinutes": null,
+    "ticketNo": 24,
+    "completedAt": "2026-05-22T15:16:48.084032",
+    "finalInvoiceId": "F628C362-3827-4EFD-A7DE-4FAED25A38F3",
+    "billedAt": "2026-05-22T15:16:48.587866",
+    "billingSessionId": "64295974-5938-43a9-b468-e8fd67580a9f",
+    "prepStartTime": "2026-05-23T02:11:56.602996",
+    "kpiLeadMinutes": 0.0
+  },
+  {
+    "id": "7d487b02-0d19-4c00-bd48-ab3e838cd5b7",
+    "sessionId": "94704b4b-7a48-49a4-9bda-b38416d87c5d",
+    "tableId": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableGuid": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
+    "tableLabel": "T10",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "5793b43b-431c-4cc0-a5e6-0f7a19c20a85",
+        "name": "شاورما دجاج Chicken Shawarma (+ Chicken)",
+        "quantity": 1.0,
+        "unitPrice": 30.0,
+        "productGuide": "6F3CB068-D3A4-4CF7-BCF0-848282352BE9",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "preparedQty": 1.0,
+        "sent": false,
+        "preparedAt": "2026-05-23T02:32:53.289529",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "4199b3fb-7b58-4463-9f85-79b0a31a6e08",
+        "name": "شاورما لحم Beef Shawarma",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "571DC914-B600-45ED-8B5A-EFFBAEF370FC",
+        "seatNo": null,
+        "lineStatus": "ready",
+        "prepared": true,
+        "preparedQty": 1.0,
+        "sent": false,
+        "preparedAt": "2026-05-23T02:33:31.286274",
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 250.0,
+      "tax": 39.2,
+      "serviceCharge": 30.0,
+      "total": 319.2
+    },
+    "status": "ready",
+    "generalOrder": true,
+    "createdAt": "2026-05-23T01:31:14.453677",
+    "ticketNo": 25,
+    "completedAt": null,
+    "prepStartTime": "2026-05-23T02:11:50.662766"
+  },
+  {
+    "id": "72169ede-a4c3-4117-9514-44215bc03ee2",
+    "sessionId": "2ef37669-62f7-44e9-abed-3201254fdc25",
+    "tableId": "7B14A454-9070-4513-8B2F-CE5AED71BCE6",
+    "tableGuid": "7B14A454-9070-4513-8B2F-CE5AED71BCE6",
+    "tableLabel": "T12",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "7ad943a3-a9cb-4dcc-a590-788332c1c946",
+        "name": "Cheese Cake (STR ) (Mid Rare، Pasta، Soup، Bacon) (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 20.0,
+        "productGuide": "7209902F-081F-4A64-8A74-F463E52FEFF5",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "2049520e-ec34-446c-ab9b-f55f6a8f2eb3",
+        "name": "بيكاتا مشوية Grilled Picatta (Medium، Mash Potato، Soup، Garlic Sauce، Bacon) (مقعد 1) — بدون بدون بصل",
+        "quantity": 1.0,
+        "unitPrice": 20.0,
+        "productGuide": "24FE8871-B1B0-403F-B5A0-F8626FEDCF2C",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "ce228323-120e-4767-ab32-956c8c01220c",
+        "name": "فيليه ستروجانوف Fillet Stroganoff (Well Done، Rice، Salad، Mushroom Sauce) (مقعد 1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "E207BC94-870F-4AD8-B617-04E762C1C5D9",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "6dd3cd56-e0a0-47eb-a454-f2cbad7a8649",
+        "name": "Chicken Al Olia (Medium، Pasta، Soup، Garlic Sauce، Extra Cheese) (مقعد 1) — بدون بدون ثوم؛ Spicy",
+        "quantity": 1.0,
+        "unitPrice": 15.0,
+        "productGuide": "7CC8A8BE-49C9-4245-94F9-39070C09C05A",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 250.0,
+      "tax": 39.2,
+      "serviceCharge": 30.0,
+      "total": 319.2
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-06-12T00:56:34.574054",
+    "prepTargetMinutes": null,
+    "ticketNo": 26,
+    "completedAt": null,
+    "updatedAt": "2026-06-12T14:33:28.805934"
+  },
+  {
+    "id": "449a247b-47c4-4fb3-b0fe-40e99b4fc9a2",
+    "sessionId": "fc03df0c-1bf0-446f-8001-248794b439fe",
+    "tableId": "B9A1DB04-D991-4F23-82C6-837C4D7116F0",
+    "tableGuid": "A5C3430F-A60B-49C8-81E2-DB9542734565",
+    "tableLabel": "T13",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "566cbf11-fa00-4483-a6d7-218ff3709c00",
+        "name": "fusilli rosee (Well Done، Rice، Soup، Garlic Sauce، Extra Cheese، Bacon) (مقعد 1) — بدون بدون بصل؛ بدون بدون ثوم؛ Spicy؛ Less Salt",
+        "quantity": 1.0,
+        "unitPrice": 35.0,
+        "productGuide": "897F9ABC-1985-49D8-BC20-C81168B39AAE",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 250.0,
+      "tax": 39.2,
+      "serviceCharge": 30.0,
+      "total": 319.2
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-06-13T12:10:59.149596",
+    "prepTargetMinutes": null,
+    "ticketNo": 27,
+    "completedAt": null
+  },
+  {
+    "id": "a177b89f-0988-460e-9ebf-41c0379d21a2",
+    "sessionId": "a1878687-e48a-421f-9b07-6580a47916eb",
+    "tableId": "4A9C81BD-8390-4720-9803-97D4D0E1FCD4",
+    "tableGuid": "4A9C81BD-8390-4720-9803-97D4D0E1FCD4",
+    "tableLabel": "T23",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "a45f8bd4-c216-4056-b2a3-e51d963bbd8f",
+        "name": "Half Pasta (P W.S ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "DC7E69A9-E4E3-41B5-9960-5032D03A374B",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "b4cc60af-a434-4ff0-9093-b1259553bb31",
+        "name": "Half Pasta (P,,RED,,S ) (1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "027BAC4A-59B0-4BA8-8B45-D0BD578F49E5",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "f2c9c71b-354c-4aef-8753-018f4925b12e",
+        "name": "Half Pasta (P.,W ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "97075991-6D69-4C96-90CE-1BEFCA88A6A4",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "0678a0f0-5458-4167-94ce-0470c04613f7",
+        "name": "Half Pasta (P.R.S ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "28D8B133-46F5-4BD7-B2A4-11A4196EE124",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "8c7a124d-3b99-4478-aa53-5d2ff9a10a5b",
+        "name": "Half Pasta (P.R.S SPIECY ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "316B3516-550E-4261-9EFD-44A8045B0E3F",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "e46174b3-fb9b-47c8-9052-2c004bac3463",
+        "name": "Half Pasta (P,RED,S, ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "03AAE09D-6D54-46DD-B55E-B60B70A7AC0C",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "ecedfad8-e37e-4ac3-83e9-516cc796f1dd",
+        "name": "Half Pasta (P,R.S ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "59A2AC89-AB61-47C2-84D8-50F7B758EDE2",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "d826a90d-63a1-447b-a921-192202400e19",
+        "name": "Half Pasta (S.RED ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "07CC8C11-4BBF-4C31-8876-C287349B6D1B",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "db09faf1-9962-44fe-8762-1017a350d231",
+        "name": "Half Pasta (WHITE SOUS ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "40461D2B-03F6-497D-BBF8-F97F0AD568C0",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "066c8909-f6be-4026-8954-29a6ca80c684",
+        "name": "Half Pasta (SP RED ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "A1805D7F-298A-4C64-8B6E-592D21EE0342",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "59119f31-2da6-4271-a975-03624b856611",
+        "name": "anchoves (1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "34CDA0A5-8E82-4FBC-8C3F-CE6ED11CE11B",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "7e1cfe31-a4b8-4c11-b00a-da601cd7c0bf",
+        "name": "Amercian Coffee (WITH MILK ) (1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "B21AA77B-8A06-4FC3-B4F1-B82B91821F6A",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "c9147164-330b-4cd7-b4ad-eceee9404f76",
+        "name": "Amercian Coffee (B ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "D0569B54-3303-4B6E-A386-2F1AADB773BE",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "01b224bc-13cd-4c03-ae50-7b9277e9be47",
+        "name": "Baba Ghanoug (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "3D140E32-922B-46E0-919F-197F63192AB2",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "1fa1588b-e83b-4d7f-8b22-63a12b06fef9",
+        "name": "Baba Ghanoug (DONE ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "D89B8A9D-BCD3-40E8-AC72-FB85C4F1E086",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "a85d5b64-4e33-45b7-84cf-1fdfa92a54bd",
+        "name": "B .B .Q (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "AEC5F6DF-596C-4E0B-B1E1-A4F93D194708",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "d4115ae5-3436-4d07-a4f2-2bd3278ab253",
+        "name": "avocado with cashed (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "AA4BC0A8-0ADB-4CC5-B762-498D6E5A3E5C",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-06-17T01:09:07.245936",
+    "prepTargetMinutes": null,
+    "ticketNo": 28,
+    "completedAt": null,
+    "cancelledAt": "2026-06-17T02:32:13.093602",
+    "updatedAt": "2026-06-17T11:23:53.162057"
+  },
+  {
+    "id": "13e89c19-c391-4ae6-943e-4c7048813eaa",
+    "sessionId": "631bd701-e292-4dec-91a9-005ee7d3ee14",
+    "tableId": "6947E632-5EBC-487F-982D-5F8B6A88A959",
+    "tableGuid": "6947E632-5EBC-487F-982D-5F8B6A88A959",
+    "tableLabel": "T24",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "5426d3ab-3134-4b3b-8a77-b627a77eaccf",
+        "name": "anchoves (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "34CDA0A5-8E82-4FBC-8C3F-CE6ED11CE11B",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "83c410ea-5333-4ebf-b02a-a2739cdbc2ba",
+        "name": "anise (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "5B8BDE42-1C27-4B4A-B1A3-9126FCCB5191",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "a62c335a-fcb7-4e38-b72d-c40a3ac286bc",
+        "name": "Asfour Soup (1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "F9837514-5C0C-45F2-AA30-2B7D0E90EC58",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "683a4a87-4f76-43fa-8da9-7222207d5fe0",
+        "name": "Asfour Soup CHicken (1)",
+        "quantity": 2.0,
+        "unitPrice": 0.0,
+        "productGuide": "7829174D-EBF9-4B49-90BB-5802EE23579D",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "ee92bcaf-3e15-4d12-bd3a-89c480d5839a",
+        "name": "Amercian Coffee (B ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "D0569B54-3303-4B6E-A386-2F1AADB773BE",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-06-18T04:30:27.940041",
+    "prepTargetMinutes": null,
+    "ticketNo": 29,
+    "completedAt": null
+  },
+  {
+    "id": "fdf1aa29-2849-43b5-84cb-89a960404efa",
+    "sessionId": "dc166de5-cc1d-43b7-a138-160196ccd28c",
+    "tableId": "5C5A0B38-A06B-49DA-8E8A-5AC89BAAD1B6",
+    "tableGuid": "5C5A0B38-A06B-49DA-8E8A-5AC89BAAD1B6",
+    "tableLabel": "T31",
+    "invoiceId": null,
+    "finalInvoiceId": null,
+    "billNumber": null,
+    "items": [
+      {
+        "lineId": "671bf132-c187-405b-81b5-30bda1c07b3d",
+        "name": "Alex Liver Sandwich (1)",
+        "quantity": 3.0,
+        "unitPrice": 0.0,
+        "productGuide": "E3D4D286-AA6A-42B6-AF9D-DBA7150FC43C",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "39b4daa9-7a68-4e7d-a2cf-21a055cfe099",
+        "name": "Egyption Hawawshy (SPIECY ) (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "8E940A36-8C43-4DF6-9C0D-2FFB32265375",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "87359b7a-d631-4d34-87a7-d6172460094b",
+        "name": "Fajita Sandwich Beef (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "9861B648-DCE1-40E8-8C24-73380D81B365",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "82ac99bd-8269-4838-b44b-ac4947e772d7",
+        "name": "Grilled Kofta (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "84EC4303-2AFB-4614-842A-FE0D55814270",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "78e61334-e55c-40e4-a0e3-9fa5c5098ea1",
+        "name": "Kobeba Shamy (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "C3567515-9C21-492E-ADE1-E21FD970C1FA",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "8eb718a7-7cff-4aa9-846a-c712e66624ff",
+        "name": "Grilled Steak (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "29F00A6D-37DE-4B5B-B83E-C6E531BFCF9B",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      },
+      {
+        "lineId": "484c6fd6-6676-4ef5-89da-43a0fa886aca",
+        "name": "Kofta Sandwich (1)",
+        "quantity": 1.0,
+        "unitPrice": 0.0,
+        "productGuide": "A87150EA-163A-4AE7-8F85-221B881A6A9C",
+        "seatNo": 1,
+        "lineStatus": "pending",
+        "prepared": false,
+        "preparedQty": 0.0,
+        "sent": false,
+        "preparedAt": null,
+        "handoffAt": null,
+        "sentAt": null,
+        "cancelled": false,
+        "cancelledAt": null
+      }
+    ],
+    "kitchenTotals": {
+      "subtotal": 0.0,
+      "tax": 0.0,
+      "serviceCharge": 0.0,
+      "total": 0.0
+    },
+    "status": "pending",
+    "generalOrder": false,
+    "createdAt": "2026-06-20T01:43:49.992779",
+    "prepTargetMinutes": null,
+    "ticketNo": 30,
+    "completedAt": null
   }
 ]

@@ -2,6 +2,7 @@
 setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
+if not defined MAT3AM_BASE_DIR set "MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS"
 
 set "MAT3AM_PY="
 where python >nul 2>&1 && set "MAT3AM_PY=python"
@@ -39,6 +40,7 @@ echo  مطاعم — تشغيل API من هذا المجلد فقط
 echo  إيقاف أي عملية تستمع على المنفذ 2288
 echo  (غالباً نسخة قديمة من api_server تسبب رسالة «وليس dev»)
 echo ========================================
+echo DATA_DIR: %MAT3AM_BASE_DIR%
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\mat3am_kill_ports.ps1" -Ports 2288
 
 timeout /t 2 /nobreak >nul

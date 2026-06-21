@@ -35,11 +35,31 @@ jobs:
       - name: Build EXE
         run: python -m PyInstaller Mat3amPOS.spec --clean --noconfirm
 
+      - name: Build Setup EXE
+        run: python -m PyInstaller scripts/mat3am_setup_launcher.py --onefile --clean --noconfirm --name Mat3amPOS_Setup --icon assets/mat3am_icon.ico --distpath dist --workpath build/setup_launcher
+
       - name: Version artifact
         run: python scripts/version_exe_artifact.py ${{ github.event.inputs.version }}
 
-      - name: Upload EXE
+      - name: Create package with ODBC installer
+        run: |
+          mkdir -p package
+          copy dist\Mat3amPOS*.exe package\
+          copy dist\Mat3amPOS_Setup.exe package\
+          copy START_HERE.bat package\
+          copy run_setup_odbc_and_install.bat package\
+          copy setup_odbc_and_install.bat package\
+          echo "Mat3amPOS.exe" > package\README.txt
+          echo "" >> package\README.txt
+          echo "=== تشغيل سريع ===" >> package\README.txt
+          echo "اضغط مرتين على START_HERE.bat" >> package\README.txt
+          echo "- يفضّل استخدام Mat3amPOS_Setup.exe تلقائياً إن وجد" >> package\README.txt
+          echo "- يتحقق من ODBC 17/18 تلقائياً" >> package\README.txt
+          echo "- يرفّع الصلاحية ثم يحمّل ويثبت ODBC عند الحاجة" >> package\README.txt
+          echo "- ثم يُشغّل البرنامج" >> package\README.txt
+
+      - name: Upload EXE package
         uses: actions/upload-artifact@v4
         with:
           name: Mat3amPOS-${{ github.event.inputs.version }}
-          path: dist/Mat3amPOS*.exe
+          path: package/

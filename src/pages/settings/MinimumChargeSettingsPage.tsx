@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { getApiBase } from "../../lib/apiBase";
+import SettingRow from "../../components/SettingRow";
 
 export default function MinimumChargeSettingsPage() {
   const base = getApiBase();
@@ -40,7 +41,7 @@ export default function MinimumChargeSettingsPage() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j as { detail?: string }).detail || `HTTP ${r.status}`);
       setValue(String((j as { tableDefaultMinimumCharge?: string | number }).tableDefaultMinimumCharge ?? value));
-      setMsg("تم حفظ minimum charge الافتراضي بنجاح.");
+      setMsg("تم حفظ الحد الأدنى الافتراضي لكل كرسي بنجاح.");
     } catch (e) {
       setMsg(`فشل الحفظ: ${String(e)}`);
     } finally {
@@ -50,12 +51,14 @@ export default function MinimumChargeSettingsPage() {
 
   return (
     <div style={{ maxWidth: 560 }}>
-      <h2 style={{ marginTop: 0 }}>الميني موم تشارج</h2>
+      <h2 style={{ marginTop: 0 }}>الحد الأدنى لكل كرسي</h2>
       <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-        هذه هي القيمة الافتراضية لحد الطاولة الأدنى. يمكن للمدير تعديلها أو جعلها صفرًا.
+        هذه هي القيمة الافتراضية للحد الأدنى لكل كرسي/ضيف، شاملة الخدمة والضريبة. ويمكن للمدير تعديلها أو جعلها صفرًا.
       </p>
-      <div className="card">
-        <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>minimum charge الافتراضي</label>
+      <SettingRow
+        label="الحد الأدنى الافتراضي لكل كرسي"
+        tooltip="القيمة الدنيا المطلوبة لكل كرسي/ضيف بعد احتساب الخدمة والضريبة. ويمكن عمل override لها على مستوى الطاولة من شاشة التشغيل، ثم تُطبّق على عدد الضيوف المعتمد داخل الجلسة."
+      >
         <input
           type="number"
           min={0}
@@ -68,7 +71,7 @@ export default function MinimumChargeSettingsPage() {
         {!canEdit ? (
           <div style={{ marginTop: 8, fontSize: "0.84rem", color: "#b45309" }}>التعديل متاح للمدير فقط.</div>
         ) : null}
-      </div>
+      </SettingRow>
       <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
         <button type="button" className="btn btn-primary" disabled={!canEdit || busy} onClick={() => void save()}>
           حفظ

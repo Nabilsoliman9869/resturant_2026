@@ -676,6 +676,7 @@ def run():
                 ("host", "123", "host", "جارسون الاستقبال"),
                 ("waiter", "123", "waiter", "جارسون الطلبات"),
                 ("kitchen", "123", "kitchen", "المطبخ"),
+                ("chef", "123", "kitchen_specialist", "شيف مختص"),
                 ("speed", "123", "speed_order", "الطلبات السريعة"),
                 ("server", "123", "server", "جارسون المناولة"),
                 ("kids", "123", "kids_guard", "كيدز إيريا"),

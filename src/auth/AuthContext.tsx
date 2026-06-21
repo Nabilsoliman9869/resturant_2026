@@ -15,6 +15,7 @@ export type SessionUser = {
   /** اسم الدخول — للعرض عند فشل ترميز DisplayName من القاعدة */
   login?: string;
   role: RoleId;
+  specialistStationCode?: string;
 };
 
 type AuthContextValue = {

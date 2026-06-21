@@ -1,0 +1,586 @@
+دراسة إعدادات مسار تطبيق المطعم
+تاريخ المراجعة: 2026-05-20
+المشروع: E:\XTRA_WEB\مطاعم
+
+============================================================
+1) ملخص تنفيذي
+============================================================
+
+هذه الدراسة تحصر الإعدادات المؤثرة على مسار التطبيق في ثلاث بيئات:
+
+1. التشغيل المحلي أثناء التطوير.
+2. تشغيل نسخة EXE.
+3. النشر على Railway/Docker، ومعه أي بيئة مشابهة مثل Render إذا استخدمت نفس البناء.
+
+النتيجة المختصرة:
+
+- الواجهة أثناء التطوير تعمل على المنفذ 9999 عبر Vite.
+- الباك إند المحلي يعمل افتراضياً على المنفذ 2288.
+- نسخة EXE لا تعتمد على Vite؛ هي تشغل FastAPI وتخدم الواجهة المبنية من داخل الحزمة.
+- Railway يعتمد على متغير PORT من المنصة، وليس 2288 غالباً.
+- مسار ملفات الواجهة المبنية يجب أن يبقى ui/restaurant.
+- مسار البيانات القابلة للكتابة يختلف بين المحلي والـ EXE وRailway.
+- أهم نقطة تشخيص هي فتح /__whoami__ لمعرفة أي نسخة API تعمل فعلاً.
+
+============================================================
+2) ملفات الإعداد والتشغيل المؤثرة
+============================================================
+
+أ) vite.config.ts
+----------------
+الدور:
+- يحدد منفذ واجهة التطوير.
+- يحدد البروكسي من Vite إلى API.
+- يحدد مجلد بناء الواجهة.
+
+القيم الحالية المهمة:
+- server.port = 9999
+- server.strictPort = true
+- proxy /api -> http://127.0.0.1:2288
+- proxy /__whoami__ -> http://127.0.0.1:2288
+- proxy /static و /modules وبعض الصفحات القديمة -> http://127.0.0.1:2288
+- build.outDir = ui/restaurant
+- base = /
+
+الأثر العملي:
+- أثناء npm run dev، المتصفح يفتح http://127.0.0.1:9999.
+- أي طلب /api من الواجهة يمر عبر Vite إلى 2288.
+- إذا كان 2288 يشغل API قديم أو EXE آخر، ستظهر اختلافات في السلوك.
+- تغيير outDir سيكسر EXE والباك إند لأن api_server.py يتوقع ui/restaurant.
+
+ب) src/lib/apiBase.ts
+---------------------
+الدور:
+- يحدد أساس عناوين API من الواجهة.
+
+المنطق الحالي:
+- إذا كانت الواجهة مفتوحة من file: يستخدم VITE_XTRA_API أو http://127.0.0.1:2288.
+- إذا كان المنفذ 9999 أو 5290 يستخدم نفس origin حتى يعمل بروكسي Vite.
+- إذا وجد VITE_XTRA_API خارج منافذ التطوير يستخدمه.
+- إذا كان local وبمنفذ غير 2288 يرجع إلى http://127.0.0.1:2288.
+- وإلا يستخدم نفس origin.
+
+الأثر العملي:
+- في التطوير: API base يكون http://127.0.0.1:9999، ثم Vite يوجهه إلى 2288.
+- في EXE: الواجهة تُخدم من نفس FastAPI على 2288، لذلك API base يكون نفس origin.
+- في Railway: الواجهة والـ API على نفس الدومين، لذلك API base يكون نفس origin.
+
+ج) backend/api_server.py
+------------------------
+الدور:
+- الخادم الرئيسي.
+- يحدد منفذ API.
+- يحدد مكان الواجهة المبنية.
+- يحدد مكان البيانات والإعدادات.
+- يخدم static routes وSPA routes.
+
+القيم والمنطق المؤثر:
+- XTRA_API_PORT = PORT أو XTRA_API_PORT أو 2288.
+- في Railway يستخدم PORT من المنصة.
+- في المحلي الافتراضي 2288.
+- في EXE أيضاً 2288 ما لم يتغير env.
+
+مسارات مهمة:
+- BUNDLE_DIR:
+  - في EXE = sys._MEIPASS، أي مجلد مؤقت تفك فيه حزمة PyInstaller.
+  - في المحلي/Railway = جذر المشروع/الحاوية.
+
+- DATA_DIR:
+  - إذا وجد MAT3AM_BASE_DIR يستخدمه.
+  - وإلا يساوي BUNDLE_DIR.
+
+- BASE_DIR = DATA_DIR.
+- REST_DIR = BUNDLE_DIR / ui / restaurant.
+
+المعنى:
+- ملفات الواجهة تُقرأ من BUNDLE_DIR/ui/restaurant.
+- ملفات التشغيل والبيانات القابلة للكتابة تُقرأ/تُكتب في DATA_DIR/config.
+- في EXE لا يجب جعل REST_DIR داخل AppData؛ يجب أن يبقى داخل الحزمة.
+
+مسارات الواجهة المخدومة:
+- /static/restaurant
+- /static/restaurant/
+- /static/restaurant/{path}
+- /login
+- /app
+- /app/
+- /app/{full_path}
+- /assets/* من مجلد ui/restaurant/assets
+- /static/restaurant/assets/* من نفس مجلد assets
+- /app-logo.png من ui/restaurant/app-logo.png
+
+نقطة حديثة مهمة:
+- تم إضافة /app-logo.png حتى لا تظهر صورة التحميل 404 في EXE.
+
+مسار التشخيص:
+- /__whoami__
+يعرض:
+- VERIFY_SCHEMA_REVISION
+- FEATURE_GUEST_RETURNS
+- API_FILE_PATH
+- DATA_DIR
+- EXE_BUILD إن كانت نسخة EXE
+- RAILWAY_GIT إن كانت بيئة Railway
+- ODBC_BUILD إن أمكن
+
+د) backend/mat3am_exe_entry.py
+------------------------------
+الدور:
+- نقطة دخول نسخة EXE.
+- يضبط MAT3AM_BASE_DIR تلقائياً إلى:
+  %LOCALAPPDATA%\Mat3amPOS
+- ينسخ config من الحزمة إلى AppData في أول تشغيل إذا لم يوجد settings.json.
+- يشغل uvicorn على XTRA_API_PORT.
+- يفتح المتصفح على:
+  http://127.0.0.1:{XTRA_API_PORT}/static/restaurant/
+
+الأثر العملي:
+- EXE يقرأ الواجهة من الحزمة المؤقتة.
+- EXE يحفظ إعدادات التشغيل والـ JSON في AppData وليس بجانب ملف exe.
+- إذا أردت تصفير بيانات EXE، لا يكفي تغيير dist؛ يجب مراجعة:
+  %LOCALAPPDATA%\Mat3amPOS
+
+هـ) Mat3amPOS.spec
+------------------
+الدور:
+- يحدد ما يدخل داخل ملف EXE.
+
+المدخل الرئيسي:
+- backend\mat3am_exe_entry.py
+
+البيانات المضمنة:
+- ui -> ui
+- config -> config
+- docs -> docs
+- public -> public
+
+الأيقونة والنسخة:
+- icon = assets/mat3am_icon.ico
+- version = assets/file_version_info.txt
+
+الأثر العملي:
+- أي ملف واجهة يجب أن يكون داخل ui بعد npm run build.
+- أي إعداد افتراضي مطلوب أول تشغيل EXE يجب أن يكون داخل config قبل البناء.
+- أيقونة exe تعتمد على assets/mat3am_icon.ico.
+
+و) scripts/prepare_mat3am_exe_build.py
+--------------------------------------
+الدور:
+- يكتب config/mat3am_exe_build.txt.
+- يولد assets/mat3am_icon.ico من dist/oya_Mohandessin.png.
+- يولد assets/file_version_info.txt لخصائص ويندوز.
+
+ملاحظة حديثة:
+- تم إصلاح توليد الأيقونة لتكون مربعة وبأحجام مناسبة لوندوز.
+
+ز) run.bat
+----------
+الدور:
+- يشغل الواجهة فقط.
+
+الأثر:
+- لا يشغل API.
+- إذا استخدمته وحده فلن تعمل بيانات الطاولات والطلبات إلا إذا كان API على 2288 يعمل مسبقاً.
+
+ح) run_api.bat
+--------------
+الدور:
+- يشغل API فقط.
+- يقتل أي عملية على 2288 قبل التشغيل.
+- يشغل backend/api_server.py من نفس مجلد المشروع.
+
+نقاط تشخيص يطبعها:
+- http://127.0.0.1:2288/__whoami__
+- يجب رؤية VERIFY_SCHEMA_REVISION=11 و FEATURE_GUEST_RETURNS=1.
+
+ط) run_full_stack.bat
+---------------------
+الدور:
+- يشغل API وواجهة Vite معاً.
+- يقتل المنافذ 2288 و9999 قبل التشغيل.
+- يشغل API أولاً ثم ينتظر /api/ready.
+- يشغل Vite مع --force.
+
+الاستخدام الموصى به محلياً:
+- هذا هو أفضل ملف لتقليل التخبط بين نسخ قديمة وحديثة.
+
+ي) scripts/mat3am_kill_ports.ps1
+--------------------------------
+الدور:
+- يوقف العمليات التي تستمع على المنافذ 2288 و9999 افتراضياً.
+
+الأثر:
+- يمنع وجود API قديم أو Vite قديم.
+- استخدامه قبل التشغيل مهم جداً عند اختلاف النسخ.
+
+ك) .env.example
+---------------
+المتغيرات المؤثرة:
+- VITE_XTRA_API=http://127.0.0.1:2288
+- MAT3AM_INITIAL_DEV_LOGIN=dev اختياري
+- MAT3AM_INITIAL_DEV_PIN=dev@123 اختياري
+- VITE_NUIT_BASE=http://127.0.0.1:8000
+
+ملاحظة مهمة:
+- في وضع Vite على 9999/5290 يتم تجاهل VITE_XTRA_API عملياً لصالح نفس origin والبروكسي.
+
+ل) config/settings.json و settings.example.json
+-----------------------------------------------
+الدور:
+- إعداد اتصال قاعدة البيانات.
+
+الحقول حسب القالب:
+- server
+- database
+- uid
+- password
+- use_windows_auth
+- mat3am.defaultCurrencyGuid
+- mat3am.currencyPreferredNames
+- mat3am.currencyNameContains
+
+ملاحظة أمنية:
+- لم يتم تضمين محتوى settings.json الفعلي في هذه الدراسة لأنه محجوب ويحتوي غالباً بيانات اتصال حساسة.
+
+مكان الملف حسب البيئة:
+- المحلي: E:\XTRA_WEB\مطاعم\config\settings.json
+- EXE: %LOCALAPPDATA%\Mat3amPOS\config\settings.json
+- Railway/Docker: /data/config/settings.json إذا تم توفير volume/data مناسب.
+
+م) Dockerfile
+-------------
+الدور:
+- بناء Railway/Docker.
+
+المراحل:
+- build frontend باستخدام node:22.
+- npm run build ينتج ui/restaurant.
+- python:3.12 يشغل backend.
+- ينسخ ui/restaurant من مرحلة frontend إلى /app/ui/restaurant.
+- يضبط MAT3AM_BASE_DIR=/data.
+- يضبط MAT3AM_UVICORN_WORKERS=2.
+- يضبط MAT3AM_REFERENCE_CACHE_ONLY=1.
+- يشغل python api_server.py من /app/backend.
+
+الأثر:
+- الواجهة والـ API يعملان من نفس الخدمة.
+- البيانات والإعدادات في /data.
+- إذا لم تكن /data مستمرة، قد تفقد إعدادات وملفات JSON عند إعادة النشر.
+
+ن) railway.toml
+---------------
+الدور:
+- يحدد أن Railway يستخدم Dockerfile.
+- healthcheckPath = /api/ping.
+
+الأثر:
+- Railway لا يستخدم منفذ 2288 مباشرة؛ المنفذ يأتي من PORT.
+- نجاح /api/ping مهم لاستقرار النشر.
+
+============================================================
+3) مسار التشغيل المحلي
+============================================================
+
+السيناريو الموصى به:
+1. تشغيل run_full_stack.bat.
+2. السكربت يوقف 2288 و9999.
+3. يشغل backend/api_server.py على 2288.
+4. يشغل Vite على 9999.
+5. المتصفح يفتح http://127.0.0.1:9999.
+6. الواجهة تطلب /api من نفس origin.
+7. Vite proxy يحول الطلب إلى http://127.0.0.1:2288.
+
+مسارات تشخيص المحلي:
+- http://127.0.0.1:2288/__whoami__
+- http://127.0.0.1:2288/api/ping
+- http://127.0.0.1:9999
+
+أسباب التخبط المحلي:
+- وجود API قديم على 2288.
+- وجود Vite قديم على 9999.
+- تشغيل run.bat فقط بدون API.
+- وجود EXE يعمل في الخلفية على 2288.
+- الكاش في المتصفح، رغم أن الإعدادات تحاول تقليله.
+
+============================================================
+4) مسار تشغيل EXE
+============================================================
+
+عند تشغيل Mat3amPOS022.exe:
+
+1. PyInstaller يفك الحزمة في مجلد مؤقت مثل:
+   %TEMP%\_MEIxxxxxx
+
+2. mat3am_exe_entry.py يضبط:
+   MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS
+
+3. api_server.py يرى:
+   BUNDLE_DIR=%TEMP%\_MEIxxxxxx
+   DATA_DIR=%LOCALAPPDATA%\Mat3amPOS
+   REST_DIR=%TEMP%\_MEIxxxxxx\ui\restaurant
+
+4. الواجهة تُخدم من:
+   /static/restaurant/
+
+5. البيانات والإعدادات تُقرأ/تُكتب في:
+   %LOCALAPPDATA%\Mat3amPOS\config
+
+6. المتصفح يفتح:
+   http://127.0.0.1:2288/static/restaurant/
+
+7. API base يكون نفس origin:
+   http://127.0.0.1:2288
+
+أهم ملاحظات EXE:
+- لا يعتمد على Vite.
+- لا يستخدم مجلد المشروع بعد البناء.
+- إعدادات الاتصال في AppData قد تختلف عن config/settings.json داخل المشروع.
+- إذا اشتغلت نسخة EXE قد تمنع المحلي من استخدام 2288.
+- إذا ظهرت 404 للواجهة، افحص REST_DIR في السجل.
+- إذا ظهرت 404 لـ app-logo.png، يجب وجود المسار /app-logo.png، وقد تم إصلاحه.
+
+تشخيص EXE:
+- افتح http://127.0.0.1:2288/__whoami__
+- تأكد من وجود EXE_BUILD.
+- تأكد من DATA_DIR.
+- تأكد من FEATURE_GUEST_RETURNS=1.
+
+============================================================
+5) مسار Railway/Docker
+============================================================
+
+في Railway:
+
+1. Dockerfile يبني الواجهة في مرحلة Node.
+2. ينسخ ui/restaurant إلى صورة Python.
+3. يشغل backend/api_server.py.
+4. Railway يمرر PORT.
+5. api_server.py يستخدم PORT بدلاً من 2288.
+6. MAT3AM_BASE_DIR=/data.
+7. الواجهة والـ API على نفس الدومين.
+
+المسارات المهمة:
+- BUNDLE_DIR=/app تقريباً.
+- REST_DIR=/app/ui/restaurant.
+- DATA_DIR=/data.
+
+أهم المخاطر:
+- عدم استمرار /data يعني فقد إعدادات وملفات JSON.
+- اختلاف الفرع أو commit في Railway عن المحلي.
+- عدم إعادة النشر بعد تحديث GitHub.
+- استخدام Render أو Railway لخدمة/فرع مختلف.
+- فشل build يؤدي لبقاء نشر قديم.
+
+تشخيص Railway:
+- افتح https://.../__whoami__
+- راقب RAILWAY_GIT.
+- قارن RAILWAY_GIT مع git log المحلي.
+- افحص /api/ping لأنه healthcheck.
+
+============================================================
+6) ملفات config/restaurant المؤثرة على سلوك ومسار التشغيل
+============================================================
+
+هذه الملفات ليست كلها إعدادات مسار URL، لكنها تؤثر على مسار تشغيل التطبيق وحالة النظام:
+
+- venue.json
+  يحدد نوع/وضع المكان وبعض إعدادات العرض.
+
+- floor_plan.json
+  مخطط الصالة والطاولات.
+
+- tables.json
+  تعريفات الطاولات المحلية.
+
+- table_sessions.json
+  جلسات الطاولات المفتوحة/المغلقة.
+
+- orders.json
+  طلبات المطبخ.
+
+- invoices.json
+  الفواتير المحلية/انتظار الدفع.
+
+- restaurant_ops_settings.json
+  إعدادات التشغيل العامة للمطعم.
+
+- workflow_settings.json
+  إعدادات أدوار ومسارات العمل.
+
+- pos_channels.json
+  قنوات البيع.
+
+- daily_menu_schedule.json
+  إعدادات المنيو اليومي.
+
+- kitchen_item_stops.json
+  إيقاف/تشغيل أصناف المطبخ.
+
+- guest_return_requests.json
+  طلبات مرتجع الضيف.
+
+- product_images.json و group_images.json
+  فهارس صور المنتجات والمجموعات.
+
+- product_images/ و group_images/
+  المجلدات الفعلية للصور إن وجدت.
+
+- sql_mirror/*.json
+  مرايا JSON لقراءات SQL الثقيلة مثل المستخدمين والطاولات/الأصناف.
+
+مكان هذه الملفات:
+- المحلي: داخل E:\XTRA_WEB\مطاعم\config\restaurant
+- EXE: داخل %LOCALAPPDATA%\Mat3amPOS\config\restaurant
+- Docker/Railway: داخل /data/config/restaurant
+
+ملاحظة مهمة:
+- عند مقارنة المحلي مع EXE، لا تقارن فقط ملفات المشروع؛ قارن أيضاً AppData.
+
+============================================================
+7) نقاط تضارب محتملة
+============================================================
+
+1. تضارب المنفذ 2288
+-------------------
+إذا كان EXE يعمل ثم شغلت API المحلي، أو العكس، سيظهر خطأ:
+WinError 10048
+
+الحل:
+- إغلاق النسخة القديمة.
+- أو استخدام scripts/mat3am_kill_ports.ps1.
+
+2. اختلاف DATA_DIR
+------------------
+نفس الكود قد يعرض بيانات مختلفة لأن DATA_DIR مختلف.
+
+المحلي:
+- E:\XTRA_WEB\مطاعم
+
+EXE:
+- %LOCALAPPDATA%\Mat3amPOS
+
+Railway:
+- /data
+
+3. اختلاف Git عن EXE
+--------------------
+EXE هو لقطة وقت البناء.
+GitHub/Railway قد يكونان على commit آخر.
+
+الحل:
+- قارن EXE_BUILD و RAILWAY_GIT و git log.
+
+4. VITE_XTRA_API
+----------------
+قد يسبب اتصالاً بخادم قديم خارج وضع Vite.
+لكن في Vite على 9999/5290 يتم تجاهله لصالح البروكسي.
+
+5. كاش المتصفح
+--------------
+تم تقليل خطره عبر:
+- Cache-Control no-store في Vite.
+- no-store على index.html من الباك إند.
+- assets بأسماء hash.
+
+لكن إذا رأيت واجهة قديمة:
+- أغلق Vite.
+- شغل npm run dev:fresh.
+- أو run_full_stack.bat.
+
+6. app-logo.png
+---------------
+كان يوجد خطر 404 لأن الواجهة تطلب /app-logo.png.
+تم إصلاحه في api_server.py بإضافة مسار مباشر.
+
+============================================================
+8) قائمة فحص سريعة قبل أي تشغيل
+============================================================
+
+محلي:
+1. شغل run_full_stack.bat.
+2. افتح http://127.0.0.1:2288/__whoami__.
+3. تأكد من:
+   - API_FILE_PATH يشير إلى E:\XTRA_WEB\مطاعم\backend\api_server.py
+   - DATA_DIR يشير إلى E:\XTRA_WEB\مطاعم
+   - VERIFY_SCHEMA_REVISION=11
+   - FEATURE_GUEST_RETURNS=1
+4. افتح http://127.0.0.1:9999.
+
+EXE:
+1. أغلق أي API محلي على 2288.
+2. شغل Mat3amPOS022.exe.
+3. افتح http://127.0.0.1:2288/__whoami__.
+4. تأكد من:
+   - EXE_BUILD موجود.
+   - DATA_DIR يشير إلى AppData\Local\Mat3amPOS.
+   - /app-logo.png يرجع 200.
+5. افتح http://127.0.0.1:2288/static/restaurant/.
+
+Railway:
+1. افتح /api/ping.
+2. افتح /__whoami__.
+3. قارن RAILWAY_GIT مع آخر commit في GitHub.
+4. تأكد من DATA_DIR=/data.
+
+============================================================
+9) توصيات عملية
+============================================================
+
+1. اعتماد run_full_stack.bat للتطوير اليومي.
+2. عدم تشغيل EXE والمحلي معاً على 2288.
+3. قبل بناء EXE:
+   - npm run build يجب أن ينتج ui/restaurant.
+   - تأكد من وجود ui/restaurant/index.html.
+   - تأكد من وجود ui/restaurant/app-logo.png.
+   - شغل prepare_mat3am_exe_build.py.
+4. بعد بناء EXE:
+   - افتح /__whoami__.
+   - تأكد من EXE_BUILD.
+   - افتح /app-logo.png.
+5. لا تعتمد على config/settings.json داخل المشروع لتشخيص EXE؛ راجع AppData.
+6. لا تعتبر Railway مطابقاً للمحلي إلا بعد مقارنة RAILWAY_GIT و/أو إعادة النشر.
+7. احفظ نسخة من هذا التقرير مع كل build كبير.
+
+============================================================
+10) أهم المسارات النهائية المرجعية
+============================================================
+
+جذر المشروع المحلي:
+E:\XTRA_WEB\مطاعم
+
+واجهة التطوير:
+http://127.0.0.1:9999
+
+API المحلي/EXE:
+http://127.0.0.1:2288
+
+تشخيص API:
+http://127.0.0.1:2288/__whoami__
+
+واجهة EXE:
+http://127.0.0.1:2288/static/restaurant/
+
+ملف EXE الحالي:
+E:\XTRA_WEB\مطاعم\dist\Mat3amPOS022.exe
+
+بيانات EXE:
+%LOCALAPPDATA%\Mat3amPOS
+
+إعداد اتصال EXE:
+%LOCALAPPDATA%\Mat3amPOS\config\settings.json
+
+إعداد اتصال المحلي:
+E:\XTRA_WEB\مطاعم\config\settings.json
+
+واجهة build:
+E:\XTRA_WEB\مطاعم\ui\restaurant
+
+صورة اللوجو داخل build:
+E:\XTRA_WEB\مطاعم\ui\restaurant\app-logo.png
+
+أيقونة EXE:
+E:\XTRA_WEB\مطاعم\assets\mat3am_icon.ico
+
+============================================================
+نهاية الدراسة
+============================================================

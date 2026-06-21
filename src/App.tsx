@@ -9,6 +9,7 @@ import CashflowFrame from "./pages/CashflowFrame";
 import CashExpensePage from "./pages/CashExpensePage";
 import PurchasesPage from "./pages/PurchasesPage";
 import ReportsPage from "./pages/ReportsPage";
+import FlashReportPage from "./pages/FlashReportPage";
 import PosPlaceholder from "./pages/PosPlaceholder";
 import TablesLayoutPage from "./pages/TablesLayoutPage";
 import DeveloperConnection from "./pages/DeveloperConnection";
@@ -42,13 +43,20 @@ import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
 import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
 import RoleScheduleSettingsPage from "./pages/settings/RoleScheduleSettingsPage";
 import RestaurantOpsSettingsPage from "./pages/settings/RestaurantOpsSettingsPage";
+import KitchenOpsSettingsPage from "./pages/settings/KitchenOpsSettingsPage";
+import AuditComplianceSettingsPage from "./pages/settings/AuditComplianceSettingsPage";
+import VipOwnerSettingsPage from "./pages/settings/VipOwnerSettingsPage";
+import CustomerVipSettingsPage from "./pages/settings/CustomerVipSettingsPage";
 import PosVenueSettingsPage from "./pages/settings/PosVenueSettingsPage";
+import DisplayCategorySettingsPage from "./pages/settings/DisplayCategorySettingsPage";
 import PosKdsSettingsPage from "./pages/settings/PosKdsSettingsPage";
 import KdsPrepTimesSettingsPage from "./pages/settings/KdsPrepTimesSettingsPage";
 import PosTaxPolicySettingsPage from "./pages/settings/PosTaxPolicySettingsPage";
 import PaymentRoutingSettingsPage from "./pages/settings/PaymentRoutingSettingsPage";
 import PosPromotionsSettingsPage from "./pages/settings/PosPromotionsSettingsPage";
 import AddonsSettingsPage from "./pages/settings/AddonsSettingsPage";
+import ModifierGroupsSettingsPage from "./pages/settings/ModifierGroupsSettingsPage";
+import ProductModifierLinksPage from "./pages/settings/ProductModifierLinksPage";
 import MinimumChargeSettingsPage from "./pages/settings/MinimumChargeSettingsPage";
 import KidsAreaPage from "./pages/KidsAreaPage";
 import KidsAreaPackagesSettingsPage from "./pages/settings/KidsAreaPackagesSettingsPage";
@@ -56,6 +64,7 @@ import SharedTerminalSettingsPage from "./pages/settings/SharedTerminalSettingsP
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
 import DeliveryManagementPage from "./pages/DeliveryManagementPage";
+import TableSessionsReportPage from "./pages/TableSessionsReportPage";
 import WaiterUiPreviewPage from "./lab/waiterUiPreview/WaiterUiPreviewPage";
 
 function RequireRole({ role, children }: { role: RoleId; children: ReactNode }) {
@@ -117,6 +126,7 @@ export default function App() {
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="flash-report" element={<FlashReportPage />} />
         <Route path="costing" element={<CostingPage />} />
         <Route path="master-data" element={<MasterDataPage />} />
       </Route>
@@ -140,6 +150,8 @@ export default function App() {
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="flash-report" element={<FlashReportPage />} />
+        <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />
         <Route path="settings" element={<SettingsLayout />}>
           <Route index element={<Navigate to="venue" replace />} />
@@ -159,15 +171,23 @@ export default function App() {
           <Route path="product-images" element={<ProductImagesSettingsPage />} />
           <Route path="pos" element={<Navigate to="../pos-venue" replace />} />
           <Route path="pos-venue" element={<PosVenueSettingsPage />} />
+          <Route path="display-categories" element={<DisplayCategorySettingsPage />} />
           <Route path="pos-kds" element={<PosKdsSettingsPage />} />
           <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
           <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
           <Route path="addons" element={<AddonsSettingsPage />} />
           <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
+          <Route path="modifier-groups" element={<ModifierGroupsSettingsPage />} />
+          <Route path="product-modifier-links" element={<ProductModifierLinksPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
-          <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
+          <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="kitchen-detail" element={<KitchenOpsSettingsPage />} />
+          <Route path="audit-compliance" element={<AuditComplianceSettingsPage />} />
+          <Route path="vip-owner" element={<VipOwnerSettingsPage />} />
+          <Route path="customer-vip" element={<CustomerVipSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
@@ -230,6 +250,18 @@ export default function App() {
       </Route>
 
       <Route
+        path="/app/kitchen_specialist/*"
+        element={
+          <RequireRole role="kitchen_specialist">
+            <AppShell role="kitchen_specialist" />
+          </RequireRole>
+        }
+      >
+        <Route index element={<Navigate to="kitchen" replace />} />
+        <Route path="kitchen" element={<KitchenPage mode="specialist" />} />
+      </Route>
+
+      <Route
         path="/app/speed_order/*"
         element={
           <RequireRole role="speed_order">
@@ -274,6 +306,8 @@ export default function App() {
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="flash-report" element={<FlashReportPage />} />
+        <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />
         <Route path="settings" element={<SettingsLayout />}>
           <Route index element={<Navigate to="connection" replace />} />
@@ -293,16 +327,24 @@ export default function App() {
           <Route path="product-images" element={<ProductImagesSettingsPage />} />
           <Route path="pos" element={<Navigate to="../pos-venue" replace />} />
           <Route path="pos-venue" element={<PosVenueSettingsPage />} />
+          <Route path="display-categories" element={<DisplayCategorySettingsPage />} />
           <Route path="pos-kds" element={<PosKdsSettingsPage />} />
           <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
           <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
           <Route path="addons" element={<AddonsSettingsPage />} />
           <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
           <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
+          <Route path="modifier-groups" element={<ModifierGroupsSettingsPage />} />
+          <Route path="product-modifier-links" element={<ProductModifierLinksPage />} />
           <Route path="pos-admin-legacy" element={<PosAdminPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
-          <Route path="restaurant-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
+          <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="kitchen-detail" element={<KitchenOpsSettingsPage />} />
+          <Route path="audit-compliance" element={<AuditComplianceSettingsPage />} />
+          <Route path="vip-owner" element={<VipOwnerSettingsPage />} />
+          <Route path="customer-vip" element={<CustomerVipSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />

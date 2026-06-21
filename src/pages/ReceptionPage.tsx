@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
+import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { mapTablesToFloorPlanLabels } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
 
@@ -113,7 +114,7 @@ export default function ReceptionPage() {
     if (!modal) return;
     setMsg("");
     try {
-      await fetch(`${base}/api/restaurant/table-sessions`, {
+      const seatR = await fetch(`${base}/api/restaurant/table-sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -127,6 +128,16 @@ export default function ReceptionPage() {
           },
         }),
       });
+      const seatText = await seatR.text();
+      if (!seatR.ok) {
+        let detail = seatText || `HTTP ${seatR.status}`;
+        try {
+          const parsed = JSON.parse(seatText) as { detail?: unknown };
+          if (typeof parsed?.detail === "string" && parsed.detail.trim()) detail = parsed.detail;
+        } catch {}
+        setMsg(detail);
+        return;
+      }
       await fetch(`${base}/api/restaurant/tables/${encodeURIComponent(modal.id)}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -164,7 +175,7 @@ export default function ReceptionPage() {
                     : st === "dirty" || st === "cleaning"
                       ? "role-op__map-card role-op__map-card--reserved"
                       : "role-op__map-card role-op__map-card--available";
-              const num = t.number != null ? `#${t.number}` : t.name.replace(/[^\d]/g, "") ? `#${t.name.replace(/[^\d]/g, "")}` : t.name;
+              const num = normalizeTableDisplayLabel(t.name, t.number, t.id);
               const btnClass =
                 st === "occupied"
                   ? "role-op__map-status-btn role-op__map-status-btn--occ"

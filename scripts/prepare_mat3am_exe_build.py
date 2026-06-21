@@ -1,5 +1,5 @@
 """
-قبل pyinstaller: طابع بناء + أيقونة .ico من dist/oya_Mohandessin.png + file_version_info لخصائص ويندوز.
+قبل pyinstaller: طابع بناء + أيقونة .ico من صورة الهوية الحالية + file_version_info لخصائص ويندوز.
 """
 from __future__ import annotations
 
@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+LOGO_CANDIDATES = (
+    ROOT / "SIRRESTO .jpeg",
+    ROOT / "public" / "app-logo.png",
+    ROOT / "dist" / "oya_Mohandessin.png",
+)
 
 
 def _git_short() -> str:
@@ -46,18 +51,21 @@ def main() -> None:
     except ImportError:
         print("[prepare] WARNING: pip install pillow — تخطي توليد ICO", file=sys.stderr)
     else:
-        src = ROOT / "dist" / "oya_Mohandessin.png"
-        if not src.is_file():
-            print(f"[prepare] ERROR: missing {src}", file=sys.stderr)
+        src = next((p for p in LOGO_CANDIDATES if p.is_file()), None)
+        if src is None:
+            print("[prepare] ERROR: missing logo source image", file=sys.stderr)
             sys.exit(1)
         assets = ROOT / "assets"
         assets.mkdir(parents=True, exist_ok=True)
         ico = assets / "mat3am_icon.ico"
         img = Image.open(src).convert("RGBA")
+        side = max(img.size)
+        canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        canvas.alpha_composite(img, ((side - img.width) // 2, (side - img.height) // 2))
+        img = canvas
         sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-        imgs = [img.resize(s, Image.Resampling.LANCZOS) for s in sizes]
-        imgs[0].save(ico, format="ICO", sizes=[(i.width, i.height) for i in imgs], append_images=imgs[1:])
-        print(f"[prepare] wrote {ico}")
+        img.save(ico, format="ICO", sizes=sizes)
+        print(f"[prepare] wrote {ico} from {src}")
 
     ver_path = ROOT / "assets" / "file_version_info.txt"
     # خصائص الملف في ويندوز — ProductVersion = طابع البناء (تتأكد من التحديث على الأجهزة)

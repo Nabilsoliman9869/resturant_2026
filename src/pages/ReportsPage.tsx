@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { repairArabicDisplayText } from "../auth/displayUser";
 import { apiBase } from "../lib/apiBase";
 
 type ReportMeta = {
@@ -12,6 +13,39 @@ type RunResult = {
   columns: string[];
   rows: unknown[][];
   message?: string;
+  reportDate?: string;
+  overall?: {
+    captainsCount?: number;
+    sessions?: number;
+    orders?: number;
+    orderQty?: number;
+    bills?: number;
+    guestReturns?: number;
+    approvedReturns?: number;
+    extraTime?: number;
+    resetReady?: number;
+    closedSessions?: number;
+  };
+  captains?: Array<{
+    captainUserId?: string;
+    captainLogin?: string;
+    captainName?: string;
+    scheduledRoleLabel?: string;
+    baseRoleLabel?: string;
+    seatingCount?: number;
+    orderCount?: number;
+    orderQty?: number;
+    orderValue?: number;
+    billRequestCount?: number;
+    guestReturnRequestCount?: number;
+    approvedReturnCount?: number;
+    extraTimeCount?: number;
+    resetReadyCount?: number;
+    closeCount?: number;
+    transferInCount?: number;
+    transferOutCount?: number;
+    claimCount?: number;
+  }>;
 };
 
 function todayISO() {
@@ -25,6 +59,14 @@ function monthStartISO() {
   const d = new Date();
   const m = `${d.getMonth() + 1}`.padStart(2, "0");
   return `${d.getFullYear()}-${m}-01`;
+}
+
+function yesterdayISO() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 function buildRunQuery(p: {
@@ -74,6 +116,9 @@ export default function ReportsPage() {
   const [runErr, setRunErr] = useState("");
   const [loadingList, setLoadingList] = useState(false);
   const [loadingRun, setLoadingRun] = useState(false);
+  const [flashResult, setFlashResult] = useState<RunResult | null>(null);
+  const [flashErr, setFlashErr] = useState("");
+  const [loadingFlash, setLoadingFlash] = useState(false);
 
   const base = apiBase();
 
@@ -86,9 +131,26 @@ export default function ReportsPage() {
     }
   }, [base]);
 
+  const loadCaptainsFlash = useCallback(async () => {
+    setLoadingFlash(true);
+    setFlashErr("");
+    try {
+      const day = yesterdayISO();
+      const r = await fetch(`${base}/api/reports/captains_flash/run?from_date=${encodeURIComponent(day)}`);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || j.message || `HTTP ${r.status}`);
+      setFlashResult(j as RunResult);
+    } catch (e) {
+      setFlashErr(e instanceof Error ? e.message : "تعذر تحميل فلاش ريبورت الكباتن");
+    } finally {
+      setLoadingFlash(false);
+    }
+  }, [base]);
+
   useEffect(() => {
     refreshPing();
-  }, [refreshPing]);
+    void loadCaptainsFlash();
+  }, [refreshPing, loadCaptainsFlash]);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +258,17 @@ export default function ReportsPage() {
     result.rows?.length > 0 &&
     result.columns?.includes("CardGuide");
 
+  const flashCards = [
+    { label: "الكباتن النشطون", value: flashResult?.overall?.captainsCount ?? 0 },
+    { label: "جلسات التسكين", value: flashResult?.overall?.sessions ?? 0 },
+    { label: "الطلبات", value: flashResult?.overall?.orders ?? 0 },
+    { label: "طلب الحساب", value: flashResult?.overall?.bills ?? 0 },
+    { label: "المرتجعات", value: flashResult?.overall?.guestReturns ?? 0 },
+    { label: "مدة إضافية", value: flashResult?.overall?.extraTime ?? 0 },
+    { label: "إرجاع جاهزة", value: flashResult?.overall?.resetReady ?? 0 },
+    { label: "حسم/إغلاق", value: flashResult?.overall?.closedSessions ?? 0 },
+  ];
+
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>تقارير الحسابات</h2>
@@ -208,6 +281,94 @@ export default function ReportsPage() {
         <button type="button" className="btn btn-ghost" onClick={refreshPing}>
           تحديث
         </button>
+        <button type="button" className="btn btn-ghost" onClick={() => void loadCaptainsFlash()}>
+          تحديث فلاش ريبورت
+        </button>
+        <a className="btn btn-ghost" href="/app/flash-report">
+          فلاش ريبورت مالي عام
+        </a>
+      </div>
+
+      <div className="card" style={{ marginBottom: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+          <div>
+            <h3 style={{ margin: 0 }}>فلاش ريبورت الكباتن</h3>
+            <div style={{ color: "var(--muted)", marginTop: 4 }}>
+              {flashResult?.reportDate ? `ملخص يوم ${flashResult.reportDate}` : "ملخص يومي لأداء الكباتن من الجلسات والطلبات والمرتجعات"}
+            </div>
+          </div>
+          <div style={{ color: "var(--muted)" }}>{loadingFlash ? "جاري التحميل…" : flashResult?.message || ""}</div>
+        </div>
+
+        {flashErr ? (
+          <div style={{ color: "var(--danger)" }}>{flashErr}</div>
+        ) : (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                gap: "0.75rem",
+                marginBottom: "1rem",
+              }}
+            >
+              {flashCards.map((card) => (
+                <div key={card.label} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "0.8rem", background: "var(--surface2)" }}>
+                  <div style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: 6 }}>{card.label}</div>
+                  <div style={{ fontSize: "1.2rem", fontWeight: 800 }}>{String(card.value)}</div>
+                </div>
+              ))}
+            </div>
+
+            {flashResult?.captains && flashResult.captains.length > 0 ? (
+              <div style={{ overflow: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.92rem" }}>
+                  <thead>
+                    <tr style={{ textAlign: "right", color: "var(--muted)", background: "var(--surface2)" }}>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>الكابتن</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>موقعه في الجدولة</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>تسكين</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>طلبات</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>طلب الحساب</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>مرتجع</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>مدة إضافية</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>إرجاع جاهزة</th>
+                      <th style={{ padding: "0.55rem", borderBottom: "1px solid var(--border)" }}>تحويل</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {flashResult.captains.map((row, index) => (
+                      <tr key={`${row.captainUserId || row.captainLogin || row.captainName || "captain"}-${index}`} style={{ borderTop: "1px solid var(--border)" }}>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>
+                          <div style={{ fontWeight: 700 }}>{repairArabicDisplayText(row.captainName || row.captainLogin || "") || "غير محدد"}</div>
+                          <div style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{row.captainLogin || row.baseRoleLabel || ""}</div>
+                        </td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>{row.scheduledRoleLabel || row.baseRoleLabel || "غير محدد"}</td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>{row.seatingCount ?? 0}</td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>
+                          <div>{row.orderCount ?? 0}</div>
+                          <div style={{ color: "var(--muted)", fontSize: "0.82rem" }}>كمية: {row.orderQty ?? 0}</div>
+                        </td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>{row.billRequestCount ?? 0}</td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>
+                          <div>{row.guestReturnRequestCount ?? 0}</div>
+                          <div style={{ color: "var(--muted)", fontSize: "0.82rem" }}>معتمد: {row.approvedReturnCount ?? 0}</div>
+                        </td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>{row.extraTimeCount ?? 0}</td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>{row.resetReadyCount ?? 0}</td>
+                        <td style={{ padding: "0.55rem", verticalAlign: "top" }}>
+                          داخل {row.transferInCount ?? 0} / خارج {row.transferOutCount ?? 0}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ color: "var(--muted)" }}>لا توجد حركة مسجلة للكباتن في هذا اليوم.</div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: "1rem" }}>
@@ -405,4 +566,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-

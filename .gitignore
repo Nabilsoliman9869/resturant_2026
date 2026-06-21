@@ -22,6 +22,9 @@ config/restaurant/*
 
 # ملفات build الناتجة (Vite outDir = ui/restaurant) — لا تُرفع
 ui/restaurant/assets/
+ui/restaurant_build_temp/
+build_v33/
+dist_v33/
 
 # تقارير/مرفقات محلية
 *.pdf

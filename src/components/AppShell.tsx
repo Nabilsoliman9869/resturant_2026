@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { CashierAlertsBar } from "./CashierAlertsBar";
 import { RestaurantDualBells } from "./RestaurantDualBells";
@@ -7,9 +7,10 @@ import { PinOverlay } from "./PinOverlay";
 import { sessionDisplayName } from "../auth/displayUser";
 import { useAuth } from "../auth/AuthContext";
 import { useVenue } from "../context/VenueContext";
+import GlobalSearchModal from "./GlobalSearchModal";
 import { useDbEpoch } from "../context/DbSettingsRefreshContext";
 import { TerminalLockProvider } from "../context/TerminalLockContext";
-import { venueBrandTitle } from "../lib/venueType";
+import { venueBrandLabel } from "../lib/venueType";
 import type { RoleId } from "../auth/roles";
 import { ROLE_LABELS } from "../auth/roles";
 import { WaiterUiStylePrompt } from "./WaiterUiStylePrompt";
@@ -25,6 +26,7 @@ import { AppMenuProvider } from "../context/AppMenuContext";
 import "../styles/appShell.css";
 
 type NavItem = { to: string; label: string };
+type NavSection = { title: string; items: NavItem[] };
 
 function isNavItemActive(pathname: string, base: string, n: NavItem): boolean {
   const dest = `${base}/${n.to}`;
@@ -38,6 +40,68 @@ function isNavItemActive(pathname: string, base: string, n: NavItem): boolean {
     return pathname === dest || pathname.startsWith(`${dest}/`);
   }
   return pathname === dest;
+}
+
+function pickNavItems(items: NavItem[], order: string[]): NavItem[] {
+  return order
+    .map((key) => items.find((it) => it.to === key))
+    .filter((it): it is NavItem => Boolean(it));
+}
+
+function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
+  const used = new Set<string>();
+  const mark = (picked: NavItem[]) => {
+    for (const item of picked) used.add(item.to);
+    return picked;
+  };
+
+  const sections: NavSection[] = [];
+  if (role === "cashier") {
+    sections.push(
+      { title: "1. الصالة والتحصيل", items: mark(pickNavItems(items, ["dashboard", "table-sessions", "invoices-local"])) },
+      { title: "2. الطلبات والخدمات", items: mark(pickNavItems(items, ["call-center", "kids-area", "pos"])) },
+      { title: "3. المالية اليومية", items: mark(pickNavItems(items, ["purchases", "cash-expense"])) },
+    );
+  } else if (role === "accountant") {
+    sections.push(
+      { title: "1. المتابعة والحسابات", items: mark(pickNavItems(items, ["dashboard", "reports", "costing", "master-data"])) },
+      { title: "2. التشغيل المساند", items: mark(pickNavItems(items, ["call-center", "pos", "purchases"])) },
+    );
+  } else if (role === "manager") {
+    sections.push(
+      { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["guest-returns", "call-center", "delivery-management"])) },
+      { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
+      { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
+    );
+  } else if (role === "developer") {
+    sections.push(
+      { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["guest-returns", "call-center", "delivery-management"])) },
+      { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
+      { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
+    );
+  } else if (role === "server") {
+    sections.push({ title: "1. التشغيل", items: mark(pickNavItems(items, ["dashboard", "runner", "tables"])) });
+  } else if (role === "kitchen") {
+    sections.push({ title: "1. المطبخ", items: mark(pickNavItems(items, ["kitchen", "kitchen-item-stop"])) });
+  } else if (role === "kitchen_specialist") {
+    sections.push({ title: "1. الشيف المختص", items: mark(pickNavItems(items, ["kitchen"])) });
+  } else if (role === "speed_order") {
+    sections.push({ title: "1. الطلبات السريعة", items: mark(pickNavItems(items, ["speed-order"])) });
+  } else if (role === "host") {
+    sections.push({ title: "1. الاستقبال", items: mark(pickNavItems(items, ["reception"])) });
+  } else if (role === "kids_guard") {
+    sections.push({ title: "1. منطقة الأطفال", items: mark(pickNavItems(items, ["kids-area"])) });
+  } else {
+    sections.push({ title: "1. القائمة الرئيسية", items: mark([...items]) });
+  }
+
+  const leftovers = items.filter((it) => !used.has(it.to));
+  if (leftovers.length) {
+    sections.push({ title: `${sections.length + 1}. عناصر إضافية`, items: leftovers });
+  }
+  return sections.filter((section) => section.items.length > 0);
 }
 
 const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
@@ -72,6 +136,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "purchases", label: "مشتريات" },
     { to: "cash-expense", label: "صرف مصروفات" },
     { to: "reports", label: "تقارير" },
+    { to: "table-sessions-report", label: "تقرير جلسات الطاولات" },
     { to: "cashflow", label: "التدفق النقدي" },
   ],
   developer: [
@@ -86,6 +151,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "purchases", label: "مشتريات" },
     { to: "cash-expense", label: "صرف مصروفات" },
     { to: "reports", label: "تقارير الحسابات" },
+    { to: "table-sessions-report", label: "تقرير جلسات الطاولات" },
     { to: "cashflow", label: "التدفق النقدي" },
   ],
   host: [{ to: "reception", label: "استقبال العملاء" }],
@@ -94,6 +160,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "kitchen", label: "شاشة المطبخ" },
     { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ" },
   ],
+  kitchen_specialist: [{ to: "kitchen", label: "شاشة الشيف المختص" }],
   speed_order: [{ to: "speed-order", label: "شاشة الطلبات السريعة" }],
   server: [
     { to: "dashboard", label: "لوحة الصالة" },
@@ -120,7 +187,7 @@ function readSidebarInitialOpen(): boolean {
 
 export function AppShell({ role }: { role: RoleId }) {
   const { user, logout } = useAuth();
-  const { venueType } = useVenue();
+  const { venueType, venueName } = useVenue();
   const dbEpoch = useDbEpoch();
   const location = useLocation();
   const navigate = useNavigate();
@@ -149,6 +216,7 @@ export function AppShell({ role }: { role: RoleId }) {
     typeof window !== "undefined" ? window.matchMedia(`(max-width: ${NARROW_MAX_PX}px)`).matches : false,
   );
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarInitialOpen);
+  const [asideSupplement, setAsideSupplement] = useState<ReactNode | null>(null);
 
   useEffect(() => {
     if (isOrderTakerFullscreen && narrowViewport) setSidebarOpen(false);
@@ -174,7 +242,7 @@ export function AppShell({ role }: { role: RoleId }) {
     const raw = NAV_BY_ROLE[role];
     if (venueType !== "coffee_shop") return raw;
     const mapped = raw.map((it) => {
-      if (role === "kitchen" && it.to === "kitchen") {
+      if ((role === "kitchen" || role === "kitchen_specialist") && it.to === "kitchen") {
         return { ...it, label: "البار / التحضير" };
       }
       if (role === "speed_order" && it.to === "speed-order") {
@@ -193,6 +261,7 @@ export function AppShell({ role }: { role: RoleId }) {
     }
     return mapped;
   }, [role, venueType]);
+  const navSections = useMemo(() => buildNavSections(role, items), [role, items]);
 
   const interDeptBells = role !== "kids_guard";
 
@@ -206,68 +275,65 @@ export function AppShell({ role }: { role: RoleId }) {
   const showMobileMenuFab = narrowViewport && !sidebarOpen && !isOrderTakerFullscreen;
 
   const appMenuValue = useMemo(
-    () => ({ openAppMenu: openSidebar, closeAppMenu: closeSidebar }),
+    () => ({ openAppMenu: openSidebar, closeAppMenu: closeSidebar, setAsideSupplement }),
     [openSidebar, closeSidebar],
   );
 
   return (
     <TerminalLockProvider>
       <AppMenuProvider value={appMenuValue}>
-      <div className="app-shell">
-        {interDeptBells ? (
-          <RestaurantDualBells role={role} userId={user?.id} mat3amActor={buildMat3amActor(user)} />
-        ) : null}
+        <div className="app-shell">
+          {interDeptBells ? (
+            <RestaurantDualBells role={role} userId={user?.id} mat3amActor={buildMat3amActor(user)} />
+          ) : null}
 
-        {narrowViewport && sidebarOpen ? (
-          <button type="button" className="app-shell__backdrop" aria-label="إغلاق القائمة" onClick={closeSidebar} />
-        ) : null}
+          {narrowViewport && sidebarOpen ? (
+            <button type="button" className="app-shell__backdrop" aria-label="إغلاق القائمة" onClick={closeSidebar} />
+          ) : null}
 
-        {!narrowViewport && !sidebarOpen ? (
-          <button
-            type="button"
-            className="app-shell__rail-tab"
-            aria-label="فتح قائمة التنقل"
-            aria-expanded={false}
-            onClick={openSidebar}
-          >
-            ‹
-          </button>
-        ) : null}
+          {!narrowViewport && !sidebarOpen ? (
+            <button
+              type="button"
+              className="app-shell__rail-tab"
+              aria-label="فتح قائمة التنقل"
+              aria-expanded={false}
+              onClick={openSidebar}
+            >
+              ‹
+            </button>
+          ) : null}
 
-        {showMobileMenuFab ? (
-          <button
-            type="button"
-            className="app-shell__menu-fab"
-            aria-label="القائمة الرئيسية"
-            title="القائمة الرئيسية — التنقل والحساب والخروج"
-            onClick={openSidebar}
-          >
-            <svg className="app-shell__menu-fab-svg" viewBox="0 0 24 24" aria-hidden>
-              <path fill="currentColor" d="M4 7h16v2H4V7zm0 5h16v2H4v-2zm0 5h10v2H4v-2z" />
-            </svg>
-          </button>
-        ) : null}
+          {showMobileMenuFab ? (
+            <button
+              type="button"
+              className="app-shell__menu-fab"
+              aria-label="القائمة الرئيسية"
+              title="القائمة الرئيسية — التنقل والحساب والخروج"
+              onClick={openSidebar}
+            >
+              <svg className="app-shell__menu-fab-svg" viewBox="0 0 24 24" aria-hidden>
+                <path fill="currentColor" d="M4 7h16v2H4V7zm0 5h16v2H4v-2zm0 5h10v2H4v-2z" />
+              </svg>
+            </button>
+          ) : null}
 
-        <aside
-            className={`app-shell__aside ${sidebarOpen ? "is-open" : "is-collapsed"}`}
+          <aside
+            className={`app-shell__aside ${sidebarOpen ? "is-open" : "is-collapsed"}${isOrderTakerFullscreen ? " app-shell__aside--order-taker" : ""}`}
             aria-hidden={!sidebarOpen}
           >
             <div className="app-shell__aside-head">
               <div className="app-shell__aside-brand">
-                <div
-                  style={{
-                    fontFamily: "var(--font)",
-                    fontSize: "1.15rem",
-                    fontWeight: 700,
-                  }}
-                >
-                  {venueBrandTitle(venueType)}
-                </div>
-                <div style={{ color: "var(--muted)", fontSize: "0.85rem" }} title={user?.login || undefined}>
+                <img
+                  src="/app-logo.png"
+                  alt="SIR RESTO"
+                  className="app-shell__brand-logo"
+                />
+                <div className="app-shell__brand-title">{venueBrandLabel(venueType, venueName)}</div>
+                <div className="app-shell__brand-user" title={user?.login || undefined}>
                   {sessionDisplayName(user)}
                 </div>
-                <div style={{ marginTop: "0.75rem" }}>
-                  <DbConnectionBar />
+                <div style={{ marginTop: "0.5rem" }}>
+                  <DbConnectionBar compact={isOrderTakerFullscreen} lightweight={isOrderTakerFullscreen} />
                 </div>
               </div>
               <button type="button" className="app-shell__aside-close" onClick={closeSidebar} aria-label="طي القائمة">
@@ -277,44 +343,69 @@ export function AppShell({ role }: { role: RoleId }) {
             <p className="app-shell__nav-heading" style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", fontWeight: 800, color: "var(--muted)" }}>
               القائمة الرئيسية
             </p>
-            <button type="button" className="btn btn-ghost" onClick={logout} style={{ marginBottom: "0.6rem" }}>
-              خروج
-            </button>
-            {items.map((n) => {
-              const dest = `${base}/${n.to}`;
-              const active = isNavItemActive(location.pathname, base, n);
-              return (
-                <NavLink
-                  key={n.to}
-                  to={dest}
-                  className={() => (active ? "nav-link nav-link--active" : "nav-link")}
-                  onClick={closeIfNarrow}
-                  title={"hint" in n ? (n as { hint?: string }).hint : undefined}
-                >
-                  {n.label}
-                </NavLink>
-              );
-            })}
+            <div className="app-shell__aside-main">
+              <button type="button" className="btn btn-ghost app-shell__logout-btn" onClick={logout} style={{ marginBottom: "0.6rem" }}>
+                خروج
+              </button>
+              {navSections.map((section) => (
+                <div key={section.title} className="app-shell__nav-section" style={{ marginBottom: "0.7rem" }}>
+                  <div className="app-shell__nav-section-title" style={{ margin: "0.15rem 0 0.35rem", fontSize: "0.74rem", fontWeight: 800, color: "var(--muted)" }}>
+                    {section.title}
+                  </div>
+                  {section.items.map((n) => {
+                    const dest = `${base}/${n.to}`;
+                    const active = isNavItemActive(location.pathname, base, n);
+                    return (
+                      <NavLink
+                        key={`${section.title}-${n.to}`}
+                        to={dest}
+                        className={() => (active ? "nav-link nav-link--active" : "nav-link")}
+                        onClick={closeIfNarrow}
+                        title={"hint" in n ? (n as { hint?: string }).hint : undefined}
+                      >
+                        {n.label}
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              ))}
+              {asideSupplement ? <div className="app-shell__aside-supplement">{asideSupplement}</div> : null}
+            </div>
+            <div className="app-shell__aside-copy">
+              <div>© 2026 Sir Consult for Information Technology</div>
+              <div>حقوق الواجهة والهوية محفوظة داخل الهيكل العام للنظام.</div>
+            </div>
           </aside>
 
-        <main
-          className="app-shell__main"
-          data-order-taker-shell={isOrderTakerFullscreen ? "1" : "0"}
-          style={isOrderTakerFullscreen ? { padding: "0" } : { padding: "1.5rem" }}
-        >
-          {isOrderTakerFullscreen ? (
-            <div style={{ padding: "0.45rem 0.75rem", borderBottom: "1px solid var(--border)" }}>
-              <DbConnectionBar compact />
-            </div>
+          <main
+            className="app-shell__main"
+            data-order-taker-shell={isOrderTakerFullscreen ? "1" : "0"}
+            style={isOrderTakerFullscreen ? { padding: "0" } : { padding: "1.5rem" }}
+          >
+            {!isOrderTakerFullscreen ? (
+              <div className="app-shell__fixed-logo" aria-hidden="true">
+                <img src="/app-logo.png" alt="" className="app-shell__fixed-logo-img" />
+              </div>
+            ) : null}
+            {isOrderTakerFullscreen ? null : (
+              <div style={{ padding: "0.45rem 0.75rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <DbConnectionBar compact />
+                {role === "developer" ? (
+                  <button type="button" className="btn btn-ghost" onClick={() => { window.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, key: "k" })); }} style={{ fontSize: "0.82rem", gap: 6, display: "inline-flex", alignItems: "center" }}>
+                    🔍 البحث <kbd style={{ fontSize: 10, opacity: 0.5, background: "var(--surface)", padding: "1px 6px", borderRadius: 4 }}>Ctrl+K</kbd>
+                  </button>
+                ) : null}
+              </div>
+            )}
+            {role === "cashier" ? <CashierAlertsBar /> : null}
+            <Outlet key={dbEpoch} />
+          </main>
+          <PinOverlay />
+          {uiStylePromptOpen && roleUsesWaiterOrderUiStyle(role) ? (
+            <WaiterUiStylePrompt roleLabel={ROLE_LABELS[role]} onDone={handleWaiterUiStyleDone} />
           ) : null}
-          {role === "cashier" ? <CashierAlertsBar /> : null}
-          <Outlet key={dbEpoch} />
-        </main>
-        <PinOverlay />
-        {uiStylePromptOpen && roleUsesWaiterOrderUiStyle(role) ? (
-          <WaiterUiStylePrompt roleLabel={ROLE_LABELS[role]} onDone={handleWaiterUiStyleDone} />
-        ) : null}
-      </div>
+          <GlobalSearchModal role={role} />
+        </div>
       </AppMenuProvider>
     </TerminalLockProvider>
   );

@@ -21,6 +21,27 @@ export type SegmentedTableRow = {
   features?: { vipSection?: boolean; zone?: string };
 };
 
+function normalizeTableIndex(value: string) {
+  const digits = String(value || "").replace(/^0+/, "");
+  return digits || "0";
+}
+
+export function normalizeTableDisplayLabel(rawLabel?: string | null, fallbackNumber?: number, fallbackId?: string) {
+  const raw = String(rawLabel || "").trim();
+  const compact = raw.replace(/\s+/g, " ");
+  const direct =
+    /^t\s*0*(\d+)$/i.exec(compact) ||
+    /^#\s*0*(\d+)$/i.exec(compact) ||
+    /^(?:table|طاولة)\s*0*(\d+)$/i.exec(compact) ||
+    /^0*(\d+)$/.exec(compact);
+  if (direct?.[1]) return `T${normalizeTableIndex(direct[1])}`;
+  if (Number.isFinite(fallbackNumber) && Number(fallbackNumber) > 0) return `T${normalizeTableIndex(String(fallbackNumber))}`;
+  if (compact) return compact;
+  const fallback = String(fallbackId || "").trim();
+  if (fallback) return `T-${fallback.slice(0, 6).toUpperCase()}`;
+  return "طاولة";
+}
+
 function floorPrefix(name: string, floorIndex: number) {
   const nm = (name || "").toLowerCase();
   if (/roof|رووف|روف/.test(nm)) return "R";
@@ -34,7 +55,7 @@ function tableCode(prefix: string, tableIndex: number) {
 }
 
 function labelFromCode(code: string) {
-  return /^\d+$/.test(code) ? `#${Number(code)}` : code;
+  return /^\d+$/.test(code) ? `T${Number(code)}` : code;
 }
 
 function planTableLabel(table: { label?: string }, generatedCode: string) {
@@ -51,7 +72,7 @@ function normalizeApiTables<T extends TableLike>(apiTables: T[]): T[] {
   return apiTables.map((table) => ({
     ...table,
     id: String(table.id),
-    name: String(table.name || "").trim() || `طاولة ${table.number ?? String(table.id).slice(0, 6)}`,
+    name: normalizeTableDisplayLabel(table.name, table.number, table.id),
   }));
 }
 
@@ -68,11 +89,11 @@ export function mapTablesToFloorPlanLabels<T extends TableLike>(planRaw: unknown
       const key = tableKey(apiId);
       if (labelById.has(key)) return;
       const code = tableCode(prefix, tableIndex);
-      const label = planTableLabel(table as { label?: string }, code);
+      const label = normalizeTableDisplayLabel(planTableLabel(table as { label?: string }, code), tableIndex + 1, apiId);
       labelById.set(key, {
         label,
         seats: table.seats,
-        number: /^\d+$/.test(label.replace("#", "")) ? Number(label.replace("#", "")) : undefined,
+        number: /^t(\d+)$/i.test(label) ? Number(/^t(\d+)$/i.exec(label)?.[1] || 0) : undefined,
       });
     });
   });
@@ -82,7 +103,7 @@ export function mapTablesToFloorPlanLabels<T extends TableLike>(planRaw: unknown
     if (!hit) return table;
     return {
       ...table,
-      name: hit.label,
+      name: normalizeTableDisplayLabel(table.name || hit.label, hit.number ?? table.number, table.id),
       seats: hit.seats ?? table.seats,
       number: hit.number ?? table.number,
     };
@@ -92,7 +113,7 @@ export function mapTablesToFloorPlanLabels<T extends TableLike>(planRaw: unknown
 function apiTablesToSegmentedRows(base: TableLike[]): SegmentedTableRow[] {
   return base.map((table) => ({
     id: String(table.id),
-    name: String(table.name || "طاولة"),
+    name: normalizeTableDisplayLabel(table.name, table.number, table.id),
     seats: table.seats,
     number: table.number,
     status: table.status,
@@ -130,13 +151,13 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
       seen.add(key);
       const apiMatch = apiById.get(key);
       const code = tableCode(prefix, tableIndex);
-      const label = planTableLabel(table as { label?: string }, code);
+      const label = normalizeTableDisplayLabel(apiMatch?.name || planTableLabel(table as { label?: string }, code), tableIndex + 1, apiId);
       planTableCount += 1;
       out.push({
         id: apiId,
         name: label,
         seats: table.seats ?? apiMatch?.seats,
-        number: /^\d+$/.test(label.replace("#", "")) ? Number(label.replace("#", "")) : undefined,
+        number: /^t(\d+)$/i.test(label) ? Number(/^t(\d+)$/i.exec(label)?.[1] || 0) : undefined,
         status: apiMatch?.status,
         floorId: floor.id,
         floorName: floor.name,

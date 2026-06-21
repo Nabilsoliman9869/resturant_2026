@@ -33,6 +33,12 @@ export function venueBrandTitle(venue: VenueType): string {
   return venue === "coffee_shop" ? "كوفي شوب XTRA" : "مطاعم XTRA";
 }
 
+export function venueBrandLabel(venue: VenueType, venueName: string): string {
+  const vn = venueName.trim();
+  if (vn) return vn;
+  return venue === "coffee_shop" ? "كوفي شوب XTRA" : "مطاعم XTRA";
+}
+
 export function venuePosHint(venue: VenueType): string {
   return venue === "coffee_shop"
     ? "وضع كوفي: افتراضي «سفري»؛ يمكن التبديل إلى طاولة للجلوس."
