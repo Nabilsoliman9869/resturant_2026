@@ -1202,6 +1202,7 @@ ALLOWED_ROLE_CODES = {
     "cashier",
     "accountant",
     "manager",
+    "operation_manager",
     "developer",
     "host",
     "waiter",
@@ -1211,6 +1212,17 @@ ALLOWED_ROLE_CODES = {
     "server",
     "kids_guard",
 }
+
+MANAGER_OP_TARGET_ROLES = ("manager", "developer", "operation_manager")
+SYSTEM_SETTINGS_TARGET_ROLES = ("manager", "developer")
+
+
+def _role_has_manager_ops_access(role: Any) -> bool:
+    return str(role or "").strip().lower() in MANAGER_OP_TARGET_ROLES
+
+
+def _role_has_system_settings_access(role: Any) -> bool:
+    return str(role or "").strip().lower() in SYSTEM_SETTINGS_TARGET_ROLES
 
 
 def _login_body_calendar_iso(body: object) -> Optional[str]:
@@ -1749,13 +1761,7 @@ def _api_auth_login_build_response(
     cal_iso: Optional[str],
     specialist_station_code: str = "",
 ) -> dict:
-    effective_role = _resolve_effective_role_code(cursor, user_id, role_code, cal_iso)
-    enforce_shift = _enforce_role_schedule_shift_active()
-    floor_shift_roles = {"waiter", "host", "server", "speed_order", "kitchen_specialist"}
-    needs_shift = role_code in floor_shift_roles or effective_role in floor_shift_roles
-    if enforce_shift and needs_shift:
-        if not _user_has_role_schedule_covering_today(cursor, user_id, cal_iso):
-            raise HTTPException(status_code=403, detail="أنت لست ضمن فريق العمل اليوم")
+    effective_role = _assert_user_allowed_for_shift_today(cursor, user_id, role_code, cal_iso)
     _audit_log(
         cursor,
         "LOGIN_OK",
@@ -4960,6 +4966,8 @@ def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
     ks_items = [x for x in ks_raw if isinstance(x, dict) and bool(x.get("stopped"))]
 
     ops_raw = _restaurant_read_ops_storage()
+    waiter_table_assignments = _restaurant_waiter_table_assignments_load()
+    temp_captain_transfers = _restaurant_temp_captain_transfer_active_rows()
     try:
         workflow_raw = _restaurant_read_workflow()
     except Exception:
@@ -5054,6 +5062,8 @@ def _order_taker_bootstrap_sync(*, refresh: bool = False) -> dict:
         "kitchenStops": {"items": ks_items},
         "workflowSettings": workflow_raw if isinstance(workflow_raw, dict) else {},
         "opsSettings": ops_raw if isinstance(ops_raw, dict) else {},
+        "waiterTableAssignments": waiter_table_assignments,
+        "tempCaptainTransfers": temp_captain_transfers,
         "dataSource": {
             "catalog": {"products": meta_p, "groups": meta_g},
             "tables": (tables_payload.get("dataSource") if isinstance(tables_payload, dict) else {}),
@@ -12203,6 +12213,7 @@ _RESTAURANT_SQL_KEYS = frozenset(
     {
         "orders",
         "table_sessions",
+        "waiter_table_assignments",
         "modifier_groups",
         "product_modifiers",
         "invoices",
@@ -12215,7 +12226,9 @@ _RESTAURANT_SQL_KEYS = frozenset(
         "guest_return_requests",
     }
 )
-_RESTAURANT_FAST_LOCAL_SQL_KEYS = frozenset(("table_sessions", "tables"))
+# Removed table_sessions/tables from fast-local to prevent stale overwrite.
+# SQL is now the single source of truth for these keys.
+_RESTAURANT_FAST_LOCAL_SQL_KEYS = frozenset()
 _restaurant_local_override_lock = threading.Lock()
 _restaurant_local_overrides: dict[str, Any] = {}
 _restaurant_sql_table_ready = False
@@ -12572,8 +12585,6 @@ def _restaurant_load(name: str, default: Any):
             data = json.load(f)
     except Exception:
         return default
-    if name in _RESTAURANT_SQL_KEYS:
-        _restaurant_sql_set(name, data)
     return data
 
 
@@ -12609,6 +12620,356 @@ def _restaurant_save(name: str, data: Any):
         raise
     if name in _RESTAURANT_SQL_KEYS and not sql_ok:
         print(f"[mat3am] _restaurant_save: SQL غير متاح — تُحفظ نسخة ملف فقط لـ {name}", flush=True)
+
+
+def _restaurant_guid_norm(value: Any) -> str:
+    return str(value or "").strip().replace("{", "").replace("}", "").upper()
+
+
+def _restaurant_waiter_assignment_day_iso(calendar_iso: Optional[str] = None) -> str:
+    s = str(calendar_iso or "").strip()[:10]
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return s
+    return datetime.now().date().isoformat()
+
+
+def _restaurant_waiter_assignment_date(value: Any) -> str:
+    s = str(value or "").strip()[:10]
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return s
+    raise HTTPException(status_code=400, detail="صيغة التاريخ يجب أن تكون YYYY-MM-DD")
+
+
+def _restaurant_waiter_assignment_table_id(value: Any) -> str:
+    return _norm_session_table_id(str(value or "").strip())
+
+
+def _restaurant_waiter_table_assignments_load() -> List[dict]:
+    raw = _restaurant_load("waiter_table_assignments", [])
+    if not isinstance(raw, list):
+        return []
+    out: List[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        uid = str(item.get("userId") or "").strip()
+        if not uid:
+            continue
+        vf = str(item.get("validFrom") or "").strip()[:10]
+        vt = str(item.get("validTo") or "").strip()[:10]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", vf) or not re.match(r"^\d{4}-\d{2}-\d{2}$", vt):
+            continue
+        if vf > vt:
+            vf, vt = vt, vf
+        table_ids: List[str] = []
+        for raw_tid in (item.get("tableIds") or []):
+            tid = _restaurant_waiter_assignment_table_id(raw_tid)
+            if tid and tid not in table_ids:
+                table_ids.append(tid)
+        out.append(
+            {
+                "id": str(item.get("id") or uuid.uuid4()),
+                "userId": uid,
+                "userLogin": str(item.get("userLogin") or "").strip()[:120],
+                "userName": str(item.get("userName") or "").strip()[:200],
+                "validFrom": vf,
+                "validTo": vt,
+                "tableIds": table_ids,
+                "createdAt": str(item.get("createdAt") or "").strip()[:40],
+            }
+        )
+    return out
+
+
+def _restaurant_waiter_table_assignments_save(rows: List[dict]) -> None:
+    safe: List[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        uid = str(row.get("userId") or "").strip()
+        if not uid:
+            continue
+        try:
+            vf = _restaurant_waiter_assignment_date(row.get("validFrom"))
+            vt = _restaurant_waiter_assignment_date(row.get("validTo"))
+        except HTTPException:
+            continue
+        if vf > vt:
+            vf, vt = vt, vf
+        table_ids: List[str] = []
+        for raw_tid in (row.get("tableIds") or []):
+            tid = _restaurant_waiter_assignment_table_id(raw_tid)
+            if tid and tid not in table_ids:
+                table_ids.append(tid)
+        safe.append(
+            {
+                "id": str(row.get("id") or uuid.uuid4()),
+                "userId": uid,
+                "userLogin": str(row.get("userLogin") or "").strip()[:120],
+                "userName": str(row.get("userName") or "").strip()[:200],
+                "validFrom": vf,
+                "validTo": vt,
+                "tableIds": table_ids,
+                "createdAt": str(row.get("createdAt") or datetime.now().isoformat()).strip()[:40],
+            }
+        )
+    safe.sort(
+        key=lambda x: (
+            str(x.get("validFrom") or ""),
+            str(x.get("userName") or x.get("userLogin") or ""),
+            str(x.get("createdAt") or ""),
+            str(x.get("id") or ""),
+        )
+    )
+    _restaurant_save("waiter_table_assignments", safe)
+
+
+def _restaurant_temp_captain_transfers_load() -> List[dict]:
+    raw = _restaurant_load("temp_captain_transfers", [])
+    if not isinstance(raw, list):
+        return []
+    out: List[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        table_id = _restaurant_waiter_assignment_table_id(item.get("tableId"))
+        from_user_id = str(item.get("fromUserId") or "").strip()
+        to_user_id = str(item.get("toUserId") or "").strip()
+        if not table_id or not from_user_id or not to_user_id:
+            continue
+        out.append(
+            {
+                "id": str(item.get("id") or uuid.uuid4()),
+                "approvalRequestId": str(item.get("approvalRequestId") or "").strip()[:80],
+                "sessionId": str(item.get("sessionId") or "").strip()[:80],
+                "tableId": table_id,
+                "tableLabel": str(item.get("tableLabel") or "").strip()[:160],
+                "fromUserId": from_user_id,
+                "fromUserName": str(item.get("fromUserName") or "").strip()[:200],
+                "toUserId": to_user_id,
+                "toUserName": str(item.get("toUserName") or "").strip()[:200],
+                "scope": str(item.get("scope") or "single_table").strip()[:40],
+                "untilType": str(item.get("untilType") or "shift_end").strip()[:40],
+                "reason": str(item.get("reason") or "").strip()[:500],
+                "createdAt": str(item.get("createdAt") or "").strip()[:40],
+                "approvedAt": str(item.get("approvedAt") or "").strip()[:40],
+                "approvedByUserId": str(item.get("approvedByUserId") or "").strip()[:80],
+                "approvedByName": str(item.get("approvedByName") or "").strip()[:200],
+                "status": str(item.get("status") or "active").strip()[:32],
+            }
+        )
+    return out
+
+
+def _restaurant_temp_captain_transfers_save(rows: List[dict]) -> None:
+    safe: List[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        table_id = _restaurant_waiter_assignment_table_id(row.get("tableId"))
+        from_user_id = str(row.get("fromUserId") or "").strip()
+        to_user_id = str(row.get("toUserId") or "").strip()
+        if not table_id or not from_user_id or not to_user_id:
+            continue
+        safe.append(
+            {
+                "id": str(row.get("id") or uuid.uuid4()),
+                "approvalRequestId": str(row.get("approvalRequestId") or "").strip()[:80],
+                "sessionId": str(row.get("sessionId") or "").strip()[:80],
+                "tableId": table_id,
+                "tableLabel": str(row.get("tableLabel") or "").strip()[:160],
+                "fromUserId": from_user_id,
+                "fromUserName": str(row.get("fromUserName") or "").strip()[:200],
+                "toUserId": to_user_id,
+                "toUserName": str(row.get("toUserName") or "").strip()[:200],
+                "scope": str(row.get("scope") or "single_table").strip()[:40],
+                "untilType": str(row.get("untilType") or "shift_end").strip()[:40],
+                "reason": str(row.get("reason") or "").strip()[:500],
+                "createdAt": str(row.get("createdAt") or datetime.now().isoformat()).strip()[:40],
+                "approvedAt": str(row.get("approvedAt") or "").strip()[:40],
+                "approvedByUserId": str(row.get("approvedByUserId") or "").strip()[:80],
+                "approvedByName": str(row.get("approvedByName") or "").strip()[:200],
+                "status": str(row.get("status") or "active").strip()[:32],
+            }
+        )
+    safe.sort(key=lambda x: (str(x.get("approvedAt") or ""), str(x.get("createdAt") or ""), str(x.get("id") or "")))
+    _restaurant_save("temp_captain_transfers", safe[-500:])
+
+
+def _restaurant_temp_captain_transfer_active_rows(calendar_iso: Optional[str] = None) -> List[dict]:
+    day = _restaurant_waiter_assignment_day_iso(calendar_iso)
+    active_sessions: dict[str, dict] = {}
+    for row in _restaurant_load("table_sessions", []):
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id") or "").strip()
+        if not sid:
+            continue
+        if str(row.get("status") or "").strip().lower() != "active":
+            continue
+        start_day = str(row.get("startTime") or "").strip()[:10]
+        if start_day and start_day != day:
+            continue
+        active_sessions[sid] = row
+    latest_by_table: dict[str, dict] = {}
+    for row in _restaurant_temp_captain_transfers_load():
+        if str(row.get("status") or "").strip().lower() != "active":
+            continue
+        sid = str(row.get("sessionId") or "").strip()
+        table_id = _restaurant_waiter_assignment_table_id(row.get("tableId"))
+        if sid:
+            sess = active_sessions.get(sid)
+            if not isinstance(sess, dict):
+                continue
+            sess_tid = _restaurant_waiter_assignment_table_id(sess.get("tableId"))
+            if table_id and sess_tid and table_id != sess_tid:
+                continue
+            row = {**row, "tableId": sess_tid or table_id}
+        key = _restaurant_waiter_assignment_table_id(row.get("tableId"))
+        if not key:
+            continue
+        prev = latest_by_table.get(key)
+        if prev and str(prev.get("approvedAt") or prev.get("createdAt") or "") >= str(row.get("approvedAt") or row.get("createdAt") or ""):
+            continue
+        latest_by_table[key] = row
+    return list(latest_by_table.values())
+
+
+def _restaurant_effective_table_ids_for_user(user_id: str, calendar_iso: Optional[str] = None) -> set[str]:
+    uid_norm = _restaurant_guid_norm(user_id)
+    out = _restaurant_waiter_assignment_table_ids_for_user(user_id, calendar_iso)
+    if not uid_norm:
+        return out
+    for row in _restaurant_temp_captain_transfer_active_rows(calendar_iso):
+        tid = _restaurant_waiter_assignment_table_id(row.get("tableId"))
+        if not tid:
+            continue
+        if _restaurant_guid_norm(row.get("fromUserId")) == uid_norm:
+            out.discard(tid)
+        if _restaurant_guid_norm(row.get("toUserId")) == uid_norm:
+            out.add(tid)
+    return out
+
+
+def _restaurant_waiter_assignment_active_on(row: dict, calendar_iso: Optional[str] = None) -> bool:
+    if not isinstance(row, dict):
+        return False
+    day = _restaurant_waiter_assignment_day_iso(calendar_iso)
+    vf = str(row.get("validFrom") or "").strip()[:10]
+    vt = str(row.get("validTo") or "").strip()[:10]
+    if not vf or not vt:
+        return False
+    if vf > vt:
+        vf, vt = vt, vf
+    return vf <= day <= vt
+
+
+def _restaurant_waiter_assignment_active_rows(calendar_iso: Optional[str] = None) -> List[dict]:
+    return [row for row in _restaurant_waiter_table_assignments_load() if _restaurant_waiter_assignment_active_on(row, calendar_iso)]
+
+
+def _restaurant_waiter_assignment_table_ids_for_user(user_id: str, calendar_iso: Optional[str] = None) -> set[str]:
+    uid_norm = _restaurant_guid_norm(user_id)
+    out: set[str] = set()
+    if not uid_norm:
+        return out
+    for row in _restaurant_waiter_assignment_active_rows(calendar_iso):
+        if _restaurant_guid_norm(row.get("userId")) != uid_norm:
+            continue
+        for raw_tid in row.get("tableIds") or []:
+            tid = _restaurant_waiter_assignment_table_id(raw_tid)
+            if tid:
+                out.add(tid)
+    return out
+
+
+def _restaurant_waiter_assignments_policy_enabled() -> bool:
+    try:
+        wf = _restaurant_read_workflow()
+        raw = str((wf or {}).get("orderTakerExclusiveTable") or "").strip().lower()
+        return raw in ("on", "1", "true", "yes")
+    except Exception:
+        return False
+
+
+def _role_requires_shift_schedule(base_role: str, effective_role: str = "") -> bool:
+    floor_shift_roles = {"waiter", "host", "server", "speed_order", "kitchen_specialist"}
+    base = str(base_role or "").strip().lower()
+    eff = str(effective_role or "").strip().lower()
+    return base in floor_shift_roles or eff in floor_shift_roles
+
+
+def _assert_user_allowed_for_shift_today(cursor, user_id: str, base_role: str, calendar_iso: Optional[str] = None) -> str:
+    effective_role = _resolve_effective_role_code(cursor, user_id, base_role, calendar_iso)
+    if _enforce_role_schedule_shift_active() and _role_requires_shift_schedule(base_role, effective_role):
+        if not _user_has_role_schedule_covering_today(cursor, user_id, calendar_iso):
+            raise HTTPException(status_code=403, detail="أنت لست ضمن فريق العمل اليوم")
+    return effective_role
+
+
+def _restaurant_waiter_assignment_restriction_for_actor(
+    actor: Optional[dict], calendar_iso: Optional[str] = None
+) -> Tuple[bool, set[str]]:
+    actor = actor if isinstance(actor, dict) else {}
+    role = str(actor.get("role") or "").strip().lower()
+    if _role_has_manager_ops_access(role):
+        return False, set()
+    if role not in ("waiter", "host"):
+        return False, set()
+    if not _restaurant_waiter_assignments_policy_enabled():
+        return False, set()
+    active_rows = _restaurant_waiter_assignment_active_rows(calendar_iso)
+    temp_rows = _restaurant_temp_captain_transfer_active_rows(calendar_iso)
+    if not active_rows and not temp_rows:
+        return False, set()
+    uid = str(actor.get("id") or "").strip()
+    return True, _restaurant_effective_table_ids_for_user(uid, calendar_iso)
+
+
+def _restaurant_assert_actor_assigned_table(actor: Optional[dict], table_id: str, calendar_iso: Optional[str] = None) -> None:
+    applies, table_ids = _restaurant_waiter_assignment_restriction_for_actor(actor, calendar_iso)
+    if not applies:
+        return
+    actor = actor if isinstance(actor, dict) else {}
+    uid = str(actor.get("id") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=403, detail="يتطلب هذا الإجراء مستخدماً صالحاً مرتبطاً بالطاولات المخصصة.")
+    if not table_ids:
+        raise HTTPException(status_code=403, detail="لا توجد طاولات مخصصة لك في هذه الفترة. راجع المدير أو الإعدادات.")
+    tid = _restaurant_waiter_assignment_table_id(table_id)
+    if tid in table_ids:
+        return
+    names = _restaurant_table_display_names_for_ids({tid}) if tid else {}
+    disp = (names.get(tid) or "").strip() if tid else ""
+    if not disp:
+        disp = _session_table_display_fallback(tid) if tid else "هذه الطاولة"
+    raise HTTPException(status_code=403, detail=f"الطاولة ({disp}) ليست ضمن الطاولات المخصصة لك في هذه الفترة.")
+
+
+def _restaurant_assert_target_user_assigned_table(
+    target_user_id: str,
+    table_id: str,
+    *,
+    calendar_iso: Optional[str] = None,
+    target_label: str = "",
+) -> None:
+    if not _restaurant_waiter_assignments_policy_enabled():
+        return
+    active_rows = _restaurant_waiter_assignment_active_rows(calendar_iso)
+    if not active_rows:
+        return
+    table_ids = _restaurant_waiter_assignment_table_ids_for_user(target_user_id, calendar_iso)
+    label = str(target_label or "المستخدم الهدف").strip()
+    if not table_ids:
+        raise HTTPException(status_code=409, detail=f"{label} لا يملك طاولات مخصصة فعّالة في هذه الفترة.")
+    tid = _restaurant_waiter_assignment_table_id(table_id)
+    if tid in table_ids:
+        return
+    names = _restaurant_table_display_names_for_ids({tid}) if tid else {}
+    disp = (names.get(tid) or "").strip() if tid else ""
+    if not disp:
+        disp = _session_table_display_fallback(tid) if tid else "هذه الطاولة"
+    raise HTTPException(status_code=409, detail=f"{label} غير مخصص له العمل على الطاولة ({disp}) في هذه الفترة.")
 
 
 # #region debug-point table-session-close-stuck
@@ -13550,7 +13911,7 @@ def _order_taker_exclusive_violation(session: dict, body: dict) -> Optional[str]
     actor = _mat3am_actor_from_body(body)
     aid = str(actor.get("id") or "").strip()
     role = str(actor.get("role") or "").strip().lower()
-    if role in ("manager", "developer"):
+    if _role_has_manager_ops_access(role):
         return None
     if not aid:
         return "أرسل مع الطلب mat3amActor (المستخدم الحالي) لتفعيل قفل الكابتن."
@@ -13581,7 +13942,7 @@ def _restaurant_assert_same_captain_for_request_bill(session_id: str, body: dict
         return
     actor = _mat3am_actor_from_body(body if isinstance(body, dict) else {})
     role = str(actor.get("role") or "").strip().lower()
-    if role in ("manager", "developer"):
+    if _role_has_manager_ops_access(role):
         return
     aid = str(actor.get("id") or "").strip()
     if not aid:
@@ -14000,7 +14361,7 @@ def _terminal_resolve_user_by_pin(cursor, pin: str, login_hint: Optional[str] = 
         if login_hint:
             cursor.execute(
                 """
-                SELECT TOP 1 Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
+                SELECT TOP 1 Id, LoginName, DisplayName, RoleCode, PinHash, IsActive, SpecialistStationCode
                 FROM dbo.MAT3AM_APP_USERS
                 WHERE LoginName = ? AND IsActive = 1
                 """,
@@ -14008,17 +14369,29 @@ def _terminal_resolve_user_by_pin(cursor, pin: str, login_hint: Optional[str] = 
             )
             r = cursor.fetchone()
             if r and _terminal_pin_compare(str(r[4] or ""), pin):
-                return {"id": str(r[0]).strip().upper(), "login": r[1], "name": r[2], "role": (r[3] or "").lower()}
+                return {
+                    "id": str(r[0]).strip().upper(),
+                    "login": r[1],
+                    "name": r[2],
+                    "role": (r[3] or "").lower(),
+                    "specialistStationCode": str(r[6] or "").strip().lower(),
+                }
             return None
         cursor.execute(
             """
-            SELECT Id, LoginName, DisplayName, RoleCode, PinHash, IsActive
+            SELECT Id, LoginName, DisplayName, RoleCode, PinHash, IsActive, SpecialistStationCode
             FROM dbo.MAT3AM_APP_USERS WHERE IsActive = 1 ORDER BY CreatedAt DESC
             """
         )
         for r in cursor.fetchall() or []:
             if _terminal_pin_compare(str(r[4] or ""), pin):
-                return {"id": str(r[0]).strip().upper(), "login": r[1], "name": r[2], "role": (r[3] or "").lower()}
+                return {
+                    "id": str(r[0]).strip().upper(),
+                    "login": r[1],
+                    "name": r[2],
+                    "role": (r[3] or "").lower(),
+                    "specialistStationCode": str(r[6] or "").strip().lower(),
+                }
     except Exception:
         return None
     return None
@@ -14133,6 +14506,7 @@ def terminal_pin_verify(body: dict, request: Request):
     login_hint = str(body.get("login") or "").strip().lower() or None
     reason = str(body.get("reason") or "mandatory_pin_overlay")[:120]
     old_uid = str(body.get("oldUserId") or "").strip() or None
+    cal_iso = _login_calendar_iso_from_request(request, body)
     ip = (request.client.host if request and request.client else "") or ""
     ua = (request.headers.get("user-agent") or "")[:400]
     if not pin:
@@ -14164,6 +14538,7 @@ def terminal_pin_verify(body: dict, request: Request):
                 wait = int((u - datetime.utcnow()).total_seconds())
                 raise HTTPException(status_code=429, detail=f"PIN غير صحيح. تم قفل الجهاز {wait} ثانية بعد {f} محاولات.")
             raise HTTPException(status_code=401, detail=f"PIN غير صحيح ({remaining} محاولات متبقية).")
+        effective_role = _assert_user_allowed_for_shift_today(cur, str(user["id"]), str(user.get("role") or ""), cal_iso)
         # نجح
         _terminal_clear_lockout(cur, tid)
         ttl = int(st.get("tokenTtlSeconds") or 900)
@@ -14182,7 +14557,8 @@ def terminal_pin_verify(body: dict, request: Request):
                 "id": user["id"],
                 "login": user.get("login"),
                 "name": user.get("name") or user.get("login"),
-                "role": user.get("role"),
+                "role": effective_role,
+                "specialistStationCode": str(user.get("specialistStationCode") or "").strip().lower(),
             },
             "terminalToken": token,
             "expiresAt": datetime.utcfromtimestamp(exp).isoformat() + "Z",
@@ -15665,6 +16041,1138 @@ def _money2_round(v) -> float:
         return 0.0
 
 
+_MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS = "cancel_session_with_open_orders"
+_MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS = "reset_table_with_open_orders"
+_MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER = "captain_handover_request"
+_MANAGER_APPROVAL_TYPE_GUEST_SESSION = "guest_session_request"
+_MANAGER_APPROVAL_STATUS_PENDING = "pending_manager"
+
+
+def _manager_approval_requests_load() -> list:
+    raw = _restaurant_load("manager_approval_requests", [])
+    return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+
+def _manager_approval_requests_save(data: list) -> None:
+    _restaurant_save("manager_approval_requests", data[:500])
+
+
+def _manager_approval_open_orders_summary(table_id: str) -> dict:
+    orders = _restaurant_open_orders_for_table(table_id)
+    status_counts = {"pending": 0, "preparing": 0, "ready": 0}
+    total_items = 0.0
+    total_value = 0.0
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        st = str(order.get("status") or "").strip().lower()
+        if st in status_counts:
+            status_counts[st] += 1
+        for item in (order.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            try:
+                qty = max(0.0, float(item.get("quantity") or 0))
+            except (TypeError, ValueError):
+                qty = 0.0
+            try:
+                price = max(0.0, float(item.get("unitPrice") or 0))
+            except (TypeError, ValueError):
+                price = 0.0
+            total_items += qty
+            total_value += qty * price
+    return {
+        "orderCount": len(orders),
+        "itemCount": _money2_round(total_items),
+        "pendingCount": int(status_counts["pending"]),
+        "preparingCount": int(status_counts["preparing"]),
+        "readyCount": int(status_counts["ready"]),
+        "totalValue": _money2_round(total_value),
+    }
+
+
+def _manager_approval_cancel_session_decisions(summary: dict) -> list[dict]:
+    pending_count = int((summary or {}).get("pendingCount") or 0)
+    ready_count = int((summary or {}).get("readyCount") or 0)
+    started_count = int((summary or {}).get("preparingCount") or 0) + ready_count
+    return [
+        {
+            "id": "return_ready_void_open",
+            "label": "إلغاء التسكين وإرجاع الطاولة إلى جاهزة",
+            "description": "ينهي الجلسة الحالية ويلغي الطلبات المفتوحة ويرجع الطاولة إلى جاهزة كإلغاء تشغيلي.",
+            "tableStatusOnComplete": "ready",
+            "financialDisposition": "void_open_orders",
+            "financialDispositionLabel": "إلغاء البنود المفتوحة بدون تحميل عميل",
+            "policyHint": "يناسب الحالات التي لم تصل لتحصيل ولا تريد ترك الطاولة على متسخة بعدها.",
+            "recommended": started_count == 0,
+        },
+        {
+            "id": "close_dirty_shift_charge",
+            "label": "إنهاء الجلسة وتحويل الطاولة إلى متسخة",
+            "description": "ينهي الجلسة الحالية ويلغي الطلبات المفتوحة ويترك الطاولة على متسخة مع تحميل تشغيلي على الشيفت.",
+            "tableStatusOnComplete": "dirty",
+            "financialDisposition": "shift_charge",
+            "financialDispositionLabel": "تحميل على الشيفت / مسؤولية تشغيلية",
+            "policyHint": "مناسب إذا بدأ التحضير أو صار هناك أثر تشغيلي يحتاج متابعة داخل الوردية.",
+            "recommended": started_count > 0,
+        },
+        {
+            "id": "close_dirty_kitchen_charge",
+            "label": "إنهاء الجلسة وتحويلها لمتسخة مع تحميل على المطبخ",
+            "description": "ينهي الجلسة الحالية ويلغي الطلبات المفتوحة لكن يسجل الأثر كمسؤولية مطبخ/إنتاج.",
+            "tableStatusOnComplete": "dirty",
+            "financialDisposition": "deduct_kitchen",
+            "financialDispositionLabel": "تحميل على المطبخ / الإنتاج",
+            "policyHint": "يستخدم عندما يكون سبب الحسم راجعاً إلى تنفيذ المطبخ أو تجهيز غير مطلوب.",
+            "recommended": False,
+        },
+    ]
+
+
+def _manager_approval_cancel_session_flags() -> list[dict]:
+    return [
+        {
+            "id": "notifyRequester",
+            "label": "إشعار مقدم الطلب بعد الحسم",
+            "description": "يرسل إشعاراً موجهاً لصاحب الطلب بنتيجة قرار المدير.",
+            "default": True,
+        },
+        {
+            "id": "recordManagerNote",
+            "label": "إرفاق ملاحظة المدير مع القرار",
+            "description": "يحفظ الملاحظة مع الطلب وسجل الجلسة للمراجعة لاحقاً.",
+            "default": True,
+        },
+    ]
+
+
+def _manager_approval_reset_table_decisions(summary: dict) -> list[dict]:
+    started_count = int((summary or {}).get("preparingCount") or 0) + int((summary or {}).get("readyCount") or 0)
+    return [
+        {
+            "id": "force_reset_ready",
+            "label": "Reset للطاولة وإرجاعها إلى جاهزة",
+            "description": "يلغي الطلبات المفتوحة القديمة ويعيد الطاولة إلى جاهزة حتى يمكن بدء تسكين جديد بعدها.",
+            "tableStatusOnComplete": "ready",
+            "financialDisposition": "void_open_orders",
+            "financialDispositionLabel": "إلغاء الطلبات المفتوحة السابقة بدون تحميل عميل جديد",
+            "policyHint": "هذا القرار لا يفتح جلسة جديدة تلقائياً، لكنه يرفع العائق ثم تعاد محاولة التسكين.",
+            "recommended": started_count == 0,
+        },
+        {
+            "id": "force_reset_dirty",
+            "label": "Reset للطاولة وتحويلها إلى متسخة",
+            "description": "يلغي الطلبات المفتوحة القديمة لكن يترك الطاولة على متسخة لمراجعة تشغيلية قبل إعادة استخدامها.",
+            "tableStatusOnComplete": "dirty",
+            "financialDisposition": "shift_charge",
+            "financialDispositionLabel": "تحميل تشغيلي على الشيفت مع إبقاء الطاولة خارج الخدمة مؤقتاً",
+            "policyHint": "يُستخدم عندما توجد شبهة تنفيذ أو تجهيز غير محسوم وتريد منع إعادة التسكين فوراً.",
+            "recommended": started_count > 0,
+        },
+    ]
+
+
+def _manager_approval_captain_handover_decisions() -> list[dict]:
+    return [
+        {
+            "id": "handover_single_table_shift",
+            "label": "تحويل هذه الطاولة فقط مؤقتاً حتى نهاية الشيفت",
+            "description": "ينقل مسؤولية الجلسة الحالية والطاولة الحالية فقط إلى البديل الذي يختاره المدير.",
+            "policyHint": "يبقى التحويل مؤقتاً ويظهر للبديل بجانب طاولاته الأصلية.",
+            "recommended": True,
+        },
+        {
+            "id": "handover_all_active_shift",
+            "label": "تحويل كل الطاولات الحالية لهذا الكابتن حتى نهاية الشيفت",
+            "description": "ينقل كل الجلسات النشطة الحالية الخاصة بمقدم الطلب إلى البديل نفسه بشكل مؤقت.",
+            "policyHint": "يستخدم عند انتهاء الشيفت أو الحاجة إلى استبدال الكابتن على مستوى كل ما يعمل عليه الآن.",
+            "recommended": False,
+        },
+    ]
+
+
+def _manager_approval_captain_handover_flags() -> list[dict]:
+    return [
+        {
+            "id": "notifyRequester",
+            "label": "إشعار مقدم الطلب بالقرار",
+            "description": "يرسل رسالة بنتيجة قرار المدير والبديل المختار.",
+            "default": True,
+        },
+        {
+            "id": "recordManagerNote",
+            "label": "تسجيل ملاحظة المدير",
+            "description": "يحفظ الملاحظة مع الطلب والتحويلات الناتجة للمراجعة لاحقاً.",
+            "default": True,
+        },
+        {
+            "id": "lockRequesterTerminal",
+            "label": "مطالبة مقدم الطلب بإنهاء الجلسة على الجهاز المشترك",
+            "description": "يرسل تنبيهاً لصاحب الطلب بأن ينهي جلسته عبر Ctrl+0 إذا كان التحويل يعني تسليم وردية فعلياً.",
+            "default": False,
+        },
+    ]
+
+
+def _manager_approval_guest_session_decisions() -> list[dict]:
+    return [
+        {
+            "id": "approve_guest_session",
+            "label": "اعتماد تحويل الجلسة إلى ضيف صالة",
+            "description": "يعتمد الجلسة كضيف صالة ويمنع تطبيق Owner/VIP عليها.",
+            "policyHint": "يستخدم قبل إرسال أول طلب حتى ينتقل العميل في نقاط البيع والكاشير إلى ضيف صالة.",
+            "recommended": True,
+        }
+    ]
+
+
+def _manager_approval_guest_session_flags() -> list[dict]:
+    return [
+        {
+            "id": "notifyRequester",
+            "label": "إشعار مقدم الطلب بالقرار",
+            "description": "يرسل إشعاراً بنتيجة اعتماد أو رفض تحويل الجلسة إلى ضيف.",
+            "default": True,
+        },
+        {
+            "id": "recordManagerNote",
+            "label": "تسجيل ملاحظة المدير",
+            "description": "يحفظ الملاحظة مع الطلب والجلسة للمراجعة اللاحقة.",
+            "default": True,
+        },
+    ]
+
+
+def _manager_approval_captain_handover_candidates(requester_id: str) -> tuple[str, list[dict]]:
+    rid = str(requester_id or "").strip()
+    if not rid:
+        return "", []
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="يلزم اتصال قاعدة البيانات لتحديد البدائل المجدولين.")
+    try:
+        eff, peers, _peer_roles = _peer_user_ids_same_effective_role_today(conn, rid)
+        if eff not in _CAPTAIN_PEER_ROLES:
+            return eff, []
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT Id, LoginName, DisplayName, RoleCode
+            FROM dbo.MAT3AM_APP_USERS
+            WHERE IsActive = 1
+            """
+        )
+        by_uid: dict[str, dict] = {}
+        for row in cursor.fetchall() or []:
+            uid = str(row[0] or "").strip()
+            if not uid:
+                continue
+            by_uid[_restaurant_guid_norm(uid)] = {
+                "userId": uid,
+                "login": str(row[1] or "").strip(),
+                "name": str(row[2] or "").strip(),
+                "role": str(row[3] or "").strip().lower(),
+            }
+        out: list[dict] = []
+        for uid in peers:
+            item = by_uid.get(_restaurant_guid_norm(uid))
+            if not isinstance(item, dict):
+                continue
+            out.append(
+                {
+                    "userId": str(item.get("userId") or ""),
+                    "login": str(item.get("login") or ""),
+                    "name": str(item.get("name") or item.get("login") or "بديل"),
+                    "role": str(item.get("role") or eff or "waiter"),
+                }
+            )
+        out.sort(key=lambda x: (str(x.get("name") or ""), str(x.get("login") or ""), str(x.get("userId") or "")))
+        return eff, out
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _restaurant_active_sessions_for_captain_today(captain_user_id: str) -> list[dict]:
+    uid_norm = _restaurant_guid_norm(captain_user_id)
+    if not uid_norm:
+        return []
+    day = datetime.now().date().isoformat()
+    out: list[dict] = []
+    for row in _restaurant_load("table_sessions", []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("status") or "").strip().lower() != "active":
+            continue
+        if _restaurant_guid_norm(row.get("captainUserId")) != uid_norm:
+            continue
+        start_day = str(row.get("startTime") or "").strip()[:10]
+        if start_day and start_day != day:
+            continue
+        out.append(row)
+    out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
+    return out
+
+
+def _manager_approval_enqueue_inbox(req: dict) -> None:
+    if not isinstance(req, dict):
+        return
+    rows = _role_inbox_load_rows()
+    req_id = str(req.get("id") or "").strip()
+    if not req_id:
+        return
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("managerApprovalRequestId") or "").strip() != req_id:
+            continue
+        if str(row.get("dismissedAt") or "").strip():
+            row["dismissedAt"] = None
+            _role_inbox_save_rows(rows)
+        return
+    summary = req.get("openOrdersSummary") if isinstance(req.get("openOrdersSummary"), dict) else {}
+    table_label = str(req.get("tableLabel") or req.get("tableId") or "الطاولة").strip()
+    req_type = str(req.get("type") or "").strip()
+    if req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS:
+        title_text = "طلب موافقة مدير: Reset لطاولة عليها طلبات قديمة"
+        body_text = (
+            f"{table_label} · طلبات قديمة مفتوحة: {int(summary.get('orderCount') or 0)}"
+            f" · قيد التحضير: {int(summary.get('preparingCount') or 0)}"
+            f" · جاهز: {int(summary.get('readyCount') or 0)}"
+        )
+    elif req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER:
+        handover_summary = req.get("handoverSummary") if isinstance(req.get("handoverSummary"), dict) else {}
+        title_text = "طلب موافقة مدير: تسليم/استبدال كابتن"
+        body_text = (
+            f"{table_label}"
+            f" · الطاولات الحالية للكابتن: {int(handover_summary.get('currentCaptainTables') or 1)}"
+            f" · البدائل المتاحة: {int(handover_summary.get('candidateCount') or 0)}"
+        )
+    elif req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION:
+        title_text = "طلب موافقة مدير: تحويل الجلسة إلى ضيف صالة"
+        body_text = f"{table_label} · تحويل نوع العميل إلى ضيف صالة قبل إرسال أول طلب"
+    else:
+        title_text = "طلب موافقة مدير: إلغاء تسكين بعد المطبخ"
+        body_text = (
+            f"{table_label} · طلبات مفتوحة: {int(summary.get('orderCount') or 0)}"
+            f" · قيد التحضير: {int(summary.get('preparingCount') or 0)}"
+            f" · جاهز: {int(summary.get('readyCount') or 0)}"
+        )
+    rows.append(
+        {
+            "id": str(uuid.uuid4()),
+            "managerApprovalRequestId": req_id,
+            "type": "manager_approval_request",
+            "title": title_text,
+            "body": body_text,
+            "targetRoles": list(MANAGER_OP_TARGET_ROLES),
+            "createdAt": str(req.get("requestedAt") or datetime.now().isoformat()),
+            "sessionId": str(req.get("sessionId") or ""),
+            "tableId": str(req.get("tableId") or ""),
+            "tableDisplayName": table_label,
+            "dismissedAt": None,
+        }
+    )
+    _role_inbox_save_rows(rows)
+
+
+def _manager_approval_dismiss_inbox(request_id: str) -> None:
+    rid = str(request_id or "").strip()
+    if not rid:
+        return
+    _role_inbox_dismiss_where(lambda item: str(item.get("managerApprovalRequestId") or "").strip() == rid)
+
+
+def _manager_approval_notify_requester(req: dict, status_text: str, manager_note: str) -> None:
+    requested_by = req.get("requestedBy") if isinstance(req.get("requestedBy"), dict) else {}
+    user_id = str(requested_by.get("userId") or "").strip()
+    role = str(requested_by.get("role") or "").strip().lower()
+    if not user_id or not role:
+        return
+    rows = _role_inbox_load_rows()
+    rows.append(
+        {
+            "id": str(uuid.uuid4()),
+            "type": "manager_approval_result",
+            "title": f"قرار المدير: {status_text}",
+            "body": (
+                f"{str(req.get('tableLabel') or req.get('tableId') or 'الطاولة').strip()}"
+                + (f" · {manager_note}" if manager_note else "")
+            ),
+            "targetRoles": [role],
+            "targetUserIds": [user_id],
+            "createdAt": datetime.now().isoformat(),
+            "dismissedAt": None,
+        }
+    )
+    _role_inbox_save_rows(rows)
+
+
+def _manager_approval_find_pending_duplicate(data: list, req_type: str, session_id: str) -> Optional[dict]:
+    sid = str(session_id or "").strip()
+    typ = str(req_type or "").strip()
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("type") or "").strip() != typ:
+            continue
+        if str(row.get("sessionId") or "").strip() != sid:
+            continue
+        if str(row.get("status") or "").strip().lower() != _MANAGER_APPROVAL_STATUS_PENDING:
+            continue
+        return row
+    return None
+
+
+def _manager_approval_find_pending_duplicate_by_table(data: list, req_type: str, table_id: str) -> Optional[dict]:
+    tid = str(table_id or "").strip()
+    typ = str(req_type or "").strip()
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("type") or "").strip() != typ:
+            continue
+        if str(row.get("tableId") or "").strip() != tid:
+            continue
+        if str(row.get("status") or "").strip().lower() != _MANAGER_APPROVAL_STATUS_PENDING:
+            continue
+        return row
+    return None
+
+
+def _manager_approval_create_cancel_session_request(session_row: dict, actor: dict, reason: str = "") -> dict:
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    table_id = str(session_row.get("tableId") or "").strip()
+    if not table_id:
+        raise HTTPException(status_code=400, detail="tableId غير متاح على الجلسة الحالية")
+    summary = _manager_approval_open_orders_summary(table_id)
+    if int(summary.get("orderCount") or 0) <= 0:
+        raise HTTPException(status_code=409, detail="لا توجد طلبات مفتوحة حالياً لرفع طلب موافقة عليها.")
+    data = _manager_approval_requests_load()
+    existing = _manager_approval_find_pending_duplicate(
+        data,
+        _MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS,
+        str(session_row.get("id") or ""),
+    )
+    if isinstance(existing, dict):
+        _manager_approval_enqueue_inbox(existing)
+        return {**existing, "deduped": True}
+    now_iso = datetime.now().isoformat()
+    table_label = _session_table_display_fallback(table_id)
+    req = {
+        "id": str(uuid.uuid4()),
+        "type": _MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS,
+        "status": _MANAGER_APPROVAL_STATUS_PENDING,
+        "requestedAt": now_iso,
+        "sessionId": str(session_row.get("id") or "")[:80],
+        "tableId": table_id[:80],
+        "tableLabel": table_label[:160],
+        "requestedBy": {
+            "userId": str(actor.get("id") or "")[:64],
+            "name": str(actor.get("name") or actor.get("login") or "")[:120],
+            "role": str(actor.get("role") or "")[:32],
+        },
+        "reason": str(reason or "")[:500],
+        "openOrdersSummary": summary,
+        "decisionOptions": _manager_approval_cancel_session_decisions(summary),
+        "decisionFlags": _manager_approval_cancel_session_flags(),
+        "managerNote": "",
+        "managerReview": None,
+        "executionResult": None,
+    }
+    data.append(req)
+    _manager_approval_requests_save(data)
+    _manager_approval_enqueue_inbox(req)
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "manager_approval_requested",
+            "requestType": _MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS,
+            "requestId": str(req.get("id") or ""),
+            "sessionId": str(session_row.get("id") or ""),
+            "tableId": table_id,
+            "requestedByUserId": str(actor.get("id") or ""),
+            "requestedByRole": str(actor.get("role") or ""),
+            "reason": str(reason or ""),
+            "openOrdersSummary": summary,
+        }
+    )
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return req
+
+
+def _manager_approval_create_reset_table_request(table_id: str, actor: dict, reason: str = "") -> dict:
+    tid = str(table_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="tableId مطلوب")
+    summary = _manager_approval_open_orders_summary(tid)
+    if int(summary.get("orderCount") or 0) <= 0:
+        raise HTTPException(status_code=409, detail="لا توجد طلبات مفتوحة حالياً لرفع طلب موافقة عليها.")
+    data = _manager_approval_requests_load()
+    existing = _manager_approval_find_pending_duplicate_by_table(
+        data,
+        _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS,
+        tid,
+    )
+    if isinstance(existing, dict):
+        _manager_approval_enqueue_inbox(existing)
+        return {**existing, "deduped": True}
+    now_iso = datetime.now().isoformat()
+    table_label = _session_table_display_fallback(tid)
+    req = {
+        "id": str(uuid.uuid4()),
+        "type": _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS,
+        "status": _MANAGER_APPROVAL_STATUS_PENDING,
+        "requestedAt": now_iso,
+        "sessionId": "",
+        "tableId": tid[:80],
+        "tableLabel": table_label[:160],
+        "requestedBy": {
+            "userId": str(actor.get("id") or "")[:64],
+            "name": str(actor.get("name") or actor.get("login") or "")[:120],
+            "role": str(actor.get("role") or "")[:32],
+        },
+        "reason": str(reason or "")[:500],
+        "openOrdersSummary": summary,
+        "decisionOptions": _manager_approval_reset_table_decisions(summary),
+        "decisionFlags": _manager_approval_cancel_session_flags(),
+        "managerNote": "",
+        "managerReview": None,
+        "executionResult": None,
+    }
+    data.append(req)
+    _manager_approval_requests_save(data)
+    _manager_approval_enqueue_inbox(req)
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "manager_approval_requested",
+            "requestType": _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS,
+            "requestId": str(req.get("id") or ""),
+            "sessionId": None,
+            "tableId": tid,
+            "requestedByUserId": str(actor.get("id") or ""),
+            "requestedByRole": str(actor.get("role") or ""),
+            "reason": str(reason or ""),
+            "openOrdersSummary": summary,
+        }
+    )
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return req
+
+
+def _manager_approval_create_captain_handover_request(session_row: dict, actor: dict, reason: str = "") -> dict:
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    session_id = str(session_row.get("id") or "").strip()
+    table_id = str(session_row.get("tableId") or "").strip()
+    if not session_id or not table_id:
+        raise HTTPException(status_code=400, detail="بيانات الجلسة الحالية غير مكتملة")
+    if str(session_row.get("status") or "").strip().lower() != "active":
+        raise HTTPException(status_code=409, detail="لا يمكن طلب تسليم كابتن على جلسة غير نشطة")
+    actor_id = str(actor.get("id") or "").strip()
+    if not actor_id:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    current_captain = str(session_row.get("captainUserId") or "").strip()
+    if not current_captain or _restaurant_guid_norm(current_captain) != _restaurant_guid_norm(actor_id):
+        raise HTTPException(status_code=403, detail="طلب التسليم متاح للكابتن الحالي لهذه الجلسة فقط.")
+    eff_role, candidates = _manager_approval_captain_handover_candidates(actor_id)
+    if eff_role not in _CAPTAIN_PEER_ROLES:
+        raise HTTPException(status_code=403, detail="الدور الفعّال اليوم لا يسمح بطلب تسليم الكابتن بهذه الطريقة.")
+    if not candidates:
+        raise HTTPException(status_code=409, detail="لا يوجد بديل مجدول اليوم بنفس الدور الفعّال لاستلام التحويل.")
+    data = _manager_approval_requests_load()
+    existing = _manager_approval_find_pending_duplicate(data, _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER, session_id)
+    if isinstance(existing, dict):
+        _manager_approval_enqueue_inbox(existing)
+        return {**existing, "deduped": True}
+    now_iso = datetime.now().isoformat()
+    table_label = _session_table_display_fallback(table_id)
+    current_sessions = _restaurant_active_sessions_for_captain_today(actor_id)
+    req = {
+        "id": str(uuid.uuid4()),
+        "type": _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER,
+        "status": _MANAGER_APPROVAL_STATUS_PENDING,
+        "requestedAt": now_iso,
+        "sessionId": session_id[:80],
+        "tableId": table_id[:80],
+        "tableLabel": table_label[:160],
+        "requestedBy": {
+            "userId": actor_id[:64],
+            "name": str(actor.get("name") or actor.get("login") or "")[:120],
+            "role": str(actor.get("role") or "")[:32],
+        },
+        "reason": str(reason or "")[:500],
+        "openOrdersSummary": _manager_approval_open_orders_summary(table_id),
+        "handoverSummary": {
+            "currentCaptainTables": len(current_sessions),
+            "candidateCount": len(candidates),
+            "effectiveRole": eff_role,
+        },
+        "targetOptions": candidates,
+        "decisionOptions": _manager_approval_captain_handover_decisions(),
+        "decisionFlags": _manager_approval_captain_handover_flags(),
+        "managerNote": "",
+        "managerReview": None,
+        "executionResult": None,
+    }
+    data.append(req)
+    _manager_approval_requests_save(data)
+    _manager_approval_enqueue_inbox(req)
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "manager_approval_requested",
+            "requestType": _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER,
+            "requestId": str(req.get("id") or ""),
+            "sessionId": session_id,
+            "tableId": table_id,
+            "requestedByUserId": actor_id,
+            "requestedByRole": str(actor.get("role") or ""),
+            "reason": str(reason or ""),
+            "candidateCount": len(candidates),
+            "currentCaptainTables": len(current_sessions),
+        }
+    )
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return req
+
+
+def _manager_approval_create_guest_session_request(session_row: dict, actor: dict, reason: str = "") -> dict:
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    session_id = str(session_row.get("id") or "").strip()
+    table_id = str(session_row.get("tableId") or "").strip()
+    if not session_id or not table_id:
+        raise HTTPException(status_code=400, detail="بيانات الجلسة الحالية غير مكتملة")
+    if str(session_row.get("status") or "").strip().lower() != "active":
+        raise HTTPException(status_code=409, detail="لا يمكن طلب اعتماد ضيف على جلسة غير نشطة")
+    _restaurant_sync_session_customer_state(session_row)
+    if session_row.get("customerTypeLocked"):
+        raise HTTPException(status_code=409, detail="نوع العميل مقفول بعد أول طلب على الجلسة.")
+    if session_row.get("guestSession") is True:
+        raise HTTPException(status_code=409, detail="الجلسة معتمدة بالفعل كضيف صالة.")
+    if _restaurant_session_has_any_orders(session_id):
+        raise HTTPException(status_code=409, detail="لا يمكن تحويل الجلسة إلى ضيف بعد إرسال أول طلب.")
+    data = _manager_approval_requests_load()
+    existing = _manager_approval_find_pending_duplicate(data, _MANAGER_APPROVAL_TYPE_GUEST_SESSION, session_id)
+    if isinstance(existing, dict):
+        _manager_approval_enqueue_inbox(existing)
+        return {**existing, "deduped": True}
+    now_iso = datetime.now().isoformat()
+    table_label = _session_table_display_fallback(table_id)
+    req = {
+        "id": str(uuid.uuid4()),
+        "type": _MANAGER_APPROVAL_TYPE_GUEST_SESSION,
+        "status": _MANAGER_APPROVAL_STATUS_PENDING,
+        "requestedAt": now_iso,
+        "sessionId": session_id[:80],
+        "tableId": table_id[:80],
+        "tableLabel": table_label[:160],
+        "requestedBy": {
+            "userId": str(actor.get("id") or "")[:64],
+            "name": str(actor.get("name") or actor.get("login") or "")[:120],
+            "role": str(actor.get("role") or "")[:32],
+        },
+        "reason": str(reason or "")[:500],
+        "openOrdersSummary": _manager_approval_open_orders_summary(table_id),
+        "decisionOptions": _manager_approval_guest_session_decisions(),
+        "decisionFlags": _manager_approval_guest_session_flags(),
+        "managerNote": "",
+        "managerReview": None,
+        "executionResult": None,
+    }
+    session_row["guestApprovalPending"] = True
+    _restaurant_sync_session_customer_state(session_row)
+    _manager_approval_requests_save(data + [req])
+    _manager_approval_update_guest_pending_state(session_id, True)
+    _manager_approval_enqueue_inbox(req)
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "manager_approval_requested",
+            "requestType": _MANAGER_APPROVAL_TYPE_GUEST_SESSION,
+            "requestId": str(req.get("id") or ""),
+            "sessionId": session_id,
+            "tableId": table_id,
+            "requestedByUserId": str(actor.get("id") or ""),
+            "requestedByRole": str(actor.get("role") or ""),
+            "reason": str(reason or ""),
+        }
+    )
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return req
+
+
+def _manager_approval_execute_cancel_session(req: dict, decision_id: str, reviewer: dict, manager_note: str, flags_map: dict) -> dict:
+    session_id = str(req.get("sessionId") or "").strip()
+    session_row = _restaurant_find_session_row(session_id)
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=409, detail="الجلسة لم تعد موجودة لحظة تنفيذ القرار.")
+    if str(session_row.get("status") or "").strip().lower() != "active":
+        raise HTTPException(status_code=409, detail="الجلسة لم تعد نشطة، وتم إيقاف الطلب.")
+    option = None
+    for item in (req.get("decisionOptions") or []):
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == str(decision_id or "").strip():
+            option = item
+            break
+    if not isinstance(option, dict):
+        raise HTTPException(status_code=400, detail="قرار المدير غير مدعوم لهذا الطلب.")
+    table_status = str(option.get("tableStatusOnComplete") or "dirty").strip().lower()
+    if table_status not in ("ready", "dirty"):
+        table_status = "dirty"
+    financial_disposition = str(option.get("financialDisposition") or "").strip().lower()
+    actor = {
+        "id": str(reviewer.get("userId") or "")[:120],
+        "login": str(reviewer.get("login") or "")[:120],
+        "name": str(reviewer.get("name") or reviewer.get("login") or "")[:200],
+        "role": str(reviewer.get("role") or "manager")[:32],
+    }
+    done = _restaurant_complete_session_internal(
+        session_id,
+        force=False,
+        reason=manager_note or str(req.get("reason") or "") or "قرار مدير على إلغاء التسكين بعد المطبخ",
+        actor=actor,
+        table_status_on_complete=table_status,
+        release_captain_on_complete=True,
+    )
+    if bool(flags_map.get("notifyRequester", True)):
+        _manager_approval_notify_requester(
+            req,
+            "اعتماد إلغاء التسكين" if table_status == "ready" else "اعتماد إنهاء الجلسة",
+            manager_note,
+        )
+    if bool(flags_map.get("recordManagerNote", True)):
+        _append_session_audit_entry(
+            {
+                "at": datetime.now().isoformat(),
+                "action": "manager_approval_executed",
+                "requestType": str(req.get("type") or ""),
+                "requestId": str(req.get("id") or ""),
+                "sessionId": session_id,
+                "tableId": str(req.get("tableId") or ""),
+                "decisionId": str(option.get("id") or ""),
+                "decisionLabel": str(option.get("label") or ""),
+                "tableStatusOnComplete": table_status,
+                "financialDisposition": financial_disposition,
+                "financialDispositionLabel": str(option.get("financialDispositionLabel") or ""),
+                "managerNote": manager_note,
+                "reviewedByUserId": str(reviewer.get("userId") or ""),
+                "reviewedByName": str(reviewer.get("name") or ""),
+                "reviewedByRole": str(reviewer.get("role") or ""),
+            }
+        )
+    return {
+        "action": "complete_session",
+        "sessionId": session_id,
+        "tableId": str(req.get("tableId") or ""),
+        "tableStatusOnComplete": table_status,
+        "decisionId": str(option.get("id") or ""),
+        "decisionLabel": str(option.get("label") or ""),
+        "financialDisposition": financial_disposition,
+        "financialDispositionLabel": str(option.get("financialDispositionLabel") or ""),
+        "policyHint": str(option.get("policyHint") or ""),
+        "completedSessionStatus": str((done or {}).get("status") or ""),
+    }
+
+
+def _manager_approval_execute_reset_table(req: dict, decision_id: str, reviewer: dict, manager_note: str, flags_map: dict) -> dict:
+    table_id = str(req.get("tableId") or "").strip()
+    if not table_id:
+        raise HTTPException(status_code=409, detail="الطاولة غير متاحة لحظة تنفيذ القرار.")
+    option = None
+    for item in (req.get("decisionOptions") or []):
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == str(decision_id or "").strip():
+            option = item
+            break
+    if not isinstance(option, dict):
+        raise HTTPException(status_code=400, detail="قرار المدير غير مدعوم لهذا الطلب.")
+    actor = {
+        "id": str(reviewer.get("userId") or "")[:120],
+        "login": str(reviewer.get("login") or "")[:120],
+        "name": str(reviewer.get("name") or reviewer.get("login") or "")[:200],
+        "role": str(reviewer.get("role") or "manager")[:32],
+    }
+    table_status = str(option.get("tableStatusOnComplete") or "ready").strip().lower()
+    if table_status not in ("ready", "dirty"):
+        table_status = "ready"
+    reset_result = _restaurant_force_reset_table(
+        table_id,
+        reason=manager_note or str(req.get("reason") or "") or "قرار مدير على Reset لطاولة بها طلبات قديمة",
+        actor=actor,
+    )
+    table_row = reset_result.get("table") if isinstance(reset_result, dict) else None
+    if isinstance(table_row, dict):
+        table_row["status"] = table_status
+        tables = _restaurant_load("tables", [])
+        if not isinstance(tables, list):
+            tables = []
+        found = False
+        for row in tables:
+            if not isinstance(row, dict):
+                continue
+            if _norm_session_table_id(str(row.get("id") or "").strip()) != _norm_session_table_id(table_id):
+                continue
+            row.update(table_row)
+            found = True
+            break
+        if not found:
+            tables.append(dict(table_row))
+        _restaurant_save("tables", tables)
+        cache_invalidate_restaurant()
+    if bool(flags_map.get("notifyRequester", True)):
+        _manager_approval_notify_requester(
+            req,
+            "اعتماد Reset للطاولة",
+            manager_note,
+        )
+    if bool(flags_map.get("recordManagerNote", True)):
+        _append_session_audit_entry(
+            {
+                "at": datetime.now().isoformat(),
+                "action": "manager_approval_executed",
+                "requestType": str(req.get("type") or ""),
+                "requestId": str(req.get("id") or ""),
+                "sessionId": None,
+                "tableId": table_id,
+                "decisionId": str(option.get("id") or ""),
+                "decisionLabel": str(option.get("label") or ""),
+                "tableStatusOnComplete": table_status,
+                "financialDisposition": str(option.get("financialDisposition") or ""),
+                "financialDispositionLabel": str(option.get("financialDispositionLabel") or ""),
+                "managerNote": manager_note,
+                "reviewedByUserId": str(reviewer.get("userId") or ""),
+                "reviewedByName": str(reviewer.get("name") or ""),
+                "reviewedByRole": str(reviewer.get("role") or ""),
+                "cancelledOrderCount": int((reset_result or {}).get("cancelledOrderCount") or 0),
+                "cancelledLineCount": int((reset_result or {}).get("cancelledLineCount") or 0),
+            }
+        )
+    return {
+        "action": "reset_table",
+        "sessionId": "",
+        "tableId": table_id,
+        "tableStatusOnComplete": table_status,
+        "decisionId": str(option.get("id") or ""),
+        "decisionLabel": str(option.get("label") or ""),
+        "financialDisposition": str(option.get("financialDisposition") or ""),
+        "financialDispositionLabel": str(option.get("financialDispositionLabel") or ""),
+        "policyHint": str(option.get("policyHint") or ""),
+        "cancelledOrderCount": int((reset_result or {}).get("cancelledOrderCount") or 0),
+        "cancelledLineCount": int((reset_result or {}).get("cancelledLineCount") or 0),
+        "completedSessionIds": (reset_result or {}).get("completedSessionIds") or [],
+    }
+
+
+def _manager_approval_notify_captain_handover(req: dict, target_user: dict, transferred_count: int, manager_note: str, lock_terminal: bool) -> None:
+    requested_by = req.get("requestedBy") if isinstance(req.get("requestedBy"), dict) else {}
+    requester_id = str(requested_by.get("userId") or "").strip()
+    requester_role = str(requested_by.get("role") or "").strip().lower()
+    target_id = str(target_user.get("userId") or "").strip()
+    target_role = str(target_user.get("role") or "").strip().lower()
+    rows = _role_inbox_load_rows()
+    now_iso = datetime.now().isoformat()
+    table_label = str(req.get("tableLabel") or req.get("tableId") or "الطاولة").strip()
+    target_name = str(target_user.get("name") or target_user.get("login") or "بديل").strip()
+    if requester_id and requester_role:
+        msg = f"تم اعتماد تسليم {table_label} إلى {target_name}."
+        if transferred_count > 1:
+            msg += f" وشمل القرار {transferred_count} طاولات حالية."
+        if lock_terminal:
+            msg += " أنهِ جلستك على الجهاز المشترك عبر Ctrl+0."
+        if manager_note:
+            msg += f" · {manager_note}"
+        rows.append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": "manager_approval_result",
+                "title": "قرار المدير: تسليم الكابتن",
+                "body": msg,
+                "targetRoles": [requester_role],
+                "targetUserIds": [requester_id],
+                "requesterTerminalAction": "lock_shift_finished" if lock_terminal else "",
+                "createdAt": now_iso,
+                "dismissedAt": None,
+            }
+        )
+    if target_id and target_role:
+        rows.append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": "captain_transfer_result",
+                "title": "تمت إضافة طاولات إليك مؤقتاً",
+                "body": f"{table_label} · المعتمد لك الآن: {transferred_count} طاولة" + (f" · {manager_note}" if manager_note else ""),
+                "targetRoles": [target_role],
+                "targetUserIds": [target_id],
+                "createdAt": now_iso,
+                "dismissedAt": None,
+            }
+        )
+    _role_inbox_save_rows(rows)
+
+
+def _manager_approval_execute_captain_handover(
+    req: dict,
+    decision_id: str,
+    reviewer: dict,
+    manager_note: str,
+    flags_map: dict,
+    target_user_id: str,
+) -> dict:
+    target_id_norm = _restaurant_guid_norm(target_user_id)
+    if not target_id_norm:
+        raise HTTPException(status_code=400, detail="يجب اختيار البديل الذي سيستلم الطاولات.")
+    options = req.get("targetOptions") if isinstance(req.get("targetOptions"), list) else []
+    target_user = None
+    for item in options:
+        if not isinstance(item, dict):
+            continue
+        if _restaurant_guid_norm(item.get("userId")) == target_id_norm:
+            target_user = item
+            break
+    if not isinstance(target_user, dict):
+        raise HTTPException(status_code=400, detail="البديل المختار لم يعد متاحاً لهذا الطلب.")
+    option = None
+    for item in (req.get("decisionOptions") or []):
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == str(decision_id or "").strip():
+            option = item
+            break
+    if not isinstance(option, dict):
+        raise HTTPException(status_code=400, detail="قرار المدير غير مدعوم لهذا الطلب.")
+    session_id = str(req.get("sessionId") or "").strip()
+    session_row = _restaurant_find_session_row(session_id)
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=409, detail="الجلسة لم تعد موجودة لحظة تنفيذ القرار.")
+    if str(session_row.get("status") or "").strip().lower() != "active":
+        raise HTTPException(status_code=409, detail="الجلسة لم تعد نشطة لحظة تنفيذ القرار.")
+    from_user_id = str((req.get("requestedBy") or {}).get("userId") or session_row.get("captainUserId") or "").strip()
+    if not from_user_id:
+        raise HTTPException(status_code=409, detail="تعذر تحديد الكابتن الحالي لهذا الطلب.")
+    move_all = str(option.get("id") or "").strip() == "handover_all_active_shift"
+    source_sessions = _restaurant_active_sessions_for_captain_today(from_user_id) if move_all else [session_row]
+    if not source_sessions:
+        raise HTTPException(status_code=409, detail="لا توجد جلسات نشطة حالية يمكن تحويلها.")
+    sessions_data = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions_data, list):
+        sessions_data = []
+    moved_ids = {str(x.get("id") or "").strip() for x in source_sessions if isinstance(x, dict)}
+    now_iso = datetime.now().isoformat()
+    target_login = str(target_user.get("login") or "").strip()
+    target_name = str(target_user.get("name") or target_login or "بديل").strip()
+    target_role = str(target_user.get("role") or "waiter").strip().lower()
+    from_name = str((req.get("requestedBy") or {}).get("name") or "").strip()
+    moved_count = 0
+    moved_tables: list[str] = []
+    for row in sessions_data:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("id") or "").strip() not in moved_ids:
+            continue
+        row["captainUserId"] = str(target_user.get("userId") or "")[:120]
+        row["captainLogin"] = target_login[:120] or None
+        row["captainName"] = target_name[:200] or None
+        row["captainRole"] = target_role[:32] or None
+        row["captainClaimedAt"] = now_iso
+        row["captainTransferredFromUserId"] = from_user_id[:120]
+        row["captainTransferredFromName"] = from_name[:200]
+        row["captainTransferApprovalRequestId"] = str(req.get("id") or "")[:80]
+        row["captainTransferApprovedAt"] = now_iso
+        moved_count += 1
+        tid = _restaurant_waiter_assignment_table_id(row.get("tableId"))
+        if tid:
+            moved_tables.append(tid)
+    _restaurant_save("table_sessions", sessions_data)
+    transfers = _restaurant_temp_captain_transfers_load()
+    for tr in transfers:
+        if not isinstance(tr, dict):
+            continue
+        if _restaurant_waiter_assignment_table_id(tr.get("tableId")) not in set(moved_tables):
+            continue
+        if str(tr.get("status") or "").strip().lower() != "active":
+            continue
+        tr["status"] = "completed"
+    for row in source_sessions:
+        if not isinstance(row, dict):
+            continue
+        tid = _restaurant_waiter_assignment_table_id(row.get("tableId"))
+        if not tid:
+            continue
+        transfers.append(
+            {
+                "id": str(uuid.uuid4()),
+                "approvalRequestId": str(req.get("id") or ""),
+                "sessionId": str(row.get("id") or ""),
+                "tableId": tid,
+                "tableLabel": _session_table_display_fallback(tid),
+                "fromUserId": from_user_id,
+                "fromUserName": from_name,
+                "toUserId": str(target_user.get("userId") or ""),
+                "toUserName": target_name,
+                "scope": "all_active_tables" if move_all else "single_table",
+                "untilType": "shift_end",
+                "reason": manager_note or str(req.get("reason") or ""),
+                "createdAt": str(req.get("requestedAt") or now_iso),
+                "approvedAt": now_iso,
+                "approvedByUserId": str(reviewer.get("userId") or ""),
+                "approvedByName": str(reviewer.get("name") or ""),
+                "status": "active",
+            }
+        )
+    _restaurant_temp_captain_transfers_save(transfers)
+    if bool(flags_map.get("notifyRequester", True)):
+        _manager_approval_notify_captain_handover(
+            req,
+            target_user,
+            moved_count,
+            manager_note,
+            bool(flags_map.get("lockRequesterTerminal")),
+        )
+    if bool(flags_map.get("recordManagerNote", True)):
+        _append_session_audit_entry(
+            {
+                "at": now_iso,
+                "action": "manager_approval_executed",
+                "requestType": str(req.get("type") or ""),
+                "requestId": str(req.get("id") or ""),
+                "sessionId": session_id,
+                "tableId": str(req.get("tableId") or ""),
+                "decisionId": str(option.get("id") or ""),
+                "decisionLabel": str(option.get("label") or ""),
+                "managerNote": manager_note,
+                "reviewedByUserId": str(reviewer.get("userId") or ""),
+                "reviewedByName": str(reviewer.get("name") or ""),
+                "reviewedByRole": str(reviewer.get("role") or ""),
+                "fromUserId": from_user_id,
+                "toUserId": str(target_user.get("userId") or ""),
+                "transferredCount": moved_count,
+            }
+        )
+    return {
+        "action": "captain_handover",
+        "sessionId": session_id,
+        "tableId": str(req.get("tableId") or ""),
+        "decisionId": str(option.get("id") or ""),
+        "decisionLabel": str(option.get("label") or ""),
+        "targetUserId": str(target_user.get("userId") or ""),
+        "targetUserName": target_name,
+        "transferredCount": moved_count,
+        "scope": "all_active_tables" if move_all else "single_table",
+        "untilType": "shift_end",
+        "policyHint": str(option.get("policyHint") or ""),
+        "requesterTerminalAction": "lock_prompt" if bool(flags_map.get("lockRequesterTerminal")) else "",
+    }
+
+
+def _manager_approval_update_guest_pending_state(session_id: str, pending: bool) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        return
+    changed = False
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("id") or "").strip() != sid:
+            continue
+        if bool(row.get("guestApprovalPending")) != bool(pending):
+            row["guestApprovalPending"] = bool(pending)
+            changed = True
+        _restaurant_sync_session_customer_state(row)
+        break
+    if changed:
+        _restaurant_save("table_sessions", data)
+        cache_invalidate_restaurant()
+
+
+def _manager_approval_reject_guest_session(req: dict) -> dict:
+    session_id = str(req.get("sessionId") or "").strip()
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    session_row = None
+    for row in data:
+        if isinstance(row, dict) and str(row.get("id") or "").strip() == session_id:
+            session_row = row
+            break
+    if isinstance(session_row, dict):
+        session_row["guestSession"] = False
+        session_row["guestApprovalPending"] = False
+        session_row["guestRejectedAt"] = datetime.now().isoformat()
+        session_row.pop("guestApprovedAt", None)
+        session_row.pop("billingProfile", None)
+        _restaurant_sync_session_customer_state(session_row)
+        _restaurant_save("table_sessions", data)
+        cache_invalidate_restaurant()
+    return {
+        "action": "reject_guest_session",
+        "sessionId": session_id,
+        "tableId": str(req.get("tableId") or ""),
+        "decisionId": "reject_guest_session",
+        "decisionLabel": "رفض تحويل الجلسة إلى ضيف صالة",
+        "customerType": str((session_row or {}).get("customerType") or "cash"),
+        "policyHint": "رُفضت جلسة الضيف وعادت الجلسة إلى عميل نقدي.",
+    }
+
+
+def _manager_approval_execute_guest_session(req: dict, decision_id: str, reviewer: dict, manager_note: str, flags_map: dict) -> dict:
+    if str(decision_id or "").strip() != "approve_guest_session":
+        raise HTTPException(status_code=400, detail="قرار المدير غير مدعوم لهذا الطلب.")
+    session_id = str(req.get("sessionId") or "").strip()
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        data = []
+    session_row = None
+    for row in data:
+        if isinstance(row, dict) and str(row.get("id") or "").strip() == session_id:
+            session_row = row
+            break
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=409, detail="الجلسة لم تعد موجودة لحظة تنفيذ القرار.")
+    _restaurant_sync_session_customer_state(session_row)
+    if session_row.get("customerTypeLocked") or _restaurant_session_has_any_orders(session_id):
+        raise HTTPException(status_code=409, detail="لا يمكن اعتماد جلسة ضيف بعد إرسال أول طلب.")
+    session_row["guestSession"] = True
+    session_row["guestApprovalPending"] = False
+    session_row["guestApprovedAt"] = datetime.now().isoformat()
+    session_row.pop("billingProfile", None)
+    _restaurant_sync_session_customer_state(session_row)
+    _restaurant_save("table_sessions", data)
+    cache_invalidate_restaurant()
+    if bool(flags_map.get("notifyRequester", True)):
+        _manager_approval_notify_requester(req, "اعتماد جلسة ضيف", manager_note)
+    if bool(flags_map.get("recordManagerNote", True)):
+        _append_session_audit_entry(
+            {
+                "at": datetime.now().isoformat(),
+                "action": "manager_approval_executed",
+                "requestType": str(req.get("type") or ""),
+                "requestId": str(req.get("id") or ""),
+                "sessionId": session_id,
+                "tableId": str(req.get("tableId") or ""),
+                "decisionId": "approve_guest_session",
+                "decisionLabel": "اعتماد تحويل الجلسة إلى ضيف صالة",
+                "managerNote": manager_note,
+                "reviewedByUserId": str(reviewer.get("userId") or ""),
+                "reviewedByName": str(reviewer.get("name") or ""),
+                "reviewedByRole": str(reviewer.get("role") or ""),
+            }
+        )
+    return {
+        "action": "approve_guest_session",
+        "sessionId": session_id,
+        "tableId": str(req.get("tableId") or ""),
+        "decisionId": "approve_guest_session",
+        "decisionLabel": "اعتماد تحويل الجلسة إلى ضيف صالة",
+        "customerType": str(session_row.get("customerType") or "guest"),
+        "policyHint": "أصبحت الجلسة الآن ضيف صالة، ولا يمكن تطبيق Owner/VIP عليها.",
+    }
+
+
 def _guest_return_relieves_guest_charge(disposition_code: str) -> bool:
     code = str(disposition_code or "").strip().lower()
     return code in {"deduct_waiter", "deduct_kitchen", "shift_charge", "stock_return"}
@@ -15748,6 +17256,70 @@ def _restaurant_find_session_row(session_id: str) -> Optional[dict]:
         if isinstance(row, dict) and str(row.get("id") or "").strip() == sid:
             return row
     return None
+
+
+def _restaurant_session_order_count(session_id: str) -> int:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return 0
+    count = 0
+    for row in _restaurant_load("orders", []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId") or "").strip() != sid:
+            continue
+        count += 1
+    return count
+
+
+def _restaurant_session_has_any_orders(session_id: str) -> bool:
+    return _restaurant_session_order_count(session_id) > 0
+
+
+def _restaurant_sync_session_customer_state(session_row: dict) -> dict:
+    if not isinstance(session_row, dict):
+        return session_row
+    sid = str(session_row.get("id") or "").strip()
+    billing_profile = session_row.get("billingProfile") if isinstance(session_row.get("billingProfile"), dict) else None
+    billing_active = isinstance(billing_profile, dict) and billing_profile.get("active") is not False
+    guest_session = session_row.get("guestSession") is True
+    if guest_session:
+        customer_type = "guest"
+    elif billing_active:
+        customer_type = "vip_owner"
+    else:
+        customer_type = "cash"
+    session_row["customerType"] = customer_type
+    has_orders = _restaurant_session_has_any_orders(sid) if sid else False
+    locked = bool(session_row.get("customerTypeLocked")) or has_orders
+    session_row["customerTypeLocked"] = locked
+    if locked and not str(session_row.get("customerTypeLockedAt") or "").strip():
+        session_row["customerTypeLockedAt"] = datetime.now().isoformat()
+    return session_row
+
+
+def _restaurant_mark_session_customer_type_locked(session_id: str) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    data = _restaurant_load("table_sessions", [])
+    if not isinstance(data, list):
+        return
+    changed = False
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("id") or "").strip() != sid:
+            continue
+        before_locked = bool(row.get("customerTypeLocked"))
+        _restaurant_sync_session_customer_state(row)
+        row["customerTypeLocked"] = True
+        if not str(row.get("customerTypeLockedAt") or "").strip():
+            row["customerTypeLockedAt"] = datetime.now().isoformat()
+        changed = changed or not before_locked
+        break
+    if changed:
+        _restaurant_save("table_sessions", data)
 
 
 def _guest_return_resolve_order_line(session_id: str, order_id: str, line_id: str) -> dict:
@@ -16208,6 +17780,182 @@ def restaurant_guest_returns_patch(request_id: str, body: dict):
     raise HTTPException(status_code=400, detail="action غير مدعوم: approve | reject")
 
 
+@app.get("/api/restaurant/manager-approvals")
+def restaurant_manager_approvals_get(
+    status: Optional[str] = None,
+    reqType: Optional[str] = None,
+):
+    data = _manager_approval_requests_load()
+    if status:
+        st = str(status or "").strip().lower()
+        data = [x for x in data if str(x.get("status") or "").strip().lower() == st]
+    if reqType:
+        typ = str(reqType or "").strip()
+        data = [x for x in data if str(x.get("type") or "").strip() == typ]
+    data.sort(key=lambda x: str(x.get("requestedAt") or ""), reverse=True)
+    return {"requests": data}
+
+
+@app.post("/api/restaurant/manager-approvals")
+def restaurant_manager_approvals_post(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    req_type = str(body.get("type") or "").strip()
+    requester = _mat3am_actor_from_body(body)
+    if req_type == _MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS:
+        session_id = str(body.get("sessionId") or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="sessionId مطلوب")
+        session_row = _restaurant_find_session_row(session_id)
+        if not isinstance(session_row, dict):
+            raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+        req = _manager_approval_create_cancel_session_request(session_row, requester, str(body.get("reason") or ""))
+    elif req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER:
+        session_id = str(body.get("sessionId") or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="sessionId مطلوب")
+        session_row = _restaurant_find_session_row(session_id)
+        if not isinstance(session_row, dict):
+            raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+        req = _manager_approval_create_captain_handover_request(session_row, requester, str(body.get("reason") or ""))
+    elif req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION:
+        session_id = str(body.get("sessionId") or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="sessionId مطلوب")
+        session_row = _restaurant_find_session_row(session_id)
+        if not isinstance(session_row, dict):
+            raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+        req = _manager_approval_create_guest_session_request(session_row, requester, str(body.get("reason") or ""))
+    elif req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS:
+        table_id = str(body.get("tableId") or "").strip()
+        if not table_id:
+            raise HTTPException(status_code=400, detail="tableId مطلوب")
+        req = _manager_approval_create_reset_table_request(table_id, requester, str(body.get("reason") or ""))
+    else:
+        raise HTTPException(status_code=400, detail="type غير مدعوم حالياً.")
+    return {"ok": True, "request": req}
+
+
+@app.patch("/api/restaurant/manager-approvals/{request_id}")
+def restaurant_manager_approvals_patch(request_id: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    action = str(body.get("action") or "").strip().lower()
+    reviewer = body.get("reviewedBy") if isinstance(body.get("reviewedBy"), dict) else {}
+    reviewer_role = str(reviewer.get("role") or "").strip().lower()
+    if not _role_has_manager_ops_access(reviewer_role):
+        raise HTTPException(status_code=403, detail="حسم هذا الطلب لمدير التشغيل أو المدير أو المطوّر فقط.")
+    data = _manager_approval_requests_load()
+    target = None
+    for row in data:
+        if isinstance(row, dict) and str(row.get("id") or "").strip() == str(request_id):
+            target = row
+            break
+    if not isinstance(target, dict):
+        raise HTTPException(status_code=404, detail="طلب الموافقة غير موجود")
+    if str(target.get("status") or "").strip().lower() != _MANAGER_APPROVAL_STATUS_PENDING:
+        raise HTTPException(status_code=409, detail="الطلب ليس بانتظار المدير حالياً.")
+    now_iso = datetime.now().isoformat()
+    manager_note = str(body.get("managerNote") or "")[:2000]
+    flags_raw = body.get("flags")
+    flags_map = {}
+    if isinstance(flags_raw, list):
+        flags_map = {str(x.get("id") or ""): bool(x.get("enabled")) for x in flags_raw if isinstance(x, dict)}
+    elif isinstance(flags_raw, dict):
+        flags_map = {str(k): bool(v) for k, v in flags_raw.items()}
+    req_type = str(target.get("type") or "").strip()
+    if action == "reject":
+        if req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION:
+            if not str(manager_note or "").strip():
+                raise HTTPException(status_code=400, detail="سبب رفض جلسة الضيف إلزامي.")
+        target["status"] = "rejected"
+        target["managerNote"] = (
+            manager_note
+            or ("رفض المدير اعتماد جلسة ضيف." if req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION else "")
+            or ("رفض المدير تنفيذ تسليم الكابتن." if req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER else "")
+            or ("رفض المدير تنفيذ Reset للطاولة." if req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS else "")
+            or "رفض المدير تنفيذ الإلغاء."
+        )
+        target["managerReview"] = {
+            "userId": str(reviewer.get("userId") or "")[:64],
+            "name": str(reviewer.get("name") or "")[:120],
+            "role": reviewer_role[:32],
+            "at": now_iso,
+            "decision": "reject",
+        }
+        target["executionResult"] = (
+            _manager_approval_reject_guest_session(target)
+            if req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION
+            else {"action": "keep_session_open"}
+        )
+        _manager_approval_requests_save(data)
+        _manager_approval_dismiss_inbox(str(target.get("id") or ""))
+        _append_session_audit_entry(
+            {
+                "at": now_iso,
+                "action": "manager_approval_rejected",
+                "requestType": str(target.get("type") or ""),
+                "requestId": str(target.get("id") or ""),
+                "sessionId": str(target.get("sessionId") or ""),
+                "tableId": str(target.get("tableId") or ""),
+                "managerNote": target.get("managerNote") or "",
+                "reviewedByUserId": str(reviewer.get("userId") or ""),
+                "reviewedByName": str(reviewer.get("name") or ""),
+                "reviewedByRole": reviewer_role,
+            }
+        )
+        if bool(flags_map.get("notifyRequester", True)):
+            _manager_approval_notify_requester(
+                target,
+                "رفض طلب جلسة ضيف"
+                if req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION
+                else "رفض طلب تسليم الكابتن"
+                if req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER
+                else "رفض طلب Reset للطاولة"
+                if req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS
+                else "رفض طلب الإلغاء",
+                manager_note,
+            )
+        cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+        return {"ok": True, "request": target}
+    if action != "approve":
+        raise HTTPException(status_code=400, detail="action غير مدعوم: approve | reject")
+    decision_id = str(body.get("decisionId") or "").strip()
+    if not decision_id:
+        raise HTTPException(status_code=400, detail="decisionId مطلوب عند الاعتماد")
+    if req_type == _MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS:
+        execution_result = _manager_approval_execute_cancel_session(target, decision_id, reviewer, manager_note, flags_map)
+    elif req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION:
+        execution_result = _manager_approval_execute_guest_session(target, decision_id, reviewer, manager_note, flags_map)
+    elif req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER:
+        execution_result = _manager_approval_execute_captain_handover(
+            target,
+            decision_id,
+            reviewer,
+            manager_note,
+            flags_map,
+            str(body.get("targetUserId") or ""),
+        )
+    elif req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS:
+        execution_result = _manager_approval_execute_reset_table(target, decision_id, reviewer, manager_note, flags_map)
+    else:
+        raise HTTPException(status_code=400, detail="نوع الطلب غير مدعوم في التنفيذ الحالي.")
+    target["status"] = "approved"
+    target["managerNote"] = manager_note
+    target["managerReview"] = {
+        "userId": str(reviewer.get("userId") or "")[:64],
+        "name": str(reviewer.get("name") or "")[:120],
+        "role": reviewer_role[:32],
+        "at": now_iso,
+        "decision": decision_id,
+    }
+    target["executionResult"] = execution_result
+    _manager_approval_requests_save(data)
+    _manager_approval_dismiss_inbox(str(target.get("id") or ""))
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return {"ok": True, "request": target}
+
+
 def _floor_plan_table_id_to_label() -> dict:
     """خريطة id الطاولة في المخطط → تسمية للعرض (label أو name)."""
     out: dict = {}
@@ -16598,7 +18346,7 @@ def _mat3am_reference_data_refresh_sync(body: dict) -> dict:
     _terminal_require_user(body.get("mat3amActor"))
     actor = body.get("mat3amActor") or {}
     role = str((actor or {}).get("role") or "").strip().lower()
-    if role not in ("manager", "developer"):
+    if not _role_has_system_settings_access(role):
         raise HTTPException(status_code=403, detail="تحديث البيانات المرجعية للمدير/المطوّر فقط")
     include_users = body.get("includeUsers") not in (False, 0, "0", "false", "no")
     from mat3am_sql_cache import refresh_all_reference_data
@@ -16882,6 +18630,8 @@ def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
         wf_raw = {}
 
     ops_raw = _restaurant_read_ops_storage()
+    waiter_table_assignments = _restaurant_waiter_table_assignments_load()
+    temp_captain_transfers = _restaurant_temp_captain_transfer_active_rows()
 
     from mat3am_sql_cache import status as cache_status
 
@@ -16894,6 +18644,8 @@ def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
         "orders": orders_raw,
         "workflowSettings": wf_raw,
         "opsSettings": ops_raw if isinstance(ops_raw, dict) else {},
+        "waiterTableAssignments": waiter_table_assignments,
+        "tempCaptainTransfers": temp_captain_transfers,
         "sources": {
             "table_sessions": sessions_src,
             "orders": orders_src,
@@ -17596,6 +19348,83 @@ def restaurant_update_table_minimum_charge(table_id: str, body: dict):
     return {"ok": True, "id": tid, "minimumCharge": mc}
 
 
+@app.get("/api/restaurant/waiter-table-assignments")
+def restaurant_get_waiter_table_assignments():
+    return {"ok": True, "items": _restaurant_waiter_table_assignments_load()}
+
+
+@app.post("/api/restaurant/waiter-table-assignments/mutate")
+def restaurant_mutate_waiter_table_assignments(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    action = str(body.get("action") or "").strip().lower()
+    rows = _restaurant_waiter_table_assignments_load()
+    if action == "add":
+        user_id = str(body.get("userId") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=400, detail="userId مطلوب")
+        table_ids = body.get("tableIds") if isinstance(body.get("tableIds"), list) else []
+        normalized_table_ids: List[str] = []
+        for raw_tid in table_ids:
+            tid = _restaurant_waiter_assignment_table_id(raw_tid)
+            if tid and tid not in normalized_table_ids:
+                normalized_table_ids.append(tid)
+        if not normalized_table_ids:
+            raise HTTPException(status_code=400, detail="اختر طاولة واحدة على الأقل")
+        rec = {
+            "id": str(uuid.uuid4()),
+            "userId": user_id,
+            "userLogin": str(body.get("userLogin") or "").strip()[:120],
+            "userName": str(body.get("userName") or "").strip()[:200],
+            "validFrom": _restaurant_waiter_assignment_date(body.get("validFrom")),
+            "validTo": _restaurant_waiter_assignment_date(body.get("validTo")),
+            "tableIds": normalized_table_ids,
+            "createdAt": datetime.now().isoformat(),
+        }
+        rows.append(rec)
+    elif action == "update":
+        row_id = str(body.get("assignmentId") or body.get("id") or "").strip()
+        if not row_id:
+            raise HTTPException(status_code=400, detail="assignmentId مطلوب")
+        hit = None
+        for row in rows:
+            if str(row.get("id") or "").strip() == row_id:
+                hit = row
+                break
+        if hit is None:
+            raise HTTPException(status_code=404, detail="التخصيص غير موجود")
+        user_id = str(body.get("userId") or hit.get("userId") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=400, detail="userId مطلوب")
+        table_ids = body.get("tableIds") if isinstance(body.get("tableIds"), list) else hit.get("tableIds") or []
+        normalized_table_ids: List[str] = []
+        for raw_tid in table_ids:
+            tid = _restaurant_waiter_assignment_table_id(raw_tid)
+            if tid and tid not in normalized_table_ids:
+                normalized_table_ids.append(tid)
+        if not normalized_table_ids:
+            raise HTTPException(status_code=400, detail="اختر طاولة واحدة على الأقل")
+        hit["userId"] = user_id
+        hit["userLogin"] = str(body.get("userLogin") or hit.get("userLogin") or "").strip()[:120]
+        hit["userName"] = str(body.get("userName") or hit.get("userName") or "").strip()[:200]
+        hit["validFrom"] = _restaurant_waiter_assignment_date(body.get("validFrom") or hit.get("validFrom"))
+        hit["validTo"] = _restaurant_waiter_assignment_date(body.get("validTo") or hit.get("validTo"))
+        hit["tableIds"] = normalized_table_ids
+    elif action == "remove":
+        row_id = str(body.get("assignmentId") or body.get("id") or "").strip()
+        if not row_id:
+            raise HTTPException(status_code=400, detail="assignmentId مطلوب")
+        kept = [row for row in rows if str(row.get("id") or "").strip() != row_id]
+        if len(kept) == len(rows):
+            raise HTTPException(status_code=404, detail="التخصيص غير موجود")
+        rows = kept
+    else:
+        raise HTTPException(status_code=400, detail="action يجب أن يكون add أو update أو remove")
+    _restaurant_waiter_table_assignments_save(rows)
+    cache_invalidate_restaurant()
+    return {"ok": True, "assignmentsChanged": True, "items": _restaurant_waiter_table_assignments_load()}
+
+
 def _get_table_minimum_charge(st_row: dict | None) -> float:
     """اقرأ minimumCharge للطاولة/الكرسي: أولاً من override الطاولة، ثم من الإعدادات الافتراضية."""
     try:
@@ -17886,8 +19715,8 @@ def restaurant_force_reset_table(table_id: str, body: dict):
     actor = _mat3am_actor_from_body(body)
     if not str(actor.get("id") or "").strip():
         raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
-    if str(actor.get("role") or "").strip().lower() not in ("manager", "developer"):
-        raise HTTPException(status_code=403, detail="Reset للطاولة للمدير أو المطوّر فقط.")
+    if not _role_has_manager_ops_access(str(actor.get("role") or "").strip().lower()):
+        raise HTTPException(status_code=403, detail="Reset للطاولة لمدير التشغيل أو المدير أو المطوّر فقط.")
     tid = str(table_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="tableId مطلوب")
@@ -18088,12 +19917,12 @@ def _assert_actor_may_manage_session_billing(session: dict, body: dict) -> None:
     actor = _mat3am_actor_from_body(body)
     role = str(actor.get("role") or "").strip().lower()
     aid = str(actor.get("id") or "").strip()
-    if role in ("manager", "developer"):
+    if _role_has_manager_ops_access(role):
         return
     cap = str((session or {}).get("captainUserId") or "").strip()
     if role in ("waiter", "host") and aid and cap and cap == aid:
         return
-    raise HTTPException(status_code=403, detail="تعديل سياسة الفوترة للمسند (كابتن) أو المدير/المطوّر فقط.")
+    raise HTTPException(status_code=403, detail="تعديل سياسة الفوترة للمسند (كابتن) أو مدير التشغيل أو المدير/المطوّر فقط.")
 
 
 def _restaurant_table_has_vip_section(table_id: str) -> bool:
@@ -18164,6 +19993,7 @@ def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = Tru
             disp = _session_table_display_fallback(tid) if tid else "بدون طاولة"
         row["tableDisplayName"] = disp
         row["linkedOrderCount"] = int(counts.get(str(s.get("id")), 0))
+        _restaurant_sync_session_customer_state(row)
         out.append(row)
     out.sort(key=lambda x: str(x.get("startTime") or ""), reverse=True)
     result = {"sessions": out}
@@ -18222,6 +20052,7 @@ def restaurant_create_session(body: dict):
     actor_role = str(actor.get("role") or "").strip().lower()
     actor_login = str(actor.get("login") or "").strip()[:120]
     actor_name = str(actor.get("name") or actor_login or "").strip()[:200]
+    _restaurant_assert_actor_assigned_table(actor, table_id)
     _close_stale_active_sessions()
     data = _restaurant_load("table_sessions", [])
     if not isinstance(data, list):
@@ -18287,10 +20118,40 @@ def restaurant_create_session(body: dict):
                 s["startedByRole"] = started_by_role
             if start_reason:
                 s["startReason"] = start_reason
+            _restaurant_sync_session_customer_state(s)
+            if body.get("guestSession") is True and not s.get("guestSession"):
+                req = _manager_approval_create_guest_session_request(
+                    s,
+                    actor,
+                    str(body.get("reason") or body.get("startReason") or "طلب تحويل الجلسة إلى ضيف صالة"),
+                )
+                _restaurant_save("table_sessions", data)
+                cache_invalidate_restaurant()
+                return {
+                    "ok": True,
+                    "session": s,
+                    "action": "approval_requested",
+                    "approvalRequested": True,
+                    "message": "تم فتح الجلسة ورفع طلب موافقة للمدير لتحويلها إلى ضيف صالة.",
+                    "request": req,
+                }
             cache_invalidate_restaurant()
             return s
     open_table_orders = _restaurant_open_orders_for_table(table_id)
     if open_table_orders:
+        if actor_id:
+            req = _manager_approval_create_reset_table_request(
+                table_id,
+                actor,
+                str(body.get("reason") or body.get("startReason") or "بدء تسكين جديد مع وجود طلبات قديمة"),
+            )
+            return {
+                "ok": True,
+                "action": "approval_requested",
+                "approvalRequested": True,
+                "message": "تم رفع طلب موافقة للمدير لعمل Reset للطاولة بسبب وجود طلبات قديمة مفتوحة.",
+                "request": req,
+            }
         raise HTTPException(
             status_code=409,
             detail=(
@@ -18314,7 +20175,8 @@ def restaurant_create_session(body: dict):
         "startReason": start_reason or None,
         "minimumChargePerSeat": _session_minimum_charge_per_seat(None, table_id),
         "seatGuestLabels": _auto_numbered_seat_guest_labels(guest_count),
-        "guestSession": body.get("guestSession") is True,
+        "guestSession": False,
+        "guestApprovalPending": False,
     }
     if actor_id:
         rec["seatedByUserId"] = actor_id
@@ -18323,6 +20185,7 @@ def restaurant_create_session(body: dict):
     if _body_wants_special_table(body) or _restaurant_table_has_vip_section(table_id):
         rec["billingProfile"] = _billing_profile_from_ops_special_defaults()
     _restaurant_assign_captain_from_actor_if_needed(rec, actor, body)
+    _restaurant_sync_session_customer_state(rec)
     data.append(rec)
     _restaurant_save("table_sessions", data)
     _restaurant_clear_table_minimum_charge_override(table_id)
@@ -18335,6 +20198,21 @@ def restaurant_create_session(body: dict):
         "takeOrderBy": _workflow_role_for("take_order"),
         "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
     }
+    if body.get("guestSession") is True:
+        req = _manager_approval_create_guest_session_request(
+            rec,
+            actor,
+            str(body.get("reason") or body.get("startReason") or "طلب تحويل الجلسة إلى ضيف صالة"),
+        )
+        cache_invalidate_restaurant()
+        return {
+            "ok": True,
+            "session": rec,
+            "action": "approval_requested",
+            "approvalRequested": True,
+            "message": "تم فتح الجلسة ورفع طلب موافقة للمدير لتحويلها إلى ضيف صالة.",
+            "request": req,
+        }
     cache_invalidate_restaurant()
     return rec
 
@@ -18359,6 +20237,15 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
             continue
         if str(s.get("status") or "").lower() != "active":
             raise HTTPException(status_code=400, detail="لا يمكن تعديل جلسة غير نشطة")
+        _restaurant_sync_session_customer_state(s)
+        if s.get("customerTypeLocked") and (
+            clear
+            or vip_ag
+            or vip_tid
+            or body.get("applyOpsDefaults") in (True, "1", "true", "yes", "on", 1)
+            or isinstance(body.get("billingProfile"), dict)
+        ):
+            raise HTTPException(status_code=409, detail="نوع العميل مقفول بعد أول طلب على الجلسة.")
         # منع تحويل جلسة الضيف لملاك/VIP
         if s.get("guestSession") is True and not clear and (vip_ag or vip_tid or body.get("applyOpsDefaults") in (True, "1", "true", "yes", "on", 1)):
             raise HTTPException(
@@ -18408,6 +20295,7 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
                 status_code=400,
                 detail="مرّر clear=true أو vipAgentGuid أو vipTemplateId أو applyOpsDefaults=true أو billingProfile={...}",
             )
+        _restaurant_sync_session_customer_state(s)
         _restaurant_save("table_sessions", data)
         cache_invalidate_restaurant()
         return {"ok": True, "session": s}
@@ -18427,8 +20315,8 @@ def restaurant_claim_order_taker(session_id: str, body: dict):
     rrole = str(actor.get("role") or "").strip().lower()
     if not rid:
         raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
-    if rrole not in ("waiter", "host", "manager", "developer"):
-        raise HTTPException(status_code=403, detail="التسكين متاح لجرسون الطلبات أو الاستقبال أو المدير.")
+    if rrole not in ("waiter", "host", "manager", "operation_manager", "developer"):
+        raise HTTPException(status_code=403, detail="التسكين متاح لجرسون الطلبات أو الاستقبال أو مدير التشغيل أو المدير.")
     data = _restaurant_load("table_sessions", [])
     if not isinstance(data, list):
         data = []
@@ -18441,9 +20329,10 @@ def restaurant_claim_order_taker(session_id: str, body: dict):
         raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
     if str(found.get("status") or "").lower() != "active":
         raise HTTPException(status_code=400, detail="لا يمكن التسكين على جلسة غير نشطة")
+    _restaurant_assert_actor_assigned_table(actor, str(found.get("tableId") or ""))
     existing = str(found.get("captainUserId") or "").strip()
     if existing and existing != rid:
-        if rrole in ("manager", "developer") and body.get("forceManagerTake") in (True, "1", "true", "yes"):
+        if _role_has_manager_ops_access(rrole) and body.get("forceManagerTake") in (True, "1", "true", "yes"):
             pass
         else:
             cname = str(found.get("captainName") or found.get("captainLogin") or "").strip() or "كابتن آخر"
@@ -18807,7 +20696,7 @@ def restaurant_cancel_captain_transfer(request_id: str, body: dict):
         raise HTTPException(status_code=400, detail="طلب التحويل لم يعد قائماً")
 
     from_cap = str(req_obj.get("fromCaptainUserId") or "").strip()
-    is_mgr = arole in ("manager", "developer")
+    is_mgr = _role_has_manager_ops_access(arole)
     if _mat3am_guid_norm(from_cap) != _mat3am_guid_norm(aid) and not is_mgr:
         raise HTTPException(status_code=403, detail="الإلغاء للكابتن الطالب أو المدير فقط.")
 
@@ -18831,8 +20720,8 @@ def restaurant_reassign_order_taker(session_id: str, body: dict):
     if not isinstance(body, dict):
         body = {}
     actor = _mat3am_actor_from_body(body)
-    if str(actor.get("role") or "").strip().lower() not in ("manager", "developer"):
-        raise HTTPException(status_code=403, detail="تحويل الكابتن للمدير أو المطوّر فقط.")
+    if not _role_has_manager_ops_access(str(actor.get("role") or "").strip().lower()):
+        raise HTTPException(status_code=403, detail="تحويل الكابتن لمدير التشغيل أو المدير أو المطوّر فقط.")
     sid = str(session_id or "").strip()
     tid = str(body.get("targetUserId") or "").strip()
     if not sid or not tid:
@@ -18851,6 +20740,11 @@ def restaurant_reassign_order_taker(session_id: str, body: dict):
         raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
     if str(found.get("status") or "").lower() != "active":
         raise HTTPException(status_code=400, detail="لا يمكن التحويل على جلسة غير نشطة")
+    _restaurant_assert_target_user_assigned_table(
+        tid,
+        str(found.get("tableId") or ""),
+        target_label=tname or tlogin or "المستخدم الهدف",
+    )
     prev = str(found.get("captainUserId") or "")
     found["captainUserId"] = tid
     found["captainLogin"] = tlogin
@@ -19040,6 +20934,19 @@ def _restaurant_complete_session_internal(
                 s["completedByLogin"] = str(actor.get("login") or "")[:120] or None
                 s["completedByName"] = str(actor.get("name") or actor.get("login") or "")[:200] or None
             _restaurant_save("table_sessions", data)
+            transfers = _restaurant_temp_captain_transfers_load()
+            changed_transfers = False
+            for tr in transfers:
+                if not isinstance(tr, dict):
+                    continue
+                if str(tr.get("sessionId") or "").strip() != str(session_id).strip():
+                    continue
+                if str(tr.get("status") or "").strip().lower() != "active":
+                    continue
+                tr["status"] = "completed"
+                changed_transfers = True
+            if changed_transfers:
+                _restaurant_temp_captain_transfers_save(transfers)
             _session_no_order_watch_dismiss_alerts_async(str(session_id))
             try:
                 _restaurant_cancel_open_kitchen_orders_for_session(str(session_id))
@@ -19322,7 +21229,7 @@ def _restaurant_sync_no_order_watch_alerts(
                 "type": "no_order_session_watch",
                 "title": f"متابعة طاولة بلا طلبات — {disp}",
                 "body": f"مر {mins} دقيقة على التسكين ولم تُسجل طلبات بعد. امنح مدة إضافية 10 د أو احسم التسكين بسبب واضح.",
-                "targetRoles": target_roles if target_user_ids else ["manager", "developer"],
+                "targetRoles": target_roles if target_user_ids else list(MANAGER_OP_TARGET_ROLES),
                 "targetUserIds": target_user_ids,
                 "createdAt": now.isoformat(),
                 "sourceKey": f"no_order_watch:first:{sid}",
@@ -19358,7 +21265,7 @@ def _restaurant_sync_no_order_watch_alerts(
                 "type": "no_order_session_escalation",
                 "title": f"تصعيد متابعة طاولة — {disp}",
                 "body": f"الطاولة بلا طلبات منذ {mins} دقيقة بعد انتهاء المدة الإضافية. راجع الكابتن أو احسم التسكين بسبب واضح.",
-                "targetRoles": ["manager", "developer"],
+                "targetRoles": list(MANAGER_OP_TARGET_ROLES),
                 "createdAt": now.isoformat(),
                 "sourceKey": f"no_order_watch:escalated:manager:{sid}",
                 "noOrderWatchStage": "manager_escalated",
@@ -19394,7 +21301,7 @@ def _restaurant_sync_no_order_watch_alerts(
                 "type": "no_order_session_final",
                 "title": f"حسم مطلوب للطاولة — {disp}",
                 "body": f"انتهت المدة الإضافية الأخيرة للطاولة وما زالت بلا طلبات منذ {mins} دقيقة. يلزم حسم فوري: إعادة الطاولة جاهزة أو إنهاء التسكين بسبب واضح.",
-                "targetRoles": ["manager", "developer"],
+                "targetRoles": list(MANAGER_OP_TARGET_ROLES),
                 "createdAt": now.isoformat(),
                 "sourceKey": f"no_order_watch:final:manager:{sid}",
                 "noOrderWatchStage": "final_decision",
@@ -19444,7 +21351,7 @@ def _role_inbox_append_for_alert(rec_id: str, typ: str, title: str, body_text: O
 
 def _actor_may_handle_no_order_watch(session_row: dict, actor: dict) -> bool:
     role = str((actor or {}).get("role") or "").strip().lower()
-    if role in ("manager", "developer"):
+    if _role_has_manager_ops_access(role):
         return True
     aid = str((actor or {}).get("id") or "").strip()
     cap = str((session_row or {}).get("captainUserId") or "").strip()
@@ -19534,8 +21441,8 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
         return {"ok": True, "action": "snooze", "session": found}
 
     if action == "reset_table":
-        if str(actor.get("role") or "").strip().lower() not in ("manager", "developer"):
-            raise HTTPException(status_code=403, detail="Reset للطاولة للمدير أو المطوّر فقط.")
+        if not _role_has_manager_ops_access(str(actor.get("role") or "").strip().lower()):
+            raise HTTPException(status_code=403, detail="Reset للطاولة لمدير التشغيل أو المدير أو المطوّر فقط.")
         reason = str(body.get("reason") or "").strip()
         table_id = str(found.get("tableId") or "").strip()
         reset_result = _restaurant_force_reset_table(table_id, reason=reason, actor=actor)
@@ -19567,10 +21474,14 @@ def restaurant_no_order_watch_action(session_id: str, body: dict):
         reason = str(body.get("reason") or "").strip()
         table_id = str(found.get("tableId") or "").strip()
         if table_id and _restaurant_open_orders_for_table(table_id):
-            raise HTTPException(
-                status_code=409,
-                detail="لا يمكن إلغاء التسكين لأن على الطاولة طلبات مفتوحة فعلية. أغلق الطلبات أو عالجها أولاً ثم أعد المحاولة.",
-            )
+            req = _manager_approval_create_cancel_session_request(found, actor, reason)
+            return {
+                "ok": True,
+                "action": "approval_requested",
+                "approvalRequested": True,
+                "message": "تم رفع طلب موافقة للمدير بسبب وجود طلبات مفتوحة على الطاولة.",
+                "request": req,
+            }
         # #region debug-point B:no-order-reset-before-dismiss
         _dbg_table_session_close(
             "B",
@@ -19664,6 +21575,9 @@ def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Q
             "body": r.get("body"),
             "createdAt": r.get("createdAt"),
         }
+        mar = str(r.get("managerApprovalRequestId") or "").strip()
+        if mar:
+            item["managerApprovalRequestId"] = mar
         trq = str(r.get("transferRequestId") or "").strip()
         if trq:
             item["transferRequestId"] = trq
@@ -19684,6 +21598,9 @@ def restaurant_role_inbox_list(forRole: str = Query(default=""), userId: str = Q
             item["allowResetReady"] = bool(r.get("allowResetReady"))
             item["snoozeCount"] = int(r.get("snoozeCount") or 0)
             item["maxSnoozes"] = int(r.get("maxSnoozes") or 0)
+        requester_terminal_action = str(r.get("requesterTerminalAction") or "").strip()
+        if requester_terminal_action:
+            item["requesterTerminalAction"] = requester_terminal_action
         out.append(item)
     out.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
     result = {"ok": True, "items": out[:80], "count": len(out)}
@@ -22574,6 +24491,9 @@ def _kids_db_create_ticket(payload: dict, lines: list) -> dict:
             try: conn.rollback()
             except Exception: pass
         ticket_id = str(uuid.uuid4()).upper()
+        package_guid_sql = _parse_guid_val(payload.get("packageGuide"))
+        if not package_guid_sql:
+            raise HTTPException(status_code=409, detail="معرّف الباقة غير صالح. افتح إعدادات باقات منطقة الأطفال وتحقق من الباقة المختارة.")
         cur.execute(
             """
             INSERT INTO dbo.MAT3AM_KIDS_TICKETS
@@ -22592,7 +24512,7 @@ def _kids_db_create_ticket(payload: dict, lines: list) -> dict:
                 str(payload.get("phone") or "")[:40] or None,
                 int(payload.get("age")) if str(payload.get("age") or "").strip().isdigit() else None,
                 str(payload.get("companionsNote") or "")[:500] or None,
-                str(payload.get("packageGuide") or ""),
+                package_guid_sql,
                 str(payload.get("packageName") or "")[:255] or None,
                 int(payload.get("packageMinutes") or 0),
                 float(payload.get("packageTotal") or 0),
@@ -22603,6 +24523,13 @@ def _kids_db_create_ticket(payload: dict, lines: list) -> dict:
             ),
         )
         for ln in lines or []:
+            raw_product_guide = str(ln.get("productGuide") or "").strip()
+            product_guid_sql = _parse_guid_val(raw_product_guide)
+            if raw_product_guide and not product_guid_sql:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"أحد بنود الباقة يحمل productGuide غير صالح: {str(ln.get('name') or 'بند غير مسمى')}",
+                )
             cur.execute(
                 """
                 INSERT INTO dbo.MAT3AM_KIDS_TICKET_LINES
@@ -22613,7 +24540,7 @@ def _kids_db_create_ticket(payload: dict, lines: list) -> dict:
                 """,
                 (
                     ticket_id,
-                    str(ln.get("productGuide") or ""),
+                    product_guid_sql,
                     str(ln.get("name") or "")[:255],
                     float(ln.get("quantity") or 1),
                     float(ln.get("unitPrice") or 0),
@@ -22626,6 +24553,10 @@ def _kids_db_create_ticket(payload: dict, lines: list) -> dict:
             )
         conn.commit()
         return {"ticketId": ticket_id}
+    except HTTPException:
+        try: conn.rollback()
+        except Exception: pass
+        raise
     except Exception as e:
         try: conn.rollback()
         except Exception: pass
@@ -22987,105 +24918,112 @@ def kids_ticket_create(body: dict):
 
     body: { childName, fatherName, phone, age?, packageGuide, companionsNote?, downPayment?, mat3amActor? }
     """
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="جسم غير صالح")
-    _terminal_require_user(body.get("mat3amActor"))
-    child = str(body.get("childName") or "").strip()
-    father = str(body.get("fatherName") or "").strip()
-    phone = str(body.get("phone") or "").strip()
-    age = body.get("age")
-    pkg_guide = str(body.get("packageGuide") or "").strip().upper()
-    if not child or not phone:
-        raise HTTPException(status_code=400, detail="اسم الطفل وهاتف الوالد مطلوبان")
-    if not pkg_guide:
-        raise HTTPException(status_code=400, detail="packageGuide مطلوب")
-
-    # 1) قراءة الباقة من TBL006/007
-    conn = get_connection()
-    if not conn:
-        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
     try:
-        cur = conn.cursor()
-        try: _ensure_menu_tables(cur)
-        except Exception: pass
-        packages = _kids_load_packages_from_db(cur)
-        pkg = next((p for p in packages if str(p.get("packageGuide") or "").upper() == pkg_guide), None)
-        if not pkg:
-            raise HTTPException(status_code=404, detail="الباقة غير موجودة أو لا تحوي مكونات")
-        pkg_minutes = int(pkg.get("durationMinutes") or 0)
-        pkg_total = float(pkg.get("totalPrice") or 0)
-        pkg_items = pkg.get("items") or []
-    finally:
-        try: conn.close()
-        except Exception: pass
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="جسم غير صالح")
+        _terminal_require_user(body.get("mat3amActor"))
+        child = str(body.get("childName") or "").strip()
+        father = str(body.get("fatherName") or "").strip()
+        phone = str(body.get("phone") or "").strip()
+        age = body.get("age")
+        pkg_guide = str(body.get("packageGuide") or "").strip().upper()
+        if not child or not phone:
+            raise HTTPException(status_code=400, detail="اسم الطفل وهاتف الوالد مطلوبان")
+        if not pkg_guide:
+            raise HTTPException(status_code=400, detail="packageGuide مطلوب")
 
-    # 2) دفعة الحجز (أمانة)
-    try:
-        dp_in = body.get("downPayment")
-        down_payment = float(dp_in) if dp_in is not None else pkg_total
-    except Exception:
-        down_payment = pkg_total
-    if down_payment < 0:
-        down_payment = 0
-    if down_payment > pkg_total + 0.001:
-        down_payment = pkg_total
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات")
+        try:
+            cur = conn.cursor()
+            try: _ensure_menu_tables(cur)
+            except Exception: pass
+            packages = _kids_load_packages_from_db(cur)
+            pkg = next((p for p in packages if str(p.get("packageGuide") or "").upper() == pkg_guide), None)
+            if not pkg:
+                raise HTTPException(status_code=404, detail="الباقة غير موجودة أو لا تحوي مكونات")
+            pkg_minutes = int(pkg.get("durationMinutes") or 0)
+            pkg_total = float(pkg.get("totalPrice") or 0)
+            pkg_items = pkg.get("items") or []
+        finally:
+            try: conn.close()
+            except Exception: pass
 
-    actor = body.get("mat3amActor") or {}
-    actor_name = str((actor or {}).get("name") or "")
+        try:
+            dp_in = body.get("downPayment")
+            down_payment = float(dp_in) if dp_in is not None else pkg_total
+        except Exception:
+            down_payment = pkg_total
+        if down_payment < 0:
+            down_payment = 0
+        if down_payment > pkg_total + 0.001:
+            down_payment = pkg_total
 
-    # 3) بنود التذكرة من مكونات الباقة (في MAT3AM_KIDS_TICKET_LINES، ليس TBL023)
-    lines = [
-        {
-            "productGuide": it["productGuide"],
-            "name": it["name"],
-            "quantity": 1.0,
-            "unitPrice": float(it.get("price") or 0),
-            "isKitchen": bool(it.get("isKitchen")),
-            "minutes": int(it.get("minutes") or 0),
-            "fromPackage": True,
+        actor = body.get("mat3amActor") or {}
+        actor_name = str((actor or {}).get("name") or "")
+
+        lines = [
+            {
+                "productGuide": it["productGuide"],
+                "name": it["name"],
+                "quantity": 1.0,
+                "unitPrice": float(it.get("price") or 0),
+                "isKitchen": bool(it.get("isKitchen")),
+                "minutes": int(it.get("minutes") or 0),
+                "fromPackage": True,
+            }
+            for it in pkg_items
+        ]
+
+        now_iso = _kids_db_now_iso()
+        payments_init = [{
+            "id": str(uuid.uuid4()),
+            "kind": "down_payment",
+            "amount": down_payment,
+            "method": "cash",
+            "at": now_iso,
+            "note": "دفعة حجز كيدز ايريا (أمانة حتى الإقفال)",
+            "by": actor_name,
+        }]
+        payload = {
+            "childName": child,
+            "fatherName": father,
+            "phone": phone,
+            "age": age,
+            "companionsNote": str(body.get("companionsNote") or "").strip(),
+            "packageGuide": pkg_guide,
+            "packageName": pkg.get("packageName") or "",
+            "packageMinutes": pkg_minutes,
+            "packageTotal": pkg_total,
+            "paidAtBooking": down_payment,
+            "createdBy": actor_name,
+            "payments": payments_init,
         }
-        for it in pkg_items
-    ]
+        res = _kids_db_create_ticket(payload, lines)
+        new_id = str(res.get("ticketId") or "").strip().upper()
 
-    # 4) إنشاء التذكرة في القاعدة
-    now_iso = _kids_db_now_iso()
-    payments_init = [{
-        "id": str(uuid.uuid4()),
-        "kind": "down_payment",
-        "amount": down_payment,
-        "method": "cash",
-        "at": now_iso,
-        "note": "دفعة حجز كيدز ايريا (أمانة حتى الإقفال)",
-        "by": actor_name,
-    }]
-    payload = {
-        "childName": child,
-        "fatherName": father,
-        "phone": phone,
-        "age": age,
-        "companionsNote": str(body.get("companionsNote") or "").strip(),
-        "packageGuide": pkg_guide,
-        "packageName": pkg.get("packageName") or "",
-        "packageMinutes": pkg_minutes,
-        "packageTotal": pkg_total,
-        "paidAtBooking": down_payment,
-        "createdBy": actor_name,
-        "payments": payments_init,
-    }
-    res = _kids_db_create_ticket(payload, lines)
-    new_id = res.get("ticketId")
+        try:
+            _kids_area_upsert_profile(phone, father, child)
+        except Exception:
+            pass
 
-    # 5) ملف الأهالي (إعادة استخدام)
-    try:
-        _kids_area_upsert_profile(phone, father, child)
-    except Exception:
-        pass
-
-    # 6) رد بالتذكرة الكاملة + enrich
-    t = _kids_db_load_ticket(new_id)
-    if t:
-        return _kids_enrich_ticket(t)
-    return {"ticketId": new_id}
+        try:
+            t = _kids_db_load_ticket(new_id)
+            if t:
+                return _kids_enrich_ticket(t)
+        except Exception as load_err:
+            return {
+                "ticketId": new_id,
+                "childName": child,
+                "status": "reserved",
+                "warning": f"تم إنشاء التذكرة لكن تعذر تحميلها مباشرة: {load_err}",
+            }
+        return {"ticketId": new_id, "childName": child, "status": "reserved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر فتح التذكرة: {e}")
 
 
 @app.post("/api/kids/tickets/{ticket_id}/start")
@@ -23259,8 +25197,8 @@ def kids_ticket_exempt_overtime(ticket_id: str, body: dict):
     _terminal_require_user(body.get("mat3amActor"))
     actor = body.get("mat3amActor") or {}
     role = str((actor or {}).get("role") or "").strip().lower()
-    if role not in ("manager", "developer"):
-        raise HTTPException(status_code=403, detail="الإعفاء متاح للمدير فقط")
+    if not _role_has_manager_ops_access(role):
+        raise HTTPException(status_code=403, detail="الإعفاء متاح لمدير التشغيل أو المدير فقط")
 
     t = _kids_db_load_ticket(ticket_id.upper())
     if not t:
@@ -23703,6 +25641,12 @@ def restaurant_create_order(body: dict):
     incoming_items = [_kds_normalize_item(x) for x in (body.get("items") or []) if isinstance(x, dict)]
     session_id = str(body.get("sessionId") or "")
     table_id = str(body.get("tableId") or "")
+    if session_id:
+        session_row = _restaurant_find_session_row(session_id)
+        if isinstance(session_row, dict):
+            _restaurant_sync_session_customer_state(session_row)
+            if session_row.get("guestApprovalPending"):
+                raise HTTPException(status_code=409, detail="بانتظار موافقة المدير لتحويل الجلسة إلى ضيف صالة قبل إرسال أول طلب.")
     # دمج تلقائي: لو في طلب مفتوح لنفس الطاولة/الجلسة نضيف عليه بدل إنشاء تذكرة جديدة
     for ex in reversed(data):
         if not isinstance(ex, dict):
@@ -23720,6 +25664,7 @@ def restaurant_create_order(body: dict):
         _kds_refresh_order_status(ex)
         _restaurant_save("orders", data)
         _mark_session_first_order_delay(session_id or ex.get("sessionId") or "")
+        _restaurant_mark_session_customer_type_locked(session_id or ex.get("sessionId") or "")
         cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
         cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
         return ex
@@ -23748,6 +25693,7 @@ def restaurant_create_order(body: dict):
     data.append(rec)
     _restaurant_save("orders", data)
     _mark_session_first_order_delay(session_id or rec.get("sessionId") or "")
+    _restaurant_mark_session_customer_type_locked(session_id or rec.get("sessionId") or "")
     cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
     cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
     return rec
@@ -24132,6 +26078,17 @@ def restaurant_create_invoice(body: dict):
     order_type = _normalize_restaurant_order_kind(str(body.get("orderType") or "table"))
     if str(order_type) == "table" and session_id:
         _restaurant_assert_order_taker_may_use_session(str(session_id), body if isinstance(body, dict) else {})
+        session_row = _restaurant_find_session_row(str(session_id))
+        if isinstance(session_row, dict):
+            _restaurant_sync_session_customer_state(session_row)
+            if session_row.get("guestApprovalPending"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "الجلسة ضيف مؤقت بانتظار قرار المدير. "
+                        "يمكنك تجهيز السلة فقط الآن، لكن لا يمكن إرسال الطلب أو طلب الحساب قبل اعتماد أو رفض المدير."
+                    ),
+                )
     delivery = body.get("delivery") or {}
     agent_guide = body.get("agentGuide")
     conn = get_connection()
@@ -24253,6 +26210,8 @@ def restaurant_create_invoice(body: dict):
                 },
             )
             _restaurant_save("orders", ord_data)
+            _mark_session_first_order_delay(str(session_id or ""))
+            _restaurant_mark_session_customer_type_locked(str(session_id or ""))
             cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
             cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
             return {
@@ -25097,6 +27056,7 @@ MAT3AM_BOOTSTRAP_DEFAULT_USERS = [
     ("cashier", "1001", "cashier", "كاشير 1"),
     ("accountant", "2001", "accountant", "محاسب 1"),
     ("manager", "3001", "manager", "مدير 1"),
+    ("ops_manager", "3002", "operation_manager", "مدير تشغيل"),
     ("developer", "9001", "developer", "مطوّر"),
     ("host", "123", "host", "جارسون الاستقبال"),
     ("waiter", "123", "waiter", "جارسون الطلبات"),
