@@ -10,6 +10,7 @@ export type OperationalSnapshot = {
   tables?: unknown[];
   sessions?: unknown[];
   orders?: unknown[];
+  waiterTableAssignments?: unknown[];
   workflowSettings?: Record<string, unknown>;
   opsSettings?: Record<string, unknown>;
   users?: unknown[];

@@ -30,6 +30,7 @@ export const WORKFLOW_SETTINGS_DEFAULTS: WorkflowSettings = {
 export const WORKFLOW_ROLE_OPTIONS = [
   { value: "host", label: "جرسون الاستقبال" },
   { value: "manager", label: "مدير المطعم" },
+  { value: "operation_manager", label: "مدير التشغيل" },
   { value: "waiter", label: "جرسون الطلبات" },
   { value: "customer_self", label: "العميل نفسه" },
   { value: "server", label: "جرسون المناولة" },

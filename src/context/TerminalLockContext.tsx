@@ -70,6 +70,11 @@ export type LockReason =
   | "token_expired"
   | "hard_logout";
 
+export type OverlayIntent =
+  | "default"
+  | "shift_finished"
+  | "next_user_login";
+
 type LockState = {
   locked: boolean;
   reason: LockReason | null;
@@ -83,7 +88,7 @@ export type DangerOp = "discount" | "void_line" | "refund" | "minimum_charge_ove
 
 type PinVerifyResponse = {
   ok: true;
-  user: { id: string; login?: string; name?: string; role?: string };
+  user: { id: string; login?: string; name?: string; role?: string; specialistStationCode?: string };
   terminalToken: string;
   ttlSeconds: number;
 };
@@ -92,8 +97,9 @@ type Ctx = {
   settings: TerminalSettings;
   enabled: boolean;
   lockState: LockState;
+  overlayIntent: OverlayIntent;
   /** يرفع overlay يدويّاً (مثلاً زر «قفل الجلسة»). */
-  lockTerminal: (reason?: LockReason) => void;
+  lockTerminal: (reason?: LockReason, intent?: OverlayIntent) => void;
   /** يستدعى من العمليات الروتينية الناجحة:
    *  - في النمط الهجين (slidingRefreshAfterAction=true): يجدّد عداد الخمول بدون قفل.
    *  - في النمط الكلاسيكي: يقفل بعد العملية إذا كان lockAfter<X> مفعّلاً. */
@@ -117,6 +123,14 @@ function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
 
+function browserLocalDateISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function TerminalLockProvider({ children }: { children: ReactNode }) {
   const { user, login, logout } = useAuth();
   const [settings, setSettings] = useState<TerminalSettings>(DEFAULT_SETTINGS);
@@ -126,6 +140,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     failedAttempts: 0,
     lockoutUntilEpoch: null,
   });
+  const [overlayIntent, setOverlayIntent] = useState<OverlayIntent>("default");
 
   const pinExempt = isSharedTerminalPinExempt(user?.role);
   const enabled = !!settings.sharedTerminalEnabled && !pinExempt;
@@ -153,10 +168,12 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     if (!enabled || pinExempt) {
       clearTerminalToken();
       lastTokenIssuedAtRef.current = 0;
+      setOverlayIntent("default");
       setLockState((s) => (s.locked ? { ...s, locked: false, reason: null } : s));
       return;
     }
     if (user?.id) {
+      setOverlayIntent("default");
       setLockState((s) => (s.locked ? s : { ...s, locked: true, reason: "boot" }));
     }
   }, [enabled, pinExempt, user?.id]);
@@ -220,12 +237,34 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     };
   }, [enabled, pingActivity, restartIdleTimer, restartHardLogoutTimer]);
 
-  const lockTerminal = useCallback((reason: LockReason = "manual") => {
+  const lockTerminal = useCallback((reason: LockReason = "manual", intent: OverlayIntent = "default") => {
     if (!enabled) return;
     clearTerminalToken();
     lastTokenIssuedAtRef.current = 0;
+    setOverlayIntent(intent);
     setLockState((s) => ({ ...s, locked: true, reason }));
   }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const onShortcut = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+      const code = String(e.code || "");
+      const key = String(e.key || "");
+      const isZero = key === "0" || code === "Digit0" || code === "Numpad0";
+      const isOne = key === "1" || code === "Digit1" || code === "Numpad1";
+      if (!isZero && !isOne) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (isZero) {
+        lockTerminal("manual", "shift_finished");
+        return;
+      }
+      lockTerminal("manual", "next_user_login");
+    };
+    window.addEventListener("keydown", onShortcut, true);
+    return () => window.removeEventListener("keydown", onShortcut, true);
+  }, [enabled, lockTerminal]);
 
   const triggerLock = useCallback(
     (trigger: SensitiveTrigger) => {
@@ -262,6 +301,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
       name: String(j.user?.name || j.user?.login || ""),
       login: String(j.user?.login || ""),
       role: (String(j.user?.role || user?.role || "waiter").toLowerCase() as RoleId),
+      specialistStationCode: String(j.user?.specialistStationCode || "").trim().toLowerCase(),
     };
     try { login(next); } catch { /* تجاهل */ }
   }, [user?.id, user?.role, login]);
@@ -274,6 +314,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
   }, [maybeSwitchUser]);
 
   const callPinVerify = useCallback(async (pin: string, login_: string | undefined, reason: string) => {
+    const localDate = browserLocalDateISO();
     return safeFetch(`${getApiBase()}/api/terminal/pin-verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -283,6 +324,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
         login: login_ || user?.login || "",
         reason,
         oldUserId: user?.id || "",
+        localDate,
       }),
     });
   }, [user?.id, user?.login]);
@@ -294,6 +336,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
         if (r.ok) {
           const j = (await r.json()) as PinVerifyResponse;
           consumeToken(j);
+          setOverlayIntent("default");
           setLockState({ locked: false, reason: null, failedAttempts: 0, lockoutUntilEpoch: null });
           restartIdleTimer();
           restartHardLogoutTimer();
@@ -365,6 +408,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
       settings,
       enabled,
       lockState,
+      overlayIntent,
       lockTerminal,
       triggerLock,
       refreshSettings,
@@ -373,7 +417,7 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
       stepUp,
       isTokenFresh,
     }),
-    [settings, enabled, lockState, lockTerminal, triggerLock, refreshSettings, pingActivity, unlockWithPin, stepUp, isTokenFresh]
+    [settings, enabled, lockState, overlayIntent, lockTerminal, triggerLock, refreshSettings, pingActivity, unlockWithPin, stepUp, isTokenFresh]
   );
 
   return (
@@ -388,6 +432,7 @@ export function useTerminalLock(): Ctx {
       settings: DEFAULT_SETTINGS,
       enabled: false,
       lockState: { locked: false, reason: null, failedAttempts: 0, lockoutUntilEpoch: null },
+      overlayIntent: "default",
       lockTerminal: () => {},
       triggerLock: () => {},
       refreshSettings: async () => {},

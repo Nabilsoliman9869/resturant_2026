@@ -79,6 +79,18 @@ export function PinOverlay() {
   const reasonText = lock.lockState.reason
     ? REASON_LABEL[lock.lockState.reason] || "قفل الجهاز"
     : "قفل الجهاز";
+  const intentHeadline =
+    lock.overlayIntent === "shift_finished"
+      ? "تم إنهاء الاستخدام الحالي"
+      : lock.overlayIntent === "next_user_login"
+        ? "تم فتح دخول الجرسون التالي"
+        : "نقطة البيع المشتركة — مطلوب PIN";
+  const intentHelp =
+    lock.overlayIntent === "shift_finished"
+      ? "اضغط Ctrl+1 عندما يصل الجرسون التالي، ثم أدخل PIN الخاص به للمتابعة."
+      : lock.overlayIntent === "next_user_login"
+        ? "هذه شاشة دخول الجرسون التالي. أدخل PIN الخاص بالمستخدم الذي سيستلم الجهاز الآن. إذا لم يكن ضمن جدول اليوم فسيُرفض الدخول."
+        : "إذا انتهيت من الجهاز اضغط Ctrl+0، وإذا جاء المستخدم التالي اضغط Ctrl+1 ثم أدخل الـ PIN.";
 
   return (
     <div
@@ -119,7 +131,7 @@ export function PinOverlay() {
           <div style={{ fontSize: 22 }}>🔒</div>
           <div>
             <div id="mat3am-pin-overlay-title" style={{ fontWeight: 800, fontSize: "1.1rem" }}>
-              نقطة البيع المشتركة — مطلوب PIN
+              {intentHeadline}
             </div>
             <div style={{ fontSize: ".85rem", color: "#aabae0" }}>
               {reasonText}
@@ -137,6 +149,9 @@ export function PinOverlay() {
             color: "#cfd9f3",
           }}
         >
+          <div style={{ marginBottom: 6, color: "#dce6ff" }}>
+            {intentHelp}
+          </div>
           {user?.name || user?.login ? (
             <>
               <strong>{user?.name || user?.login}</strong>
@@ -190,6 +205,11 @@ export function PinOverlay() {
             }}
           >
             {err}
+            {err.includes("فريق العمل اليوم") ? (
+              <div style={{ marginTop: 6, color: "#ffe6b3" }}>
+                راجع «جدولة أدوار المستخدمين» وتأكد أيضاً من تخصيص الطاولات إذا كان القفل على كابتن واحد مفعّلاً.
+              </div>
+            ) : null}
           </div>
         ) : null}
         {inLockout ? (
@@ -248,6 +268,9 @@ export function PinOverlay() {
           </button>
         </div>
         <div style={{ marginTop: 12, fontSize: ".75rem", color: "#8696bd", textAlign: "center" }}>
+          <div style={{ marginBottom: 4 }}>
+            اختصارات الجهاز المشترك: <strong>Ctrl+0</strong> إنهاء الاستخدام الحالي، <strong>Ctrl+1</strong> بدء دخول المستخدم التالي
+          </div>
           محاولات فاشلة: {lock.lockState.failedAttempts} / {lock.settings.maxAttemptsBeforeLockout}
         </div>
       </div>

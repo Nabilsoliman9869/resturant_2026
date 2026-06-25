@@ -21,10 +21,17 @@ import GuestReturnRequestModal, { type GuestReturnOrderLine } from "../component
 import { CashierPayInvoiceModal, type CashierInvoiceRow } from "../components/CashierPayInvoiceModal";
 import CaptainBillReviewModal, { type CaptainBillReviewLine } from "../components/CaptainBillReviewModal";
 import { useAuth } from "../auth/AuthContext";
+import { roleHasManagerOpsAccess } from "../auth/roles";
 import { repairArabicDisplayText, sessionDisplayName } from "../auth/displayUser";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
+import {
+  effectiveTableIdsForUser,
+  normalizeTempCaptainTransfers,
+  normalizeWaiterTableAssignments,
+  waiterTableAssignmentRestrictionApplies,
+} from "../lib/waiterTableAssignments";
 import { CaptainGuestDock } from "../components/CaptainGuestDock";
 import ModifierWizard, { type ModifierGroup } from "../components/ModifierWizard";
 import { useAppMenu } from "../context/AppMenuContext";
@@ -71,6 +78,9 @@ type OrderTakerSessionRow = {
   guestCount?: number | string;
   minimumChargePerSeat?: number | string;
   guestSession?: boolean;
+  guestApprovalPending?: boolean;
+  customerType?: string;
+  customerTypeLocked?: boolean;
   captainUserId?: string;
   captainName?: string;
   captainLogin?: string;
@@ -83,6 +93,15 @@ type PatchSessionResponse = {
   ok?: boolean;
   session?: OrderTakerSessionRow;
   detail?: string;
+  approvalRequested?: boolean;
+  message?: string;
+};
+
+type GuestApprovalRequestRow = {
+  id?: string;
+  type?: string;
+  status?: string;
+  sessionId?: string;
 };
 
 type ProductGroup = { CardGuide: string; GroupName: string; image?: string; imageUrl?: string; DisplayCategory?: string };
@@ -462,6 +481,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [msg, setMsg] = useState("");
   const [unauthorizedAccessTable, setUnauthorizedAccessTable] = useState<string>("");
+  const [unauthorizedAccessKind, setUnauthorizedAccessKind] = useState<"" | "captain" | "assignment">("");
   const [loading, setLoading] = useState(false);
   const [dailyMenuState, setDailyMenuState] = useState<DailyMenuState | null>(null);
   const [dailyMenuScheduleEntries, setDailyMenuScheduleEntries] = useState<DailyMenuScheduleEntry[]>([]);
@@ -495,6 +515,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [addonPickerQty, setAddonPickerQty] = useState(1);
   const [billingRequestedAt, setBillingRequestedAt] = useState<string | null>(null);
   const [sessionBillingProfile, setSessionBillingProfile] = useState<SessionBillingProfile | null>(null);
+  const [sessionGuestApprovalPending, setSessionGuestApprovalPending] = useState(false);
+  const [pendingGuestApprovalId, setPendingGuestApprovalId] = useState<string | null>(null);
+  const [sessionCustomerTypeLocked, setSessionCustomerTypeLocked] = useState(false);
+  const [sessionCustomerType, setSessionCustomerType] = useState("cash");
+  const [guestDecisionBusy, setGuestDecisionBusy] = useState(false);
   const [requestBillBusy, setRequestBillBusy] = useState(false);
   const [summonBusy, setSummonBusy] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
@@ -642,6 +667,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     if (isDeliveryEmbedded) return "/app/cashier/dashboard";
     const r = String(user?.role || "").trim().toLowerCase();
     if (r === "manager") return "/app/manager/captain-tables";
+    if (r === "operation_manager") return "/app/operation_manager/captain-tables";
     if (r === "developer") return "/app/developer/captain-tables";
     return "/app/waiter/tables";
   }, [backTo, isDeliveryEmbedded, user?.role]);
@@ -682,6 +708,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     setCaptainGate(cid ? { id: cid, name: cname || "مسند الطلب" } : null);
     const bp = row?.billingProfile;
     setSessionBillingProfile(bp && typeof bp === "object" ? bp : null);
+    setSessionGuestApprovalPending(Boolean(row?.guestApprovalPending));
+    setSessionCustomerTypeLocked(Boolean(row?.customerTypeLocked));
+    setSessionCustomerType(String(row?.customerType || (row?.guestSession ? "guest" : bp ? "vip_owner" : "cash")));
     setBillingRequestedAt(row?.billingRequestedAt ? String(row.billingRequestedAt) : null);
     const guestCount = clampSeatGuestCount(row?.guestCount, 1);
     setSessionGuestCount(guestCount);
@@ -837,6 +866,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           tables?: unknown;
           sessions?: unknown;
           floorPlan?: { plan?: unknown };
+          waiterTableAssignments?: unknown;
+          tempCaptainTransfers?: unknown;
           workflowSettings?: Record<string, unknown>;
           policy?: Record<string, unknown>;
           promotions?: unknown;
@@ -856,6 +887,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const tj = { tables: boot.tables };
       const rsj = { sessions: boot.sessions };
       const wfj = boot.workflowSettings ?? {};
+      const assignmentRows = normalizeWaiterTableAssignments(boot.waiterTableAssignments);
+      const tempTransfers = normalizeTempCaptainTransfers(boot.tempCaptainTransfers);
       const polj = boot.policy ?? {};
       const promoj = { promotions: boot.promotions };
       const aj = { agents: boot.agents };
@@ -884,30 +917,44 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const sessList = sortSessionsByRecencyDesc(sessListRaw);
       activeSessionsRef.current = sessList;
       const uid = user?.id != null ? String(user.id) : "";
-      const mgrDev = user?.role === "manager" || user?.role === "developer";
+      const mgrDev = roleHasManagerOpsAccess(user?.role);
       const allowedTableKeys = new Set<string>();
       for (const s of sessList as { captainUserId?: string; tableId?: string }[]) {
         if (!s || typeof s !== "object") continue;
         if (String(s.captainUserId || "").trim() === uid && uid) allowedTableKeys.add(tableRefKey(s.tableId));
       }
-      const outFiltered = mgrDev ? outList : outList.filter((t: any) => allowedTableKeys.has(tableRefKey(t.id)));
+      const ex = String((wfj as { orderTakerExclusiveTable?: string }).orderTakerExclusiveTable || "").toLowerCase();
+      const exclusiveOn = ex === "on" || ex === "1" || ex === "true" || ex === "yes";
+      const assignmentRestricted = waiterTableAssignmentRestrictionApplies({
+        rows: assignmentRows,
+        tempTransfers,
+        userId: uid,
+        userRole: user?.role,
+        exclusiveOn,
+      });
+      const assignedTableIds = effectiveTableIdsForUser({ assignmentRows, tempTransfers, userId: uid });
+      const outFiltered = mgrDev
+        ? outList
+        : assignmentRestricted
+          ? outList.filter((t: any) => assignedTableIds.has(tableRefKey(t.id)))
+          : outList.filter((t: any) => allowedTableKeys.has(tableRefKey(t.id)));
 
       setSessionByTableRef(buildSessionByTableRef(sessList as unknown[], outList));
       setTablesMoveCatalog(outList);
-      const ex = String((wfj as { orderTakerExclusiveTable?: string }).orderTakerExclusiveTable || "").toLowerCase();
-      setOrderTakerExclusiveTable(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
+      setOrderTakerExclusiveTable(exclusiveOn);
 
       const fromUrl = searchParams.get("tableId");
-      // التحقق: هل الطاولة المطلوبة في الرابط المباشر تخص كابتن آخر؟
       let unauthorizedTableName = "";
+      let unauthorizedKind: "" | "captain" | "assignment" = "";
       if (fromUrl && !mgrDev && !outFiltered.some((x: any) => x.id === fromUrl)) {
-        // الطاولة موجودة في outList لكنها ليست من طاولات الكابتن
         const foreignTable = outList.find((t: any) => t.id === fromUrl);
         if (foreignTable) {
           unauthorizedTableName = String(foreignTable.name || foreignTable.id || "هذه الطاولة");
+          unauthorizedKind = assignmentRestricted ? "assignment" : "captain";
         }
       }
       setUnauthorizedAccessTable(unauthorizedTableName);
+      setUnauthorizedAccessKind(unauthorizedKind);
       setTables(outFiltered);
 
       setSelectedTableId((prev) => {
@@ -915,7 +962,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         // إذا كانت الطاولة المطلوبة من الرابط المباشر ملكاً للكابتن، نختارها
         if (fromUrl && arr.some((x: any) => x.id === fromUrl)) return fromUrl;
         if (prev && arr.some((x: any) => x.id === prev)) return prev;
-        // إذا وصل برابط مباشر لطاولة كابتن آخر → لا نختارها، ننتقي أول طابقته
         return arr.length ? arr[0].id : "";
       });
 
@@ -924,6 +970,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           setMsg(
             "لا توجد طاولات في المخطط — من المطوّر: تهيئة TBL005 + floor_plan.json أو افتح الطاولة من «لوحة الطاولات» أولاً.",
           );
+        } else if (!mgrDev && assignmentRestricted) {
+          setMsg("لا توجد طاولات مخصصة لك في هذه الفترة. راجع المدير أو شاشة توزيع الطاولات.");
         } else if (!mgrDev) {
           setMsg(
             "لا توجد طاولة مسندة لجلسة نشطة لحسابك. افتح «لوحة الطاولات» → ابدأ التسكين على طاولة، ثم ارجع لطلب للطاولة.",
@@ -1270,6 +1318,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         if (!stop) {
           setCaptainGate(null);
           setSessionBillingProfile(null);
+          setSessionGuestApprovalPending(false);
+          setSessionCustomerTypeLocked(false);
+          setSessionCustomerType("cash");
           setBillingRequestedAt(null);
         }
       }
@@ -1284,10 +1335,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const orderTakingLocked = useMemo(() => {
     if (!orderTakerExclusiveTable) return false;
     if (!captainGate?.id) return false;
-    if (user?.role === "manager" || user?.role === "developer") return false;
+    if (roleHasManagerOpsAccess(user?.role)) return false;
     if (!user?.id) return false;
     return String(user.id) !== String(captainGate.id);
   }, [orderTakerExclusiveTable, captainGate, user?.id, user?.role]);
+
+  const customerTypeLocked = sessionCustomerTypeLocked || sessionOrders.length > 0;
+  const canManagerResolveGuest = roleHasManagerOpsAccess(user?.role) && sessionGuestApprovalPending;
 
   /**
    * عند تطبيق Owner/VIP على الجلسة (vip_owner_agent أو vip_owner_template):
@@ -1485,7 +1539,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         timeoutMs: 12000,
       });
       if (!cr.ok) return null;
-      const rec = tryParseJson<{ id?: string }>(await cr.text());
+      const rec = tryParseJson<{ id?: string; approvalRequested?: boolean; message?: string }>(await cr.text());
+      if (rec?.approvalRequested) {
+        setMsg(typeof rec.message === "string" && rec.message.trim() ? rec.message : "تم رفع طلب موافقة للمدير.");
+        return null;
+      }
       return rec?.id ? String(rec.id) : null;
     },
     [base, urlSessionId, user]
@@ -1519,6 +1577,55 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setSessionBusy(false);
     }
   }, [activeSessionId, resolveSessionForTable, selectedTableBlocked, selectedTableId]);
+
+  const requestGuestSessionApproval = useCallback(async () => {
+    if (billingRequestedAt) {
+      setMsg("تم طلب الحساب — لا يمكن تحويل الجلسة إلى ضيف الآن.");
+      return;
+    }
+    if (sessionGuestApprovalPending) {
+      setMsg("هذه الجلسة لديها بالفعل طلب ضيف بانتظار اعتماد المدير.");
+      return;
+    }
+    if (customerTypeLocked) {
+      setMsg("نوع العميل مقفول بعد أول طلب على الجلسة.");
+      return;
+    }
+    const sid = await ensureGuestSession();
+    if (!sid) return;
+    setSessionBusy(true);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/manager-approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "guest_session_request",
+          sessionId: sid,
+          reason: "طلب تحويل الجلسة إلى ضيف صالة من شاشة الطلب",
+          mat3amActor: buildMat3amActor(user),
+        }),
+      });
+      const txt = await r.text();
+      const js = tryParseJson<PatchSessionResponse>(txt) ?? {};
+      if (!r.ok) throw new Error(js.detail || txt || `HTTP ${r.status}`);
+      setSessionGuestApprovalPending(true);
+      setSessionCustomerType("cash");
+      setSelectedAgentGuid("");
+      setMsg(js.message || "تم تسجيل الجلسة كضيف مؤقت وإشعار المدير لاتخاذ القرار.");
+    } catch (e) {
+      setMsg(`تعذر تسجيل الجلسة كضيف مؤقت: ${briefNetworkHint(e)}`);
+    } finally {
+      setSessionBusy(false);
+    }
+  }, [
+    base,
+    billingRequestedAt,
+    customerTypeLocked,
+    ensureGuestSession,
+    sessionGuestApprovalPending,
+    user,
+  ]);
 
   useEffect(() => {
     if (!selectedTableId) {
@@ -1585,6 +1692,25 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }, [activeSessionId, base]);
 
+  const loadPendingGuestApproval = useCallback(async () => {
+    if (!activeSessionId || !sessionGuestApprovalPending) {
+      setPendingGuestApprovalId(null);
+      return;
+    }
+    try {
+      const r = await safeFetch(
+        `${base}/api/restaurant/manager-approvals?status=pending_manager&reqType=guest_session_request`,
+        { timeoutMs: 12000 },
+      );
+      const j = tryParseJson<{ requests?: GuestApprovalRequestRow[] }>(await r.text()) ?? {};
+      const rows = Array.isArray(j.requests) ? j.requests : [];
+      const match = rows.find((row) => String(row?.sessionId || "").trim() === String(activeSessionId).trim());
+      setPendingGuestApprovalId(match?.id ? String(match.id) : null);
+    } catch {
+      setPendingGuestApprovalId(null);
+    }
+  }, [activeSessionId, base, sessionGuestApprovalPending]);
+
   const loadApprovedGuestReturns = useCallback(async () => {
     if (!activeSessionId) {
       setApprovedReturnsMap({});
@@ -1621,6 +1747,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     const id = window.setInterval(() => void loadSessionInvoices(), 12000);
     return () => window.clearInterval(id);
   }, [billingRequestedAt, loadSessionInvoices]);
+
+  useEffect(() => {
+    void loadPendingGuestApproval();
+  }, [loadPendingGuestApproval]);
 
   const filteredProducts = useMemo(() => {
     let list = menuEligibleProducts;
@@ -2309,6 +2439,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg(sessionBusy ? "جاري تجهيز الجلسة…" : "تعذر ربط جلسة نشطة بالطاولة. حدّث الصفحة أو تحقق من الاتصال.");
       return;
     }
+    if (sessionGuestApprovalPending) {
+      setMsg("الجلسة حالياً ضيف مؤقت. يمكنك تجهيز السلة فقط، لكن لا يمكن إرسال الطلب قبل اعتماد أو رفض المدير.");
+      return;
+    }
     setLoading(true);
     try {
       const items = cart.map((l) => {
@@ -2383,6 +2517,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("لا توجد جلسة نشطة.");
       return;
     }
+    if (sessionGuestApprovalPending) {
+      setMsg("الجلسة ضيف مؤقت بانتظار قرار المدير. لا يمكن طلب الحساب قبل اعتماد أو رفض المدير.");
+      return;
+    }
     if (cart.some((line) => Number(line.qty || 0) > 0)) {
       setMsg("يوجد بنود في السلة لم تُرسل للمطبخ بعد.");
       return;
@@ -2395,6 +2533,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }
 
   async function requestBill(opts?: { autoPrint?: boolean }) {
+    if (sessionGuestApprovalPending) {
+      setMsg("الجلسة ضيف مؤقت بانتظار قرار المدير. لا يمكن طلب الحساب قبل اعتماد أو رفض المدير.");
+      return;
+    }
     const autoPrint = Boolean(opts?.autoPrint);
     setRequestBillBusy(true);
     try {
@@ -2496,6 +2638,56 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg(String(e));
     } finally {
       setRequestBillBusy(false);
+    }
+  }
+
+  async function reviewPendingGuestRequest(action: "approve" | "reject") {
+    if (!pendingGuestApprovalId) {
+      setMsg("لم أجد طلب ضيف معلقاً لهذه الجلسة.");
+      return;
+    }
+    let managerNote = "";
+    if (action === "approve") {
+      if (!window.confirm("اعتماد هذه الجلسة كضيف صالة الآن؟")) return;
+    } else {
+      const note = window.prompt("اكتب سبب رفض جلسة الضيف", "");
+      if (note === null) return;
+      if (!String(note).trim()) {
+        setMsg("سبب رفض جلسة الضيف إلزامي.");
+        return;
+      }
+      managerNote = String(note).trim();
+    }
+    setGuestDecisionBusy(true);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/manager-approvals/${encodeURIComponent(pendingGuestApprovalId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          decisionId: action === "approve" ? "approve_guest_session" : undefined,
+          managerNote: managerNote || undefined,
+          reviewedBy: {
+            userId: user?.id != null ? String(user.id) : "",
+            name: sessionDisplayName(user) || "مدير",
+            role: user?.role || "manager",
+          },
+        }),
+        timeoutMs: 15000,
+      });
+      const txt = await r.text();
+      const js = tryParseJson<{ detail?: string }>(txt) ?? {};
+      if (!r.ok) throw new Error(js.detail || txt || `HTTP ${r.status}`);
+      setPendingGuestApprovalId(null);
+      setMsg(action === "approve" ? "تم اعتماد جلسة الضيف." : "تم رفض جلسة الضيف وإعادتها إلى عميل نقدي.");
+      await loadAll();
+      await loadSessionOrders();
+      await loadSessionInvoices();
+    } catch (e) {
+      setMsg(`تعذر حسم جلسة الضيف: ${briefNetworkHint(e)}`);
+    } finally {
+      setGuestDecisionBusy(false);
     }
   }
 
@@ -2936,7 +3128,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               <button type="button" className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--cashier" disabled={summonBusy || !activeSessionId} onClick={() => void summonCashier()}>
                 {summonBusy ? "…" : "استدعاء كاشير"}
               </button>
-              <button type="button" className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--bill" disabled={requestBillBusy || !activeSessionId || billingLocked} onClick={openBillReview}>
+              <button
+                type="button"
+                className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--bill"
+                disabled={requestBillBusy || !activeSessionId || billingLocked || sessionGuestApprovalPending}
+                onClick={openBillReview}
+              >
                 {requestBillBusy ? "…" : "طلب الحساب"}
               </button>
             </div>
@@ -2946,6 +3143,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 value={selectedAgentGuid}
                 onChange={(e) => setSelectedAgentGuid(e.target.value)}
                 aria-label="اسم العميل"
+                disabled={billingLocked || sessionGuestApprovalPending || customerTypeLocked}
                 style={{ width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", textAlign: "right", height: 34 }}
               >
                 {agents.length === 0 ? (
@@ -3022,9 +3220,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             textAlign: "right",
           }}
         >
-          <strong>⚠️ هذه الطاولة ({unauthorizedAccessTable}) تخص كابتن آخر.</strong>
+          <strong>
+            ⚠️ {unauthorizedAccessKind === "assignment"
+              ? `هذه الطاولة (${unauthorizedAccessTable}) ليست ضمن الطاولات المخصصة لك.`
+              : `هذه الطاولة (${unauthorizedAccessTable}) تخص كابتن آخر.`}
+          </strong>
           <br />
-          تم توجيهك لطاولتك المسجلة. لا يمكنك الوصول لهذه الطاولة — تواصل مع الكابتن أو المدير لتحويل الجلسة.
+          {unauthorizedAccessKind === "assignment"
+            ? "تم توجيهك إلى أول طاولة مسموح بها لك في هذه الفترة. راجع المدير إذا احتجت تعديل التوزيع."
+            : "تم توجيهك لطاولتك المسجلة. لا يمكنك الوصول لهذه الطاولة — تواصل مع الكابتن أو المدير لتحويل الجلسة."}
         </div>
       ) : orderTakingLocked && captainGate?.name ? (
         <div
@@ -3233,6 +3437,55 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             {orderTakingLocked ? (
               <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem", fontWeight: 800 }}>
                 🔒 الطلب مقفل — مسند لكابتن آخر
+              </div>
+            ) : null}
+            {sessionGuestApprovalPending ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem", fontWeight: 800 }}>
+                ⏳ الجلسة الآن `ضيف مؤقت` بانتظار قرار المدير. يمكنك تجهيز السلة فقط، لكن لا يمكن إرسال الطلب أو طلب الحساب الآن.
+              </div>
+            ) : null}
+            {customerTypeLocked && !sessionGuestApprovalPending ? (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "#e0f2fe", color: "#075985", fontSize: "0.82rem", fontWeight: 800 }}>
+                🔐 نوع العميل مقفول لهذه الجلسة بعد أول طلب: {sessionCustomerType === "guest" ? "ضيف صالة" : sessionCustomerType === "vip_owner" ? "Owner / VIP" : "عميل نقدي"}
+              </div>
+            ) : null}
+            {canManagerResolveGuest ? (
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void reviewPendingGuestRequest("approve")}
+                  disabled={guestDecisionBusy || !pendingGuestApprovalId}
+                >
+                  {guestDecisionBusy ? "…" : "اعتماد الضيف"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => void reviewPendingGuestRequest("reject")}
+                  disabled={guestDecisionBusy || !pendingGuestApprovalId}
+                  style={{ borderColor: "rgba(220,38,38,0.35)", color: "#991b1b" }}
+                >
+                  {guestDecisionBusy ? "…" : "رفض الضيف"}
+                </button>
+              </div>
+            ) : null}
+            {!sessionGuestApprovalPending && sessionCustomerType !== "guest" ? (
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => void requestGuestSessionApproval()}
+                  disabled={billingLocked || sessionBusy || customerTypeLocked || orderTakingLocked}
+                  style={{
+                    borderColor: "rgba(245,158,11,0.45)",
+                    background: "rgba(245,158,11,0.1)",
+                    color: "#92400e",
+                    fontWeight: 900,
+                  }}
+                >
+                  تعيين ضيف مؤقت
+                </button>
               </div>
             ) : null}
             {sessionKitchenStats.ready > 0 ? (
@@ -3683,10 +3936,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       <button
                         type="button"
                         className="waiter-pos__btn waiter-pos__cart-submit"
-                        disabled={loading || billingLocked || cart.length === 0}
+                        disabled={loading || billingLocked || sessionGuestApprovalPending || cart.length === 0}
                         onClick={() => void submitSale()}
                       >
-                        {loading ? "جاري الإرسال…" : "إرسال الطلب"}
+                        {loading ? "جاري الإرسال…" : sessionGuestApprovalPending ? "بانتظار قرار المدير" : "إرسال الطلب"}
                       </button>
                     </div>
                   </div>
@@ -4352,7 +4605,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     <button
                       type="button"
                       className={`waiter-pos__mb-sendbar__btn${cart.length === 0 ? " waiter-pos__mb-sendbar__btn--blocked" : ""}`}
-                      disabled={loading || billingLocked || cart.length === 0}
+                      disabled={loading || billingLocked || sessionGuestApprovalPending || cart.length === 0}
                       onClick={() => void submitSale()}
                     >
                       {loading ? "جاري الإرسال…" : "إرسال الطلب"}

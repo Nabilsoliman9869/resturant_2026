@@ -114,6 +114,7 @@ export default function WorkflowRolesSettingsPage() {
             <option value="server">جرسون مناولة</option>
             <option value="waiter">نفس جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
+            <option value="operation_manager">مدير التشغيل</option>
             <option value="host">جرسون الاستقبال</option>
             <option value="kitchen_window">استلام مباشر من نافذة الشيف</option>
           </select>
@@ -125,6 +126,7 @@ export default function WorkflowRolesSettingsPage() {
             <option value="server">جرسون مناولة</option>
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
+            <option value="operation_manager">مدير التشغيل</option>
             <option value="cleaner">عامل النظافة</option>
           </select>
         </div>
@@ -134,6 +136,7 @@ export default function WorkflowRolesSettingsPage() {
           <select value={s.checkRequestBy} onChange={(e) => setS((x) => ({ ...x, checkRequestBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
+            <option value="operation_manager">مدير التشغيل</option>
             <option value="cashier">الكاشير</option>
             <option value="server">جرسون المناولة</option>
           </select>
@@ -164,6 +167,7 @@ export default function WorkflowRolesSettingsPage() {
             <option value="server">جرسون المناولة</option>
             <option value="waiter">جرسون الطلبات</option>
             <option value="manager">مدير المطعم</option>
+            <option value="operation_manager">مدير التشغيل</option>
             <option value="cleaner">عامل النظافة</option>
           </select>
         </div>
@@ -173,6 +177,7 @@ export default function WorkflowRolesSettingsPage() {
           <select value={s.cleaningReviewBy} onChange={(e) => setS((x) => ({ ...x, cleaningReviewBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="none">بدون مراجعة</option>
             <option value="manager">المدير</option>
+            <option value="operation_manager">مدير التشغيل</option>
             <option value="waiter">جرسون الطلبات</option>
             <option value="cleaner">عامل النظافة</option>
           </select>

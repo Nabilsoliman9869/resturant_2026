@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../auth/AuthContext";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
+import { buildMat3amActor } from "../lib/mat3amActor";
 import { getApiBase } from "../lib/apiBase";
 import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { mapTablesToFloorPlanLabels } from "../lib/restaurantTableView";
@@ -42,6 +44,7 @@ function statusLabel(st: TableStatus) {
 
 export default function ReceptionPage() {
   const base = getApiBase();
+  const { user } = useAuth();
   const [tables, setTables] = useState<TableRow[]>([]);
   const [msg, setMsg] = useState("");
   const [modal, setModal] = useState<TableRow | null>(null);
@@ -119,6 +122,7 @@ export default function ReceptionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tableId: modal.id,
+          mat3amActor: buildMat3amActor(user),
           guestCount: Math.max(1, guestCount),
           childrenCount: Math.max(0, childrenCount),
           preferences: {
@@ -132,12 +136,22 @@ export default function ReceptionPage() {
       if (!seatR.ok) {
         let detail = seatText || `HTTP ${seatR.status}`;
         try {
-          const parsed = JSON.parse(seatText) as { detail?: unknown };
+          const parsed = JSON.parse(seatText) as { detail?: unknown; approvalRequested?: boolean; message?: string };
+          if (parsed?.approvalRequested && typeof parsed?.message === "string" && parsed.message.trim()) detail = parsed.message;
           if (typeof parsed?.detail === "string" && parsed.detail.trim()) detail = parsed.detail;
         } catch {}
         setMsg(detail);
         return;
       }
+      try {
+        const parsed = JSON.parse(seatText) as { approvalRequested?: boolean; message?: string };
+        if (parsed?.approvalRequested) {
+          setMsg(typeof parsed.message === "string" && parsed.message.trim() ? parsed.message : "تم رفع طلب موافقة للمدير.");
+          setModal(null);
+          await load();
+          return;
+        }
+      } catch {}
       await fetch(`${base}/api/restaurant/tables/${encodeURIComponent(modal.id)}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

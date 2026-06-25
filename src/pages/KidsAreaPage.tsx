@@ -434,6 +434,19 @@ export default function KidsAreaPage() {
   const stepDone2 = stepDone1 && !!childName.trim() && !!phone.trim();
   const canSubmit = stepDone2 && !busy;
 
+  const readApiError = async (r: Response) => {
+    try {
+      const j = (await r.json()) as { detail?: string; message?: string; warning?: string };
+      return j?.detail || j?.message || j?.warning || "";
+    } catch {
+      try {
+        return (await r.text()) || "";
+      } catch {
+        return "";
+      }
+    }
+  };
+
   const submitNewTicket = async () => {
     if (!pickedPkg) return showMsg("err", "اختر باقة أولاً");
     if (!childName.trim() || !phone.trim()) return showMsg("err", "اسم الطفل ورقم هاتف الوالد مطلوبان");
@@ -454,16 +467,17 @@ export default function KidsAreaPage() {
         }),
       });
       if (!r.ok) {
-        const t = await r.text();
-        showMsg("err", `تعذّر فتح التذكرة: ${t || r.status}`);
+        const t = await readApiError(r);
+        showMsg("err", `تعذّر فتح التذكرة: ${t || r.status || "خطأ غير معروف"}`);
         return;
       }
-      const tk = (await r.json()) as KTicket;
-      showMsg("ok", `حُجزت تذكرة للطفل ${tk.childName} — اضغط «بدء الجلسة» عند دخوله`);
+      const tk = (await r.json()) as KTicket & { ticketId?: string; warning?: string };
+      const createdName = String(tk.childName || childName.trim() || "");
+      showMsg("ok", tk.warning || `حُجزت تذكرة للطفل ${createdName} — اضغط «بدء الجلسة» عند دخوله`);
       resetNewForm();
       setShowNew(false);
       await loadTickets();
-      setOpenTicketId(tk.id);
+      setOpenTicketId(String(tk.id || tk.ticketId || ""));
     } catch (e) {
       showMsg("err", `خطأ: ${String((e as Error)?.message || e)}`);
     } finally {

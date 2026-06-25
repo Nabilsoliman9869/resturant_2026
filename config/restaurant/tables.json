@@ -126,7 +126,9 @@
       "smokingArea": false,
       "vipSection": true,
       "zone": "VIP"
-    }
+    },
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-25T00:48:52.499666"
   },
   {
     "id": "f47ac10b-58cc-4372-a567-0e02b2c3d402",
@@ -145,7 +147,9 @@
       "smokingArea": false,
       "vipSection": true,
       "zone": "VIP"
-    }
+    },
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-25T00:48:53.849876"
   },
   {
     "id": "f47ac10b-58cc-4372-a567-0e02b2c3d403",
@@ -164,7 +168,9 @@
       "smokingArea": false,
       "vipSection": true,
       "zone": "VIP"
-    }
+    },
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-25T00:48:55.358767"
   },
   {
     "id": "f47ac10b-58cc-4372-a567-0e02b2c3d404",
@@ -183,7 +189,9 @@
       "smokingArea": false,
       "vipSection": true,
       "zone": "VIP"
-    }
+    },
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-25T00:48:56.948625"
   },
   {
     "id": "f47ac10b-58cc-4372-a567-0e02b2c3d405",

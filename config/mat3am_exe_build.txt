@@ -1,1 +1,3 @@
-2026-06-20T09:14:53Z code=M260620-0914-61C87F7 git=61c87f7
+v037-customer-type-workflow
+Built: 2026-06-25T00:33:09.843Z
+Features: Customer Type (cash/guest/owner/vip) + Manager Approval Workflow

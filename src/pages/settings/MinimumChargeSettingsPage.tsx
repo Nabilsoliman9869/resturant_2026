@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
+import { roleHasManagerOpsAccess } from "../../auth/roles";
 import { getApiBase } from "../../lib/apiBase";
 import SettingRow from "../../components/SettingRow";
 
 export default function MinimumChargeSettingsPage() {
   const base = getApiBase();
   const { user } = useAuth();
-  const canEdit = user?.role === "manager" || user?.role === "developer";
+  const canEdit = roleHasManagerOpsAccess(user?.role);
   const [value, setValue] = useState("0");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -69,7 +70,7 @@ export default function MinimumChargeSettingsPage() {
           style={{ width: "100%" }}
         />
         {!canEdit ? (
-          <div style={{ marginTop: 8, fontSize: "0.84rem", color: "#b45309" }}>التعديل متاح للمدير فقط.</div>
+          <div style={{ marginTop: 8, fontSize: "0.84rem", color: "#b45309" }}>التعديل متاح لمدير التشغيل أو المدير أو المطوّر فقط.</div>
         ) : null}
       </SettingRow>
       <div style={{ marginTop: 10, display: "flex", gap: 8 }}>

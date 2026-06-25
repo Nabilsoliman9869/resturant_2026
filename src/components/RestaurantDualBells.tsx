@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
+import { roleHasManagerOpsAccess } from "../auth/roles";
 import { playInterDeptInboxBeep } from "../lib/kdsBeep";
 import type { RoleId } from "../auth/roles";
+import { useTerminalLock } from "../context/TerminalLockContext";
 
 type Mat3amActorPayload = { id: string; login: string; name: string; role: string };
 
@@ -17,6 +19,7 @@ type InboxItem = {
   title?: string;
   body?: string | null;
   createdAt?: string;
+  managerApprovalRequestId?: string;
   transferRequestId?: string;
   sessionId?: string;
   tableId?: string;
@@ -27,6 +30,7 @@ type InboxItem = {
   allowResetReady?: boolean;
   snoozeCount?: number;
   maxSnoozes?: number;
+  requesterTerminalAction?: string;
 };
 
 /** أدوار يمكن إرسال تنبيه عام إليها (معرّف API = RoleId) */
@@ -85,6 +89,7 @@ function RedInboxBell({
   mat3amActor?: Mat3amActorPayload | null;
 }) {
   const base = getApiBase();
+  const terminalLock = useTerminalLock();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -95,6 +100,7 @@ function RedInboxBell({
   const inboxBases = ["/api/restaurant/cashier/role-inbox", "/api/restaurant/role-inbox"];
   const seenIdsRef = useRef<Set<string>>(new Set());
   const skipBeepRef = useRef(true);
+  const processedTerminalActionIdsRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +119,7 @@ function RedInboxBell({
         const j = tryParseJson<{ items?: InboxItem[] }>(txt) ?? {};
         if (r.ok) {
           const next = Array.isArray(j.items) ? j.items : [];
+          const hasPendingManagerApproval = next.some((it) => it?.type === "manager_approval_request");
           if (skipBeepRef.current) {
             skipBeepRef.current = false;
             for (const it of next) {
@@ -128,7 +135,9 @@ function RedInboxBell({
                 hasNew = true;
               }
             }
-            if (hasNew) playInterDeptInboxBeep();
+            const repeatManagerBeep =
+              !open && roleHasManagerOpsAccess(role) && hasPendingManagerApproval;
+            if (hasNew || repeatManagerBeep) playInterDeptInboxBeep();
           }
           setItems(next);
           return;
@@ -167,6 +176,19 @@ function RedInboxBell({
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
+
+  useEffect(() => {
+    if (!terminalLock.enabled) return;
+    for (const item of items) {
+      const id = String(item?.id || "").trim();
+      if (!id || processedTerminalActionIdsRef.current.has(id)) continue;
+      const action = String(item?.requesterTerminalAction || "").trim().toLowerCase();
+      if (action !== "lock_shift_finished") continue;
+      processedTerminalActionIdsRef.current.add(id);
+      terminalLock.lockTerminal("manual", "shift_finished");
+      break;
+    }
+  }, [items, terminalLock]);
 
   const acceptCaptainTransfer = async (transferRequestId: string) => {
     setTransferMsg("");
@@ -241,10 +263,15 @@ function RedInboxBell({
         }),
       });
       const txt = await r.text();
-      const j = tryParseJson<{ detail?: unknown }>(txt);
+      const j = tryParseJson<{ detail?: unknown; approvalRequested?: boolean; message?: string }>(txt);
       if (!r.ok) {
         const d = j?.detail;
         setTransferMsg(typeof d === "string" ? d : txt.slice(0, 160) || `HTTP ${r.status}`);
+        return;
+      }
+      if (j?.approvalRequested) {
+        setTransferMsg(typeof j.message === "string" && j.message.trim() ? j.message : "تم رفع طلب موافقة للمدير.");
+        await load();
         return;
       }
       setTransferMsg(
@@ -407,6 +434,20 @@ function RedInboxBell({
                           }}
                         >
                           {busyTransferId === it.transferRequestId ? "جاري القبول…" : "قبول التحويل"}
+                        </button>
+                      ) : null}
+                      {it.type === "manager_approval_request" && it.managerApprovalRequestId ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ marginTop: 8, width: "100%", fontWeight: 800 }}
+                          onClick={(ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            window.location.assign(`/app/${role}/manager-approvals`);
+                          }}
+                        >
+                          فتح صفحة الموافقات
                         </button>
                       ) : null}
                       {it.sessionId && (it.type === "no_order_session_watch" || it.type === "no_order_session_escalation" || it.type === "no_order_session_final") ? (

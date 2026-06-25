@@ -16351,8 +16351,11 @@ def _manager_approval_enqueue_inbox(req: dict) -> None:
             f" · البدائل المتاحة: {int(handover_summary.get('candidateCount') or 0)}"
         )
     elif req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION:
-        title_text = "طلب موافقة مدير: تحويل الجلسة إلى ضيف صالة"
-        body_text = f"{table_label} · تحويل نوع العميل إلى ضيف صالة قبل إرسال أول طلب"
+        requested_type = str(req.get("requestedCustomerType") or "guest")
+        type_labels = {"guest": "ضيف صالة", "owner": "مالك", "vip": "شخص مهم"}
+        label = type_labels.get(requested_type, requested_type)
+        title_text = f"طلب موافقة مدير: تحويل الجلسة إلى {label}"
+        body_text = f"{table_label} · تحويل نوع العميل إلى {label} قبل إرسال أول طلب"
     else:
         title_text = "طلب موافقة مدير: إلغاء تسكين بعد المطبخ"
         body_text = (
@@ -16641,7 +16644,7 @@ def _manager_approval_create_captain_handover_request(session_row: dict, actor: 
     return req
 
 
-def _manager_approval_create_guest_session_request(session_row: dict, actor: dict, reason: str = "") -> dict:
+def _manager_approval_create_guest_session_request(session_row: dict, actor: dict, reason: str = "", requested_customer_type: str = "guest") -> dict:
     if not isinstance(session_row, dict):
         raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
     session_id = str(session_row.get("id") or "").strip()
@@ -16664,6 +16667,8 @@ def _manager_approval_create_guest_session_request(session_row: dict, actor: dic
         return {**existing, "deduped": True}
     now_iso = datetime.now().isoformat()
     table_label = _session_table_display_fallback(table_id)
+    type_labels = {"guest": "ضيف صالة", "owner": "مالك", "vip": "شخص مهم"}
+    label = type_labels.get(requested_customer_type, requested_customer_type)
     req = {
         "id": str(uuid.uuid4()),
         "type": _MANAGER_APPROVAL_TYPE_GUEST_SESSION,
@@ -16678,6 +16683,7 @@ def _manager_approval_create_guest_session_request(session_row: dict, actor: dic
             "role": str(actor.get("role") or "")[:32],
         },
         "reason": str(reason or "")[:500],
+        "requestedCustomerType": requested_customer_type,
         "openOrdersSummary": _manager_approval_open_orders_summary(table_id),
         "decisionOptions": _manager_approval_guest_session_decisions(),
         "decisionFlags": _manager_approval_guest_session_flags(),
@@ -17103,6 +17109,7 @@ def _manager_approval_reject_guest_session(req: dict) -> dict:
         session_row["guestSession"] = False
         session_row["guestApprovalPending"] = False
         session_row["guestRejectedAt"] = datetime.now().isoformat()
+        session_row["customerType"] = "cash"
         session_row.pop("guestApprovedAt", None)
         session_row.pop("billingProfile", None)
         _restaurant_sync_session_customer_state(session_row)
@@ -17113,9 +17120,9 @@ def _manager_approval_reject_guest_session(req: dict) -> dict:
         "sessionId": session_id,
         "tableId": str(req.get("tableId") or ""),
         "decisionId": "reject_guest_session",
-        "decisionLabel": "رفض تحويل الجلسة إلى ضيف صالة",
+        "decisionLabel": "رفض تحويل الجلسة",
         "customerType": str((session_row or {}).get("customerType") or "cash"),
-        "policyHint": "رُفضت جلسة الضيف وعادت الجلسة إلى عميل نقدي.",
+        "policyHint": "رُفض تحويل الجلسة وعادت إلى عميل نقدي.",
     }
 
 
@@ -17136,7 +17143,12 @@ def _manager_approval_execute_guest_session(req: dict, decision_id: str, reviewe
     _restaurant_sync_session_customer_state(session_row)
     if session_row.get("customerTypeLocked") or _restaurant_session_has_any_orders(session_id):
         raise HTTPException(status_code=409, detail="لا يمكن اعتماد جلسة ضيف بعد إرسال أول طلب.")
-    session_row["guestSession"] = True
+    requested_type = str(req.get("requestedCustomerType") or "guest")
+    type_labels = {"guest": "ضيف صالة", "owner": "مالك", "vip": "شخص مهم"}
+    label = type_labels.get(requested_type, requested_type)
+    session_row["customerType"] = requested_type
+    if requested_type == "guest":
+        session_row["guestSession"] = True
     session_row["guestApprovalPending"] = False
     session_row["guestApprovedAt"] = datetime.now().isoformat()
     session_row.pop("billingProfile", None)
@@ -17144,7 +17156,7 @@ def _manager_approval_execute_guest_session(req: dict, decision_id: str, reviewe
     _restaurant_save("table_sessions", data)
     cache_invalidate_restaurant()
     if bool(flags_map.get("notifyRequester", True)):
-        _manager_approval_notify_requester(req, "اعتماد جلسة ضيف", manager_note)
+        _manager_approval_notify_requester(req, f"اعتماد جلسة {label}", manager_note)
     if bool(flags_map.get("recordManagerNote", True)):
         _append_session_audit_entry(
             {
@@ -17155,7 +17167,7 @@ def _manager_approval_execute_guest_session(req: dict, decision_id: str, reviewe
                 "sessionId": session_id,
                 "tableId": str(req.get("tableId") or ""),
                 "decisionId": "approve_guest_session",
-                "decisionLabel": "اعتماد تحويل الجلسة إلى ضيف صالة",
+                "decisionLabel": f"اعتماد تحويل الجلسة إلى {label}",
                 "managerNote": manager_note,
                 "reviewedByUserId": str(reviewer.get("userId") or ""),
                 "reviewedByName": str(reviewer.get("name") or ""),
@@ -17167,9 +17179,9 @@ def _manager_approval_execute_guest_session(req: dict, decision_id: str, reviewe
         "sessionId": session_id,
         "tableId": str(req.get("tableId") or ""),
         "decisionId": "approve_guest_session",
-        "decisionLabel": "اعتماد تحويل الجلسة إلى ضيف صالة",
-        "customerType": str(session_row.get("customerType") or "guest"),
-        "policyHint": "أصبحت الجلسة الآن ضيف صالة، ولا يمكن تطبيق Owner/VIP عليها.",
+        "decisionLabel": f"اعتماد تحويل الجلسة إلى {label}",
+        "customerType": str(session_row.get("customerType") or requested_type),
+        "policyHint": f"أصبحت الجلسة الآن {label}.",
     }
 
 
@@ -17281,14 +17293,18 @@ def _restaurant_sync_session_customer_state(session_row: dict) -> dict:
         return session_row
     sid = str(session_row.get("id") or "").strip()
     billing_profile = session_row.get("billingProfile") if isinstance(session_row.get("billingProfile"), dict) else None
-    billing_active = isinstance(billing_profile, dict) and billing_profile.get("active") is not False
-    guest_session = session_row.get("guestSession") is True
-    if guest_session:
-        customer_type = "guest"
-    elif billing_active:
-        customer_type = "vip_owner"
+    explicit_customer_type = str(session_row.get("customerType") or "").strip().lower()
+    if explicit_customer_type in ("guest", "owner", "vip"):
+        customer_type = explicit_customer_type
     else:
-        customer_type = "cash"
+        guest_session = session_row.get("guestSession") is True
+        billing_active = bool(billing_profile and billing_profile.get("active"))
+        if guest_session:
+            customer_type = "guest"
+        elif billing_active:
+            customer_type = "vip_owner"
+        else:
+            customer_type = "cash"
     session_row["customerType"] = customer_type
     has_orders = _restaurant_session_has_any_orders(sid) if sid else False
     locked = bool(session_row.get("customerTypeLocked")) or has_orders
@@ -17825,7 +17841,8 @@ def restaurant_manager_approvals_post(body: dict):
         session_row = _restaurant_find_session_row(session_id)
         if not isinstance(session_row, dict):
             raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
-        req = _manager_approval_create_guest_session_request(session_row, requester, str(body.get("reason") or ""))
+        customer_type = str(body.get("customerType") or "guest").strip().lower()
+        req = _manager_approval_create_guest_session_request(session_row, requester, str(body.get("reason") or ""), requested_customer_type=customer_type)
     elif req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS:
         table_id = str(body.get("tableId") or "").strip()
         if not table_id:
@@ -20119,11 +20136,14 @@ def restaurant_create_session(body: dict):
             if start_reason:
                 s["startReason"] = start_reason
             _restaurant_sync_session_customer_state(s)
-            if body.get("guestSession") is True and not s.get("guestSession"):
+            customer_type = str(body.get("customerType") or "cash").strip().lower()
+            if customer_type not in ("", "cash") and not s.get("guestSession"):
+                s["customerType"] = customer_type
                 req = _manager_approval_create_guest_session_request(
                     s,
                     actor,
-                    str(body.get("reason") or body.get("startReason") or "طلب تحويل الجلسة إلى ضيف صالة"),
+                    str(body.get("reason") or body.get("startReason") or f"طلب تحويل الجلسة إلى {customer_type}"),
+                    requested_customer_type=customer_type,
                 )
                 _restaurant_save("table_sessions", data)
                 cache_invalidate_restaurant()
@@ -20132,7 +20152,7 @@ def restaurant_create_session(body: dict):
                     "session": s,
                     "action": "approval_requested",
                     "approvalRequested": True,
-                    "message": "تم فتح الجلسة ورفع طلب موافقة للمدير لتحويلها إلى ضيف صالة.",
+                    "message": f"تم فتح الجلسة ورفع طلب موافقة للمدير لتحويلها إلى {customer_type}.",
                     "request": req,
                 }
             cache_invalidate_restaurant()
@@ -20198,11 +20218,14 @@ def restaurant_create_session(body: dict):
         "takeOrderBy": _workflow_role_for("take_order"),
         "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
     }
-    if body.get("guestSession") is True:
+    customer_type = str(body.get("customerType") or "cash").strip().lower()
+    if customer_type not in ("", "cash"):
+        rec["customerType"] = customer_type
         req = _manager_approval_create_guest_session_request(
             rec,
             actor,
-            str(body.get("reason") or body.get("startReason") or "طلب تحويل الجلسة إلى ضيف صالة"),
+            str(body.get("reason") or body.get("startReason") or f"طلب تحويل الجلسة إلى {customer_type}"),
+            requested_customer_type=customer_type,
         )
         cache_invalidate_restaurant()
         return {
@@ -20210,7 +20233,7 @@ def restaurant_create_session(body: dict):
             "session": rec,
             "action": "approval_requested",
             "approvalRequested": True,
-            "message": "تم فتح الجلسة ورفع طلب موافقة للمدير لتحويلها إلى ضيف صالة.",
+            "message": f"تم فتح الجلسة ورفع طلب موافقة للمدير لتحويلها إلى {customer_type}.",
             "request": req,
         }
     cache_invalidate_restaurant()

@@ -154,6 +154,21 @@ export default function SharedTerminalSettingsPage() {
           marginBottom: 14,
           padding: "0.75rem 1rem",
           borderRadius: 8,
+          background: "rgba(16,185,129,0.09)",
+          border: "1px solid rgba(16,185,129,0.28)",
+          fontSize: ".88rem",
+          color: "var(--text)",
+        }}
+      >
+        <strong>اختصارات التسليم بين الجرسونات:</strong> <code>Ctrl+0</code> تعني أن المستخدم الحالي انتهى من الجهاز،
+        وبعدها يضغط الجرسون التالي <code>Ctrl+1</code> لبدء دخول الـ PIN واستلام الشاشة. إذا كان تفعيل
+        <strong> إلزام جدولة الوردية</strong> مفعلاً، فلن يُقبل PIN لمستخدم غير موجود في جدول اليوم.
+      </div>
+      <div
+        style={{
+          marginBottom: 14,
+          padding: "0.75rem 1rem",
+          borderRadius: 8,
           background: "rgba(80,160,255,0.08)",
           border: "1px solid rgba(80,160,255,0.35)",
           fontSize: ".88rem",

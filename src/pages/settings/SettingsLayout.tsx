@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import type { RoleId } from "../../auth/roles";
+import { roleHasSystemSettingsAccess, type RoleId } from "../../auth/roles";
 
 type SettingsNavItem = { to: string; label: string; absolute?: boolean; hint?: string };
 type SettingsNavSection = { title: string; items: SettingsNavItem[] };
@@ -11,7 +11,7 @@ function roleFromPath(pathname: string): RoleId | null {
 
 function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
   const roleBase = role ? `/app/${role}` : "/app/manager";
-  const sections: SettingsNavSection[] = [
+  const fullSections: SettingsNavSection[] = [
     {
       title: "1. النظام والتعريفات",
       items: [
@@ -64,6 +64,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
       items: [
         { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "دورة العمل، التنظيف، مسارات الأدوار، VIP، تدقيق" },
         { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "دوام كل موظف حسب دوره في النظام" },
+        { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "تحديد الطاولات التي يراها كل كابتن خلال فترة زمنية" },
         { to: "users", label: "مستخدمو التطبيق", hint: "إنشاء وإدارة حسابات الدخول للموظفين" },
         { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "إعدادات الطابعات والأجهزة المشتركة" },
       ],
@@ -89,8 +90,48 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
     },
   ];
 
-  if (role === "manager" || role === "developer") {
-    sections.push({
+  if (role === "operation_manager") {
+    return [
+      {
+        title: "1. الصالة والمتابعة اليومية",
+        items: [
+          { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "السياسات اليومية للتسكين والتنبيهات ومسار الخدمة" },
+          { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "تحديد من يعمل اليوم وعلى أي دور" },
+          { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "تخصيص الطاولات للجرسونات حسب الفترة" },
+          { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "إعدادات الجهاز المشترك والـ PIN والتبديل" },
+        ],
+      },
+      {
+        title: "2. المطبخ والتجهيز الفوري",
+        items: [
+          { to: "pos-kds", label: "شاشة المطبخ (KDS)", hint: "تفعيل وعرض الطلبات على شاشة المطبخ" },
+          { to: "pos-prep-times", label: "زمن التحضير لكل صنف", hint: "تحديد أزمنة التحضير المستخدمة يومياً" },
+          { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ", hint: "إيقاف الأصناف غير المتاحة أثناء التشغيل" },
+        ],
+      },
+      {
+        title: "3. السياسات الساخنة",
+        items: [
+          { to: "minimum-charge", label: "الحد الأدنى للطاولة", hint: "حد أدنى تشغيلي يمكن متابعته يومياً" },
+        ],
+      },
+      {
+        title: "4. المراكز والتقارير",
+        items: [
+          { to: `${roleBase}/manager-approvals`, label: "موافقات المدير", absolute: true },
+          { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true },
+          { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true },
+          { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true },
+          { to: `${roleBase}/reports`, label: "تقارير", absolute: true },
+          { to: `${roleBase}/flash-report`, label: "تقرير سريع", absolute: true },
+          { to: `${roleBase}/table-sessions-report`, label: "تقرير جلسات الطاولات", absolute: true },
+        ],
+      },
+    ];
+  }
+
+  if (roleHasSystemSettingsAccess(role)) {
+    fullSections.push({
       title: "9. المراكز الإدارية المرتبطة",
       items: [
         { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true },
@@ -106,7 +147,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
 
   // pos-admin-legacy removed — all features (venue, KDS, tax, promos) now in dedicated pages
 
-  return sections;
+  return fullSections;
 }
 
 export default function SettingsLayout() {
@@ -114,7 +155,7 @@ export default function SettingsLayout() {
   const role = roleFromPath(loc.pathname);
   const base = role ? `/app/${role}/settings` : "/app/manager/settings";
   const sections = buildSettingsSections(role);
-  const asideTitle = "مركز الإعدادات والإدارة";
+  const asideTitle = role === "operation_manager" ? "إعدادات مدير التشغيل" : "مركز الإعدادات والإدارة";
 
   return (
     <div style={{ display: "flex", gap: "1.25rem", alignItems: "stretch", minHeight: "70vh" }}>
@@ -143,7 +184,9 @@ export default function SettingsLayout() {
           {asideTitle}
         </div>
         <div style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.6 }}>
-          ترتيب مرقّم للتدريب والتشغيل، مع ضم الشاشات الإدارية المرتبطة داخل مرجع واحد.
+          {role === "operation_manager"
+            ? "إعدادات يومية سريعة فقط، بدون صفحات التأسيس أو تعريفات النظام أو إدارة المستخدمين."
+            : "ترتيب مرقّم للتدريب والتشغيل، مع ضم الشاشات الإدارية المرتبطة داخل مرجع واحد."}
         </div>
         {sections.map((sec) => (
           <div key={sec.title}>

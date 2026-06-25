@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
+import { roleHasManagerOpsAccess } from "../auth/roles";
 import FloorPlanLive from "../components/FloorPlanLive";
 import { CashierTableStripBoard } from "../components/CashierTableStripBoard";
 import { getApiBase } from "../lib/apiBase";
@@ -14,7 +15,7 @@ type Stats = {
 export default function DashboardPage() {
   const { user } = useAuth();
   const role = user?.role;
-  const shouldShowLiveFloor = role === "cashier" || role === "waiter" || role === "server" || role === "host" || role === "manager" || role === "developer";
+  const shouldShowLiveFloor = role === "cashier" || role === "waiter" || role === "server" || role === "host" || roleHasManagerOpsAccess(role);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);

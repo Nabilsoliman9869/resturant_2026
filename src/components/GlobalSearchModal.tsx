@@ -43,17 +43,18 @@ const ALL_ITEMS: SearchResult[] = [
   { title: "محرك التكلفة", path: "daily-cost-engine", subtitle: "التدقيق والتكاليف", keywords: "cost engine محرك" },
   { title: "النتيجة اليومية", path: "daily-result", subtitle: "التدقيق والتكاليف", keywords: "daily result profit loss" },
   // صفحات تشغيلية
-  { title: "داشبورد", path: "/app/manager", subtitle: "الرئيسية", keywords: "dashboard home رئيسية" },
-  { title: "شريحات الطاولات", path: "table-slides", subtitle: "الصالة", keywords: "tables طاولات شرائح" },
-  { title: "طلب للطاولة", path: "order", subtitle: "الصالة", keywords: "order طلب" },
-  { title: "مرتجعات الضيوف", path: "/app/manager/guest-returns", subtitle: "مراكز إدارية", keywords: "guest returns مرتجعات" },
-  { title: "Call Center (دليفري)", path: "/app/manager/call-center", subtitle: "مراكز إدارية", keywords: "delivery call center دليفري" },
-  { title: "إدارة الدليفري", path: "/app/manager/delivery-management", subtitle: "مراكز إدارية", keywords: "delivery إدارة" },
-  { title: "نقطة البيع", path: "/app/manager/pos", subtitle: "مراكز إدارية", keywords: "pos point of sale" },
-  { title: "المشتريات", path: "/app/manager/purchases", subtitle: "مراكز إدارية", keywords: "purchases مشتريات" },
-  { title: "صرف مصروفات", path: "/app/manager/cash-expense", subtitle: "مراكز إدارية", keywords: "expense cash صرف" },
-  { title: "تقارير الحسابات", path: "/app/manager/reports", subtitle: "مراكز إدارية", keywords: "reports تقارير" },
-  { title: "التدفق النقدي", path: "/app/manager/cashflow", subtitle: "مراكز إدارية", keywords: "cashflow نقدي" },
+  { title: "داشبورد", path: "@/dashboard", subtitle: "الرئيسية", keywords: "dashboard home رئيسية" },
+  { title: "شريحات الطاولات", path: "@/captain-tables", subtitle: "الصالة", keywords: "tables طاولات شرائح" },
+  { title: "طلب للطاولة", path: "@/order-taker", subtitle: "الصالة", keywords: "order طلب" },
+  { title: "موافقات المدير", path: "@/manager-approvals", subtitle: "مراكز إدارية", keywords: "approvals manager approvals موافقات مدير" },
+  { title: "مرتجعات الضيوف", path: "@/guest-returns", subtitle: "مراكز إدارية", keywords: "guest returns مرتجعات" },
+  { title: "Call Center (دليفري)", path: "@/call-center", subtitle: "مراكز إدارية", keywords: "delivery call center دليفري" },
+  { title: "إدارة الدليفري", path: "@/delivery-management", subtitle: "مراكز إدارية", keywords: "delivery إدارة" },
+  { title: "نقطة البيع", path: "@/pos", subtitle: "مراكز إدارية", keywords: "pos point of sale" },
+  { title: "المشتريات", path: "@/purchases", subtitle: "مراكز إدارية", keywords: "purchases مشتريات" },
+  { title: "صرف مصروفات", path: "@/cash-expense", subtitle: "مراكز إدارية", keywords: "expense cash صرف" },
+  { title: "تقارير الحسابات", path: "@/reports", subtitle: "مراكز إدارية", keywords: "reports تقارير" },
+  { title: "التدفق النقدي", path: "@/cashflow", subtitle: "مراكز إدارية", keywords: "cashflow نقدي" },
 ];
 
 function score(q: string, it: SearchResult): number {
@@ -105,7 +106,7 @@ export default function GlobalSearchModal({ role }: { role: string }) {
 
   const go = (path: string) => {
     const base = `/app/${role}`;
-    const url = path.startsWith("/") ? path : `${base}/settings/${path}`;
+    const url = path.startsWith("@/") ? `${base}/${path.slice(2)}` : path.startsWith("/") ? path : `${base}/settings/${path}`;
     navigate(url);
     setOpen(false);
   };

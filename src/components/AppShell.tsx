@@ -11,8 +11,7 @@ import GlobalSearchModal from "./GlobalSearchModal";
 import { useDbEpoch } from "../context/DbSettingsRefreshContext";
 import { TerminalLockProvider } from "../context/TerminalLockContext";
 import { venueBrandLabel } from "../lib/venueType";
-import type { RoleId } from "../auth/roles";
-import { ROLE_LABELS } from "../auth/roles";
+import { ROLE_LABELS, roleHasManagerOpsAccess, type RoleId } from "../auth/roles";
 import { WaiterUiStylePrompt } from "./WaiterUiStylePrompt";
 import {
   isWaiterUiPromptDoneThisSession,
@@ -70,14 +69,21 @@ function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
   } else if (role === "manager") {
     sections.push(
       { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
-      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["guest-returns", "call-center", "delivery-management"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
       { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
       { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
+    );
+  } else if (role === "operation_manager") {
+    sections.push(
+      { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
+      { title: "2. الموافقات والخدمة", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
+      { title: "3. الإعدادات اليومية", items: mark(pickNavItems(items, ["settings"])) },
+      { title: "4. التقارير التشغيلية", items: mark(pickNavItems(items, ["reports", "flash-report", "table-sessions-report"])) },
     );
   } else if (role === "developer") {
     sections.push(
       { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
-      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["guest-returns", "call-center", "delivery-management"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
       { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
       { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
     );
@@ -128,6 +134,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "dashboard", label: "داشبورد" },
     { to: "captain-tables", label: "شريحات الطاولات" },
     { to: "order-taker", label: "طلب للطاولة" },
+    { to: "manager-approvals", label: "موافقات المدير" },
     { to: "guest-returns", label: "مرتجعات الضيوف" },
     { to: "call-center", label: "Call Center (دليفري)" },
     { to: "delivery-management", label: "إدارة الدليفري" },
@@ -139,10 +146,24 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "table-sessions-report", label: "تقرير جلسات الطاولات" },
     { to: "cashflow", label: "التدفق النقدي" },
   ],
+  operation_manager: [
+    { to: "dashboard", label: "لوحة التشغيل" },
+    { to: "captain-tables", label: "شريحات الطاولات" },
+    { to: "order-taker", label: "طلب للطاولة" },
+    { to: "manager-approvals", label: "موافقات المدير" },
+    { to: "guest-returns", label: "مرتجعات الضيوف" },
+    { to: "call-center", label: "Call Center (دليفري)" },
+    { to: "delivery-management", label: "إدارة الدليفري" },
+    { to: "settings", label: "إعدادات التشغيل اليومية" },
+    { to: "reports", label: "تقارير" },
+    { to: "flash-report", label: "تقرير سريع" },
+    { to: "table-sessions-report", label: "تقرير جلسات الطاولات" },
+  ],
   developer: [
     { to: "dashboard", label: "داشبورد" },
     { to: "captain-tables", label: "شريحات الطاولات" },
     { to: "order-taker", label: "طلب للطاولة" },
+    { to: "manager-approvals", label: "موافقات المدير" },
     { to: "guest-returns", label: "مرتجعات الضيوف" },
     { to: "call-center", label: "Call Center (دليفري)" },
     { to: "delivery-management", label: "إدارة الدليفري" },
@@ -203,7 +224,7 @@ export function AppShell({ role }: { role: RoleId }) {
     }
   }, [role, navigate]);
   const isOrderTakerFullscreen =
-    (role === "waiter" || role === "manager" || role === "developer") &&
+    (role === "waiter" || roleHasManagerOpsAccess(role)) &&
     location.pathname.startsWith(`${base}/order-taker`);
 
   useEffect(() => {
@@ -251,7 +272,7 @@ export function AppShell({ role }: { role: RoleId }) {
       if (role === "waiter" && it.to === "pos") {
         return { ...it, label: "طلب سريع (بار)" };
       }
-      if ((role === "cashier" || role === "manager" || role === "developer" || role === "accountant") && it.to === "pos") {
+      if ((role === "cashier" || roleHasManagerOpsAccess(role) || role === "accountant") && it.to === "pos") {
         return { ...it, label: "نقطة البيع / بار" };
       }
       return it;

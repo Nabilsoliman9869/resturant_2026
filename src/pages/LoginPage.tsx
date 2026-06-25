@@ -12,6 +12,7 @@ const ROLE_SET = new Set<RoleId>([
   "cashier",
   "accountant",
   "manager",
+  "operation_manager",
   "developer",
   "host",
   "waiter",

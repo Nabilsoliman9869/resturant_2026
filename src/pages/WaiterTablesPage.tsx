@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { useLocation, useNavigate } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { useAuth } from "../auth/AuthContext";
+import { roleHasManagerOpsAccess } from "../auth/roles";
 import { repairArabicDisplayText } from "../auth/displayUser";
 import { getApiBase } from "../lib/apiBase";
 import { buildMat3amActor } from "../lib/mat3amActor";
@@ -10,6 +11,14 @@ import { tryParseJson } from "../lib/tryParseJson";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
 import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
+import {
+  effectiveTableIdsForUser,
+  normalizeAssignedTableId,
+  normalizeTempCaptainTransfers,
+  normalizeWaiterTableAssignments,
+  type TempCaptainTransferRow,
+  waiterTableAssignmentRestrictionApplies,
+} from "../lib/waiterTableAssignments";
 import "../styles/operationalRoles.css";
 
 type RestTable = SegmentedTableRow;
@@ -32,7 +41,11 @@ type TableSession = {
   noOrderWatchStage?: string;
   noOrderEscalatedAt?: string;
   noOrderFinalAlertAt?: string;
+  linkedOrderCount?: number;
   guestSession?: boolean;
+  guestApprovalPending?: boolean;
+  customerType?: string;
+  customerTypeLocked?: boolean;
   billingProfile?: {
     active?: boolean;
     source?: string;
@@ -53,6 +66,12 @@ type OrderRow = {
   status?: string;
   items?: OrderItem[];
   kitchenTotals?: { total?: number };
+};
+type GuestApprovalRequestRow = {
+  id?: string;
+  sessionId?: string;
+  status?: string;
+  type?: string;
 };
 type TableReport = {
   tableName: string;
@@ -109,7 +128,9 @@ export default function WaiterTablesPage() {
   const [alertBusyByTable, setAlertBusyByTable] = useState<Record<string, boolean>>({});
   const [minChargeDraftByTable, setMinChargeDraftByTable] = useState<Record<string, string>>({});
   const [minChargeBusyByTable, setMinChargeBusyByTable] = useState<Record<string, boolean>>({});
-  const [guestSessionByTable, setGuestSessionByTable] = useState<Record<string, boolean>>({});
+  const [customerTypeByTable, setCustomerTypeByTable] = useState<Record<string, string>>({});
+  const [guestApprovalRequestBySession, setGuestApprovalRequestBySession] = useState<Record<string, string>>({});
+  const [guestApprovalBusySessionId, setGuestApprovalBusySessionId] = useState<string>("");
   const [vipTemplates, setVipTemplates] = useState<VipTemplate[]>([]);
   const [ownersVipAgents, setOwnersVipAgents] = useState<OwnersVipAgent[]>([]);
   const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
@@ -117,6 +138,7 @@ export default function WaiterTablesPage() {
   const [captainTransferBusySessionId, setCaptainTransferBusySessionId] = useState<string>("");
   const [noOrderBusySessionId, setNoOrderBusySessionId] = useState<string>("");
   const [tableResetBusyId, setTableResetBusyId] = useState<string>("");
+  const [tempCaptainTransfers, setTempCaptainTransfers] = useState<TempCaptainTransferRow[]>([]);
   const [tableJumpQuery, setTableJumpQuery] = useState("");
   const [tableJumpHighlightId, setTableJumpHighlightId] = useState<string | null>(null);
   const tableCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -148,6 +170,16 @@ export default function WaiterTablesPage() {
     () => ownersVipAgents.filter((a) => !templateLinkedAgentGuids.has(a.CardGuide)),
     [ownersVipAgents, templateLinkedAgentGuids],
   );
+
+  const tempTransferByTable = useMemo(() => {
+    const out = new Map<string, TempCaptainTransferRow>();
+    for (const row of tempCaptainTransfers) {
+      const tid = normalizeAssignedTableId(row.tableId);
+      if (!tid) continue;
+      out.set(tid, row);
+    }
+    return out;
+  }, [tempCaptainTransfers]);
 
   function isTodayIso(iso?: string): boolean {
     if (!iso) return false;
@@ -225,7 +257,7 @@ export default function WaiterTablesPage() {
   }
 
   const loadTables = useCallback(async () => {
-    const needUsers = user?.role === "manager" || user?.role === "developer";
+    const needUsers = roleHasManagerOpsAccess(user?.role);
 
     const applyLoadedPayload = (
       fpj: Record<string, unknown>,
@@ -234,11 +266,13 @@ export default function WaiterTablesPage() {
       oj: Record<string, unknown>,
       wfj: Record<string, unknown>,
       opsj: Record<string, unknown>,
+      assignmentRowsRaw: unknown,
+      tempTransfersRaw: unknown,
       hint?: string,
     ) => {
-      setMsg(hint || "");
       const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
-      setExclusiveOn(ex === "on" || ex === "1" || ex === "true" || ex === "yes");
+      const exclusiveEnabled = ex === "on" || ex === "1" || ex === "true" || ex === "yes";
+      setExclusiveOn(exclusiveEnabled);
 
       try {
         const raw = String((opsj as { vipOwnerTemplatesJson?: unknown })?.vipOwnerTemplatesJson || "").trim();
@@ -288,22 +322,45 @@ export default function WaiterTablesPage() {
       }
 
       const apiTables: RestTable[] = Array.isArray(jt["tables"]) ? (jt["tables"] as RestTable[]) : [];
+      const assignmentRows = normalizeWaiterTableAssignments(assignmentRowsRaw);
+      const tempTransfers = normalizeTempCaptainTransfers(tempTransfersRaw);
+      setTempCaptainTransfers(tempTransfers);
+      const assignedIds = effectiveTableIdsForUser({
+        assignmentRows,
+        tempTransfers,
+        userId: String(user?.id || ""),
+      });
+      const assignmentRestricted = waiterTableAssignmentRestrictionApplies({
+        rows: assignmentRows,
+        tempTransfers,
+        userId: String(user?.id || ""),
+        userRole: user?.role,
+        exclusiveOn: exclusiveEnabled,
+      });
+      const visibleTables = assignmentRestricted
+        ? apiTables.filter((t) => assignedIds.has(normalizeAssignedTableId(t?.id)))
+        : apiTables;
+      const effectiveHint =
+        assignmentRestricted && visibleTables.length === 0 && apiTables.length > 0
+          ? "لا توجد طاولات مخصصة لك في هذه الفترة. راجع المدير أو شاشة التوزيع."
+          : hint || "";
+      setMsg(effectiveHint);
       const planRaw = fpj["plan"];
       const statusById = new Map<string, string>();
-      for (const t of apiTables as any[]) statusById.set(String(t?.id || ""), normalizeTableStatus(String(t?.status || "")));
+      for (const t of visibleTables as any[]) statusById.set(String(t?.id || ""), normalizeTableStatus(String(t?.status || "")));
       setTables(
-        buildSegmentedTablesFromFloorPlan(planRaw, apiTables).map((t: any) => ({
+        buildSegmentedTablesFromFloorPlan(planRaw, visibleTables).map((t: any) => ({
           ...t,
           status: statusById.get(String(t?.id || "")) || normalizeTableStatus(String(t?.status || "")),
-          noOrderOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderOverdue),
-          noOrderMinutes: Number((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderMinutes || 0),
-          cleanupOverdue: Boolean((apiTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.cleanupOverdue),
+          noOrderOverdue: Boolean((visibleTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderOverdue),
+          noOrderMinutes: Number((visibleTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.noOrderMinutes || 0),
+          cleanupOverdue: Boolean((visibleTables as any[]).find((x: any) => String(x?.id || "") === String(t?.id || ""))?.cleanupOverdue),
         })),
       );
 
       setMinChargeDraftByTable((prev) => {
         const next: Record<string, string> = { ...prev };
-        for (const t of apiTables as any[]) {
+        for (const t of visibleTables as any[]) {
           const tid = String(t?.id || "").trim();
           if (!tid) continue;
           const mc = Number(t?.minimumCharge ?? 0);
@@ -380,7 +437,7 @@ export default function WaiterTablesPage() {
         if (tblDs?.error) hint = `تحذير SQL (الطاولات): ${tblDs.error}`;
         else if (src?.tables === "sql" || tblDs?.source === "sql") hint = "";
         else if (tblDs?.fromMirror) hint = "عرض طاولات من نسخة JSON احتياطية — تحقق من اتصال SQL.";
-        applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, hint);
+        applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, snap.waiterTableAssignments, snap.tempCaptainTransfers, hint);
         if (needUsers) {
           const u = Array.isArray(snap.users) ? (snap.users as StaffUser[]) : [];
           if (u.length) {
@@ -392,13 +449,14 @@ export default function WaiterTablesPage() {
         return;
       }
 
-      const [fp, rt, rs, ro, wf, ops] = await Promise.all([
+      const [fp, rt, rs, ro, wf, ops, wa] = await Promise.all([
         safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
         safeFetch(`${base}/api/restaurant/tables`),
         safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
         safeFetch(`${base}/api/restaurant/orders`),
         safeFetch(`${base}/api/restaurant/workflow-settings`),
         safeFetch(`${base}/api/restaurant/ops-settings`),
+        safeFetch(`${base}/api/restaurant/waiter-table-assignments`),
       ]);
       const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
@@ -406,6 +464,7 @@ export default function WaiterTablesPage() {
       const oj = (tryParseJson(await ro.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const opsj = (tryParseJson(await ops.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const waj = (tryParseJson(await wa.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const httpLabel = (r: Response, nameAr: string) =>
         `${nameAr} (${r.status === 0 ? "لا اتصال بالخادم" : `HTTP ${r.status}`})`;
       const bad: string[] = [];
@@ -415,6 +474,7 @@ export default function WaiterTablesPage() {
       if (!ro.ok) bad.push(httpLabel(ro, "الطلبات"));
       if (!wf.ok) bad.push(httpLabel(wf, "إعداد المسند"));
       if (!ops.ok) bad.push(httpLabel(ops, "إعدادات Owner/VIP"));
+      if (!wa.ok) bad.push(httpLabel(wa, "تخصيص الطاولات"));
       if (bad.length) {
         const allNet = [fp, rt, rs, ro, wf, ops].every((r) => r.status === 0);
         const tail = allNet
@@ -429,11 +489,48 @@ export default function WaiterTablesPage() {
       }
       const rtDs = (jt as { dataSource?: { error?: string } }).dataSource;
       const sqlHint = rtDs?.error ? `تحذير SQL: ${rtDs.error}` : "";
-      applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, sqlHint);
+      applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, waj.items, [], sqlHint);
     } catch (e) {
       setMsg(briefNetworkHint(e));
     }
-  }, [base, user?.role]);
+  }, [base, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!roleHasManagerOpsAccess(user?.role)) {
+      setGuestApprovalRequestBySession({});
+      return;
+    }
+    const pendingSessionIds = sessions
+      .filter((s) => Boolean(s?.guestApprovalPending) && String(s?.id || "").trim())
+      .map((s) => String(s.id || "").trim());
+    if (pendingSessionIds.length === 0) {
+      setGuestApprovalRequestBySession({});
+      return;
+    }
+    let stop = false;
+    void (async () => {
+      try {
+        const r = await safeFetch(
+          `${base}/api/restaurant/manager-approvals?status=pending_manager&reqType=guest_session_request`,
+        );
+        const j = tryParseJson<{ requests?: GuestApprovalRequestRow[] }>(await r.text()) ?? {};
+        const rows = Array.isArray(j.requests) ? j.requests : [];
+        const next: Record<string, string> = {};
+        for (const row of rows) {
+          const sid = String(row?.sessionId || "").trim();
+          const rid = String(row?.id || "").trim();
+          if (!sid || !rid || !pendingSessionIds.includes(sid)) continue;
+          next[sid] = rid;
+        }
+        if (!stop) setGuestApprovalRequestBySession(next);
+      } catch {
+        if (!stop) setGuestApprovalRequestBySession({});
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [base, sessions, user?.role]);
 
   useEffect(() => {
     let stop = false;
@@ -451,7 +548,7 @@ export default function WaiterTablesPage() {
 
   useEffect(() => {
     const r = user?.role;
-    if (r !== "manager" && r !== "developer") return;
+    if (!roleHasManagerOpsAccess(r)) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -625,7 +722,7 @@ export default function WaiterTablesPage() {
         );
         okMessage = "تم تسكينك كابتن على هذه الجلسة.";
       } else {
-        const isGuest = !!guestSessionByTable[tableId];
+        const customerType = customerTypeByTable[tableId] || "cash";
         r = await safeFetch(`${base}/api/restaurant/table-sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -635,7 +732,7 @@ export default function WaiterTablesPage() {
             assignOrderTaker: true,
             startedByRole: actor.role,
             startReason: "captain_seat_from_table_card",
-            guestSession: isGuest,
+            customerType,
           }),
           timeoutMs: claimTimeoutMs,
         });
@@ -652,7 +749,12 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      const j = tryParseJson<TableSession | { session?: TableSession }>(t);
+      const j = tryParseJson<TableSession | { session?: TableSession; approvalRequested?: boolean; message?: string }>(t);
+      if (j && typeof j === "object" && "approvalRequested" in j && j.approvalRequested) {
+        setMsg(typeof j.message === "string" && j.message.trim() ? j.message : "تم رفع طلب موافقة للمدير.");
+        await loadTables();
+        return;
+      }
       const session = j && typeof j === "object" && "session" in j ? j.session : (j as TableSession | null);
       if (session && !String(session.captainUserId || "").trim()) {
         session.captainUserId = actor.id;
@@ -682,11 +784,16 @@ export default function WaiterTablesPage() {
     setMsg("");
     try {
       const r = await safeFetch(
-        `${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/request-captain-transfer`,
+        `${base}/api/restaurant/manager-approvals`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mat3amActor: actor }),
+          body: JSON.stringify({
+            type: "captain_handover_request",
+            sessionId,
+            reason: "طلب تسليم/استبدال كابتن أثناء التشغيل",
+            mat3amActor: actor,
+          }),
         },
       );
       const t = await r.text();
@@ -700,12 +807,63 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      setMsg("تم إرسال طلب تحويل الكابتن — سيصل للزملاء بنفس الدور الفعّال اليوم في الجرس الأحمر.");
+      setMsg("تم رفع طلب تسليم الكابتن للمدير ليحدد البديل ونطاق التحويل.");
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
     } finally {
       setCaptainTransferBusySessionId("");
+    }
+  }
+
+  async function reviewGuestSession(sessionId: string, action: "approve" | "reject") {
+    const requestId = String(guestApprovalRequestBySession[sessionId] || "").trim();
+    if (!requestId) {
+      setMsg("لم أجد طلب ضيف معلقاً لهذه الجلسة.");
+      return;
+    }
+    let managerNote = "";
+    if (action === "approve") {
+      if (!window.confirm("اعتماد هذه الجلسة كضيف صالة الآن؟")) return;
+    } else {
+      const note = window.prompt("اكتب سبب رفض جلسة الضيف", "");
+      if (note === null) return;
+      if (!String(note).trim()) {
+        setMsg("سبب رفض جلسة الضيف إلزامي.");
+        return;
+      }
+      managerNote = String(note).trim();
+    }
+    setGuestApprovalBusySessionId(sessionId);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/manager-approvals/${encodeURIComponent(requestId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          decisionId: action === "approve" ? "approve_guest_session" : undefined,
+          managerNote: managerNote || undefined,
+          reviewedBy: {
+            userId: user?.id != null ? String(user.id) : "",
+            name: repairArabicDisplayText(String(user?.name || user?.login || "مدير")),
+            role: user?.role || "manager",
+          },
+        }),
+      });
+      const t = await r.text();
+      const j = tryParseJson<{ detail?: unknown }>(t);
+      if (!r.ok) {
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg(action === "approve" ? "تم اعتماد جلسة الضيف." : "تم رفض جلسة الضيف وإعادتها إلى عميل نقدي.");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setGuestApprovalBusySessionId("");
     }
   }
 
@@ -734,7 +892,12 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      const j = tryParseJson<{ session?: TableSession } & Record<string, unknown>>(t);
+      const j = tryParseJson<{ session?: TableSession; approvalRequested?: boolean; message?: string } & Record<string, unknown>>(t);
+      if (j?.approvalRequested) {
+        setMsg(typeof j.message === "string" && j.message.trim() ? j.message : "تم رفع طلب موافقة للمدير.");
+        await loadTables();
+        return;
+      }
       const done = j?.session;
       const doneTableId = String(done?.tableId || "").trim();
       if (done && doneTableId && action !== "snooze") {
@@ -942,7 +1105,7 @@ export default function WaiterTablesPage() {
   async function saveMinimumCharge(tableId: string) {
     const tid = String(tableId || "").trim();
     if (!tid) return;
-    if (!(user?.role === "manager" || user?.role === "developer")) return;
+    if (!roleHasManagerOpsAccess(user?.role)) return;
     const raw = String(minChargeDraftByTable[tid] ?? "").trim();
     const mc = Number(raw);
     if (!Number.isFinite(mc) || mc < 0) {
@@ -1135,16 +1298,20 @@ export default function WaiterTablesPage() {
 
   const orderTakerBase = location.pathname.startsWith("/app/manager")
     ? "/app/manager"
-    : location.pathname.startsWith("/app/developer")
-      ? "/app/developer"
-      : "/app/waiter";
+    : location.pathname.startsWith("/app/operation_manager")
+      ? "/app/operation_manager"
+      : location.pathname.startsWith("/app/developer")
+        ? "/app/developer"
+        : "/app/waiter";
 
   const headerTitle =
     user?.role === "manager"
       ? "شريحات الطاولات — المدير"
-      : user?.role === "developer"
-        ? "شريحات الطاولات — مطوّر"
-        : "جارسون الطلبات";
+      : user?.role === "operation_manager"
+        ? "شريحات الطاولات — مدير التشغيل"
+        : user?.role === "developer"
+          ? "شريحات الطاولات — مطوّر"
+          : "جارسون الطلبات";
 
   const handlePrint = useCallback(() => {
     const el = document.querySelector<HTMLElement>(".print-only");
@@ -1218,6 +1385,8 @@ export default function WaiterTablesPage() {
               ? repairArabicDisplayText(String(sessRow.captainName || sessRow.captainLogin || "").trim()) || ""
               : "";
             const capId = sessRow ? String(sessRow.captainUserId || "").trim() : "";
+            const tempTransfer = tempTransferByTable.get(normalizeAssignedTableId(t.id));
+            const incomingTempTransfer = Boolean(tempTransfer && user?.id && String(tempTransfer.toUserId || "").trim() === String(user.id));
             const watchStage = String(sessRow?.noOrderWatchStage || "").trim();
             const snoozeCount = Math.max(0, Number(sessRow?.noOrderSnoozeCount || 0));
             const snoozedUntilIso = String(sessRow?.noOrderSnoozedUntil || "").trim();
@@ -1225,6 +1394,8 @@ export default function WaiterTablesPage() {
             const snoozeActive = Number.isFinite(snoozedUntilTs) && snoozedUntilTs > Date.now();
             const needsImmediateResolution = watchStage === "final_decision" || snoozeCount >= 2;
             const isGuestSession = Boolean(sessRow?.guestSession);
+            const guestApprovalPending = Boolean(sessRow?.guestApprovalPending);
+            const customerTypeLocked = Boolean(sessRow?.customerTypeLocked || Number(sessRow?.linkedOrderCount || 0) > 0);
             const bp = sessRow?.billingProfile;
             const vipOwnerLabel =
               bp && typeof bp === "object" && bp.active !== false
@@ -1239,10 +1410,10 @@ export default function WaiterTablesPage() {
             const minGap = minOk > 0 && money.totalCost < minOk ? minOk - money.totalCost : 0;
             const alertPick = alertPickByTable[String(t.id)] ?? "";
             const alertBusy = Boolean(alertBusyByTable[String(t.id)]);
-            const canEditMin = user?.role === "manager" || user?.role === "developer";
+            const canEditMin = roleHasManagerOpsAccess(user?.role);
             const billAgeMinutes = diffMinutesFromIso(sessRow?.billingRequestedAt || undefined);
             const canForceResetTable = Boolean(
-              (user?.role === "manager" || user?.role === "developer") &&
+              roleHasManagerOpsAccess(user?.role) &&
               (tStatus === "occupied" || sidStr || money.orderCount > 0 || billReq),
             );
             const noOrderWatchActive = Boolean(
@@ -1263,6 +1434,28 @@ export default function WaiterTablesPage() {
                 ? `طلب الحساب ${billAgeMinutes} د`
                 : "طلب حساب"
               : "";
+            const sessionStateLabel = tStatus === "dirty" ? "متسخة" : tStatus === "cleaning" ? "قيد التنظيف" : isBusy ? "مشغولة" : "جاهزة";
+            const customerTypeLabels: Record<string, string> = {
+              cash: "نقدي",
+              guest: "ضيف صالة",
+              owner: "مالك",
+              vip: "شخص مهم",
+            };
+            const currentCustomerType = String(sessRow?.customerType || "cash");
+            const customerStateLabel = guestApprovalPending
+              ? `العميل: ${customerTypeLabels[currentCustomerType] || currentCustomerType} بانتظار اعتماد`
+              : isGuestSession
+                ? "العميل: ضيف صالة"
+                : vipOwnerLabel
+                  ? `العميل: ${vipOwnerLabel}`
+                  : customerTypeLocked
+                    ? `العميل: ${customerTypeLabels[currentCustomerType] || currentCustomerType} مقفول`
+                    : `العميل: ${customerTypeLabels[currentCustomerType] || currentCustomerType} افتراضي`;
+            const captainStateLabel = captainLabel
+              ? `الكابتن: ${captainLabel}`
+              : sidStr
+                ? "الجلسة مفتوحة بدون كابتن"
+                : "لا توجد جلسة نشطة";
             const claimButtonLabel =
               claimBusyTableId === String(t.id)
                 ? "جاري التسكين…"
@@ -1272,7 +1465,7 @@ export default function WaiterTablesPage() {
                     ? capId
                       ? "الطاولة مسندة"
                       : "تسكين كابتن"
-                    : "ابدأ التسكين";
+                    : "فتح جلسة";
             const claimButtonTitle =
               claimBusyTableId === String(t.id)
                 ? "جارٍ تنفيذ أمر التسكين لهذه الطاولة"
@@ -1283,6 +1476,31 @@ export default function WaiterTablesPage() {
                       ? `الجلسة مسندة إلى ${captainLabel || "كابتن آخر"}`
                       : "ربط الجلسة على الكابتن"
                     : "بدء جلسة وتسكين نفسك على الطاولة";
+            const openOrderDisabled = Boolean(
+              notReady ||
+              guestApprovalPending ||
+              (exclusiveOn && capId && user?.id && String(capId) !== String(user.id) && !roleHasManagerOpsAccess(user.role)),
+            );
+            const openOrderLabel = guestApprovalPending
+              ? "بانتظار الاعتماد"
+              : notReady
+                ? "الطاولة غير جاهزة"
+                : !sidStr
+                  ? "فتح الطلب وبدء الجلسة"
+                  : capId && user?.id && String(capId) === String(user.id)
+                    ? "متابعة الطلب"
+                    : sidStr && !capId
+                      ? "فتح الطلب وتأكيد الكابتن"
+                      : roleHasManagerOpsAccess(user?.role)
+                        ? "فتح الطلب"
+                        : "الطاولة مسندة";
+            const openOrderHint = guestApprovalPending
+              ? "بانتظار اعتماد المدير — لا يمكن فتح الطلب حتى يتم الاعتماد"
+              : !sidStr
+                ? "فتح شاشة الطلب سيُنشئ الجلسة تلقائياً لهذه الطاولة"
+                : sidStr && !capId
+                  ? "فتح شاشة الطلب ثم تثبيت الكابتن على الجلسة الحالية"
+                  : "متابعة تشغيل الطلب على الجلسة الحالية";
             const openOrderTakerForTable = async () => {
               if (notReady) {
                 setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
@@ -1293,8 +1511,7 @@ export default function WaiterTablesPage() {
                 capId &&
                 user?.id &&
                 String(capId) !== String(user.id) &&
-                user.role !== "manager" &&
-                user.role !== "developer"
+                !roleHasManagerOpsAccess(user.role)
               ) {
                 const nm = captainLabel || "كابتن آخر";
                 setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
@@ -1346,10 +1563,21 @@ export default function WaiterTablesPage() {
                       {isVipTable ? <span className="waiter-tables-vip-pill">VIP</span> : null}
                       {vipOwnerLabel ? <span className="waiter-tables-owner-pill">{vipOwnerLabel}</span> : null}
                       {isGuestSession ? <span className="waiter-tables-owner-pill" style={{ background: "rgba(16,185,129,0.15)", borderColor: "rgba(16,185,129,0.4)", color: "#047857" }}>ضيف</span> : null}
+                      {guestApprovalPending ? (
+                        <span className="waiter-tables-owner-pill" style={{ background: "rgba(245,158,11,0.14)", borderColor: "rgba(245,158,11,0.45)", color: "#92400e" }}>
+                          {customerTypeLabels[currentCustomerType] || currentCustomerType} مؤقت
+                        </span>
+                      ) : null}
+                      {incomingTempTransfer ? (
+                        <span className="waiter-tables-owner-pill" style={{ background: "rgba(59,130,246,0.12)", borderColor: "rgba(59,130,246,0.45)", color: "#1d4ed8" }}>
+                          محولة مؤقتاً
+                        </span>
+                      ) : null}
                     </div>
                     <div className="waiter-tblcard__spec-meta-row">
+                      <span className="waiter-tblcard__mini-chip waiter-tblcard__mini-chip--state">{sessionStateLabel}</span>
                       <span className="waiter-tblcard__spec-seats">المقاعد: {t.seats ?? "—"}</span>
-                      <span className="waiter-tblcard__mini-chip">{tStatus === "dirty" ? "متسخة" : tStatus === "cleaning" ? "قيد التنظيف" : isBusy ? "مشغولة" : "جاهزة"}</span>
+                      {money.orderCount > 0 ? <span className="waiter-tblcard__mini-chip">طلبات: {money.orderCount}</span> : null}
                       {billReq ? (
                         <span className="waiter-tblcard__mini-chip" style={{ borderColor: "rgba(59,130,246,0.5)", background: "rgba(59,130,246,0.12)" }}>
                           {billStatusLabel || "طلب حساب"}
@@ -1358,44 +1586,58 @@ export default function WaiterTablesPage() {
                       {noOrderStatusLabel ? <span className="waiter-tblcard__mini-chip" data-tooltip="متابعة التسكين بلا طلبات">⏱ {noOrderStatusLabel}</span> : null}
                     </div>
                     <div className="waiter-tblcard__spec-seated-by">
-                      {captainLabel ? (
-                        <span className="waiter-tblcard__spec-captain">كابتن: {captainLabel}</span>
-                      ) : sidStr ? (
-                        <span className="waiter-tblcard__spec-muted">لم يُسكَّن كابتن بعد</span>
-                      ) : (
-                        <span className="waiter-tblcard__spec-muted">لا توجد جلسة نشطة</span>
-                      )}
+                      {captainLabel ? <span className="waiter-tblcard__spec-captain">{captainStateLabel}</span> : <span className="waiter-tblcard__spec-muted">{captainStateLabel}</span>}
                     </div>
+                    <div className="waiter-tblcard__spec-customer-line">{customerStateLabel}</div>
                     {cleanupOverdue ? <div className="waiter-tblcard__session-gap">تنبيه: تأخر تنظيف أكثر من 10 دقائق</div> : null}
+                  </div>
+
+                  <div className="waiter-tblcard__spec-open">
+                    <button
+                      type="button"
+                      className="waiter-tblcard__open-order"
+                      disabled={openOrderDisabled}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void openOrderTakerForTable();
+                      }}
+                      data-tooltip={openOrderDisabled ? claimButtonTitle : openOrderHint}
+                    >
+                      {openOrderLabel}
+                    </button>
+                    <div className="waiter-tblcard__open-order-hint">{openOrderDisabled ? claimButtonTitle : openOrderHint}</div>
                   </div>
 
                   <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
                     <div className="waiter-tblcard__pill-row">
-                      {(user?.role === "manager" || user?.role === "developer" || user?.role === "waiter") && !sidStr ? (
-                        <label
+                      {(roleHasManagerOpsAccess(user?.role) || user?.role === "waiter") && !sidStr ? (
+                        <select
                           className="waiter-tblcard__pill"
                           style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
+                            fontSize: "0.78rem",
+                            fontWeight: 700,
+                            padding: "2px 6px",
+                            borderRadius: 999,
+                            border: "1px solid rgba(99,102,241,0.35)",
+                            background: "rgba(99,102,241,0.08)",
+                            color: "#4338ca",
                             cursor: "pointer",
-                            background: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.15)" : undefined,
-                            borderColor: guestSessionByTable[String(t.id)] ? "rgba(16,185,129,0.4)" : undefined,
+                            minWidth: 0,
                           }}
-                          data-tooltip="تسجيل الجلسة كضيف — تُحوّل الفاتورة لاحقاً على حساب العميل الوهمي 'ضيف'"
+                          value={customerTypeByTable[String(t.id)] || "cash"}
+                          onChange={(e) =>
+                            setCustomerTypeByTable((prev) => ({
+                              ...prev,
+                              [String(t.id)]: e.target.value,
+                            }))
+                          }
+                          title="نوع العميل قبل التسكين"
                         >
-                          <input
-                            type="checkbox"
-                            checked={!!guestSessionByTable[String(t.id)]}
-                            onChange={(e) =>
-                              setGuestSessionByTable((prev) => ({
-                                ...prev,
-                                [String(t.id)]: e.target.checked,
-                              }))
-                            }
-                          />
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700 }}>ضيف</span>
-                        </label>
+                          <option value="cash">عميل نقدي</option>
+                          <option value="guest">ضيف صالة</option>
+                          <option value="owner">مالك</option>
+                          <option value="vip">شخص مهم</option>
+                        </select>
                       ) : null}
                       <button
                         type="button"
@@ -1408,8 +1650,7 @@ export default function WaiterTablesPage() {
                             capId &&
                             user?.id &&
                             String(capId) !== String(user.id) &&
-                            user.role !== "manager" &&
-                            user.role !== "developer",
+                            !roleHasManagerOpsAccess(user.role),
                           )
                         }
                         onClick={() => void claimCaptain({ tableId: String(t.id), sessionId: sidStr || null })}
@@ -1431,13 +1672,44 @@ export default function WaiterTablesPage() {
                             e.stopPropagation();
                             void requestCaptainTransfer(sidStr);
                           }}
-                          data-tooltip="إرسال تنبيه للزملاء بنفس الدور الفعّال اليوم — قبول من الجرس الأحمر"
+                          data-tooltip="رفع طلب للمدير لتحديد البديل وهل التحويل لهذه الطاولة فقط أم لكل الطاولات الحالية"
                         >
-                          {captainTransferBusySessionId === sidStr ? "…" : "طلب تحويل"}
+                          {captainTransferBusySessionId === sidStr ? "…" : "طلب تسليم"}
                         </button>
                       ) : null}
 
-                      {(user?.role === "manager" || user?.role === "developer") && sidStr ? (
+                      {roleHasManagerOpsAccess(user?.role) && sidStr && guestApprovalPending ? (
+                        <>
+                          <button
+                            type="button"
+                            className="waiter-tblcard__pill"
+                            disabled={guestApprovalBusySessionId === sidStr || !guestApprovalRequestBySession[sidStr]}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void reviewGuestSession(sidStr, "approve");
+                            }}
+                            data-tooltip="اعتماد جلسة الضيف من نفس بطاقة الطاولة"
+                            style={{ background: "rgba(16,185,129,0.14)", borderColor: "rgba(16,185,129,0.38)", color: "#047857" }}
+                          >
+                            {guestApprovalBusySessionId === sidStr ? "…" : "اعتماد ضيف"}
+                          </button>
+                          <button
+                            type="button"
+                            className="waiter-tblcard__pill"
+                            disabled={guestApprovalBusySessionId === sidStr || !guestApprovalRequestBySession[sidStr]}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void reviewGuestSession(sidStr, "reject");
+                            }}
+                            data-tooltip="رفض جلسة الضيف وإعادتها إلى عميل نقدي"
+                            style={{ background: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.35)", color: "#b91c1c" }}
+                          >
+                            {guestApprovalBusySessionId === sidStr ? "…" : "رفض ضيف"}
+                          </button>
+                        </>
+                      ) : null}
+
+                      {roleHasManagerOpsAccess(user?.role) && sidStr ? (
                         <button
                           type="button"
                           className="waiter-tblcard__pill"
@@ -1535,7 +1807,11 @@ export default function WaiterTablesPage() {
                       onClick={(e) => e.stopPropagation()}
                       data-tooltip="ربط الطاولة على Owner/VIP"
                     >
-                      {isGuestSession ? (
+                      {guestApprovalPending ? (
+                        <div style={{ fontSize: "0.72rem", color: "#92400e", fontWeight: 700, padding: "4px 0", textAlign: "center" }}>
+                          الجلسة {customerTypeLabels[currentCustomerType] || currentCustomerType} مؤقت بانتظار قرار المدير
+                        </div>
+                      ) : isGuestSession ? (
                         <div style={{ fontSize: "0.72rem", color: "#047857", fontWeight: 600, padding: "4px 0", textAlign: "center" }}>
                           جلسة ضيف — لا يمكن تحويلها لملاك/VIP
                         </div>
@@ -1592,34 +1868,37 @@ export default function WaiterTablesPage() {
                         type="button"
                         className="btn btn-ghost"
                         style={{ fontWeight: 900, whiteSpace: "nowrap", padding: "0.35rem 0.5rem", width: "100%", minWidth: 0 }}
-                        disabled={vipBusySessionId === sidStr || isGuestSession}
+                        disabled={vipBusySessionId === sidStr || isGuestSession || guestApprovalPending || customerTypeLocked}
                         onClick={() => {
                           if (isGuestSession) {
                             setMsg("جلسة ضيف — لا يمكن تحويلها لملاك/VIP");
                             return;
                           }
+                          if (guestApprovalPending) {
+                            setMsg("هناك طلب ضيف بانتظار اعتماد المدير على هذه الجلسة.");
+                            return;
+                          }
+                          if (customerTypeLocked) {
+                            setMsg("نوع العميل مقفول بعد أول طلب على الجلسة.");
+                            return;
+                          }
                           const chosen = vipChoiceBySession[sidStr] ?? "";
                           void applyVipBilling(sidStr, chosen);
                         }}
-                        data-tooltip={isGuestSession ? "جلسة ضيف — لا يمكن تطبيق Owner/VIP" : "تطبيق Owner/VIP على الجلسة"}
+                        data-tooltip={
+                          isGuestSession
+                            ? "جلسة ضيف — لا يمكن تطبيق Owner/VIP"
+                            : guestApprovalPending
+                              ? "يوجد طلب ضيف بانتظار اعتماد المدير"
+                              : customerTypeLocked
+                                ? "نوع العميل مقفول بعد أول طلب"
+                                : "تطبيق Owner/VIP على الجلسة"
+                        }
                       >
-                        {vipBusySessionId === sidStr ? "…" : isGuestSession ? "—" : "تطبيق"}
+                        {vipBusySessionId === sidStr ? "…" : isGuestSession || guestApprovalPending ? "—" : customerTypeLocked ? "مقفول" : "تطبيق"}
                       </button>
                     </div>
                   ) : null}
-
-                  <div className="waiter-tblcard__spec-open">
-                    <button
-                      type="button"
-                      className="waiter-tblcard__open-order"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openOrderTakerForTable();
-                      }}
-                    >
-                      فتح الطلب
-                    </button>
-                  </div>
 
                   <div className="waiter-tblcard__spec-money">
                     <div className="waiter-tblcard__money-est">
@@ -1969,12 +2248,12 @@ export default function WaiterTablesPage() {
                 <div className="print-meta-value">
                   {report.startTime
                     ? new Date(report.startTime).toLocaleString("ar-EG", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                      })
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                    })
                     : "غير متاح"}
                 </div>
               </div>

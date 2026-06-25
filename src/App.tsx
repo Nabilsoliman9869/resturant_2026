@@ -24,6 +24,7 @@ import RunnerPage from "./pages/RunnerPage";
 import WaiterOrderPage from "./pages/WaiterOrderPage";
 import WaiterTablesPage from "./pages/WaiterTablesPage";
 import GuestReturnsManagerPage from "./pages/GuestReturnsManagerPage";
+import ManagerApprovalsPage from "./pages/ManagerApprovalsPage";
 import ServerTablesPage from "./pages/ServerTablesPage";
 import SettingsLayout from "./pages/settings/SettingsLayout";
 import VenueFloorSettingsPage from "./pages/settings/VenueFloorSettingsPage";
@@ -43,6 +44,7 @@ import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
 import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
 import RoleScheduleSettingsPage from "./pages/settings/RoleScheduleSettingsPage";
 import RestaurantOpsSettingsPage from "./pages/settings/RestaurantOpsSettingsPage";
+import WaiterTableAssignmentsPage from "./pages/settings/WaiterTableAssignmentsPage";
 import KitchenOpsSettingsPage from "./pages/settings/KitchenOpsSettingsPage";
 import AuditComplianceSettingsPage from "./pages/settings/AuditComplianceSettingsPage";
 import VipOwnerSettingsPage from "./pages/settings/VipOwnerSettingsPage";
@@ -143,6 +145,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="manager-approvals" element={<ManagerApprovalsPage />} />
         <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
@@ -182,6 +185,7 @@ export default function App() {
           <Route path="product-modifier-links" element={<ProductModifierLinksPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
+          <Route path="waiter-table-assignments" element={<WaiterTableAssignmentsPage />} />
           <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
           <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="kitchen-detail" element={<KitchenOpsSettingsPage />} />
@@ -203,6 +207,38 @@ export default function App() {
         <Route path="connection" element={<Navigate to="settings/connection" replace />} />
         <Route path="init-db" element={<Navigate to="settings/init-db" replace />} />
         <Route path="users" element={<Navigate to="settings/users" replace />} />
+      </Route>
+
+      <Route
+        path="/app/operation_manager/*"
+        element={
+          <RequireRole role="operation_manager">
+            <AppShell role="operation_manager" />
+          </RequireRole>
+        }
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="captain-tables" element={<WaiterTablesPage />} />
+        <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="manager-approvals" element={<ManagerApprovalsPage />} />
+        <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
+        <Route path="call-center" element={<CallCenterPage />} />
+        <Route path="delivery-management" element={<DeliveryManagementPage />} />
+        <Route path="reports" element={<ReportsPage />} />
+        <Route path="flash-report" element={<FlashReportPage />} />
+        <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
+        <Route path="settings" element={<SettingsLayout />}>
+          <Route index element={<Navigate to="role-schedule" replace />} />
+          <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
+          <Route path="waiter-table-assignments" element={<WaiterTableAssignmentsPage />} />
+          <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
+          <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
+          <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
+          <Route path="pos-kds" element={<PosKdsSettingsPage />} />
+          <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
+          <Route path="kitchen-item-stop" element={<KitchenItemStopPage />} />
+        </Route>
       </Route>
 
       <Route
@@ -299,6 +335,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="manager-approvals" element={<ManagerApprovalsPage />} />
         <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
@@ -339,6 +376,7 @@ export default function App() {
           <Route path="pos-admin-legacy" element={<PosAdminPage />} />
           <Route path="workflow" element={<WorkflowRolesSettingsPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
+          <Route path="waiter-table-assignments" element={<WaiterTableAssignmentsPage />} />
           <Route path="restaurant-ops" element={<Navigate to="../kitchen-ops" replace />} />
           <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="kitchen-detail" element={<KitchenOpsSettingsPage />} />
