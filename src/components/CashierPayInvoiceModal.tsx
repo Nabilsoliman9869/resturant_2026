@@ -74,6 +74,7 @@ export type CashierInvoiceRow = {
   /** اسم العميل المربوط بالفاتورة (مالك / VIP / عميل آجل) */
   agentName?: string | null;
   agentGuid?: string | null;
+  customerType?: string | null;
   paymentStatus?: string | null;
   onAccountAt?: string | null;
 };
@@ -954,6 +955,9 @@ export function CashierPayInvoiceModal({
 
   const userRole = String(user?.role || "").trim().toLowerCase();
   const waiterPrintLocked = userRole === "waiter" && Number(row?.printCount || 0) >= 1;
+  const showOnAccount = Boolean(
+    row?.agentGuid || (row?.customerType && row.customerType !== "cash")
+  );
 
   const suggestRemainder = useCallback(
     (field: "cash" | "visa" | "wallet" | "instapay") => {
@@ -1465,18 +1469,20 @@ export function CashierPayInvoiceModal({
 
             {allowPayment ? (
               <>
-            <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "1px dashed rgba(148,163,184,0.55)", background: onAccount ? "rgba(234,179,8,0.08)" : "rgba(0,0,0,0.02)" }}>
-              <label style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={onAccount} onChange={(e) => setOnAccount(e.target.checked)} />
-                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>ترحيل على حساب العميل (بدون سداد فوري)</span>
-              </label>
-              <p style={{ margin: "0.35rem 0 0", fontSize: "0.78rem", color: "var(--muted)" }}>
-                يُسجّل الفاتورة كمديونية على حساب العميل المربوط بالجلسة (مالك / VIP / عميل آجل).
-              </p>
-              {onAccount && row?.agentName ? (
-                <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", fontWeight: 700 }}>العميل: {row.agentName}</p>
-              ) : null}
-            </div>
+            {showOnAccount ? (
+              <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "1px dashed rgba(148,163,184,0.55)", background: onAccount ? "rgba(234,179,8,0.08)" : "rgba(0,0,0,0.02)" }}>
+                <label style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}>
+                  <input type="checkbox" checked={onAccount} onChange={(e) => setOnAccount(e.target.checked)} />
+                  <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>ترحيل على حساب العميل (بدون سداد فوري)</span>
+                </label>
+                <p style={{ margin: "0.35rem 0 0", fontSize: "0.78rem", color: "var(--muted)" }}>
+                  يُسجّل الفاتورة كمديونية على حساب العميل المربوط بالجلسة (مالك / VIP / عميل آجل).
+                </p>
+                {onAccount && row?.agentName ? (
+                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", fontWeight: 700 }}>العميل: {row.agentName}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             {!onAccount ? (
               <>

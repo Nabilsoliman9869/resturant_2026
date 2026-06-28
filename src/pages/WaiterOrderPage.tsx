@@ -87,6 +87,7 @@ type OrderTakerSessionRow = {
   billingRequestedAt?: string;
   billingProfile?: SessionBillingProfile;
   seatGuestLabels?: unknown;
+  maxInvoiceLimit?: number;
 };
 
 type PatchSessionResponse = {
@@ -519,6 +520,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [pendingGuestApprovalId, setPendingGuestApprovalId] = useState<string | null>(null);
   const [sessionCustomerTypeLocked, setSessionCustomerTypeLocked] = useState(false);
   const [sessionCustomerType, setSessionCustomerType] = useState("cash");
+  const [sessionMaxInvoiceLimit, setSessionMaxInvoiceLimit] = useState<number | null>(null);
   const [guestDecisionBusy, setGuestDecisionBusy] = useState(false);
   const [requestBillBusy, setRequestBillBusy] = useState(false);
   const [summonBusy, setSummonBusy] = useState(false);
@@ -712,6 +714,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     setSessionCustomerTypeLocked(Boolean(row?.customerTypeLocked));
     setSessionCustomerType(String(row?.customerType || (row?.guestSession ? "guest" : bp ? "vip_owner" : "cash")));
     setBillingRequestedAt(row?.billingRequestedAt ? String(row.billingRequestedAt) : null);
+    setSessionMaxInvoiceLimit(typeof row?.maxInvoiceLimit === "number" ? row.maxInvoiceLimit : null);
     const guestCount = clampSeatGuestCount(row?.guestCount, 1);
     setSessionGuestCount(guestCount);
     setGuestCountDraft(String(guestCount));
@@ -1321,6 +1324,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           setSessionGuestApprovalPending(false);
           setSessionCustomerTypeLocked(false);
           setSessionCustomerType("cash");
+          setSessionMaxInvoiceLimit(null);
           setBillingRequestedAt(null);
         }
       }
@@ -2443,6 +2447,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الجلسة حالياً ضيف مؤقت. يمكنك تجهيز السلة فقط، لكن لا يمكن إرسال الطلب قبل اعتماد أو رفض المدير.");
       return;
     }
+    const accumulatedTotal = reviewTotal + total;
+    if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && accumulatedTotal > sessionMaxInvoiceLimit) {
+      setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
+      return;
+    }
     setLoading(true);
     try {
       const items = cart.map((l) => {
@@ -2521,6 +2530,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الجلسة ضيف مؤقت بانتظار قرار المدير. لا يمكن طلب الحساب قبل اعتماد أو رفض المدير.");
       return;
     }
+    if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && reviewTotal > sessionMaxInvoiceLimit) {
+      setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
+      return;
+    }
     if (cart.some((line) => Number(line.qty || 0) > 0)) {
       setMsg("يوجد بنود في السلة لم تُرسل للمطبخ بعد.");
       return;
@@ -2535,6 +2548,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   async function requestBill(opts?: { autoPrint?: boolean }) {
     if (sessionGuestApprovalPending) {
       setMsg("الجلسة ضيف مؤقت بانتظار قرار المدير. لا يمكن طلب الحساب قبل اعتماد أو رفض المدير.");
+      return;
+    }
+    if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && reviewTotal > sessionMaxInvoiceLimit) {
+      setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
       return;
     }
     const autoPrint = Boolean(opts?.autoPrint);
@@ -3119,6 +3136,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div className="waiter-pos__hdr-status">
               <span className="waiter-pos__hdr-status-chip">{desktopTableLabel}</span>
               <span className="waiter-pos__hdr-status-chip">{desktopSessionLabel}</span>
+              {sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 ? (
+                <span className="waiter-pos__hdr-status-chip" style={{ color: "#fbbf24", fontWeight: 800 }}>
+                  حد: {sessionMaxInvoiceLimit.toFixed(2)}
+                </span>
+              ) : null}
               <span className="waiter-pos__hdr-status-chip">{desktopBillingLabel}</span>
             </div>
             <div className="waiter-pos__hdr-primary-actions">
@@ -3625,7 +3647,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   style={{
                     width: "100%",
                     minHeight: 52,
-                    maxHeight: 72,
+                    maxHeight: 120,
                     display: "flex",
                     flexDirection: "column",
                     overflow: "hidden",
@@ -3633,7 +3655,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   }}
                 >
                   {loading && groups.length === 0 ? (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", overflow: "hidden", paddingBottom: 4 }}>
                       {Array.from({ length: 6 }).map((_, i) => (
                         <span key={`skel-${i}`} className="waiter-pos__cat" style={{ flexShrink: 0, width: 72, height: 32, background: "#e2e8f0", borderColor: "transparent", color: "transparent", cursor: "default" }}>
                           &nbsp;
@@ -3641,7 +3663,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       ))}
                     </div>
                   ) : displayMode === "category" && categoryKey !== "all" ? (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", overflow: "hidden", paddingBottom: 4 }}>
                       <button
                         type="button"
                         className="waiter-pos__cat"
@@ -3665,7 +3687,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", overflow: "hidden", paddingBottom: 4 }}>
                       <button
                         type="button"
                         className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
@@ -3773,7 +3795,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         const kn = kitchenNotesParts.join("؛ ");
                         const sn = assignmentMode === "general" ? null : selectedSeat;
                         const line: CartLine = {
-                          id: crypto.randomUUID(),
+                          id: lineId(),
                           productGuide: result.baseProduct.guide,
                           name: lineName,
                           qty: 1,
@@ -4478,7 +4500,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 style={{
                   width: "100%",
                   minHeight: 52,
-                  maxHeight: 72,
+                  maxHeight: 120,
                   display: "flex",
                   flexDirection: "column",
                   overflow: "hidden",
@@ -4486,7 +4508,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 }}
               >
                 {displayMode === "category" && categoryKey !== "all" ? (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", overflow: "hidden", paddingBottom: 4 }}>
                     <button
                       type="button"
                       className="waiter-pos__cat"
@@ -4510,7 +4532,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", overflow: "hidden", paddingBottom: 4 }}>
                     <button
                       type="button"
                       className={`waiter-pos__cat ${categoryKey === "all" ? "waiter-pos__cat--active" : ""}`}
@@ -4668,7 +4690,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       const kn = kitchenNotesParts.join("؛ ");
                       const sn = assignmentMode === "general" ? null : selectedSeat;
                       const line: CartLine = {
-                        id: crypto.randomUUID(),
+                        id: lineId(),
                         productGuide: result.baseProduct.guide,
                         name: lineName,
                         qty: 1,

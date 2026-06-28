@@ -33,7 +33,7 @@ export default function DisplayCategorySettingsPage() {
   async function load() {
     setBusy(true);
     try {
-      const r = await fetch(`${base}/api/product-groups`);
+      const r = await fetch(`${base}/api/product-groups?displayMenu=true`);
       const j = await r.json();
       const list: ProductGroup[] = Array.isArray(j?.groups) ? j.groups : [];
       setGroups(list);

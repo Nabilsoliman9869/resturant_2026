@@ -17,6 +17,10 @@ type OrderRow = {
   tableId?: string;
   status?: string;
   createdAt?: string;
+  prepStartTime?: string;
+  prepTargetMinutes?: number;
+  completedAt?: string;
+  kpiLeadMinutes?: number;
   items?: OrderItem[];
 };
 
@@ -99,6 +103,54 @@ function formatDateShort(iso?: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso.slice(0, 16);
   return d.toLocaleString("ar-EG", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function orderPrepLabel(o: OrderRow): string {
+  const st = String(o.status || "").toLowerCase();
+  if (st === "served" || st === "paid") {
+    if (typeof o.kpiLeadMinutes === "number" && Number.isFinite(o.kpiLeadMinutes)) {
+      return `${o.kpiLeadMinutes.toFixed(1)} د`;
+    }
+    return "—";
+  }
+  if (st === "cancelled") return "—";
+  const target = Number(o.prepTargetMinutes) > 0 ? Number(o.prepTargetMinutes) : 20;
+  const prepStart = o.prepStartTime ? new Date(o.prepStartTime).getTime() : NaN;
+  if (!Number.isFinite(prepStart)) {
+    return st === "pending" ? "بانتظار البدء" : "—";
+  }
+  const deadline = prepStart + target * 60 * 1000;
+  const now = Date.now();
+  const remSec = Math.ceil((deadline - now) / 1000);
+  if (remSec <= 0) {
+    const lateMin = Math.ceil(Math.abs(remSec) / 60);
+    return `متأخر ${lateMin} د`;
+  }
+  const remMin = Math.ceil(remSec / 60);
+  return `متبقي ${remMin} د`;
+}
+
+function orderPrepColor(o: OrderRow): string {
+  const st = String(o.status || "").toLowerCase();
+  if (st === "served" || st === "paid" || st === "cancelled") return "#64748b";
+  const target = Number(o.prepTargetMinutes) > 0 ? Number(o.prepTargetMinutes) : 20;
+  const prepStart = o.prepStartTime ? new Date(o.prepStartTime).getTime() : NaN;
+  if (!Number.isFinite(prepStart)) return "#64748b";
+  const deadline = prepStart + target * 60 * 1000;
+  const now = Date.now();
+  const remSec = Math.ceil((deadline - now) / 1000);
+  if (remSec <= 0) return "#dc2626";
+  if (remSec <= 5 * 60) return "#d97706";
+  return "#16a34a";
+}
+
+function sessionAvgKpi(orders: OrderRow[]): string {
+  const served = orders.filter((o) => ["served", "paid"].includes(String(o.status || "").toLowerCase()));
+  if (!served.length) return "—";
+  const valid = served.filter((o) => typeof o.kpiLeadMinutes === "number" && Number.isFinite(o.kpiLeadMinutes));
+  if (!valid.length) return "—";
+  const avg = valid.reduce((a, o) => a + (o.kpiLeadMinutes || 0), 0) / valid.length;
+  return `${avg.toFixed(1)} د`;
 }
 
 /* ─── component ─── */
@@ -265,6 +317,10 @@ export default function TableSessionsReportPage() {
           av = a.grandTotal;
           bv = b.grandTotal;
           break;
+        case "kpi":
+          av = a.orders.reduce((sum, o) => sum + (Number(o.kpiLeadMinutes) || 0), 0);
+          bv = b.orders.reduce((sum, o) => sum + (Number(o.kpiLeadMinutes) || 0), 0);
+          break;
         default:
           av = String(a.session.startTime || "");
           bv = String(b.session.startTime || "");
@@ -282,7 +338,7 @@ export default function TableSessionsReportPage() {
 
   /* ─── totals ─── */
   const totals = useMemo(() => {
-    return sorted.reduce(
+    const acc = sorted.reduce(
       (acc, r) => {
         acc.sessions += 1;
         acc.orders += r.orders.length;
@@ -295,6 +351,7 @@ export default function TableSessionsReportPage() {
       },
       { sessions: 0, orders: 0, qty: 0, cost: 0, service: 0, vat: 0, grand: 0 },
     );
+    return acc;
   }, [sorted]);
 
   const handleSort = (key: string) => {
@@ -419,6 +476,7 @@ export default function TableSessionsReportPage() {
                   { key: "ready", label: "جاهز" },
                   { key: "served", label: "واصل" },
                   { key: "cancelled", label: "ملغى" },
+                  { key: "kpi", label: "KPI" },
                   { key: "cost", label: "السلة" },
                   { key: "service", label: "الخدمة" },
                   { key: "vat", label: "VAT" },
@@ -488,6 +546,9 @@ export default function TableSessionsReportPage() {
                       <td style={{ padding: "0.55rem", verticalAlign: "top", textAlign: "center", color: "#dc2626" }}>
                         {r.cancelledCount || "—"}
                       </td>
+                      <td style={{ padding: "0.55rem", verticalAlign: "top", textAlign: "center", whiteSpace: "nowrap", fontSize: "0.78rem" }}>
+                        {sessionAvgKpi(r.orders)}
+                      </td>
                       <td style={{ padding: "0.55rem", verticalAlign: "top", textAlign: "right", whiteSpace: "nowrap" }}>
                         {r.totalCost.toFixed(2)}
                       </td>
@@ -512,7 +573,7 @@ export default function TableSessionsReportPage() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={16} style={{ padding: "0.75rem 1rem", background: "#f8fbff" }}>
+                        <td colSpan={17} style={{ padding: "0.75rem 1rem", background: "#f8fbff" }}>
                           <div style={{ marginBottom: 8, fontWeight: 800, fontSize: "0.9rem" }}>
                             طلبات الجلسة ({r.orders.length})
                           </div>
@@ -556,6 +617,11 @@ export default function TableSessionsReportPage() {
                                     </div>
                                     <div style={{ fontSize: "0.78rem", color: "#475569", marginTop: 2 }}>
                                       {String(o.createdAt || "").replace("T", " ").slice(0, 16)}
+                                      {o.prepStartTime ? (
+                                        <span style={{ marginRight: 8, color: orderPrepColor(o), fontWeight: 700 }}>
+                                          · {orderPrepLabel(o)}
+                                        </span>
+                                      ) : null}
                                     </div>
                                     <div style={{ fontSize: "0.85rem", marginTop: 3, fontWeight: 700 }}>
                                       {tot.toFixed(2)} ج.م

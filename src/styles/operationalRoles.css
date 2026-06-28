@@ -3189,15 +3189,26 @@
   background: rgba(255, 255, 255, 0.85);
   border-radius: 999px;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
-  padding: 6px 12px;
+  min-height: 38px;
+  padding: 8px 14px;
   font-size: 0.82rem;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 5px 10px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.waiter-tblcard__pill-row > button.waiter-tblcard__pill {
+  flex: 1 1 0;
+  min-width: 132px;
 }
 
 .waiter-tblcard__pill--assign {
-  width: 112px;
+  min-width: 152px;
+  width: auto;
   text-align: center;
   border-color: rgba(234, 88, 12, 0.35);
   background: linear-gradient(180deg, #fb923c, #ea580c);
@@ -3264,6 +3275,8 @@
 .waiter-tblcard__spec-open {
   margin-top: 10px;
   width: 100%;
+  display: grid;
+  gap: 8px;
 }
 
 .waiter-tblcard__open-order {
@@ -3273,7 +3286,8 @@
   color: #fff;
   font-weight: 950;
   font-size: 0.95rem;
-  padding: 10px 12px;
+  min-height: 46px;
+  padding: 10px 14px;
   border-radius: 12px;
   cursor: pointer;
   box-shadow:
@@ -3297,13 +3311,20 @@
     inset 0 -1px 0 rgba(124, 45, 18, 0.22);
 }
 
-.waiter-tblcard__open-order-hint {
-  margin-top: 6px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  color: #64748b;
-  text-align: center;
-  line-height: 1.35;
+.waiter-tblcard__open-order--secondary {
+  border-color: rgba(30, 64, 175, 0.45);
+  background: linear-gradient(180deg, #2563eb, #1e40af);
+  box-shadow:
+    0 10px 18px rgba(30, 64, 175, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(30, 41, 59, 0.26);
+}
+
+.waiter-tblcard__open-order--secondary:active {
+  box-shadow:
+    0 6px 12px rgba(30, 64, 175, 0.17),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(30, 41, 59, 0.2);
 }
 
 .waiter-tblcard__spec-customer-line {
@@ -3331,6 +3352,7 @@
   font-size: 0.78rem;
   font-weight: 900;
   color: #0f172a;
+  letter-spacing: 0.01em;
 }
 
 .waiter-tblcard__money-est-val {

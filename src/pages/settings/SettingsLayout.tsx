@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { roleHasSystemSettingsAccess, type RoleId } from "../../auth/roles";
 
@@ -15,77 +16,77 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
     {
       title: "1. النظام والتعريفات",
       items: [
-        { to: "master-data", label: "التعريفات الأساسية", hint: "العملة، الوحدات، مجموعات الأصناف..." },
-        { to: "connection", label: "اتصال القاعدة", hint: "إعدادات الاتصال بقاعدة البيانات SQL Server" },
-        { to: "init-db", label: "تهيئة SQL", hint: "إنشاء الجداول الأولية في القاعدة" },
+        { to: "master-data", label: "التعريفات الأساسية", hint: "يؤثر على: الوحدات، العملات، ومجموعات البيانات المرجعية في كل الشاشات" },
+        { to: "connection", label: "اتصال القاعدة", hint: "يؤثر على: حفظ وقراءة كل الإعدادات والبيانات من SQL Server" },
+        { to: "init-db", label: "تهيئة SQL", hint: "يؤثر على: إنشاء الجداول الأولية قبل أي تشغيل فعلي" },
       ],
     },
     {
       title: "2. المنشأ والأساس",
       items: [
-        { to: "pos-venue", label: "نوع المنشأ (POS)", hint: "مطعم، كافيه، فندق — يؤثر على أنماط الفواتير" },
-        { to: "venue", label: "المكان والطابق", hint: "اسم المنشأ، عدد الطوابق، نوع الصالة" },
-        { to: "floor-editor", label: "مخطط الصالة (رسم)", hint: "رسم موقع الطاولات على الخريطة" },
-        { to: "tables", label: "الطاولات والمناطق", hint: "تعريف أرقام الطاولات وربطها بالمخطط" },
+        { to: "pos-venue", label: "نوع المنشأ (POS)", hint: "يؤثر على: شكل الفواتير، بعض المسميات، وسلوك التشغيل العام" },
+        { to: "venue", label: "المكان والطابق", hint: "يؤثر على: اسم المنشأ، عدد الطوابق، وصياغة الواجهة" },
+        { to: "floor-editor", label: "مخطط الصالة (رسم)", hint: "يؤثر على: توزيع الطاولات وظهورها بصرياً في شاشة الصالة" },
+        { to: "tables", label: "الطاولات والمناطق", hint: "يؤثر على: أرقام الطاولات، المناطق، وربطها بالمخطط" },
       ],
     },
     {
-      title: "3. المنيو والمنتجات",
+      title: "3. الأصناف والمنيو",
       items: [
-        { to: "menus", label: "المنيو", hint: "تنظيم الأصناف في مجموعات وعرضها في POS" },
-        { to: "display-categories", label: "تصنيفات عرض المنيو", hint: "ربط مجموعات TBL006 بتصنيفات عرض رئيسية في شاشة الجرسون" },
-        { to: "product-images", label: "صور المنتجات", hint: "رفع صور الأصناف للعرض في المنيو" },
-        { to: "addons", label: "الإضافات (كتالوج)", hint: "إضافات اختيارية يمكن اختيارها مع الأصناف" },
-        { to: "modifier-groups", label: "إعدادات الشرائح (Wizard)", hint: "تعريف الشرائح العامة وخياراتها والكتابة الحرة داخلها" },
-        { to: "product-modifier-links", label: "بروفايلات الأصناف", hint: "ربط كل صنف بالشرائح المناسبة له وترتيبها وخصائصها" },
-        { to: "price-lists", label: "قوائم الأسعار", hint: "تعديل الأسعار لكل صنف حسب قائمة السعر" },
-        { to: "costing-mode", label: "أساس التكلفة", hint: "طريقة حساب التكلفة: منيو أو تكلفة + نسبة" },
+        { to: "menus", label: "المنيو", hint: "يؤثر على: تجميع الأصناف وطريقة عرضها في POS وشاشات الطلب" },
+        { to: "display-categories", label: "تصنيفات عرض المنيو", hint: "يؤثر على: خريطة العرض في شاشة الجرسون وربط المجموعات الرئيسية" },
+        { to: "product-images", label: "صور المنتجات", hint: "يؤثر على: صور الأصناف في شاشة المنيو، البطاقات، والمراجعة السريعة" },
+        { to: "modifier-groups", label: "إعدادات الشرائح (Wizard)", hint: "يؤثر على: خيارات التعديل، الشرائح، والكتابة الحرة أثناء إضافة الصنف" },
+        { to: "product-modifier-links", label: "بروفايلات الأصناف", hint: "يؤثر على: الشرائح المتاحة لكل صنف وترتيبها وسلوك الإضافة" },
+        { to: "addons", label: "الإضافات (كتالوج)", hint: "يؤثر على: الإضافات الاختيارية التي تظهر مع الأصناف" },
+        { to: "price-lists", label: "قوائم الأسعار", hint: "يؤثر على: سعر الصنف في الطلب، الكاشير، والتقارير" },
+        { to: "costing-mode", label: "أساس التكلفة", hint: "يؤثر على: طريقة احتساب تكلفة الصنف وهامش الربح" },
       ],
     },
     {
       title: "4. المطبخ والإنتاج",
       items: [
-        { to: "pos-kds", label: "شاشة المطبخ (KDS)", hint: "طريقة عرض الطلبات للطباخين" },
-        { to: "pos-prep-times", label: "زمن التحضير لكل صنف", hint: "مدة تحضير كل صنف لحساب وقت التسليم المتوقع" },
-        { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ", hint: "إيقاف بيع أصناف مؤقتاً عند نفاد المخزون" },
+        { to: "pos-kds", label: "شاشة المطبخ (KDS)", hint: "يؤثر على: عرض الطلبات للطباخين، المسارات، والتنبيه عند التأخير" },
+        { to: "pos-prep-times", label: "زمن التحضير لكل صنف", hint: "يؤثر على: وقت التسليم المتوقع، العدّاد، وتقارير الأداء" },
+        { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ", hint: "يؤثر على: إيقاف بيع الصنف في الطلب والبحث والماكينة" },
       ],
     },
     {
       title: "5. السياسات المالية",
       items: [
-        { to: "pos-tax", label: "الضريبة والخدمة", hint: "نسبة الضريبة المضافة ونسبة الخدمة" },
-        { to: "minimum-charge", label: "الحد الأدنى للطاولة", hint: "القيمة الافتراضية التي يجب أن يصل إليها حساب كل طاولة" },
-        { to: "pos-promos", label: "العروض والتخفيضات", hint: "إنشاء عروض وأكواد خصم" },
-        { to: "payment-routing", label: "ربط التحصيل (حسابات)", hint: "حسابات التحصيل لكل وسيلة دفع" },
+        { to: "pos-tax", label: "الضريبة والخدمة", hint: "يؤثر على: إجمالي الفاتورة، الحساب النهائي، وتقارير الكاشير" },
+        { to: "minimum-charge", label: "الحد الأدنى للطاولة", hint: "يؤثر على: الحد الأدنى المفروض على كل جلسة والطباعة المحاسبية" },
+        { to: "pos-promos", label: "العروض والتخفيضات", hint: "يؤثر على: الخصومات المطبقة في الطلب والفاتورة والتسويات" },
+        { to: "payment-routing", label: "ربط التحصيل (حسابات)", hint: "يؤثر على: ترحيل المدفوعات لكل وسيلة دفع في الحسابات" },
       ],
     },
     {
       title: "6. دورة العمل والأدوار",
       items: [
-        { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "دورة العمل، التنظيف، مسارات الأدوار، VIP، تدقيق" },
-        { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "دوام كل موظف حسب دوره في النظام" },
-        { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "تحديد الطاولات التي يراها كل كابتن خلال فترة زمنية" },
-        { to: "users", label: "مستخدمو التطبيق", hint: "إنشاء وإدارة حسابات الدخول للموظفين" },
-        { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "إعدادات الطابعات والأجهزة المشتركة" },
+        { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "يؤثر على: التسكين، التنظيف، التنبيهات، ومسارات الأدوار" },
+        { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "يؤثر على: من يستطيع الدخول والظهور في الوردية اليوم" },
+        { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "يؤثر على: الطاولات المرئية والمسموح بها لكل كابتن" },
+        { to: "users", label: "مستخدمو التطبيق", hint: "يؤثر على: حسابات الدخول، الأدوار، والصلاحيات" },
+        { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "يؤثر على: الأجهزة المشتركة، PIN، والسلوك الموحد" },
       ],
     },
     {
       title: "7. العملاء والخدمات الإضافية",
       items: [
-        { to: "customer-vip", label: "تعريف العملاء والمالكين", hint: "تعريف عملاء TBL016 ومجموعات TBL015 وإعدادات المالك/VIP" },
-        { to: "kids-area-packages", label: "باقات منطقة الأطفال", hint: "أسعار الدخول والباقات لمنطقة الأطفال" },
+        { to: "customer-vip", label: "تعريف العملاء والمالكين", hint: "يؤثر على: مالك/VIP/عميل آجل وربطه بالجلسات والفواتير" },
+        { to: "kids-area-packages", label: "باقات منطقة الأطفال", hint: "يؤثر على: أسعار الدخول، الباقات، وربطها بالحساب" },
       ],
     },
     {
       title: "8. التدقيق والتكاليف اليومية",
       items: [
-        { to: "audit-compliance", label: "التدقيق والامتثال", hint: "سجلات التدقيق، جدولة الأدوار، سياسة الدليفري" },
-        { to: "costing", label: "التكاليف اليومية", hint: "إدخال تكاليف المواد الخام يومياً" },
-        { to: "daily-opening-custody", label: "عهدة أول اليوم", hint: "المبلغ المبدئي في الصندوق" },
-        { to: "daily-return", label: "المسترد والمرتجعات", hint: "قيمة المرتجعات اليومية" },
-        { to: "daily-overhead", label: "مصاريف التشغيل", hint: "مصاريف الكهرباء، الإيجار، الرواتب..." },
-        { to: "daily-cost-engine", label: "محرك التكلفة", hint: "حساب التكلفة الفعلية لكل صنف" },
-        { to: "daily-result", label: "النتيجة اليومية", hint: "صافي الربح أو الخسارة اليومية" },
+        { to: "audit-compliance", label: "التدقيق والامتثال", hint: "يؤثر على: السجلات، المتابعة، والسياسات التشغيلية الحساسة" },
+        { to: "costing", label: "التكاليف اليومية", hint: "يؤثر على: إدخال تكلفة المواد الخام والحسابات اليومية" },
+        { to: "daily-opening-custody", label: "عهدة أول اليوم", hint: "يؤثر على: رصيد بداية اليوم في الصندوق" },
+        { to: "daily-return", label: "المسترد والمرتجعات", hint: "يؤثر على: المرتجعات اليومية وتصفية العهدة" },
+        { to: "daily-overhead", label: "مصاريف التشغيل", hint: "يؤثر على: مصروفات الكهرباء، الإيجار، الرواتب، وغيرها" },
+        { to: "daily-cost-engine", label: "محرك التكلفة", hint: "يؤثر على: التكلفة الفعلية وربحية الأصناف" },
+        { to: "daily-result", label: "النتيجة اليومية", hint: "يؤثر على: صافي الربح أو الخسارة اليومية" },
       ],
     },
   ];
@@ -95,36 +96,36 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
       {
         title: "1. الصالة والمتابعة اليومية",
         items: [
-          { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "السياسات اليومية للتسكين والتنبيهات ومسار الخدمة" },
-          { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "تحديد من يعمل اليوم وعلى أي دور" },
-          { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "تخصيص الطاولات للجرسونات حسب الفترة" },
-          { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "إعدادات الجهاز المشترك والـ PIN والتبديل" },
+          { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "يؤثر على: التسكين، التنبيهات، وسير الخدمة اليومي" },
+          { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "يؤثر على: من يعمل اليوم ومن يُسمح له بالدخول" },
+          { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "يؤثر على: الطاولات المرئية لكل جرسون في الوردية" },
+          { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "يؤثر على: الجهاز المشترك، PIN، ومسار التبديل" },
         ],
       },
       {
         title: "2. المطبخ والتجهيز الفوري",
         items: [
-          { to: "pos-kds", label: "شاشة المطبخ (KDS)", hint: "تفعيل وعرض الطلبات على شاشة المطبخ" },
-          { to: "pos-prep-times", label: "زمن التحضير لكل صنف", hint: "تحديد أزمنة التحضير المستخدمة يومياً" },
-          { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ", hint: "إيقاف الأصناف غير المتاحة أثناء التشغيل" },
+          { to: "pos-kds", label: "شاشة المطبخ (KDS)", hint: "يؤثر على: عرض الطلبات والتنبيه عند التباطؤ" },
+          { to: "pos-prep-times", label: "زمن التحضير لكل صنف", hint: "يؤثر على: وقت التسليم المتوقع وقياس الأداء" },
+          { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ", hint: "يؤثر على: ظهور الصنف للبيع والطلب" },
         ],
       },
       {
         title: "3. السياسات الساخنة",
         items: [
-          { to: "minimum-charge", label: "الحد الأدنى للطاولة", hint: "حد أدنى تشغيلي يمكن متابعته يومياً" },
+          { to: "minimum-charge", label: "الحد الأدنى للطاولة", hint: "يؤثر على: الحد الأدنى التشغيلي لكل جلسة وحسابها" },
         ],
       },
       {
         title: "4. المراكز والتقارير",
         items: [
-          { to: `${roleBase}/manager-approvals`, label: "موافقات المدير", absolute: true },
-          { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true },
-          { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true },
-          { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true },
-          { to: `${roleBase}/reports`, label: "تقارير", absolute: true },
-          { to: `${roleBase}/flash-report`, label: "تقرير سريع", absolute: true },
-          { to: `${roleBase}/table-sessions-report`, label: "تقرير جلسات الطاولات", absolute: true },
+          { to: `${roleBase}/manager-approvals`, label: "موافقات المدير", absolute: true, hint: "يؤثر على: الموافقات الحساسة كتحويل الجلسات وحدود الفواتير" },
+          { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true, hint: "يؤثر على: المرتجعات وربطها بالحسابات والجلسات" },
+          { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true, hint: "يؤثر على: أوامر التوصيل وحركة المكالمات" },
+          { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true, hint: "يؤثر على: متابعة المناديب والرحلات" },
+          { to: `${roleBase}/reports`, label: "تقارير", absolute: true, hint: "يؤثر على: تحليل الأداء والقرارات التشغيلية" },
+          { to: `${roleBase}/flash-report`, label: "تقرير سريع", absolute: true, hint: "يؤثر على: لقطة فورية للوضع الحالي" },
+          { to: `${roleBase}/table-sessions-report`, label: "تقرير جلسات الطاولات", absolute: true, hint: "يؤثر على: تحليل الجلسات، الطلبات، وقياسات الزمن" },
         ],
       },
     ];
@@ -134,13 +135,13 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
     fullSections.push({
       title: "9. المراكز الإدارية المرتبطة",
       items: [
-        { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true },
-        { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true },
-        { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true },
-        { to: `${roleBase}/purchases`, label: "المشتريات", absolute: true },
-        { to: `${roleBase}/cash-expense`, label: "صرف مصروفات", absolute: true },
-        { to: `${roleBase}/reports`, label: "تقارير الحسابات", absolute: true },
-        { to: `${roleBase}/cashflow`, label: "التدفق النقدي", absolute: true },
+        { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true, hint: "يؤثر على: مرتجعات الضيوف والتسويات" },
+        { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true, hint: "يؤثر على: استقبال أوامر الدليفري" },
+        { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true, hint: "يؤثر على: توزيع المناديب وحالة التسليم" },
+        { to: `${roleBase}/purchases`, label: "المشتريات", absolute: true, hint: "يؤثر على: أوامر الشراء والمخزون" },
+        { to: `${roleBase}/cash-expense`, label: "صرف مصروفات", absolute: true, hint: "يؤثر على: المصروفات النقدية اليومية" },
+        { to: `${roleBase}/reports`, label: "تقارير الحسابات", absolute: true, hint: "يؤثر على: قراءة الأداء المالي والتشغيلي" },
+        { to: `${roleBase}/cashflow`, label: "التدفق النقدي", absolute: true, hint: "يؤثر على: تتبع الداخل والخارج النقدي" },
       ],
     });
   }
@@ -150,12 +151,41 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
   return fullSections;
 }
 
+function itemHref(base: string, item: SettingsNavItem): string {
+  return item.absolute ? item.to : `${base}/${item.to}`;
+}
+
+function findActiveSectionTitle(pathname: string, base: string, sections: SettingsNavSection[]): string | null {
+  for (const sec of sections) {
+    for (const item of sec.items) {
+      const href = itemHref(base, item);
+      if (pathname === href || pathname.startsWith(`${href}/`)) {
+        return sec.title;
+      }
+    }
+  }
+  return sections[0]?.title ?? null;
+}
+
 export default function SettingsLayout() {
   const loc = useLocation();
   const role = roleFromPath(loc.pathname);
   const base = role ? `/app/${role}/settings` : "/app/manager/settings";
   const sections = buildSettingsSections(role);
   const asideTitle = role === "operation_manager" ? "إعدادات مدير التشغيل" : "مركز الإعدادات والإدارة";
+  const defaultOpenTitle = useMemo(() => findActiveSectionTitle(loc.pathname, base, sections), [loc.pathname, base, sections]);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
+    defaultOpenTitle ? { [defaultOpenTitle]: true } : {},
+  );
+
+  useEffect(() => {
+    if (!defaultOpenTitle) return;
+    setOpenSections((prev) => ({ ...prev, [defaultOpenTitle]: true }));
+  }, [defaultOpenTitle]);
+
+  function toggleSection(title: string) {
+    setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }));
+  }
 
   return (
     <div style={{ display: "flex", gap: "1.25rem", alignItems: "stretch", minHeight: "70vh" }}>
@@ -189,31 +219,58 @@ export default function SettingsLayout() {
             : "ترتيب مرقّم للتدريب والتشغيل، مع ضم الشاشات الإدارية المرتبطة داخل مرجع واحد."}
         </div>
         {sections.map((sec) => (
-          <div key={sec.title}>
-            <div
+          <div
+            key={sec.title}
+            style={{
+              border: "1px solid rgba(148,163,184,0.14)",
+              borderRadius: 12,
+              background: openSections[sec.title] ? "rgba(15,23,42,0.18)" : "rgba(255,255,255,0.03)",
+              overflow: "hidden",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => toggleSection(sec.title)}
               style={{
-                fontSize: "0.8rem",
-                fontWeight: 800,
-                color: "var(--muted)",
-                marginBottom: "0.35rem",
-                opacity: 0.9,
+                width: "100%",
+                border: "none",
+                background: "transparent",
+                color: "var(--text)",
+                cursor: "pointer",
+                padding: "0.7rem 0.8rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                fontSize: "0.88rem",
+                fontWeight: 900,
+                textAlign: "right",
               }}
+              aria-expanded={openSections[sec.title] ? "true" : "false"}
             >
-              {sec.title}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              {sec.items.map((it, itemIndex) => (
-                <NavLink
-                  key={`${sec.title}-${it.to}`}
-                  to={it.absolute ? it.to : `${base}/${it.to}`}
-                  title={it.hint || ""}
-                  className={({ isActive }) => (isActive ? "nav-link nav-link--active" : "nav-link")}
-                  style={{ fontSize: "0.92rem", padding: "0.45rem 0.6rem" }}
-                >
-                  {`${sec.title.split(".")[0]}.${itemIndex + 1} ${it.label}`}
-                </NavLink>
-              ))}
-            </div>
+              <span>{sec.title}</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>{openSections[sec.title] ? "▲" : "▼"}</span>
+            </button>
+            {openSections[sec.title] ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.28rem", padding: "0 0.45rem 0.5rem" }}>
+                {sec.items.map((it, itemIndex) => (
+                  <NavLink
+                    key={`${sec.title}-${it.to}`}
+                    to={itemHref(base, it)}
+                    title={it.hint || ""}
+                    className={({ isActive }) => (isActive ? "nav-link nav-link--active" : "nav-link")}
+                    style={{
+                      fontSize: "0.9rem",
+                      padding: "0.52rem 0.65rem",
+                      borderRadius: 10,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {`${sec.title.split(".")[0]}.${itemIndex + 1} ${it.label}`}
+                  </NavLink>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
       </aside>

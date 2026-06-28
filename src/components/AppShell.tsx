@@ -409,13 +409,43 @@ export function AppShell({ role }: { role: RoleId }) {
               </div>
             ) : null}
             {isOrderTakerFullscreen ? null : (
-              <div style={{ padding: "0.45rem 0.75rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div
+                style={{
+                  padding: "0.45rem 0.75rem",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
                 <DbConnectionBar compact />
                 {role === "developer" ? (
-                  <button type="button" className="btn btn-ghost" onClick={() => { window.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, key: "k" })); }} style={{ fontSize: "0.82rem", gap: 6, display: "inline-flex", alignItems: "center" }}>
-                    🔍 البحث <kbd style={{ fontSize: 10, opacity: 0.5, background: "var(--surface)", padding: "1px 6px", borderRadius: 4 }}>Ctrl+K</kbd>
-                  </button>
+                  <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        window.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, key: "k" }));
+                      }}
+                      style={{
+                        minWidth: 360,
+                        maxWidth: "min(100%, 560px)",
+                        width: "100%",
+                        fontSize: "0.9rem",
+                        gap: 8,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0.7rem 1rem",
+                        borderRadius: 999,
+                      }}
+                    >
+                      🔍 بحث الإعدادات
+                      <kbd style={{ fontSize: 10, opacity: 0.5, background: "var(--surface)", padding: "1px 6px", borderRadius: 4 }}>Ctrl+K</kbd>
+                    </button>
+                  </div>
                 ) : null}
+                <div style={{ width: role === "developer" ? 88 : 0, flexShrink: 0 }} />
               </div>
             )}
             {role === "cashier" ? <CashierAlertsBar /> : null}

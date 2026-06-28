@@ -55,6 +55,7 @@ type TableSession = {
   };
 };
 type StaffUser = { id: string; login: string; name: string; role: string; isActive?: boolean };
+type RoleSchedEntry = { id: number; userId: string; roleCode: string; validFrom: string; validTo: string };
 type VipTemplate = { id: string; label: string; active: boolean; agentGuid: string };
 type OwnersVipAgent = { CardGuide: string; AgentName: string };
 type OrderItem = { name?: string; quantity?: number; unitPrice?: number };
@@ -117,12 +118,14 @@ export default function WaiterTablesPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [report, setReport] = useState<TableReport | null>(null);
   const [policy, setPolicy] = useState({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
+  const [defaultMinimumCharge, setDefaultMinimumCharge] = useState(0);
   const [exclusiveOn, setExclusiveOn] = useState(false);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [reassignSid, setReassignSid] = useState<string | null>(null);
   const [reassignPickId, setReassignPickId] = useState("");
-  const [claimBusyTableId, setClaimBusyTableId] = useState<string>("");
+  const [claimBusyTableIds, setClaimBusyTableIds] = useState<Set<string>>(() => new Set());
   const [reassignBusy, setReassignBusy] = useState(false);
+  const [enforceShift, setEnforceShift] = useState(false);
   const [alertPresets, setAlertPresets] = useState<AlertPreset[]>([]);
   const [alertPickByTable, setAlertPickByTable] = useState<Record<string, string>>({});
   const [alertBusyByTable, setAlertBusyByTable] = useState<Record<string, boolean>>({});
@@ -142,6 +145,16 @@ export default function WaiterTablesPage() {
   const [tableJumpQuery, setTableJumpQuery] = useState("");
   const [tableJumpHighlightId, setTableJumpHighlightId] = useState<string | null>(null);
   const tableCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [approvalModalSessionId, setApprovalModalSessionId] = useState<string>("");
+  const [approvalDecisionId, setApprovalDecisionId] = useState("approve_guest_session");
+  const [approvalMaxLimit, setApprovalMaxLimit] = useState("");
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [agentPickerTableId, setAgentPickerTableId] = useState<string>("");
+  const [agentPickerType, setAgentPickerType] = useState<"owner" | "vip" | "credit">("owner");
+  const [agentPickerSearch, setAgentPickerSearch] = useState("");
+  const [agentPickerResults, setAgentPickerResults] = useState<OwnersVipAgent[]>([]);
+  const [agentPickerBusy, setAgentPickerBusy] = useState(false);
 
   /**
    * قالب صالح للعرض = مفعّل **و** عنده ما يميّزه (اسم محدد أو عميل مربوط).
@@ -275,6 +288,13 @@ export default function WaiterTablesPage() {
       setExclusiveOn(exclusiveEnabled);
 
       try {
+        const shiftOn = String((opsj as Record<string, unknown>)?.enforceRoleScheduleForShift || "").trim().toLowerCase();
+        setEnforceShift(shiftOn === "on" || shiftOn === "1" || shiftOn === "true" || shiftOn === "yes");
+      } catch {
+        setEnforceShift(false);
+      }
+
+      try {
         const raw = String((opsj as { vipOwnerTemplatesJson?: unknown })?.vipOwnerTemplatesJson || "").trim();
         const arr = raw ? (JSON.parse(raw) as unknown[]) : [];
         const rows = (Array.isArray(arr) ? arr : [])
@@ -319,6 +339,13 @@ export default function WaiterTablesPage() {
         setPolicy({ servicePercent: Number.isFinite(svc) ? svc : 12, vatPercent: Number.isFinite(vat) ? vat : 14, serviceBeforeVat: before });
       } catch {
         setPolicy({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
+      }
+
+      try {
+        const rawDefaultMin = Number((opsj as Record<string, unknown>)["tableDefaultMinimumCharge"] ?? 0);
+        setDefaultMinimumCharge(Number.isFinite(rawDefaultMin) ? Math.max(0, rawDefaultMin) : 0);
+      } catch {
+        setDefaultMinimumCharge(0);
       }
 
       const apiTables: RestTable[] = Array.isArray(jt["tables"]) ? (jt["tables"] as RestTable[]) : [];
@@ -440,9 +467,17 @@ export default function WaiterTablesPage() {
         applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, snap.waiterTableAssignments, snap.tempCaptainTransfers, hint);
         if (needUsers) {
           const u = Array.isArray(snap.users) ? (snap.users as StaffUser[]) : [];
+          const sched = Array.isArray(snap.roleSchedule) ? (snap.roleSchedule as RoleSchedEntry[]) : [];
           if (u.length) {
+            const todayIso = (() => { const d = new Date(); const m = `${d.getMonth()+1}`.padStart(2,'0'); const day = `${d.getDate()}`.padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; })();
+            const hasSchedToday = (userId: string) => sched.some((s) => String(s.userId).toLowerCase() === String(userId).toLowerCase() && String(s.validFrom || "").slice(0,10) <= todayIso && String(s.validTo || "").slice(0,10) >= todayIso);
             setStaffUsers(
-              u.filter((x) => ["waiter", "host"].includes(String(x.role || "").toLowerCase()) && x.isActive !== false),
+              u.filter((x) => {
+                const roleOk = ["waiter", "host"].includes(String(x.role || "").toLowerCase());
+                const activeOk = x.isActive !== false;
+                const schedOk = !enforceShift || hasSchedToday(x.id);
+                return roleOk && activeOk && schedOk;
+              }),
             );
           }
         }
@@ -552,12 +587,20 @@ export default function WaiterTablesPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await safeFetch(`${base}/api/auth/users`);
-        const j = tryParseJson<{ users?: StaffUser[] }>(await res.text()) ?? {};
+        const res = await safeFetch(`${base}/api/auth/users?includeRoleSchedule=1`);
+        const j = tryParseJson<{ users?: StaffUser[]; roleSchedule?: RoleSchedEntry[] }>(await res.text()) ?? {};
         if (cancelled || !res.ok) return;
         const u = Array.isArray(j.users) ? j.users : [];
+        const sched = Array.isArray(j.roleSchedule) ? j.roleSchedule : [];
+        const todayIso = (() => { const d = new Date(); const m = `${d.getMonth()+1}`.padStart(2,'0'); const day = `${d.getDate()}`.padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; })();
+        const hasSchedToday = (userId: string) => sched.some((s) => String(s.userId).toLowerCase() === String(userId).toLowerCase() && String(s.validFrom || "").slice(0,10) <= todayIso && String(s.validTo || "").slice(0,10) >= todayIso);
         setStaffUsers(
-          u.filter((x) => ["waiter", "host"].includes(String(x.role || "").toLowerCase()) && x.isActive !== false),
+          u.filter((x) => {
+            const roleOk = ["waiter", "host"].includes(String(x.role || "").toLowerCase());
+            const activeOk = x.isActive !== false;
+            const schedOk = !enforceShift || hasSchedToday(x.id);
+            return roleOk && activeOk && schedOk;
+          }),
         );
       } catch {
         /* ignore */
@@ -697,8 +740,8 @@ export default function WaiterTablesPage() {
    * - بجلسة نشطة بلا كابتن (أو لتأكيد الكابتن) → نستخدم مسار `/claim-order-taker` كما كان.
    * بهذا السلوك يصبح زر «تسكين» في الشريحة هو الفعل الأول الذي يحجز الطاولة على المُسكِّن.
    */
-  async function claimCaptain(args: { tableId: string; sessionId?: string | null }) {
-    const { tableId, sessionId } = args;
+  async function claimCaptain(args: { tableId: string; sessionId?: string | null; navigateAfterClaim?: boolean }) {
+    const { tableId, sessionId, navigateAfterClaim = false } = args;
     const claimTimeoutMs = 12000;
     setMsg("");
     const actor = buildMat3amActor(user);
@@ -706,7 +749,11 @@ export default function WaiterTablesPage() {
       setMsg("تعذر تحديد المستخدم — أعد تسجيل الدخول.");
       return;
     }
-    setClaimBusyTableId(String(tableId));
+    setClaimBusyTableIds((prev) => {
+      const next = new Set(prev);
+      next.add(String(tableId));
+      return next;
+    });
     try {
       let r: Response;
       let okMessage = "";
@@ -722,18 +769,36 @@ export default function WaiterTablesPage() {
         );
         okMessage = "تم تسكينك كابتن على هذه الجلسة.";
       } else {
-        const customerType = customerTypeByTable[tableId] || "cash";
+        const rawCustomerType = customerTypeByTable[tableId] || "cash";
+        let customerType = rawCustomerType;
+        let agentGuid: string | undefined;
+        if (rawCustomerType.includes(":")) {
+          const [typePart, guidPart] = rawCustomerType.split(":", 2);
+          customerType = typePart;
+          agentGuid = guidPart;
+        }
+        const body: Record<string, unknown> = {
+          tableId,
+          mat3amActor: actor,
+          assignOrderTaker: true,
+          startedByRole: actor.role,
+          startReason: "captain_seat_from_table_card",
+          customerType,
+        };
+        const rawMin = String(minChargeDraftByTable[tableId] ?? "").trim();
+        if (rawMin) {
+          const parsedMin = Number(rawMin);
+          if (Number.isFinite(parsedMin) && parsedMin >= 0) {
+            body.minimumChargePerSeat = parsedMin;
+          }
+        }
+        if (agentGuid) {
+          body.agentGuid = agentGuid;
+        }
         r = await safeFetch(`${base}/api/restaurant/table-sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tableId,
-            mat3amActor: actor,
-            assignOrderTaker: true,
-            startedByRole: actor.role,
-            startReason: "captain_seat_from_table_card",
-            customerType,
-          }),
+          body: JSON.stringify(body),
           timeoutMs: claimTimeoutMs,
         });
         okMessage = "تم فتح جلسة وتسكينك كابتن على الطاولة.";
@@ -749,13 +814,19 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      const j = tryParseJson<TableSession | { session?: TableSession; approvalRequested?: boolean; message?: string }>(t);
+      const j = tryParseJson<
+        TableSession | { session?: TableSession; approvalRequested?: boolean; message?: string; action?: string }
+      >(t);
       if (j && typeof j === "object" && "approvalRequested" in j && j.approvalRequested) {
         setMsg(typeof j.message === "string" && j.message.trim() ? j.message : "تم رفع طلب موافقة للمدير.");
         await loadTables();
         return;
       }
       const session = j && typeof j === "object" && "session" in j ? j.session : (j as TableSession | null);
+      const activeTableCount =
+        session && typeof session === "object" && typeof (session as { captainActiveTableCountToday?: unknown }).captainActiveTableCountToday === "number"
+          ? Number((session as { captainActiveTableCountToday?: number }).captainActiveTableCountToday || 0)
+          : 0;
       if (session && !String(session.captainUserId || "").trim()) {
         session.captainUserId = actor.id;
         session.captainLogin = actor.login;
@@ -763,14 +834,20 @@ export default function WaiterTablesPage() {
         session.captainRole = actor.role;
       }
       applyClaimedSessionLocally(session, String(tableId));
-      setMsg(okMessage);
-      const newSessionId = session?.id || sessionId;
-      const q = `tableId=${encodeURIComponent(tableId)}` + (newSessionId ? `&sessionId=${encodeURIComponent(String(newSessionId))}` : "");
-      navigate(`${orderTakerBase}/order-taker?${q}`);
+      setMsg(activeTableCount > 1 ? `${okMessage} لديك الآن ${activeTableCount} طاولات نشطة اليوم.` : okMessage);
+      if (navigateAfterClaim) {
+        const newSessionId = session?.id || sessionId;
+        const q = `tableId=${encodeURIComponent(tableId)}` + (newSessionId ? `&sessionId=${encodeURIComponent(String(newSessionId))}` : "");
+        navigate(`${orderTakerBase}/order-taker?${q}`);
+      }
     } catch (e) {
       setMsg(briefNetworkHint(e));
     } finally {
-      setClaimBusyTableId("");
+      setClaimBusyTableIds((prev) => {
+        const next = new Set(prev);
+        next.delete(String(tableId));
+        return next;
+      });
     }
   }
 
@@ -822,18 +899,21 @@ export default function WaiterTablesPage() {
       setMsg("لم أجد طلب ضيف معلقاً لهذه الجلسة.");
       return;
     }
-    let managerNote = "";
     if (action === "approve") {
-      if (!window.confirm("اعتماد هذه الجلسة كضيف صالة الآن؟")) return;
-    } else {
-      const note = window.prompt("اكتب سبب رفض جلسة الضيف", "");
-      if (note === null) return;
-      if (!String(note).trim()) {
-        setMsg("سبب رفض جلسة الضيف إلزامي.");
-        return;
-      }
-      managerNote = String(note).trim();
+      setApprovalModalSessionId(sessionId);
+      setApprovalDecisionId("approve_guest_session");
+      setApprovalMaxLimit("");
+      setApprovalModalOpen(true);
+      return;
     }
+    let managerNote = "";
+    const note = window.prompt("اكتب سبب رفض جلسة الضيف", "");
+    if (note === null) return;
+    if (!String(note).trim()) {
+      setMsg("سبب رفض جلسة الضيف إلزامي.");
+      return;
+    }
+    managerNote = String(note).trim();
     setGuestApprovalBusySessionId(sessionId);
     setMsg("");
     try {
@@ -842,7 +922,6 @@ export default function WaiterTablesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
-          decisionId: action === "approve" ? "approve_guest_session" : undefined,
           managerNote: managerNote || undefined,
           reviewedBy: {
             userId: user?.id != null ? String(user.id) : "",
@@ -858,13 +937,102 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
-      setMsg(action === "approve" ? "تم اعتماد جلسة الضيف." : "تم رفض جلسة الضيف وإعادتها إلى عميل نقدي.");
+      setMsg("تم رفض جلسة الضيف وإعادتها إلى عميل نقدي.");
       await loadTables();
     } catch (e) {
       setMsg(briefNetworkHint(e));
     } finally {
       setGuestApprovalBusySessionId("");
     }
+  }
+
+  async function submitApprovalFromModal() {
+    const sessionId = approvalModalSessionId;
+    const requestId = String(guestApprovalRequestBySession[sessionId] || "").trim();
+    if (!requestId) {
+      setMsg("لم أجد طلب ضيف معلقاً لهذه الجلسة.");
+      setApprovalModalOpen(false);
+      return;
+    }
+    const decisionId = approvalDecisionId;
+    let decisionInputValue: string | undefined;
+    if (decisionId === "approve_guest_session_with_limit") {
+      const lim = Number(approvalMaxLimit);
+      if (!Number.isFinite(lim) || lim <= 0) {
+        setMsg("أدخل حداً أقصى صالحاً أكبر من صفر.");
+        return;
+      }
+      decisionInputValue = String(lim);
+    }
+    setGuestApprovalBusySessionId(sessionId);
+    setApprovalModalOpen(false);
+    setMsg("");
+    try {
+      const r = await safeFetch(`${base}/api/restaurant/manager-approvals/${encodeURIComponent(requestId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "approve",
+          decisionId,
+          decisionInputValue,
+          reviewedBy: {
+            userId: user?.id != null ? String(user.id) : "",
+            name: repairArabicDisplayText(String(user?.name || user?.login || "مدير")),
+            role: user?.role || "manager",
+          },
+        }),
+      });
+      const t = await r.text();
+      const j = tryParseJson<{ detail?: unknown }>(t);
+      if (!r.ok) {
+        const d = j?.detail;
+        setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
+        return;
+      }
+      setMsg(decisionId === "approve_guest_session_with_limit" ? "تم الاعتماد مع حد أقصى." : "تم اعتماد جلسة الضيف.");
+      await loadTables();
+    } catch (e) {
+      setMsg(briefNetworkHint(e));
+    } finally {
+      setGuestApprovalBusySessionId("");
+    }
+  }
+
+  async function searchAgents() {
+    const type = agentPickerType;
+    const q = agentPickerSearch.trim();
+    setAgentPickerBusy(true);
+    try {
+      const group = type === "credit" ? "credit_customers" : "owners&vip";
+      const url = `${base}/api/agents/by-group-name?group_name=${encodeURIComponent(group)}`;
+      const r = await safeFetch(url);
+      const j = tryParseJson<{ agents?: OwnersVipAgent[] }>(await r.text()) ?? {};
+      if (!r.ok) {
+        setAgentPickerResults([]);
+        return;
+      }
+      const all = Array.isArray(j.agents) ? j.agents : [];
+      const filtered = q
+        ? all.filter((a) => String(a.AgentName || "").toLowerCase().includes(q.toLowerCase()))
+        : all;
+      setAgentPickerResults(filtered);
+    } catch {
+      setAgentPickerResults([]);
+    } finally {
+      setAgentPickerBusy(false);
+    }
+  }
+
+  function selectAgentForTable(agent: OwnersVipAgent) {
+    const tableId = agentPickerTableId;
+    const type = agentPickerType;
+    setCustomerTypeByTable((prev) => ({
+      ...prev,
+      [tableId]: `${type}:${agent.CardGuide}`,
+    }));
+    setAgentPickerOpen(false);
+    setAgentPickerSearch("");
+    setAgentPickerResults([]);
   }
 
   async function applyNoOrderWatchAction(sessionId: string, action: "snooze" | "close" | "reset_ready" | "reset_table", reason?: string) {
@@ -1408,6 +1576,9 @@ export default function WaiterTablesPage() {
             const minCharge = Number(minRaw);
             const minOk = Number.isFinite(minCharge) ? Math.max(0, minCharge) : 0;
             const minGap = minOk > 0 && money.totalCost < minOk ? minOk - money.totalCost : 0;
+            const hasCustomMinOverride = Math.abs(minOk - defaultMinimumCharge) > 0.0001;
+            const minSourceLabel = hasCustomMinOverride ? (minOk <= 0 ? "استثناء" : "قيمة خاصة") : "افتراضي";
+            const minSourceTone = hasCustomMinOverride ? (minOk <= 0 ? "exception" : "custom") : "default";
             const alertPick = alertPickByTable[String(t.id)] ?? "";
             const alertBusy = Boolean(alertBusyByTable[String(t.id)]);
             const canEditMin = roleHasManagerOpsAccess(user?.role);
@@ -1456,18 +1627,9 @@ export default function WaiterTablesPage() {
               : sidStr
                 ? "الجلسة مفتوحة بدون كابتن"
                 : "لا توجد جلسة نشطة";
-            const claimButtonLabel =
-              claimBusyTableId === String(t.id)
-                ? "جاري التسكين…"
-                : capId && user?.id && String(capId) === String(user.id)
-                  ? "أنت الكابتن ✓"
-                  : sidStr
-                    ? capId
-                      ? "الطاولة مسندة"
-                      : "تسكين كابتن"
-                    : "فتح جلسة";
+            const isClaimBusy = claimBusyTableIds.has(String(t.id));
             const claimButtonTitle =
-              claimBusyTableId === String(t.id)
+              isClaimBusy
                 ? "جارٍ تنفيذ أمر التسكين لهذه الطاولة"
                 : capId && user?.id && String(capId) === String(user.id)
                   ? "أنت الكابتن على هذه الجلسة"
@@ -1476,31 +1638,33 @@ export default function WaiterTablesPage() {
                       ? `الجلسة مسندة إلى ${captainLabel || "كابتن آخر"}`
                       : "ربط الجلسة على الكابتن"
                     : "بدء جلسة وتسكين نفسك على الطاولة";
-            const openOrderDisabled = Boolean(
+            const seatingDisabled = Boolean(
               notReady ||
               guestApprovalPending ||
               (exclusiveOn && capId && user?.id && String(capId) !== String(user.id) && !roleHasManagerOpsAccess(user.role)),
             );
-            const openOrderLabel = guestApprovalPending
+            const seatedByMe = Boolean(sidStr && capId && user?.id && String(capId) === String(user.id));
+            const seatingLabel = guestApprovalPending
               ? "بانتظار الاعتماد"
               : notReady
                 ? "الطاولة غير جاهزة"
-                : !sidStr
-                  ? "فتح الطلب وبدء الجلسة"
-                  : capId && user?.id && String(capId) === String(user.id)
-                    ? "متابعة الطلب"
-                    : sidStr && !capId
-                      ? "فتح الطلب وتأكيد الكابتن"
-                      : roleHasManagerOpsAccess(user?.role)
-                        ? "فتح الطلب"
-                        : "الطاولة مسندة";
-            const openOrderHint = guestApprovalPending
-              ? "بانتظار اعتماد المدير — لا يمكن فتح الطلب حتى يتم الاعتماد"
-              : !sidStr
-                ? "فتح شاشة الطلب سيُنشئ الجلسة تلقائياً لهذه الطاولة"
-                : sidStr && !capId
-                  ? "فتح شاشة الطلب ثم تثبيت الكابتن على الجلسة الحالية"
-                  : "متابعة تشغيل الطلب على الجلسة الحالية";
+                : seatedByMe
+                  ? "متابعة الطلب"
+                  : "تسكين";
+            const seatingHint = guestApprovalPending
+              ? "بانتظار اعتماد المدير — لا يمكن تشغيل الطلب حتى يتم الاعتماد"
+              : notReady
+                ? "أكمل دورة التنظيف أولاً"
+                : seatedByMe
+                  ? "فتح نقطة جرسون الطلبات على نفس الجلسة"
+                  : "ينفذ التسكين فقط بدون فتح نقطة الطلب";
+            const showQuickOpen = !sidStr && !guestApprovalPending && !notReady;
+            const quickOpenDisabled = Boolean(
+              notReady ||
+              guestApprovalPending ||
+              isClaimBusy ||
+              (exclusiveOn && capId && user?.id && String(capId) !== String(user.id) && !roleHasManagerOpsAccess(user.role)),
+            );
             const openOrderTakerForTable = async () => {
               if (notReady) {
                 setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
@@ -1515,6 +1679,11 @@ export default function WaiterTablesPage() {
               ) {
                 const nm = captainLabel || "كابتن آخر";
                 setMsg(`الطاولة مسندة إلى ${nm}. يتدخل المدير لتحويل الكابتن أو سجّل تسكينك إن كنت المسؤول.`);
+                return;
+              }
+              // لو مافيش جلسة، نبدأها أولاً عبر claimCaptain (بينشئ الجلسة ويوجه للطلب)
+              if (!sidStr) {
+                await claimCaptain({ tableId: String(t.id), navigateAfterClaim: true });
                 return;
               }
               // اذا في اختيار VIP/Owner غير مطبّق، نطبّقه تلقائياً قبل فتح الطلب
@@ -1596,16 +1765,33 @@ export default function WaiterTablesPage() {
                     <button
                       type="button"
                       className="waiter-tblcard__open-order"
-                      disabled={openOrderDisabled}
+                      disabled={seatingDisabled || isClaimBusy}
                       onClick={(e) => {
                         e.stopPropagation();
-                        void openOrderTakerForTable();
+                        if (seatedByMe) {
+                          void openOrderTakerForTable();
+                          return;
+                        }
+                        void claimCaptain({ tableId: String(t.id), sessionId: sidStr || null });
                       }}
-                      data-tooltip={openOrderDisabled ? claimButtonTitle : openOrderHint}
+                      data-tooltip={seatingDisabled || isClaimBusy ? claimButtonTitle : seatingHint}
                     >
-                      {openOrderLabel}
+                      {seatingLabel}
                     </button>
-                    <div className="waiter-tblcard__open-order-hint">{openOrderDisabled ? claimButtonTitle : openOrderHint}</div>
+                    {showQuickOpen ? (
+                      <button
+                        type="button"
+                        className="waiter-tblcard__open-order waiter-tblcard__open-order--secondary"
+                        disabled={quickOpenDisabled}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openOrderTakerForTable();
+                        }}
+                        title="يفتح نقطة جرسون الطلبات مباشرة ويقوم بالتسكين ضمنياً"
+                      >
+                        {isClaimBusy ? "جاري الفتح…" : "فتح الطلب وبدء الجلسة"}
+                      </button>
+                    ) : null}
                   </div>
 
                   <div className="waiter-tblcard__spec-row1" onClick={(e) => e.stopPropagation()}>
@@ -1625,40 +1811,30 @@ export default function WaiterTablesPage() {
                             minWidth: 0,
                           }}
                           value={customerTypeByTable[String(t.id)] || "cash"}
-                          onChange={(e) =>
-                            setCustomerTypeByTable((prev) => ({
-                              ...prev,
-                              [String(t.id)]: e.target.value,
-                            }))
-                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === "owner" || val === "vip" || val === "credit") {
+                              setAgentPickerTableId(String(t.id));
+                              setAgentPickerType(val);
+                              setAgentPickerSearch("");
+                              setAgentPickerResults([]);
+                              setAgentPickerOpen(true);
+                            } else {
+                              setCustomerTypeByTable((prev) => ({
+                                ...prev,
+                                [String(t.id)]: val,
+                              }));
+                            }
+                          }}
                           title="نوع العميل قبل التسكين"
                         >
                           <option value="cash">عميل نقدي</option>
                           <option value="guest">ضيف صالة</option>
-                          <option value="owner">مالك</option>
-                          <option value="vip">شخص مهم</option>
+                          <option value="owner">مالك (اختيار من القائمة)</option>
+                          <option value="vip">شخص مهم (اختيار من القائمة)</option>
+                          <option value="credit">عميل آجل (اختيار من القائمة)</option>
                         </select>
                       ) : null}
-                      <button
-                        type="button"
-                        className="waiter-tblcard__pill waiter-tblcard__pill--assign"
-                        disabled={
-                          claimBusyTableId === String(t.id) ||
-                          notReady ||
-                          Boolean(
-                            exclusiveOn &&
-                            capId &&
-                            user?.id &&
-                            String(capId) !== String(user.id) &&
-                            !roleHasManagerOpsAccess(user.role),
-                          )
-                        }
-                        onClick={() => void claimCaptain({ tableId: String(t.id), sessionId: sidStr || null })}
-                        title={claimButtonTitle}
-                      >
-                        {claimButtonLabel}
-                      </button>
-
                       {sidStr &&
                         capId &&
                         user?.id &&
@@ -1902,7 +2078,9 @@ export default function WaiterTablesPage() {
 
                   <div className="waiter-tblcard__spec-money">
                     <div className="waiter-tblcard__money-est">
-                      <div className="waiter-tblcard__money-est-label">قيمة تقديرية</div>
+                      <div className="waiter-tblcard__money-est-label" data-tooltip="إجمالي قيمة الطلبات الحالية على الطاولة">
+                        إجمالي الطلب الحالي
+                      </div>
                       <div className="waiter-tblcard__money-est-val">{money.totalCost.toFixed(0)} ج</div>
                     </div>
                     <div className="waiter-tblcard__money-min-stack" onClick={(e) => e.stopPropagation()} data-tooltip="الحد الأدنى لكل كرسي على هذه الطاولة">
@@ -1919,7 +2097,8 @@ export default function WaiterTablesPage() {
                       ) : (
                         <div className="waiter-tblcard__money-min-readout">{minOk.toFixed(0)}</div>
                       )}
-                      <div className="waiter-tblcard__money-min-hint">لكل كرسي</div>
+                      <div className="waiter-tblcard__money-min-hint">الحد الأدنى / كرسي</div>
+                      <div className={`waiter-tblcard__money-min-source waiter-tblcard__money-min-source--${minSourceTone}`}>{minSourceLabel}</div>
                     </div>
                     <div className="waiter-tblcard__money-min-label" onClick={(e) => e.stopPropagation()}>
                       {canEditMin ? (
@@ -2410,6 +2589,178 @@ export default function WaiterTablesPage() {
           {/* Footer */}
           <div className="print-footer">
             تم إنشاء هذا التقرير في {new Date().toLocaleString("ar-EG")} — نظام إدارة المطاعم
+          </div>
+        </div>
+      ) : null}
+      {approvalModalOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            zIndex: 1100,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setApprovalModalOpen(false)}
+        >
+          <div
+            className="card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(420px, 92vw)", padding: 18 }}
+          >
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>اعتماد جلسة الضيف</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(16,185,129,0.35)",
+                  background: "rgba(16,185,129,0.08)",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="approvalDecision"
+                  value="approve_guest_session"
+                  checked={approvalDecisionId === "approve_guest_session"}
+                  onChange={(e) => {
+                    setApprovalDecisionId(e.target.value);
+                    setApprovalMaxLimit("");
+                  }}
+                />
+                <span style={{ fontWeight: 700, color: "#047857" }}>اعتماد بدون حد أقصى</span>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(239,68,68,0.45)",
+                  background: "rgba(239,68,68,0.08)",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="radio"
+                    name="approvalDecision"
+                    value="approve_guest_session_with_limit"
+                    checked={approvalDecisionId === "approve_guest_session_with_limit"}
+                    onChange={(e) => setApprovalDecisionId(e.target.value)}
+                  />
+                  <span style={{ fontWeight: 700, color: "#b91c1c" }}>اعتماد مع حد أقصى</span>
+                </div>
+                {approvalDecisionId === "approve_guest_session_with_limit" ? (
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="أدخل الحد الأقصى للفاتورة (ج.م)"
+                    value={approvalMaxLimit}
+                    onChange={(e) => setApprovalMaxLimit(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(239,68,68,0.5)",
+                      fontSize: "0.92rem",
+                      marginTop: 4,
+                    }}
+                  />
+                ) : null}
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setApprovalModalOpen(false)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void submitApprovalFromModal()}
+                disabled={
+                  guestApprovalBusySessionId === approvalModalSessionId ||
+                  (approvalDecisionId === "approve_guest_session_with_limit" &&
+                    (!approvalMaxLimit || Number(approvalMaxLimit) <= 0))
+                }
+              >
+                {guestApprovalBusySessionId === approvalModalSessionId ? "…" : "تأكيد الاعتماد"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {agentPickerOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            zIndex: 1100,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setAgentPickerOpen(false)}
+        >
+          <div
+            className="card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(480px, 92vw)", padding: 18, maxHeight: "80vh", display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>
+              {agentPickerType === "owner" ? "اختيار مالك" : agentPickerType === "vip" ? "اختيار شخص مهم" : "اختيار عميل آجل"}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input
+                type="text"
+                placeholder="ابحث بالاسم..."
+                value={agentPickerSearch}
+                onChange={(e) => setAgentPickerSearch(e.target.value)}
+                style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid #cbd5e1" }}
+              />
+              <button type="button" className="btn btn-primary" disabled={agentPickerBusy} onClick={() => void searchAgents()}>
+                {agentPickerBusy ? "…" : "بحث"}
+              </button>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+              {agentPickerResults.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "0.85rem", textAlign: "center", padding: 20 }}>
+                  {agentPickerBusy ? "جاري البحث..." : "لا نتائج — اضغط بحث"}
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {agentPickerResults.map((a) => (
+                    <button
+                      key={a.CardGuide}
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ justifyContent: "flex-start", textAlign: "right" }}
+                      onClick={() => selectAgentForTable(a)}
+                    >
+                      {a.AgentName}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setAgentPickerOpen(false)}>
+                إلغاء
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

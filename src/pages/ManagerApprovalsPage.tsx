@@ -62,6 +62,7 @@ type ReviewDraft = {
   managerNote: string;
   targetUserId: string;
   flags: Record<string, boolean>;
+  decisionInputValue: string;
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -83,6 +84,7 @@ function initialDraft(req: ApprovalRequest): ReviewDraft {
     managerNote: String(req.managerNote || ""),
     targetUserId: String((req.targetOptions || [])[0]?.userId || ""),
     flags,
+    decisionInputValue: "",
   };
 }
 
@@ -131,6 +133,7 @@ export default function ManagerApprovalsPage() {
         managerNote: patch.managerNote ?? current.managerNote,
         targetUserId: patch.targetUserId ?? current.targetUserId,
         flags: patch.flags ?? current.flags,
+        decisionInputValue: patch.decisionInputValue ?? current.decisionInputValue,
       },
     }));
   }
@@ -160,12 +163,20 @@ export default function ManagerApprovalsPage() {
         setMsg("سبب رفض جلسة الضيف إلزامي.");
         return;
       }
+      if (action === "approve" && draft.decisionId === "approve_guest_session_with_limit") {
+        const lim = Number(draft.decisionInputValue);
+        if (!Number.isFinite(lim) || lim <= 0) {
+          setMsg("أدخل حداً أقصى صالحاً أكبر من صفر.");
+          return;
+        }
+      }
       const r = await fetch(`${base}/api/restaurant/manager-approvals/${encodeURIComponent(req.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
           decisionId: action === "approve" ? draft.decisionId : undefined,
+          decisionInputValue: action === "approve" && draft.decisionId === "approve_guest_session_with_limit" ? draft.decisionInputValue || undefined : undefined,
           targetUserId: action === "approve" ? draft.targetUserId || undefined : undefined,
           managerNote: draft.managerNote || undefined,
           flags: Object.entries(draft.flags).map(([id, enabled]) => ({ id, enabled })),
@@ -267,7 +278,7 @@ export default function ManagerApprovalsPage() {
                       <select
                         value={draft.decisionId}
                         disabled={resolved}
-                        onChange={(e) => patchDraft(req, { decisionId: e.target.value })}
+                        onChange={(e) => patchDraft(req, { decisionId: e.target.value, decisionInputValue: "" })}
                         style={{ width: "100%", marginTop: 4 }}
                       >
                         <option value="">اختر القرار</option>
@@ -300,6 +311,25 @@ export default function ManagerApprovalsPage() {
                               </div>
                             ) : null}
                             {opt.policyHint ? <div style={{ color: "var(--muted)", fontSize: "0.79rem", marginTop: 4 }}>{opt.policyHint}</div> : null}
+                            {draft.decisionId === opt.id && opt.id === "approve_guest_session_with_limit" ? (
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                placeholder="أدخل الحد الأقصى للفاتورة (ج.م)"
+                                value={draft.decisionInputValue}
+                                disabled={resolved}
+                                onChange={(e) => patchDraft(req, { decisionInputValue: e.target.value })}
+                                style={{
+                                  width: "100%",
+                                  marginTop: 8,
+                                  padding: "8px 10px",
+                                  borderRadius: 6,
+                                  border: "1px solid rgba(239,68,68,0.5)",
+                                  fontSize: "0.92rem",
+                                }}
+                              />
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -366,7 +396,15 @@ export default function ManagerApprovalsPage() {
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
                     {!resolved ? (
                       <>
-                        <button type="button" className="btn btn-primary" onClick={() => void review(req, "approve")}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => void review(req, "approve")}
+                          disabled={
+                            draft.decisionId === "approve_guest_session_with_limit" &&
+                            (!draft.decisionInputValue || Number(draft.decisionInputValue) <= 0)
+                          }
+                        >
                           تنفيذ القرار
                         </button>
                         <button type="button" className="btn btn-ghost" onClick={() => void review(req, "reject")}>

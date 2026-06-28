@@ -12,6 +12,8 @@ export type DailyMenuState = {
 export type DailyMenuScheduleItem = {
   ProductGuide: string;
   ProductName: string;
+  imageUrl?: string;
+  selected?: boolean;
 };
 
 export type DailyMenuScheduleEntry = {
@@ -192,7 +194,9 @@ export function scheduleRestrictionForDate(
     if (it.length) {
       anyItems = true;
       for (const x of it) {
-        const g = String((x as DailyMenuScheduleItem).ProductGuide || "").trim();
+        const xi = x as DailyMenuScheduleItem;
+        if (xi.selected === false) continue;
+        const g = String(xi.ProductGuide || "").trim();
         if (g) merged.add(g.toUpperCase());
       }
     }

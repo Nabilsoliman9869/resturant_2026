@@ -264,12 +264,17 @@ export default function ModifierWizard({ baseProduct, groups, onResult, onCancel
 
   const handleConfirm = () => {
     if (!canConfirm) return;
-    const result: WizardResult = {
-      baseProduct,
-      selections: Object.values(selections).filter((s) => s.selectedItemIds.length > 0 || String(s.note || "").trim().length > 0),
-      totalPrice,
-    };
-    onResult(result);
+    try {
+      const result: WizardResult = {
+        baseProduct,
+        selections: Object.values(selections).filter((s) => s.selectedItemIds.length > 0 || String(s.note || "").trim().length > 0),
+        totalPrice,
+      };
+      onResult(result);
+    } catch (e) {
+      console.error("[ModifierWizard] confirm error:", e);
+      alert("حدث خطأ أثناء الإضافة — راجع Console (F12) للتفاصيل");
+    }
   };
 
   return (

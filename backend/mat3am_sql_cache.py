@@ -465,6 +465,7 @@ def _fetch_tbl006_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
                 g.LatinName,
                 g.GroupName,
                 g.GroupImageUrl,
+                g.TextValue01,
                 g.TextValue02,
                 s.ProductGuide,
                 s.ProductImageUrl
@@ -495,9 +496,10 @@ def _fetch_tbl006_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
                     "LatinName": row[2] or "",
                     "GroupName": row[3],
                     "GroupImageUrl": str(row[4]).strip() if len(row) > 4 and row[4] else None,
-                    "DisplayCategory": str(row[5]).strip() if len(row) > 5 and row[5] else "",
-                    "SampleProductGuide": str(row[6]).strip() if len(row) > 6 and row[6] else None,
-                    "SampleProductImageUrl": str(row[7]).strip() if len(row) > 7 and row[7] else None,
+                    "TextValue01": str(row[5]).strip() if len(row) > 5 and row[5] else "",
+                    "DisplayCategory": str(row[6]).strip() if len(row) > 6 and row[6] else "",
+                    "SampleProductGuide": str(row[7]).strip() if len(row) > 7 and row[7] else None,
+                    "SampleProductImageUrl": str(row[8]).strip() if len(row) > 8 and row[8] else None,
                 }
             )
         return rows, None

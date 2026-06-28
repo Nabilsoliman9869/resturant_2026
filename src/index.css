@@ -300,8 +300,8 @@ textarea {
   top: 50%;
   transform: translateY(-50%);
   z-index: 999;
-  min-width: 220px;
-  max-width: 320px;
+  min-width: 260px;
+  max-width: 420px;
   padding: 10px 12px;
   background: var(--surface2);
   border: 1px solid var(--border);

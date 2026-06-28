@@ -17,6 +17,7 @@ type OrderItem = {
   sent?: boolean;
   handoffAt?: string | null;
   lineStatus?: string;
+  lineStartedAt?: string | null;
   cancelled?: boolean;
 };
 type OrderRow = {
@@ -66,6 +67,23 @@ type ManagerOrderInsight = {
   priorityScore: number;
   priorityLabel: string;
 };
+
+const SUMMARY_EPSILON = 0.0001;
+
+function orderHasKitchenWork(order: OrderRow): boolean {
+  const items = Array.isArray(order.items) ? order.items : [];
+  for (const it of items) {
+    if (it?.cancelled) continue;
+    const status = String(it?.lineStatus || "").trim().toLowerCase();
+    if (status === "pending" || status === "preparing") return true;
+    const qty = Math.max(0, Number(it?.quantity || 0));
+    const preparedQty = Math.max(0, Number(it?.preparedQty || 0));
+    const sent = Boolean(it?.sent);
+    const handed = Boolean(it?.handoffAt);
+    if (!sent && !handed && preparedQty + SUMMARY_EPSILON < qty) return true;
+  }
+  return false;
+}
 type TableInsight = {
   tableId: string;
   orders: OrderRow[];
@@ -154,12 +172,32 @@ function kitchenTableDisplay(o: OrderRow): string {
   return String(o.tableLabel || o.tableId || "—");
 }
 
+function orderStatusLabelAr(status: string): string {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "pending") return "انتظار بدء التنفيذ";
+  if (s === "preparing") return "قيد التنفيذ";
+  if (s === "ready") return "جاهز للتسليم";
+  if (s === "served") return "تم التسليم";
+  if (s === "paid") return "مدفوع";
+  if (s === "cancelled") return "ملغي";
+  return s || "—";
+}
+
 function replaceOrderById(prev: OrderRow[], nextOrder: OrderRow): OrderRow[] {
   const idx = prev.findIndex((o) => o.id === nextOrder.id);
   if (idx === -1) return [nextOrder, ...prev];
   const copy = [...prev];
   copy[idx] = nextOrder;
   return copy;
+}
+
+function sortOrdersByCreatedAtAsc(rows: OrderRow[]): OrderRow[] {
+  return [...rows].sort((a, b) => {
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : Number.POSITIVE_INFINITY;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : Number.POSITIVE_INFINITY;
+    if (ta !== tb) return ta - tb;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
 }
 
 function tableCompletion(orders: OrderRow[]) {
@@ -200,7 +238,9 @@ function computeManagerOrderInsight(order: OrderRow, settings: KdsSettings, nowT
   const targetMinutes = Number(order.prepTargetMinutes) > 0 ? Number(order.prepTargetMinutes) : settings.prepTargetMinutes;
   const warnMinutes = Math.max(1, Number(settings.warnBeforeEndMinutes) || 5);
   const createdTs = order.createdAt ? new Date(order.createdAt).getTime() : NaN;
-  const baselineTs = Number.isFinite(createdTs) ? createdTs : order.prepStartTime ? new Date(order.prepStartTime).getTime() : NaN;
+  const prepStartTs = order.prepStartTime ? new Date(order.prepStartTime).getTime() : NaN;
+  // عداد ETA يبدأ فقط من أول "بدء تنفيذ" فعلي.
+  const baselineTs = Number.isFinite(prepStartTs) ? prepStartTs : NaN;
   const clientDeadlineTs = Number.isFinite(baselineTs) ? baselineTs + targetMinutes * 60 * 1000 : null;
   const clientRemainingSec = clientDeadlineTs == null ? null : Math.ceil((clientDeadlineTs - nowTs) / 1000);
   const clientOverdue = clientRemainingSec != null && clientRemainingSec <= 0;
@@ -231,7 +271,12 @@ function computeManagerOrderInsight(order: OrderRow, settings: KdsSettings, nowT
   if (targetMinutes <= 12) priorityScore += 70;
   else if (targetMinutes <= 20) priorityScore += 35;
   const priorityLabel = clientOverdue ? "متأخر" : clientAtRisk ? "معرّض" : executionStarted ? "قيد التنفيذ" : "انتظار";
-  const clientLabel = clientOverdue ? `تأخير ${formatDelayClock(clientRemainingSec)}` : `ETA ${formatRemainingClock(clientRemainingSec)}`;
+  const clientLabel =
+    clientRemainingSec == null
+      ? "لم يبدأ التنفيذ بعد"
+      : clientOverdue
+        ? `تأخير ${formatDelayClock(clientRemainingSec)}`
+        : `ETA ${formatRemainingClock(clientRemainingSec)}`;
   return {
     targetMinutes,
     clientRemainingSec,
@@ -295,10 +340,6 @@ function usePrepCountdown(prepStartIso: string | undefined, targetMinutes: numbe
 function KdsOrderCard({
   order,
   settings,
-  busyKeys,
-  onTogglePrepared,
-  onSendLine,
-  onStartPreparing,
   base,
   alertType,
   alertTitlePrefix,
@@ -307,10 +348,6 @@ function KdsOrderCard({
 }: {
   order: OrderRow;
   settings: KdsSettings;
-  busyKeys: Set<string>;
-  onTogglePrepared: (orderId: string, lineId: string, prepared: boolean) => void;
-  onSendLine: (orderId: string, lineId: string) => void;
-  onStartPreparing: (orderId: string) => void;
   base: string;
   alertType: string;
   alertTitlePrefix: string;
@@ -320,8 +357,8 @@ function KdsOrderCard({
   const target = Number(order.prepTargetMinutes) > 0 ? Number(order.prepTargetMinutes) : settings.prepTargetMinutes;
   const warn = settings.warnBeforeEndMinutes;
   const preparing = (order.status || "").toLowerCase() === "preparing";
-  const pending = (order.status || "").toLowerCase() === "pending";
-  const { urgent, overdue, label } = usePrepCountdown(preparing ? order.prepStartTime : undefined, target, warn);
+  // إذا كان prepStartTime موجوداً نستخدمه دائماً للعد التنازلي، حتى لو لم يتغير status بعد
+  const { urgent, overdue } = usePrepCountdown(order.prepStartTime ? order.prepStartTime : undefined, target, warn);
   const cashierNotifiedRef = useRef(false);
   const managerTone = insight.clientOverdue ? riskTone("overdue") : insight.clientAtRisk ? riskTone("at_risk") : insight.executionStarted ? riskTone("active") : riskTone("normal");
 
@@ -387,7 +424,7 @@ function KdsOrderCard({
             </div>
           ) : null}
           <div style={{ color: "var(--wp-muted)", fontSize: "0.88rem", marginTop: 4 }}>
-            طاولة: <strong>{kitchenTableDisplay(order)}</strong> · الحالة: {order.status}
+            طاولة: <strong>{kitchenTableDisplay(order)}</strong> · الحالة: {orderStatusLabelAr(order.status)}
           </div>
           {mode === "kitchen" ? (
             <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -413,63 +450,93 @@ function KdsOrderCard({
               </span>
             </div>
           ) : null}
-          <div style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              className="waiter-pos__btn waiter-pos__btn--primary"
-              disabled={!pending || busyKeys.has(`${order.id}:status`)}
-              onClick={() => onStartPreparing(order.id)}
-            >
-              {preparing ? "التنفيذ جارٍ" : pending ? (mode === "kitchen" ? "بدء التنفيذ" : "بدء التحضير") : "تم البدء"}
-            </button>
-          </div>
           <div style={{ marginTop: 8, fontSize: "0.9rem", lineHeight: 1.45 }}>{orderLabel(order)}</div>
           <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
             {(order.items || []).map((it, idx) => {
-              const lid = String(it.lineId || `${order.id}-${idx}`);
               const prepared = Boolean(it.prepared);
               const qty = Math.max(0, Number(it.quantity || 1));
               const preparedQty = Math.max(0, Math.min(qty, Number(it.preparedQty || (prepared ? qty : 0))));
-              const handedOff = Boolean(it.sent || it.handoffAt || String(it.lineStatus || "").toLowerCase() === "sent" || String(it.lineStatus || "").toLowerCase() === "ready");
-              const lineBusy = busyKeys.has(`${order.id}:${lid}`);
+              const lineStatus = String(it.lineStatus || "").trim().toLowerCase();
+              const delivered = Boolean(it.sent || lineStatus === "sent");
+              const handedToRunner = Boolean(it.handoffAt);
+              const lineStarted = Boolean(lineStatus === "preparing");
+              const lineDone = Boolean((prepared || lineStatus === "ready") && !handedToRunner && !delivered);
+              const lineSent = Boolean(handedToRunner && !delivered);
+              const lineStateLabel = delivered ? "اكتمل التسليم" : lineSent ? "مرسل" : lineDone ? "تم الانتهاء" : lineStarted ? "قيد التنفيذ" : "انتظار";
               return (
                 <div
-                  key={lid}
+                  key={String(it.lineId || `${order.id}-${idx}`)}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr auto auto",
+                    gridTemplateColumns: "1fr auto auto auto",
                     gap: 8,
                     alignItems: "center",
                     padding: "6px 8px",
                     border: "1px solid rgba(255,255,255,0.1)",
                     borderRadius: 10,
-                    opacity: handedOff ? 0.55 : 1,
+                    opacity: delivered ? 0.6 : 1,
                   }}
                 >
                   <div>
                     {it.name || "صنف"} ×{it.quantity || 1}
+                    <span style={{ display: "block", marginTop: 2, fontSize: "0.78rem", color: "var(--wp-muted)" }}>{lineStateLabel}</span>
                     {qty > 1 ? (
                       <span style={{ display: "block", marginTop: 2, fontSize: "0.8rem", color: "var(--wp-muted)" }}>
                         التقدّم: {preparedQty}/{qty}
                       </span>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    className="waiter-pos__btn waiter-pos__btn--ghost"
-                    disabled={!preparing || prepared || handedOff || lineBusy}
-                    onClick={() => onTogglePrepared(order.id, lid, true)}
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: 88,
+                      padding: "6px 10px",
+                      borderRadius: 10,
+                      fontWeight: 800,
+                      fontSize: "0.82rem",
+                      background: lineStarted ? "#1e3a8a" : "#e5e7eb",
+                      color: lineStarted ? "#ffffff" : "#6b7280",
+                      border: `1px solid ${lineStarted ? "#1e3a8a" : "#cbd5e1"}`,
+                    }}
                   >
-                    {prepared || handedOff ? "تم الانتهاء" : "تم الانتهاء"}
-                  </button>
-                  <button
-                    type="button"
-                    className="waiter-pos__btn waiter-pos__btn--ghost"
-                    disabled={!prepared || handedOff || lineBusy}
-                    onClick={() => onSendLine(order.id, lid)}
+                    قيد التنفيذ
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: 88,
+                      padding: "6px 10px",
+                      borderRadius: 10,
+                      fontWeight: 800,
+                      fontSize: "0.82rem",
+                      background: lineDone ? "#065f46" : "#e5e7eb",
+                      color: lineDone ? "#ffffff" : "#6b7280",
+                      border: `1px solid ${lineDone ? "#065f46" : "#cbd5e1"}`,
+                    }}
                   >
-                    {handedOff ? "مرسل" : "إرسال"}
-                  </button>
+                    تم الانتهاء
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: 88,
+                      padding: "6px 10px",
+                      borderRadius: 10,
+                      fontWeight: 800,
+                      fontSize: "0.82rem",
+                      background: lineSent ? "#b45309" : "#e5e7eb",
+                      color: lineSent ? "#ffffff" : "#6b7280",
+                      border: `1px solid ${lineSent ? "#b45309" : "#cbd5e1"}`,
+                    }}
+                  >
+                    مرسل
+                  </span>
                 </div>
               );
             })}
@@ -481,11 +548,6 @@ function KdsOrderCard({
         <span>تنبيه قبل النهاية: {warn} د</span>
         {mode === "kitchen" ? <span>عمر الطلب: {insight.ageMinutes.toFixed(1)} د</span> : null}
       </div>
-      {preparing && (
-        <div className={`kds-timer ${urgent || overdue ? "kds-timer--warn" : ""}`}>
-          {overdue ? <>تأخير التنفيذ: {label}</> : <>متبقي للتنفيذ: {label}</>}
-        </div>
-      )}
       <div style={{ marginTop: 8, fontSize: "0.8rem", color: "var(--wp-muted)" }}>
         KPI · من الاستقبال حتى آخر تنفيذ: <strong>{leadLabel}</strong>
       </div>
@@ -548,35 +610,6 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
     return () => window.clearInterval(id);
   }, [loadAll]);
 
-  async function togglePrepared(orderId: string, lineId: string, prepared: boolean) {
-    const key = `${orderId}:${lineId}`;
-    setMsg("");
-    setBusyKeys((prev) => new Set(prev).add(key));
-    try {
-      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prepared }),
-      });
-      const txt = await r.text();
-      if (!r.ok) throw new Error(txt);
-      const j = tryParseJson<{ order?: OrderRow }>(txt) ?? {};
-      if (j.order && typeof j.order.id === "string") {
-        setOrders((prev) => replaceOrderById(prev, j.order as OrderRow));
-      } else {
-        await loadAll();
-      }
-    } catch (e) {
-      setMsg(String(e));
-    } finally {
-      setBusyKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  }
-
   async function adjustPreparedQty(orderId: string, lineId: string, delta: number) {
     const key = `${orderId}:${lineId}:prepared-delta`;
     setMsg("");
@@ -592,6 +625,16 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
       const j = tryParseJson<{ order?: OrderRow }>(txt) ?? {};
       if (j.order && typeof j.order.id === "string") {
         setOrders((prev) => replaceOrderById(prev, j.order as OrderRow));
+        if (delta > 0) {
+          const line = (j.order.items || []).find((it) => String(it.lineId || "") === String(lineId));
+          const qty = Math.max(0, Number(line?.quantity || 0));
+          const preparedQty = Math.max(0, Number(line?.preparedQty || 0));
+          const done = Boolean(line?.prepared) || (qty > 0 && preparedQty >= qty);
+          const alreadyHandedOff = Boolean(line?.handoffAt || line?.sent || String(line?.lineStatus || "").toLowerCase() === "sent");
+          if (done && !alreadyHandedOff) {
+            await sendLine(orderId, lineId);
+          }
+        }
       } else {
         await loadAll();
       }
@@ -633,39 +676,13 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
     }
   }
 
-  async function startPreparing(orderId: string) {
-    const key = `${orderId}:status`;
-    setMsg("");
-    setBusyKeys((prev) => new Set(prev).add(key));
-    try {
-      const r = await fetch(`${base}/api/restaurant/orders/${encodeURIComponent(orderId)}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "preparing" }),
-      });
-      const txt = await r.text();
-      if (!r.ok) throw new Error(txt);
-      const j = tryParseJson<OrderRow>(txt);
-      if (j && typeof j.id === "string") {
-        setOrders((prev) => replaceOrderById(prev, j));
-      } else {
-        await loadAll();
-      }
-    } catch (e) {
-      setMsg(String(e));
-    } finally {
-      setBusyKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  }
-
   const pending = useMemo(
     () =>
       orders.filter(
-        (o) => isKitchenShiftWindow(o.createdAt) && !["served", "paid", "cancelled"].includes((o.status || "").toLowerCase()),
+        (o) =>
+          isKitchenShiftWindow(o.createdAt) &&
+          !["served", "paid", "cancelled"].includes((o.status || "").toLowerCase()) &&
+          orderHasKitchenWork(o),
       ),
     [orders],
   );
@@ -892,7 +909,8 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
   }, [tableInsights]);
 
   function findSummaryTarget(summaryName: string) {
-    for (const o of filteredPending) {
+    const ageOrdered = sortOrdersByCreatedAtAsc(filteredPending);
+    for (const o of ageOrdered) {
       for (let idx = 0; idx < (o.items || []).length; idx++) {
         const it = o.items[idx];
         const nm = normalizeSummaryItemName(String(it?.name || "صنف"));
@@ -934,16 +952,23 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
   }, [filteredPending]);
 
   async function sendAllReady() {
-    const targets: Array<{ orderId: string; lineId: string }> = [];
-    for (const o of filteredPending) {
+    const targets: Array<{ orderId: string; lineId: string; createdAtTs: number; linePos: number }> = [];
+    const ageOrdered = sortOrdersByCreatedAtAsc(filteredPending);
+    for (const o of ageOrdered) {
       for (let idx = 0; idx < (o.items || []).length; idx++) {
         const it = o.items[idx];
         const status = String(it.lineStatus || "").trim().toLowerCase();
         if (it.sent || it.handoffAt) continue;
         if (!(status === "ready" || it.prepared)) continue;
-        targets.push({ orderId: o.id, lineId: String(it.lineId || `${o.id}-${idx}`) });
+        const ts = o.createdAt ? new Date(o.createdAt).getTime() : Number.POSITIVE_INFINITY;
+        targets.push({ orderId: o.id, lineId: String(it.lineId || `${o.id}-${idx}`), createdAtTs: ts, linePos: idx });
       }
     }
+    targets.sort((a, b) => {
+      if (a.createdAtTs !== b.createdAtTs) return a.createdAtTs - b.createdAtTs;
+      if (a.orderId !== b.orderId) return a.orderId.localeCompare(b.orderId);
+      return a.linePos - b.linePos;
+    });
     if (!targets.length) {
       setMsg("لا توجد بنود جاهزة للإرسال الآن.");
       return;
@@ -973,7 +998,9 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
         row.remainingQty += remainingQty;
       }
     }
-    return Array.from(m.values()).filter((x) => x.totalQty > 0).sort((a, b) => b.remainingQty - a.remainingQty);
+    return Array.from(m.values())
+      .filter((x) => x.totalQty > 0 && x.remainingQty > SUMMARY_EPSILON)
+      .sort((a, b) => b.remainingQty - a.remainingQty);
   }, [filteredPending]);
 
   return (
@@ -1067,6 +1094,33 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
           </div>
         ) : null}
 
+        {mode !== "specialist" ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: "0.85rem 0.95rem",
+              borderRadius: 14,
+              background: "rgba(14,165,233,0.08)",
+              border: "1px solid rgba(14,165,233,0.22)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontSize: "0.9rem", color: "#0f172a", fontWeight: 700 }}>ترحيل الجاهز من الأقدم إلى الأحدث</div>
+            <button
+              type="button"
+              className="waiter-pos__btn waiter-pos__btn--primary"
+              disabled={readyToSendCount <= 0}
+              onClick={() => void sendAllReady()}
+            >
+              {readyToSendCount > 0 ? `ترحيل الجاهز (${readyToSendCount})` : "ترحيل الجاهز"}
+            </button>
+          </div>
+        ) : null}
+
         {mode === "specialist" ? (
           <div
             style={{
@@ -1111,6 +1165,7 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
               const undoTarget = findSummaryPreparedTarget(row.name);
               const summaryBusy = target ? busyKeys.has(`${target.orderId}:${target.lineId}:prepared-delta`) : false;
               const undoBusy = undoTarget ? busyKeys.has(`${undoTarget.orderId}:${undoTarget.lineId}:prepared-delta`) : false;
+              const noRemaining = row.remainingQty <= SUMMARY_EPSILON;
               return (
                 <div
                 key={row.name}
@@ -1164,7 +1219,7 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
                     <button
                       type="button"
                       className={mode === "specialist" ? "waiter-pos__btn waiter-pos__btn--primary" : "waiter-pos__btn waiter-pos__btn--ghost"}
-                      disabled={!target || row.remainingQty <= 0 || summaryBusy}
+                      disabled={!target || noRemaining || summaryBusy}
                       style={{ whiteSpace: "nowrap", padding: mode === "specialist" ? "0.65rem 1rem" : "0.35rem 0.6rem", fontSize: mode === "specialist" ? "1rem" : undefined }}
                       onClick={() => {
                         const nextTarget = findSummaryTarget(row.name);
@@ -1223,7 +1278,7 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
                     : "لا توجد محطة للمستخدم"
                   : mode === "specialist" && String(ops.kitchenExecutionMode || "").trim().toLowerCase() !== "specialist_chefs"
                     ? "الوضع غير مفعّل"
-                    : `لا توجد طلبات${filterTable ? ` للطاولة ${filterTable}` : ""}.`}
+                    : `لا توجد طلبات قيد الطبخ${filterTable ? ` للطاولة ${filterTable}` : ""}.`}
               </div>
             ) : (
               <div className="kds-cards">
@@ -1237,10 +1292,6 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
                     alertTitlePrefix={alertTitlePrefix}
                     mode={mode}
                     insight={orderInsightById.get(o.id) || computeManagerOrderInsight(o, settings, nowTs)}
-                    busyKeys={busyKeys}
-                    onTogglePrepared={(oid, lid, prepared) => void togglePrepared(oid, lid, prepared)}
-                    onSendLine={(oid, lid) => void sendLine(oid, lid)}
-                    onStartPreparing={(oid) => void startPreparing(oid)}
                   />
                 ))}
               </div>

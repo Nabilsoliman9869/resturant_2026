@@ -10,38 +10,42 @@ type SearchResult = {
 
 const ALL_ITEMS: SearchResult[] = [
   // إعدادات
-  { title: "التعريفات الأساسية", path: "master-data", subtitle: "النظام والتعريفات", keywords: "عملة وحدات مجموعات currency units" },
-  { title: "اتصال القاعدة", path: "connection", subtitle: "النظام والتعريفات", keywords: "sql server database قاعدة بيانات" },
-  { title: "تهيئة SQL", path: "init-db", subtitle: "النظام والتعريفات", keywords: "جداول create tables" },
-  { title: "نوع المنشأ (POS)", path: "pos-venue", subtitle: "المنشأ والأساس", keywords: "مطعم كافيه فندق restaurant cafe" },
-  { title: "المكان والطابق", path: "venue", subtitle: "المنشأ والأساس", keywords: "اسم المنشأ طوابق" },
-  { title: "مخطط الصالة (رسم)", path: "floor-editor", subtitle: "المنشأ والأساس", keywords: "خريطة طاولات رسم map" },
-  { title: "الطاولات والمناطق", path: "tables", subtitle: "المنشأ والأساس", keywords: "أرقام طاولات zones" },
-  { title: "المنيو", path: "menus", subtitle: "المنيو والمنتجات", keywords: "أصناف menu items" },
-  { title: "صور المنتجات", path: "product-images", subtitle: "المنيو والمنتجات", keywords: "upload images رفع صور" },
-  { title: "الإضافات (كتالوج)", path: "addons", subtitle: "المنيو والمنتجات", keywords: "extras toppings إضافات" },
-  { title: "قوائم الأسعار", path: "price-lists", subtitle: "المنيو والمنتجات", keywords: "prices تسعير" },
-  { title: "أساس التكلفة", path: "costing-mode", subtitle: "المنيو والمنتجات", keywords: "cost تكلفة menu pricing" },
-  { title: "شاشة المطبخ (KDS)", path: "pos-kds", subtitle: "المطبخ والإنتاج", keywords: "kitchen display طباخين" },
-  { title: "زمن التحضير لكل صنف", path: "pos-prep-times", subtitle: "المطبخ والإنتاج", keywords: "prep time وقت تحضير" },
-  { title: "إيقاف أصناف المطبخ", path: "kitchen-item-stop", subtitle: "المطبخ والإنتاج", keywords: "stop out of stock نفاد" },
-  { title: "الضريبة والخدمة", path: "pos-tax", subtitle: "السياسات المالية", keywords: "vat tax service ضريبة" },
-  { title: "الحد الأدنى للطاولة", path: "minimum-charge", subtitle: "السياسات المالية", keywords: "minimum charge حد أدنى" },
-  { title: "العروض والتخفيضات", path: "pos-promos", subtitle: "السياسات المالية", keywords: "promotion discount خصم عرض كوبون coupon" },
-  { title: "ربط التحصيل (حسابات)", path: "payment-routing", subtitle: "السياسات المالية", keywords: "payment accounts تحصيل" },
-  { title: "سياسات تشغيل الصالة", path: "kitchen-ops", subtitle: "دورة العمل والأدوار", keywords: "operations workflow أدوار" },
-  { title: "جدولة أدوار المستخدمين", path: "role-schedule", subtitle: "دورة العمل والأدوار", keywords: "schedule shifts وردية" },
-  { title: "مستخدمو التطبيق", path: "users", subtitle: "دورة العمل والأدوار", keywords: "users login accounts حسابات" },
-  { title: "نقاط البيع المشتركة", path: "pos-shared-terminal", subtitle: "دورة العمل والأدوار", keywords: "printers terminals طابعات" },
-  { title: "تعريف العملاء والمالكين", path: "customer-vip", subtitle: "العملاء والخدمات", keywords: "agents customers owners vip عملاء مالكين" },
-  { title: "باقات منطقة الأطفال", path: "kids-area-packages", subtitle: "العملاء والخدمات", keywords: "kids children أطفال" },
-  { title: "التدقيق والامتثال", path: "audit-compliance", subtitle: "التدقيق والتكاليف", keywords: "audit compliance تدقيق" },
-  { title: "التكاليف اليومية", path: "costing", subtitle: "التدقيق والتكاليف", keywords: "daily cost materials raw" },
-  { title: "عهدة أول اليوم", path: "daily-opening-custody", subtitle: "التدقيق والتكاليف", keywords: "opening custody صندوق" },
-  { title: "المسترد والمرتجعات", path: "daily-return", subtitle: "التدقيق والتكاليف", keywords: "returns مرتجعات" },
-  { title: "مصاريف التشغيل", path: "daily-overhead", subtitle: "التدقيق والتكاليف", keywords: "overhead expenses مصاريف" },
-  { title: "محرك التكلفة", path: "daily-cost-engine", subtitle: "التدقيق والتكاليف", keywords: "cost engine محرك" },
-  { title: "النتيجة اليومية", path: "daily-result", subtitle: "التدقيق والتكاليف", keywords: "daily result profit loss" },
+  { title: "التعريفات الأساسية", path: "master-data", subtitle: "1. النظام والتعريفات", keywords: "عملة وحدات مجموعات currency units" },
+  { title: "اتصال القاعدة", path: "connection", subtitle: "1. النظام والتعريفات", keywords: "sql server database قاعدة بيانات" },
+  { title: "تهيئة SQL", path: "init-db", subtitle: "1. النظام والتعريفات", keywords: "جداول create tables" },
+  { title: "نوع المنشأ (POS)", path: "pos-venue", subtitle: "2. المنشأ والأساس", keywords: "مطعم كافيه فندق restaurant cafe" },
+  { title: "المكان والطابق", path: "venue", subtitle: "2. المنشأ والأساس", keywords: "اسم المنشأ طوابق" },
+  { title: "مخطط الصالة (رسم)", path: "floor-editor", subtitle: "2. المنشأ والأساس", keywords: "خريطة طاولات رسم map" },
+  { title: "الطاولات والمناطق", path: "tables", subtitle: "2. المنشأ والأساس", keywords: "أرقام طاولات zones" },
+  { title: "المنيو", path: "menus", subtitle: "3. الأصناف والمنيو", keywords: "أصناف menu items" },
+  { title: "تصنيفات عرض المنيو", path: "display-categories", subtitle: "3. الأصناف والمنيو", keywords: "menu display categories مجموعات" },
+  { title: "صور المنتجات", path: "product-images", subtitle: "3. الأصناف والمنيو", keywords: "upload images رفع صور" },
+  { title: "إعدادات الشرائح (Wizard)", path: "modifier-groups", subtitle: "3. الأصناف والمنيو", keywords: "wizard modifiers شرائح" },
+  { title: "بروفايلات الأصناف", path: "product-modifier-links", subtitle: "3. الأصناف والمنيو", keywords: "profiles links modifiers" },
+  { title: "الإضافات (كتالوج)", path: "addons", subtitle: "3. الأصناف والمنيو", keywords: "extras toppings إضافات" },
+  { title: "قوائم الأسعار", path: "price-lists", subtitle: "3. الأصناف والمنيو", keywords: "prices تسعير" },
+  { title: "أساس التكلفة", path: "costing-mode", subtitle: "3. الأصناف والمنيو", keywords: "cost تكلفة menu pricing" },
+  { title: "شاشة المطبخ (KDS)", path: "pos-kds", subtitle: "4. المطبخ والإنتاج", keywords: "kitchen display طباخين" },
+  { title: "زمن التحضير لكل صنف", path: "pos-prep-times", subtitle: "4. المطبخ والإنتاج", keywords: "prep time وقت تحضير" },
+  { title: "إيقاف أصناف المطبخ", path: "kitchen-item-stop", subtitle: "4. المطبخ والإنتاج", keywords: "stop out of stock نفاد" },
+  { title: "الضريبة والخدمة", path: "pos-tax", subtitle: "5. السياسات المالية", keywords: "vat tax service ضريبة" },
+  { title: "الحد الأدنى للطاولة", path: "minimum-charge", subtitle: "5. السياسات المالية", keywords: "minimum charge حد أدنى" },
+  { title: "العروض والتخفيضات", path: "pos-promos", subtitle: "5. السياسات المالية", keywords: "promotion discount خصم عرض كوبون coupon" },
+  { title: "ربط التحصيل (حسابات)", path: "payment-routing", subtitle: "5. السياسات المالية", keywords: "payment accounts تحصيل" },
+  { title: "سياسات تشغيل الصالة", path: "kitchen-ops", subtitle: "6. دورة العمل والأدوار", keywords: "operations workflow أدوار" },
+  { title: "جدولة أدوار المستخدمين", path: "role-schedule", subtitle: "6. دورة العمل والأدوار", keywords: "schedule shifts وردية" },
+  { title: "توزيع طاولات الجرسونات", path: "waiter-table-assignments", subtitle: "6. دورة العمل والأدوار", keywords: "tables assignment captain" },
+  { title: "مستخدمو التطبيق", path: "users", subtitle: "6. دورة العمل والأدوار", keywords: "users login accounts حسابات" },
+  { title: "نقاط البيع المشتركة", path: "pos-shared-terminal", subtitle: "6. دورة العمل والأدوار", keywords: "printers terminals طابعات" },
+  { title: "تعريف العملاء والمالكين", path: "customer-vip", subtitle: "7. العملاء والخدمات الإضافية", keywords: "agents customers owners vip عملاء مالكين" },
+  { title: "باقات منطقة الأطفال", path: "kids-area-packages", subtitle: "7. العملاء والخدمات الإضافية", keywords: "kids children أطفال" },
+  { title: "التدقيق والامتثال", path: "audit-compliance", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "audit compliance تدقيق" },
+  { title: "التكاليف اليومية", path: "costing", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "daily cost materials raw" },
+  { title: "عهدة أول اليوم", path: "daily-opening-custody", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "opening custody صندوق" },
+  { title: "المسترد والمرتجعات", path: "daily-return", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "returns مرتجعات" },
+  { title: "مصاريف التشغيل", path: "daily-overhead", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "overhead expenses مصاريف" },
+  { title: "محرك التكلفة", path: "daily-cost-engine", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "cost engine محرك" },
+  { title: "النتيجة اليومية", path: "daily-result", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "daily result profit loss" },
   // صفحات تشغيلية
   { title: "داشبورد", path: "@/dashboard", subtitle: "الرئيسية", keywords: "dashboard home رئيسية" },
   { title: "شريحات الطاولات", path: "@/captain-tables", subtitle: "الصالة", keywords: "tables طاولات شرائح" },
@@ -117,7 +121,7 @@ export default function GlobalSearchModal({ role }: { role: string }) {
       background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "8vh"
     }} onClick={() => setOpen(false)}>
       <div style={{
-        width: "min(680px, 92vw)", background: "var(--bg)", border: "1px solid var(--border)",
+        width: "min(920px, 94vw)", background: "var(--bg)", border: "1px solid var(--border)",
         borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden"
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
@@ -127,8 +131,8 @@ export default function GlobalSearchModal({ role }: { role: string }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && results.length) go(results[0].path); }}
-            placeholder="ابحث في الإعدادات والصفحات... (مثال: عميل، KDS، ضريبة)"
-            style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 16, color: "var(--text)" }}
+            placeholder="ابحث في الإعدادات والصفحات... (مثال: منيو، طاولات، ضريبة، KDS)"
+            style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 17, color: "var(--text)" }}
           />
           <kbd style={{ fontSize: 12, opacity: 0.5, background: "var(--surface)", padding: "2px 8px", borderRadius: 6 }}>Esc</kbd>
         </div>

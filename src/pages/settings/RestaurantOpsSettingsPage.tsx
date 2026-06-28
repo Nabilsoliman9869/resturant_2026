@@ -478,6 +478,23 @@ export default function RestaurantOpsSettingsPage() {
         <code>MAT3AM_WORKFLOW_SETTINGS</code> وملف <code>workflow_settings.json</code>) مع <strong>تشغيل المطبخ والطباعة وVIP والكيدز والتدقيق</strong> (
         <code>MAT3AM_RESTAURANT_OPS_SETTINGS</code> و<code>restaurant_ops_settings.json</code>). الحفظ يوزّع تلقائياً بين المخزنين دون ازدواج يدوي.
       </p>
+      <div
+        style={{
+          marginTop: 10,
+          marginBottom: 18,
+          padding: "0.85rem 1rem",
+          borderRadius: 12,
+          border: "1px solid rgba(14,165,233,0.22)",
+          background: "linear-gradient(180deg, rgba(14,165,233,0.08), rgba(14,165,233,0.03))",
+          color: "var(--text)",
+          lineHeight: 1.7,
+          fontSize: "0.88rem",
+        }}
+      >
+        <strong>ماذا تؤثر هذه الصفحة؟</strong> على ترتيب الجلسات، مسارات الأدوار، شاشة المطبخ، زمن التحضير، الطباعة، حدود بعض الفواتير، وظهور العميل المربوط بالجلسة.
+        <br />
+        أي تغيير هنا قد ينعكس مباشرة على شاشة الجرسون، KDS، الكاشير، وتقارير التشغيل بعد الحفظ.
+      </div>
 
       <h3 style={{ marginTop: "1.25rem", marginBottom: "0.5rem", fontSize: "1.05rem" }}>دورة العمل ومسارات الأدوار</h3>
       <div className="grid-2">
