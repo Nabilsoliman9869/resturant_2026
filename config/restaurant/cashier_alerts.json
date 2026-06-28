@@ -250,5 +250,41 @@
     "sourceKey": null,
     "createdAt": "2026-05-22T15:16:48.714153",
     "dismissedAt": null
+  },
+  {
+    "id": "acd5b5ae-beee-48e4-a753-a852eb68794d",
+    "type": "waiter_summon",
+    "title": "طلب ماكينة فيزا",
+    "body": null,
+    "tableId": "B9A1DB04-D991-4F23-82C6-837C4D7116F0",
+    "sessionId": "dc1b2bdc-61bd-4fba-8a80-1269c44a9b71",
+    "orderId": null,
+    "sourceKey": null,
+    "createdAt": "2026-06-26T16:03:21.970377",
+    "dismissedAt": null
+  },
+  {
+    "id": "07fefba0-d189-456e-9c1d-de34d9a2f414",
+    "type": "waiter_summon",
+    "title": "طلب مندوب تحصيل كاش",
+    "body": null,
+    "tableId": "B9A1DB04-D991-4F23-82C6-837C4D7116F0",
+    "sessionId": "dc1b2bdc-61bd-4fba-8a80-1269c44a9b71",
+    "orderId": null,
+    "sourceKey": null,
+    "createdAt": "2026-06-26T16:03:22.104548",
+    "dismissedAt": null
+  },
+  {
+    "id": "8f73ced6-1640-45c3-a177-e31ce4011f6a",
+    "type": "kitchen_urgent",
+    "title": "استعجال المطبخ",
+    "body": null,
+    "tableId": "10B7C06D-A4EA-4C57-88E3-17484F7E617B",
+    "sessionId": "f985b9d7-211f-41ad-be4e-83e4bddfcbaa",
+    "orderId": null,
+    "sourceKey": "tbl:10B7C06D-A4EA-4C57-88E3-17484F7E617B:kitchen_rush:1782549420034",
+    "createdAt": "2026-06-27T11:37:01.151501",
+    "dismissedAt": null
   }
 ]

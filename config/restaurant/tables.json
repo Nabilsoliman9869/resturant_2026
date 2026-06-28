@@ -96,12 +96,16 @@
   },
   {
     "id": "CBECE9B1-8D01-427E-894F-5780E6F4D40D",
-    "status": "occupied",
+    "status": "ready",
     "name": "T10",
-    "statusUpdatedAt": "2026-05-23T01:30:19.559869",
+    "statusUpdatedAt": "2026-06-27T12:14:22.361922",
     "dirtyAt": null,
     "cleaningStartedAt": null,
-    "readyAt": "2026-05-07T21:56:44.867612"
+    "readyAt": "2026-06-27T12:14:22.361922",
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false
   },
   {
     "id": "76DC1ED4-80E4-4AEF-82F4-F80E29C0B9B7",
@@ -214,33 +218,62 @@
   },
   {
     "id": "10B7C06D-A4EA-4C57-88E3-17484F7E617B",
-    "status": "occupied",
+    "status": "ready",
     "name": "T11",
-    "statusUpdatedAt": "2026-05-12T21:40:32.462117"
+    "statusUpdatedAt": "2026-06-27T12:14:27.481231",
+    "readyAt": "2026-06-27T12:14:27.481231",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false
   },
   {
     "id": "7B14A454-9070-4513-8B2F-CE5AED71BCE6",
     "status": "occupied",
     "name": "T12",
-    "statusUpdatedAt": "2026-06-12T00:24:21.135401"
+    "statusUpdatedAt": "2026-06-27T12:24:57.413221",
+    "readyAt": "2026-06-27T12:14:20.930436",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false,
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-27T12:24:56.858754"
   },
   {
     "id": "A5C3430F-A60B-49C8-81E2-DB9542734565",
     "status": "occupied",
     "name": "T13",
-    "statusUpdatedAt": "2026-06-16T13:08:50.963509"
+    "statusUpdatedAt": "2026-06-27T12:25:25.759356",
+    "readyAt": "2026-06-26T20:53:46.009114",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false,
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-27T12:25:25.739375"
   },
   {
     "id": "B9A1DB04-D991-4F23-82C6-837C4D7116F0",
     "status": "occupied",
     "name": "T100",
-    "statusUpdatedAt": "2026-06-13T12:11:53.254305"
+    "statusUpdatedAt": "2026-06-26T16:03:12.969103",
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-26T16:03:12.923002"
   },
   {
     "id": "2FF21A35-0066-4378-81E6-434F08F010FA",
     "status": "occupied",
     "name": "T22",
-    "statusUpdatedAt": "2026-06-15T01:33:27.311076"
+    "statusUpdatedAt": "2026-06-26T03:38:35.579674",
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-26T03:38:35.546247"
   },
   {
     "id": "3D6796DF-65E5-4CDE-8302-5C33070AEB25",
@@ -252,13 +285,17 @@
     "id": "4A9C81BD-8390-4720-9803-97D4D0E1FCD4",
     "status": "occupied",
     "name": "T23",
-    "statusUpdatedAt": "2026-06-17T01:04:59.065163"
+    "statusUpdatedAt": "2026-06-26T04:36:19.477924",
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-26T04:36:19.117149"
   },
   {
     "id": "6947E632-5EBC-487F-982D-5F8B6A88A959",
     "status": "occupied",
     "name": "T24",
-    "statusUpdatedAt": "2026-06-18T04:29:04.345129"
+    "statusUpdatedAt": "2026-06-26T15:48:47.770447",
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-26T15:48:47.489864"
   },
   {
     "id": "5B111EC1-2065-4B1C-ADD5-2EE36D3437AF",
@@ -286,8 +323,55 @@
   },
   {
     "id": "4D66D93E-C55A-4FF3-B4CE-916C297712ED",
-    "status": "occupied",
+    "status": "ready",
     "name": "T20",
-    "statusUpdatedAt": "2026-06-20T11:33:54.378393"
+    "statusUpdatedAt": "2026-06-26T20:54:03.569772",
+    "readyAt": "2026-06-26T20:54:03.569772",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false
+  },
+  {
+    "id": "CA066DF0-56CE-416F-9F1E-6F641B656741",
+    "status": "occupied",
+    "statusUpdatedAt": "2026-06-27T13:09:24.354388",
+    "readyAt": "2026-06-27T12:12:57.163643",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false,
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-27T13:09:24.325270"
+  },
+  {
+    "id": "1AD8C760-A7D7-4331-BFAA-3F71FDAB3999",
+    "status": "occupied",
+    "statusUpdatedAt": "2026-06-27T13:10:15.279696",
+    "readyAt": "2026-06-27T12:12:57.837729",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false,
+    "minimumCharge": 0.0,
+    "minimumChargeUpdatedAt": "2026-06-27T12:38:12.023737"
+  },
+  {
+    "id": "741A51B6-CB19-4ABF-A8B8-5A1792A6C457",
+    "status": "ready",
+    "statusUpdatedAt": "2026-06-26T20:54:22.563883",
+    "readyAt": "2026-06-26T20:54:22.563883",
+    "dirtyAt": null,
+    "cleaningStartedAt": null,
+    "occupiedSince": null,
+    "noOrderOverdue": false,
+    "noOrderMinutes": 0,
+    "cleanupOverdue": false
   }
 ]

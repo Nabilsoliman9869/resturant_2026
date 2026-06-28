@@ -4,32 +4,13 @@ chcp 65001 >nul
 cd /d "%~dp0"
 if not defined MAT3AM_BASE_DIR set "MAT3AM_BASE_DIR=%LOCALAPPDATA%\Mat3amPOS"
 
-set "MAT3AM_PY="
-where python >nul 2>&1 && set "MAT3AM_PY=python"
-if not defined MAT3AM_PY where py >nul 2>&1 && set "MAT3AM_PY=py"
-rem محاولات مباشرة لمسارات Python الشائعة (بدون for لتجنب parsing edge-cases)
-if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
-if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-if not defined MAT3AM_PY if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.exe" set "MAT3AM_PY=%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
-if not defined MAT3AM_PY if exist "%ProgramFiles%\Python313\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python313\python.exe"
-if not defined MAT3AM_PY if exist "%ProgramFiles%\Python312\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python312\python.exe"
-if not defined MAT3AM_PY if exist "%ProgramFiles%\Python311\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python311\python.exe"
-if not defined MAT3AM_PY if exist "%ProgramFiles%\Python310\python.exe" set "MAT3AM_PY=%ProgramFiles%\Python310\python.exe"
-if not defined MAT3AM_PY if exist "C:\Python313\python.exe" set "MAT3AM_PY=C:\Python313\python.exe"
-if not defined MAT3AM_PY if exist "C:\Python312\python.exe" set "MAT3AM_PY=C:\Python312\python.exe"
-if not defined MAT3AM_PY if exist "C:\Python311\python.exe" set "MAT3AM_PY=C:\Python311\python.exe"
-if not defined MAT3AM_PY if exist "C:\Python310\python.exe" set "MAT3AM_PY=C:\Python310\python.exe"
-if not defined MAT3AM_PY (
+set "MAT3AM_PY=C:\Users\NabilSirconsult\env\Scripts\python.exe"
+if not exist "%MAT3AM_PY%" (
   echo ========================================
-  echo [خطأ] لم يُعثر على Python في PATH.
-  echo ثبّت Python 3 من https://www.python.org/downloads/
-  echo وفعّل الخيار «Add python.exe to PATH» ثم أعد فتح الطرفية.
+  echo [خطأ] لم يُعثر على Python المتوقع.
+  echo المسار: %MAT3AM_PY%
   echo.
-  echo جرّب أيضاً (في CMD):
-  echo   where python
-  echo   where py
-  echo أو ثبّت Python في المسار الافتراضي داخل LocalAppData.
+  echo إذا تغيّر المسار عدّله في run_api.bat
   echo ========================================
   pause
   exit /b 1
