@@ -88,6 +88,11 @@ type OrderTakerSessionRow = {
   billingProfile?: SessionBillingProfile;
   seatGuestLabels?: unknown;
   maxInvoiceLimit?: number;
+  mergedIntoSessionId?: string;
+  mergedSourceSessionIds?: string[];
+  mergeId?: string;
+  mergeRole?: "source" | "target";
+  tableDisplayName?: string;
 };
 
 type PatchSessionResponse = {
@@ -403,13 +408,6 @@ function buildAutoNumberedSeatLabels(guestCount: number, existing?: Record<numbe
   return out;
 }
 
-/** مطابقة معرف مستخدم/GUID بين الجلسة وواجهة الكابتن */
-function mat3amGuidNormEq(a: string, b: string): boolean {
-  const x = String(a || "").trim().replace(/[{}]/g, "").toUpperCase();
-  const y = String(b || "").trim().replace(/[{}]/g, "").toUpperCase();
-  return x.length > 0 && y.length > 0 && x === y;
-}
-
 function seatNoFromLine(l: CartLine): number | null {
   if (l.seatNo != null && Number.isFinite(l.seatNo)) return l.seatNo;
   const m = /كرسي\s*(\d+)/.exec(String(l.seatLabel || ""));
@@ -530,6 +528,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [splitBySeat, setSplitBySeat] = useState(false);
   const [reorderSeatTargets, setReorderSeatTargets] = useState<Record<string, number>>({});
   const [reorderBusyKey, setReorderBusyKey] = useState("");
+  const [partialMoveSelected, setPartialMoveSelected] = useState<Record<string, boolean>>({});
+  const [partialMoveSeatTargets, setPartialMoveSeatTargets] = useState<Record<string, number>>({});
+  const [partialMoveTargetTableId, setPartialMoveTargetTableId] = useState("");
+  const [partialMoveIncludesGuest, setPartialMoveIncludesGuest] = useState(false);
+  const [partialMoveBusy, setPartialMoveBusy] = useState(false);
   const [transferTargetTableId, setTransferTargetTableId] = useState("");
   const [mergeTargetTableId, setMergeTargetTableId] = useState("");
   const [transferPickQuery, setTransferPickQuery] = useState("");
@@ -544,6 +547,21 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   /** جلسة نشطة واحدة لكل tableId (مرجع موحّد) */
   const [sessionByTableRef, setSessionByTableRef] = useState<Record<string, { id: string; captainUserId: string }>>({});
   const [sessionMoveBusy, setSessionMoveBusy] = useState(false);
+  const [mergedIntoSessionId, setMergedIntoSessionId] = useState("");
+  const [mergedSourceSessionIds, setMergedSourceSessionIds] = useState<string[]>([]);
+  const [unmergePreviewLines, setUnmergePreviewLines] = useState<Array<{
+    orderId: string;
+    lineId: string;
+    name: string;
+    quantity: number;
+    seatNo?: number | null;
+    origin: "source" | "target";
+    tableId?: string;
+  }>>([]);
+  const [unmergeSeatTargets, setUnmergeSeatTargets] = useState<Record<string, number>>({});
+  const [unmergeSeatEnabled, setUnmergeSeatEnabled] = useState<Record<string, boolean>>({});
+  const [unmergeSourceSessionId, setUnmergeSourceSessionId] = useState("");
+  const [unmergeBusy, setUnmergeBusy] = useState(false);
   /** اسم للعرض/الطباعة على الشيك — نصّي على الجلسة وليس عميلاً منفصلاً في TBL016 */
   const [seatGuestLabels, setSeatGuestLabels] = useState<Record<number, string>>({});
   const [sessionGuestCount, setSessionGuestCount] = useState(1);
@@ -602,30 +620,20 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const transferPickBase = useMemo(() => {
     return tablesMoveCatalog.filter((t) => {
       if (String(t.id) === String(selectedTableId)) return false;
-      const ref = tableRefKey(t.id);
-      const occ = sessionByTableRef[ref];
-      if (occ?.id) return false;
       const tst = normalizeTableStatus(String(t.status || ""));
       if (tst === "dirty" || tst === "cleaning") return false;
       return true;
     });
-  }, [tablesMoveCatalog, sessionByTableRef, selectedTableId]);
+  }, [tablesMoveCatalog, selectedTableId]);
 
   const mergePickBase = useMemo(() => {
-    const capId = String(captainGate?.id || "").trim();
     return tablesMoveCatalog.filter((t) => {
       if (String(t.id) === String(selectedTableId)) return false;
-      const ref = tableRefKey(t.id);
-      const occ = sessionByTableRef[ref];
-      if (!occ?.id) return false;
-      if (String(occ.id) === String(activeSessionId || "")) return false;
-      if (capId) {
-        const oc = String(occ.captainUserId || "").trim();
-        if (oc && !mat3amGuidNormEq(oc, capId)) return false;
-      }
+      const tst = normalizeTableStatus(String(t.status || ""));
+      if (tst === "dirty" || tst === "cleaning") return false;
       return true;
     });
-  }, [tablesMoveCatalog, sessionByTableRef, selectedTableId, captainGate?.id, activeSessionId]);
+  }, [tablesMoveCatalog, selectedTableId]);
 
   const runTransferTableSearch = useCallback(() => {
     const q = transferPickQuery.trim();
@@ -648,14 +656,22 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     const q = transferPickQuery.trim();
     const list = q ? transferPickBase.filter((t) => matchesTablePickQuery(t, q)) : transferPickBase.slice(0, 80);
     setTransferSearchResults(list);
-    setTransferTargetTableId((cur) => (cur && list.some((t) => t.id === cur) ? cur : list[0]?.id || ""));
+    setTransferTargetTableId((cur) => {
+      const curId = String(cur || "").trim();
+      if (curId && list.some((t) => String(t.id) === curId)) return curId;
+      return String(list[0]?.id || "").trim();
+    });
   }, [transferPickBase, transferPickQuery]);
 
   useEffect(() => {
     const q = mergePickQuery.trim();
     const list = q ? mergePickBase.filter((t) => matchesTablePickQuery(t, q)) : mergePickBase.slice(0, 80);
     setMergeSearchResults(list);
-    setMergeTargetTableId((cur) => (cur && list.some((t) => t.id === cur) ? cur : list[0]?.id || ""));
+    setMergeTargetTableId((cur) => {
+      const curId = String(cur || "").trim();
+      if (curId && list.some((t) => String(t.id) === curId)) return curId;
+      return String(list[0]?.id || "").trim();
+    });
   }, [mergePickBase, mergePickQuery]);
 
   const isDeliveryEmbedded = String(embeddedChannel || "").trim().toLowerCase() === "delivery";
@@ -715,6 +731,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     setSessionCustomerType(String(row?.customerType || (row?.guestSession ? "guest" : bp ? "vip_owner" : "cash")));
     setBillingRequestedAt(row?.billingRequestedAt ? String(row.billingRequestedAt) : null);
     setSessionMaxInvoiceLimit(typeof row?.maxInvoiceLimit === "number" ? row.maxInvoiceLimit : null);
+    setMergedIntoSessionId(String(row?.mergedIntoSessionId || "").trim());
+    setMergedSourceSessionIds(
+      Array.isArray(row?.mergedSourceSessionIds)
+        ? row.mergedSourceSessionIds.map((x) => String(x || "").trim()).filter(Boolean)
+        : [],
+    );
     const guestCount = clampSeatGuestCount(row?.guestCount, 1);
     setSessionGuestCount(guestCount);
     setGuestCountDraft(String(guestCount));
@@ -848,8 +870,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }
 
 
-  const loadAll = useCallback(async () => {
-    setMsg("");
+  const loadAll = useCallback(async (preserveMsg = false) => {
+    if (!preserveMsg) setMsg("");
     setLoading(true);
     try {
       const bootR = await safeFetch(`${base}/api/restaurant/order-taker-bootstrap`);
@@ -1302,6 +1324,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             setCaptainGate(null);
             setSessionBillingProfile(null);
             setBillingRequestedAt(null);
+            setMergedIntoSessionId("");
+            setMergedSourceSessionIds([]);
           }
           return;
         }
@@ -1667,7 +1691,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
     setOrdersBusy(true);
     try {
-      const r = await fetch(`${base}/api/restaurant/orders?sessionId=${encodeURIComponent(activeSessionId)}`);
+      const r = await fetch(`${base}/api/restaurant/orders?sessionId=${encodeURIComponent(activeSessionId)}&includeMerged=true`);
       const j = tryParseJson<{ orders?: unknown }>(await r.text()) ?? {};
       const list = Array.isArray(j.orders) ? j.orders : [];
       setSessionOrders(list as ServerOrder[]);
@@ -1847,9 +1871,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   const openNavoptsDialog = useCallback(
     (tab: "returns" | "transfer" | "merge" | "reorder" | "invoices") => {
+      if ((tab === "transfer" || tab === "merge") && Boolean(billingRequestedAt)) {
+        setMsg("تم طلب الحساب — لا يمكن تحويل أو دمج الطاولة الآن.");
+        return;
+      }
       setNavoptsActiveTab(tab);
     },
-    [],
+    [billingRequestedAt],
   );
 
   useEffect(() => {
@@ -2072,6 +2100,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const total = Math.max(
     0,
     billingTotals.netPortion + serviceCharge + vatValue + Math.max(0, tipAmount || 0)
+  );
+  const sessionSummarySubtotal = Math.max(0, reviewBillingTotals.netPortion + billingTotals.netPortion);
+  const sessionSummaryService = Math.max(0, reviewBillingTotals.serviceCharge + billingTotals.serviceCharge);
+  const sessionSummaryVat = Math.max(0, reviewBillingTotals.vatValue + billingTotals.vatValue);
+  const sessionSummaryMinimumGap = Math.max(0, reviewMinimumChargeDelta + minimumChargeDelta);
+  const sessionSummaryTotal = Math.max(
+    0,
+    sessionSummarySubtotal +
+      sessionSummaryService +
+      sessionSummaryVat +
+      sessionSummaryMinimumGap +
+      Math.max(0, tipAmount || 0),
   );
   const itemCount = cart.reduce((a, l) => a + l.qty, 0);
   const billingLocked = Boolean(billingRequestedAt);
@@ -2530,6 +2570,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الجلسة ضيف مؤقت بانتظار قرار المدير. لا يمكن طلب الحساب قبل اعتماد أو رفض المدير.");
       return;
     }
+    if (mergedIntoSessionId) {
+      const target = activeSessionsRef.current.find((row) => String(row.id || "") === mergedIntoSessionId);
+      setMsg(
+        `هذه الطاولة مدموجة مع ${target?.tableDisplayName || "الطاولة الرئيسية"}. اطلب الحساب النهائي من الطاولة الهدف فقط.`,
+      );
+      return;
+    }
     if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && reviewTotal > sessionMaxInvoiceLimit) {
       setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
       return;
@@ -2546,6 +2593,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }
 
   async function requestBill(opts?: { autoPrint?: boolean }) {
+    if (mergedIntoSessionId) {
+      setMsg("طلب الحساب مغلق على الطاولة المصدر بعد الدمج. افتح الطاولة الهدف لطلب الحساب المشترك.");
+      return;
+    }
     if (sessionGuestApprovalPending) {
       setMsg("الجلسة ضيف مؤقت بانتظار قرار المدير. لا يمكن طلب الحساب قبل اعتماد أو رفض المدير.");
       return;
@@ -2698,7 +2749,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       if (!r.ok) throw new Error(js.detail || txt || `HTTP ${r.status}`);
       setPendingGuestApprovalId(null);
       setMsg(action === "approve" ? "تم اعتماد جلسة الضيف." : "تم رفض جلسة الضيف وإعادتها إلى عميل نقدي.");
-      await loadAll();
+      await loadAll(true);
       await loadSessionOrders();
       await loadSessionInvoices();
     } catch (e) {
@@ -2729,25 +2780,59 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("اختر طاولة مختلفة للتحويل.");
       return;
     }
+    const targetSession = sessionByTableRef[tableRefKey(targetTableId)];
+    const targetWasOccupied = Boolean(targetSession?.id);
+    if (
+      targetWasOccupied &&
+      !window.confirm(
+        "الطاولة الهدف مشغولة بالفعل.\n\nسيتم إغلاق جلسة الطاولة الحالية ونقل جميع طلباتها وضيوفها إلى حساب الطاولة الهدف. هل تريد المتابعة؟",
+      )
+    ) {
+      return;
+    }
     setSessionMoveBusy(true);
     try {
-      const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}`, {
+      const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: targetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
+        body: JSON.stringify({
+          tableId: targetTableId,
+          confirmOccupiedTarget: targetWasOccupied,
+          actor: "waiter",
+          mat3amActor: buildMat3amActor(user),
+        }),
+        timeoutMs: 15000,
       });
       const t = await r.text();
-      if (!r.ok) throw new Error(t);
-      setSelectedTableId(targetTableId);
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown; message?: unknown }>(t);
+        const detail =
+          (typeof j?.detail === "string" && j.detail.trim()) ||
+          (typeof j?.message === "string" && j.message.trim()) ||
+          t ||
+          `HTTP ${r.status}`;
+        throw new Error(detail);
+      }
+      const parsed = tryParseJson<{ session?: { id?: string; tableId?: string } }>(t);
+      const patchedSession = parsed?.session;
+      const nextTableId = String(patchedSession?.tableId || targetTableId).trim() || targetTableId;
+      if (patchedSession?.id) setActiveSessionId(String(patchedSession.id));
+      setSelectedTableId(nextTableId);
+      activeSessionsRef.current = [];
       setTransferTargetTableId("");
       setTransferPickQuery("");
       setTransferSearchResults(null);
       closeNavoptsDialog();
-      setMsg("تم تحويل الجلسة إلى الطاولة الجديدة.");
+      setMsg(
+        targetWasOccupied
+          ? "تم ضم الطلبات والضيوف إلى الطاولة الهدف، وتحولت الطاولة المصدر إلى دورة التنظيف."
+          : "تم تحويل الجلسة إلى الطاولة الجديدة، وتحولت الطاولة المصدر إلى دورة التنظيف.",
+      );
       void loadSessionOrders();
-      void loadAll();
+      void loadAll(true);
     } catch (e) {
-      setMsg(String(e));
+      const errMsg = e instanceof Error && e.message ? e.message : "";
+      setMsg(errMsg || briefNetworkHint(e));
     } finally {
       setSessionMoveBusy(false);
     }
@@ -2774,27 +2859,225 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("اختر طاولة مختلفة للدمج.");
       return;
     }
+    if (mergedIntoSessionId || mergedSourceSessionIds.length > 0) {
+      setMsg("هذه الطاولة ضمن دمج نشط. فك الدمج الحالي أولاً.");
+      return;
+    }
+    const targetSession = sessionByTableRef[tableRefKey(targetTableId)];
+    const targetWasOccupied = Boolean(targetSession?.id);
+    if (
+      targetWasOccupied &&
+      !window.confirm(
+        "تنبيه: الطاولة الهدف مشغولة ولها حساب وطلبات حالية.\n\nبعد الدمج سيشمل حساب الطاولة الهدف جميع طلباتها الحالية وجميع طلبات الطاولة المصدر، ولن يمكن طلب الحساب من الطاولة المصدر. هل أنت متأكد من تنفيذ الدمج؟",
+      )
+    ) {
+      return;
+    }
     setSessionMoveBusy(true);
     try {
       const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}/merge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetTableId, actor: "waiter", mat3amActor: buildMat3amActor(user) }),
+        body: JSON.stringify({
+          targetTableId,
+          confirmOccupiedTarget: targetWasOccupied,
+          actor: "waiter",
+          mat3amActor: buildMat3amActor(user),
+        }),
       });
       const t = await r.text();
       if (!r.ok) throw new Error(t);
-      setSelectedTableId(targetTableId);
+      const parsed = tryParseJson<{
+        sourceSession?: { mergedIntoSessionId?: string; mergeId?: string };
+        targetSession?: { id?: string };
+      }>(t);
+      const targetSessionId = String(parsed?.targetSession?.id || parsed?.sourceSession?.mergedIntoSessionId || "").trim();
+      if (targetSessionId) setMergedIntoSessionId(targetSessionId);
+      setMergedSourceSessionIds([]);
       setMergeTargetTableId("");
       setMergePickQuery("");
       setMergeSearchResults(null);
       closeNavoptsDialog();
-      setMsg("تم دمج الطاولة الحالية مع الطاولة الهدف ونقل الطلبات للجلسة الهدف.");
+      setMsg(
+        targetWasOccupied
+          ? "تم دمج الحسابين. يستمر الطلب من الطاولتين، ويُطلب الحساب النهائي من الطاولة الهدف فقط."
+          : "تم تشغيل الطاولة الهدف ودمج الحساب معها. يستمر الطلب من الطاولتين، ويُطلب الحساب النهائي من الطاولة الهدف فقط.",
+      );
       void loadSessionOrders();
-      void loadAll();
+      void loadAll(true);
     } catch (e) {
       setMsg(String(e));
     } finally {
       setSessionMoveBusy(false);
+    }
+  }
+
+  async function loadUnmergePreview(sourceSessionId?: string) {
+    if (!activeSessionId) return;
+    setUnmergeBusy(true);
+    setMsg("");
+    try {
+      const sourceId = String(sourceSessionId || mergedIntoSessionId || mergedSourceSessionIds[0] || "").trim();
+      const query = sourceId && !mergedIntoSessionId ? `?sourceSessionId=${encodeURIComponent(sourceId)}` : "";
+      const r = await safeFetch(
+        `${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}/merge-preview${query}`,
+        { timeoutMs: 12000 },
+      );
+      const text = await r.text();
+      const j = tryParseJson<{
+        sourceSession?: { id?: string };
+        lines?: Array<{
+          orderId?: string;
+          lineId?: string;
+          name?: string;
+          quantity?: number;
+          seatNo?: number | null;
+          origin?: "source" | "target";
+          tableId?: string;
+        }>;
+        detail?: string;
+      }>(text) ?? {};
+      if (!r.ok) throw new Error(j.detail || text);
+      const lines = (Array.isArray(j.lines) ? j.lines : [])
+        .map((line) => ({
+          orderId: String(line.orderId || ""),
+          lineId: String(line.lineId || ""),
+          name: String(line.name || "صنف"),
+          quantity: Number(line.quantity || 0),
+          seatNo: line.seatNo,
+          origin: line.origin === "target" ? "target" as const : "source" as const,
+          tableId: String(line.tableId || ""),
+        }))
+        .filter((line) => line.orderId && line.lineId);
+      setUnmergeSourceSessionId(String(j.sourceSession?.id || sourceId));
+      setUnmergePreviewLines(lines);
+      setUnmergeSeatTargets(
+        Object.fromEntries(lines.map((line) => [`${line.orderId}:${line.lineId}`, Number(line.seatNo || 0)])),
+      );
+      setUnmergeSeatEnabled(
+        Object.fromEntries(lines.map((line) => [`${line.orderId}:${line.lineId}`, true])),
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUnmergeBusy(false);
+    }
+  }
+
+  async function submitUnmerge() {
+    if (!activeSessionId || !unmergeSourceSessionId) return;
+    if (
+      !window.confirm(
+        "سيتم فك الحساب المشترك وإعادة كل طاولة إلى جلستها الأصلية مع تطبيق توزيع المقاعد الظاهر. هل تريد المتابعة؟",
+      )
+    ) {
+      return;
+    }
+    setUnmergeBusy(true);
+    setMsg("");
+    try {
+      const assignments = unmergePreviewLines
+        .filter((line) => unmergeSeatEnabled[`${line.orderId}:${line.lineId}`] !== false)
+        .map((line) => ({
+          orderId: line.orderId,
+          lineId: line.lineId,
+          seatNo: unmergeSeatTargets[`${line.orderId}:${line.lineId}`] || null,
+        }));
+      const r = await safeFetch(
+        `${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}/unmerge`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceSessionId: unmergeSourceSessionId,
+            assignments,
+            actor: "waiter",
+            mat3amActor: buildMat3amActor(user),
+          }),
+          timeoutMs: 15000,
+        },
+      );
+      const text = await r.text();
+      const j = tryParseJson<{ detail?: string }>(text) ?? {};
+      if (!r.ok) throw new Error(j.detail || text);
+      setUnmergePreviewLines([]);
+      setUnmergeSourceSessionId("");
+      setUnmergeSeatTargets({});
+      setUnmergeSeatEnabled({});
+      setMergedIntoSessionId("");
+      setMergedSourceSessionIds((prev) => prev.filter((id) => id !== unmergeSourceSessionId));
+      setMsg("تم فك الدمج وإعادة كل طاولة إلى جلستها الأصلية.");
+      void loadSessionOrders();
+      void loadAll(true);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUnmergeBusy(false);
+    }
+  }
+
+  async function submitPartialMove() {
+    if (!activeSessionId || !partialMoveTargetTableId) {
+      setMsg("اختر البنود والطاولة الهدف أولاً.");
+      return;
+    }
+    const rows = reviewSeatMoveRows.filter(
+      (row) => row.source === "order" && partialMoveSelected[row.key] && row.orderId,
+    );
+    if (!rows.length) {
+      setMsg("اختر بنداً مرسلاً واحداً على الأقل للنقل.");
+      return;
+    }
+    const targetWasOccupied = Boolean(sessionByTableRef[tableRefKey(partialMoveTargetTableId)]?.id);
+    if (
+      targetWasOccupied &&
+      !window.confirm(
+        "الطاولة الهدف مشغولة. ستُضاف البنود المحددة إلى جلستها وحسابها الحالي. هل تريد المتابعة؟",
+      )
+    ) {
+      return;
+    }
+    setPartialMoveBusy(true);
+    setMsg("");
+    try {
+      const r = await safeFetch(
+        `${base}/api/restaurant/table-sessions/${encodeURIComponent(activeSessionId)}/move-items`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetTableId: partialMoveTargetTableId,
+            confirmOccupiedTarget: targetWasOccupied,
+            guestCount: partialMoveIncludesGuest ? 1 : 0,
+            items: rows.map((row) => ({
+              orderId: row.orderId,
+              lineId: row.lineId,
+              quantity: row.qty,
+              seatNo: partialMoveSeatTargets[row.key] || row.seatNo || 1,
+            })),
+            actor: "waiter",
+            mat3amActor: buildMat3amActor(user),
+          }),
+          timeoutMs: 15000,
+        },
+      );
+      const text = await r.text();
+      const j = tryParseJson<{ detail?: string }>(text) ?? {};
+      if (!r.ok) throw new Error(j.detail || text);
+      setPartialMoveSelected({});
+      setPartialMoveSeatTargets({});
+      setPartialMoveIncludesGuest(false);
+      setMsg(
+        targetWasOccupied
+          ? "تم نقل البنود المحددة وإضافتها إلى حساب الطاولة الهدف."
+          : "تم تشغيل الطاولة الهدف ونقل البنود المحددة إليها.",
+      );
+      void loadSessionOrders();
+      void loadAll(true);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPartialMoveBusy(false);
     }
   }
 
@@ -2956,7 +3239,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const useDesktopOrderWorkspace = !useCaptainMobileUi;
   const desktopTableLabel = selectedTable ? tableDisplayName(selectedTable) : selectedTableId || "بدون طاولة";
   const desktopSessionLabel = activeSessionId ? `#${activeSessionId.slice(0, 8)}` : "لا توجد جلسة";
-  const desktopBillingLabel = billingLocked ? "قيد طلب الحساب" : "جلسة مفتوحة";
+  const desktopBillingLabel = billingLocked
+    ? "قيد طلب الحساب"
+    : mergedIntoSessionId
+      ? "الحساب من الطاولة الهدف"
+      : mergedSourceSessionIds.length > 0
+        ? "الحساب المشترك هنا"
+        : "جلسة مفتوحة";
   const operationalSidebarContent = useMemo(
     () => (
       <div className="app-shell__op-section">
@@ -3153,10 +3442,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               <button
                 type="button"
                 className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--bill"
-                disabled={requestBillBusy || !activeSessionId || billingLocked || sessionGuestApprovalPending}
+                disabled={requestBillBusy || !activeSessionId || billingLocked || sessionGuestApprovalPending || Boolean(mergedIntoSessionId)}
                 onClick={openBillReview}
               >
-                {requestBillBusy ? "…" : "طلب الحساب"}
+                {requestBillBusy ? "…" : mergedIntoSessionId ? "الحساب من الهدف" : "طلب الحساب"}
               </button>
             </div>
             <div className="waiter-pos__hdr-fields">
@@ -3432,12 +3721,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 800, fontSize: "0.9rem", marginBottom: 8, color: "#0f172a" }}>التكلفة</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, fontSize: "0.86rem" }}>
-              <div><span style={{ color: "#64748b" }}>السلة:</span> <strong>{gross.toFixed(2)} ج.م</strong></div>
-              <div><span style={{ color: "#64748b" }}>الخدمة ({policy.servicePercent}%):</span> <strong>{serviceCharge.toFixed(2)}</strong></div>
-              <div><span style={{ color: "#64748b" }}>VAT ({policy.vatPercent}%):</span> <strong>{vatValue.toFixed(2)}</strong></div>
+              <div><span style={{ color: "#64748b" }}>السلة:</span> <strong>{sessionSummarySubtotal.toFixed(2)} ج.م</strong></div>
+              <div><span style={{ color: "#64748b" }}>الخدمة ({policy.servicePercent}%):</span> <strong>{sessionSummaryService.toFixed(2)}</strong></div>
+              <div><span style={{ color: "#64748b" }}>VAT ({policy.vatPercent}%):</span> <strong>{sessionSummaryVat.toFixed(2)}</strong></div>
               <div><span style={{ color: "#64748b" }}>بقشيش:</span> <strong>{(tipAmount || 0).toFixed(2)}</strong></div>
-              {minimumChargeDelta > 0 ? (
-                <div><span style={{ color: "#92400e" }}>فرق المينيموم:</span> <strong style={{ color: "#92400e" }}>{minimumChargeDelta.toFixed(2)}</strong></div>
+              {sessionSummaryMinimumGap > 0 ? (
+                <div><span style={{ color: "#92400e" }}>فرق المينيموم:</span> <strong style={{ color: "#92400e" }}>{sessionSummaryMinimumGap.toFixed(2)}</strong></div>
               ) : null}
               {billingTotals.ownerTpl ? (
                 <div><span style={{ color: "#b45309" }}>سياسة مالك/VIP:</span> <strong style={{ color: "#b45309" }}>{String(sessionBillingProfile?.vipOwnerLabel || "").trim() || "نشطة"}</strong></div>
@@ -3445,7 +3734,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               {billingTotals.ownerDiscountPct > 0 ? (
                 <div><span style={{ color: "#b45309" }}>خصم مالك:</span> <strong style={{ color: "#b45309" }}>{billingTotals.ownerDiscountPct}%</strong></div>
               ) : null}
-              <div><span style={{ color: "#0f172a" }}>الإجمالي:</span> <strong style={{ fontSize: "1rem", color: "#059669" }}>{total.toFixed(2)} ج.م</strong></div>
+              <div><span style={{ color: "#0f172a" }}>الإجمالي:</span> <strong style={{ fontSize: "1rem", color: "#059669" }}>{sessionSummaryTotal.toFixed(2)} ج.م</strong></div>
             </div>
           </div>
 
@@ -4874,7 +5163,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 <div style={{ display: "grid", gap: 12 }}>
                   <div className="waiter-pos__table-move-block">
                     <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#3b82f6" }}>تحويل الطاولة كاملة</div>
-                    <div className="waiter-pos__table-pick-hint">البحث حي تلقائيًا. انقر للتحديد أو دبل كليك للتنفيذ فورًا.</div>
+                    <div className="waiter-pos__table-pick-hint">إلى طاولة فارغة: تنتقل الجلسة. إلى طاولة مشغولة: تُضم الطلبات والضيوف إلى حسابها بعد تأكيد واضح.</div>
                     <div className="waiter-pos__table-pick-search-row">
                       <input type="search" enterKeyHint="search" className="waiter-pos__table-pick-search" value={transferPickQuery} onChange={(e) => setTransferPickQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (transferSearchResults?.length === 1) { void transferTableTo(transferSearchResults[0]!.id); return; } runTransferTableSearch(); } }} placeholder="ابحث عن طاولة فارغة…" autoComplete="off" aria-label="بحث طاولة للتحويل" />
                       <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runTransferTableSearch()}>بحث</button>
@@ -4886,13 +5175,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 6 }}>اضغط على طاولة لاختيارها:</div>
                         <div className="waiter-pos__table-pick-list waiter-pos__table-pick-list--dialog" role="listbox" aria-label="طاولات للتحويل">
                           {transferSearchResults.map((t) => (
-                            <button key={`tr-pick-${t.id}`} type="button" role="option" aria-selected={transferTargetTableId === t.id} className={`waiter-pos__table-pick-row${transferTargetTableId === t.id ? " is-selected" : ""}`} onClick={() => setTransferTargetTableId(t.id)} onDoubleClick={() => void transferTableTo(t.id)} title="انقر للتحديد أو دبل كليك لتنفيذ التحويل مباشرة">{tableDisplayName(t)}</button>
+                            <button key={`tr-pick-${t.id}`} type="button" role="option" aria-selected={String(transferTargetTableId) === String(t.id)} className={`waiter-pos__table-pick-row${String(transferTargetTableId) === String(t.id) ? " is-selected" : ""}`} onClick={() => setTransferTargetTableId(String(t.id))} onDoubleClick={() => void transferTableTo(String(t.id))} title="انقر للتحديد أو دبل كليك لتنفيذ التحويل مباشرة">{tableDisplayName(t)} {sessionByTableRef[tableRefKey(t.id)]?.id ? "— مشغولة" : "— فارغة"}</button>
                           ))}
                         </div>
                       </>
                     )}
                     {transferTargetTableId ? (
-                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#60a5fa" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === transferTargetTableId)) || transferTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setTransferTargetTableId("")}>مسح</button></div>
+                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#60a5fa" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => String(x.id) === String(transferTargetTableId))) || transferTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setTransferTargetTableId("")}>مسح</button></div>
                     ) : null}
                     <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: transferTargetTableId ? "#3b82f6" : undefined, opacity: transferTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTableByTarget(transferTargetTableId)}>⮕ تنفيذ التحويل</button>
                   </div>
@@ -4900,9 +5189,59 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               )}
               {navoptsActiveTab === "merge" && (
                 <div style={{ display: "grid", gap: 12 }}>
+                  {mergedIntoSessionId || mergedSourceSessionIds.length > 0 ? (
+                    <div className="waiter-pos__table-move-block" style={{ borderColor: "rgba(245,158,11,0.55)" }}>
+                      <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#fbbf24" }}>دمج نشط</div>
+                      <div style={{ color: "#cbd5e1", marginBottom: 10 }}>
+                        {mergedIntoSessionId
+                          ? "هذه هي الطاولة المصدر. يستمر الطلب منها، لكن طلب الحساب النهائي متاح من الطاولة الهدف فقط."
+                          : `هذه هي الطاولة الهدف للحساب المشترك${mergedSourceSessionIds.length > 1 ? ` (${mergedSourceSessionIds.length} طاولات مصدر)` : ""}.`}
+                      </div>
+                      {mergedSourceSessionIds.length > 1 && !mergedIntoSessionId ? (
+                        <select value={unmergeSourceSessionId || mergedSourceSessionIds[0] || ""} onChange={(e) => { setUnmergeSourceSessionId(e.target.value); setUnmergePreviewLines([]); }} style={{ width: "100%", marginBottom: 8 }}>
+                          {mergedSourceSessionIds.map((sid, idx) => <option key={sid} value={sid}>الطاولة المصدر {idx + 1}</option>)}
+                        </select>
+                      ) : null}
+                      <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" disabled={unmergeBusy} onClick={() => void loadUnmergePreview(unmergeSourceSessionId || undefined)}>
+                        {unmergeBusy ? "جارٍ التحميل…" : "مراجعة وإلغاء الدمج"}
+                      </button>
+                      {unmergePreviewLines.length > 0 ? (
+                        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                          <div style={{ color: "#fbbf24", fontWeight: 800 }}>راجع كل الأصناف وأعد تحديد المقاعد قبل الفصل</div>
+                          {unmergePreviewLines.map((line) => {
+                            const key = `${line.orderId}:${line.lineId}`;
+                            return (
+                              <div key={key} className="waiter-pos__ops-modal__grid-row">
+                                <div style={{ minWidth: 0 }}>
+                                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#fbbf24", fontSize: "0.78rem" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={unmergeSeatEnabled[key] !== false}
+                                      onChange={(e) => setUnmergeSeatEnabled((prev) => ({ ...prev, [key]: e.target.checked }))}
+                                    />
+                                    تطبيق توزيع المقعد
+                                  </label>
+                                  <div style={{ color: "#fff", fontWeight: 800 }}>{line.name} ×{line.quantity}</div>
+                                  <div style={{ color: "#94a3b8", fontSize: "0.78rem" }}>{line.origin === "source" ? "الطاولة المصدر" : "الطاولة الهدف"} · {line.tableId}</div>
+                                </div>
+                                <span style={{ color: "#cbd5e1" }}>المقعد</span>
+                                <select disabled={unmergeSeatEnabled[key] === false} value={unmergeSeatTargets[key] || ""} onChange={(e) => setUnmergeSeatTargets((prev) => ({ ...prev, [key]: Number(e.target.value || 0) }))}>
+                                  <option value="">بدون مقعد</option>
+                                  {[...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1), SHARED_SEAT_NO].map((seat) => <option key={`${key}-${seat}`} value={seat}>{seatGuestDisplay(seat)}</option>)}
+                                </select>
+                              </div>
+                            );
+                          })}
+                          <button type="button" className="waiter-pos__btn waiter-pos__btn--primary" disabled={unmergeBusy} onClick={() => void submitUnmerge()}>
+                            {unmergeBusy ? "جارٍ فك الدمج…" : "تأكيد فك الدمج وإعادة التوزيع"}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="waiter-pos__table-move-block">
                     <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#22c55e" }}>دمج مع طاولة أخرى</div>
-                    <div className="waiter-pos__table-pick-hint">البحث حي تلقائيًا. انقر للتحديد أو دبل كليك لتنفيذ الدمج مباشرة.</div>
+                    <div className="waiter-pos__table-pick-hint">الطاولة الفارغة ستُشغّل تلقائيًا. الطاولة المشغولة تعرض تحذيرًا لأن حسابها الحالي سيصبح الحساب المشترك.</div>
                     <div className="waiter-pos__table-pick-search-row">
                       <input type="search" enterKeyHint="search" className="waiter-pos__table-pick-search" value={mergePickQuery} onChange={(e) => setMergePickQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (mergeSearchResults?.length === 1) { void mergeIntoTableTo(mergeSearchResults[0]!.id); return; } runMergeTableSearch(); } }} placeholder="ابحث عن طاولة للدمج…" autoComplete="off" aria-label="بحث طاولة للدمج" />
                       <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-pick-search-btn" onClick={() => runMergeTableSearch()}>بحث</button>
@@ -4912,14 +5251,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     ) : (
                       <div className="waiter-pos__table-pick-list waiter-pos__table-pick-list--dialog" role="listbox" aria-label="طاولات للدمج">
                         {mergeSearchResults.map((t) => (
-                          <button key={`mg-pick-${t.id}`} type="button" role="option" aria-selected={mergeTargetTableId === t.id} className={`waiter-pos__table-pick-row${mergeTargetTableId === t.id ? " is-selected" : ""}`} onClick={() => setMergeTargetTableId(t.id)} onDoubleClick={() => void mergeIntoTableTo(t.id)} title="انقر للتحديد أو دبل كليك لتنفيذ الدمج مباشرة">{tableDisplayName(t)}</button>
+                          <button key={`mg-pick-${t.id}`} type="button" role="option" aria-selected={String(mergeTargetTableId) === String(t.id)} className={`waiter-pos__table-pick-row${String(mergeTargetTableId) === String(t.id) ? " is-selected" : ""}`} onClick={() => setMergeTargetTableId(String(t.id))} onDoubleClick={() => void mergeIntoTableTo(String(t.id))} title="انقر للتحديد أو دبل كليك لتنفيذ الدمج مباشرة">{tableDisplayName(t)} {sessionByTableRef[tableRefKey(t.id)]?.id ? "— مشغولة" : "— فارغة"}</button>
                         ))}
                       </div>
                     )}
                     {mergeTargetTableId ? (
-                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#4ade80" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => x.id === mergeTargetTableId)) || mergeTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setMergeTargetTableId("")}>مسح</button></div>
+                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#4ade80" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => String(x.id) === String(mergeTargetTableId))) || mergeTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setMergeTargetTableId("")}>مسح</button></div>
                     ) : null}
-                    <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: mergeTargetTableId ? "#22c55e" : undefined, opacity: mergeTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId} onClick={() => void mergeIntoTableTarget(mergeTargetTableId)}>⮕ تنفيذ الدمج</button>
+                    <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: mergeTargetTableId ? "#22c55e" : undefined, opacity: mergeTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId || Boolean(mergedIntoSessionId) || mergedSourceSessionIds.length > 0} onClick={() => void mergeIntoTableTarget(mergeTargetTableId)}>⮕ تنفيذ الدمج</button>
                   </div>
                 </div>
               )}
@@ -4960,6 +5299,65 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         })}
                       </div>
                     )}
+                  </div>
+                  <div className="waiter-pos__table-move-block" style={{ borderColor: "rgba(14,165,233,0.45)" }}>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#38bdf8" }}>فصل ضيف أو بنود إلى طاولة أخرى</div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 10 }}>
+                      اختر البنود المرسلة، ثم الطاولة والمقعد الهدف. الطاولة الفارغة ستُشغّل تلقائيًا، والمشغولة ستطلب تأكيدًا قبل إضافة البنود إلى حسابها.
+                    </div>
+                    <select value={partialMoveTargetTableId} onChange={(e) => setPartialMoveTargetTableId(e.target.value)} disabled={billingLocked || partialMoveBusy} style={{ width: "100%", marginBottom: 10 }}>
+                      <option value="">اختر الطاولة الهدف</option>
+                      {transferPickBase.map((table) => (
+                        <option key={`partial-target-${table.id}`} value={table.id}>
+                          {tableDisplayName(table)} — {sessionByTableRef[tableRefKey(table.id)]?.id ? "مشغولة" : "فارغة"}
+                        </option>
+                      ))}
+                    </select>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1", marginBottom: 10 }}>
+                      <input
+                        type="checkbox"
+                        checked={partialMoveIncludesGuest}
+                        disabled={billingLocked || partialMoveBusy}
+                        onChange={(e) => setPartialMoveIncludesGuest(e.target.checked)}
+                      />
+                      فصل ضيف كامل مع البنود المحددة (ينقص عدد ضيوف المصدر ويزيد عدد ضيوف الهدف)
+                    </label>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {reviewSeatMoveRows.filter((row) => row.source === "order").map((row) => (
+                        <label key={`partial-${row.key}`} className="waiter-pos__ops-modal__grid-row" style={{ cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(partialMoveSelected[row.key])}
+                            disabled={billingLocked || partialMoveBusy}
+                            onChange={(e) => setPartialMoveSelected((prev) => ({ ...prev, [row.key]: e.target.checked }))}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: "#fff", fontWeight: 800 }}>{row.name} ×{row.qty}</div>
+                            <div style={{ color: "#94a3b8", fontSize: "0.78rem" }}>حاليًا: {row.seatNo ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}</div>
+                          </div>
+                          <select
+                            value={partialMoveSeatTargets[row.key] || row.seatNo || 1}
+                            disabled={!partialMoveSelected[row.key] || partialMoveBusy}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setPartialMoveSeatTargets((prev) => ({ ...prev, [row.key]: Number(e.target.value || 1) }))}
+                            aria-label={`مقعد ${row.name} في الطاولة الهدف`}
+                          >
+                            {[...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1), SHARED_SEAT_NO].map((seat) => (
+                              <option key={`partial-${row.key}-${seat}`} value={seat}>{seatGuestDisplay(seat)}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action"
+                      disabled={billingLocked || partialMoveBusy || !partialMoveTargetTableId || !Object.values(partialMoveSelected).some(Boolean)}
+                      onClick={() => void submitPartialMove()}
+                      style={{ marginTop: 10 }}
+                    >
+                      {partialMoveBusy ? "جارٍ النقل…" : "نقل البنود المحددة"}
+                    </button>
                   </div>
                 </div>
               )}

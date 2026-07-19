@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from typing import Any, Callable, List, Optional, Tuple
@@ -19,6 +20,63 @@ _TBL005: dict = {"rows": None, "fetched_at": 0.0, "error": None, "from_mirror": 
 _TBL007: dict = {"rows": None, "fetched_at": 0.0, "error": None, "from_mirror": False}
 _TBL006: dict = {"rows": None, "fetched_at": 0.0, "error": None, "from_mirror": False}
 _USERS: dict = {"users": None, "fetched_at": 0.0, "error": None}
+
+
+def _decode_unicode_markers(value: str) -> str:
+    s = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), value)
+    s = re.sub(r"%u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), s)
+
+    def _cp(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        try:
+            return chr(int(raw, 16))
+        except Exception:
+            return match.group(0)
+
+    return re.sub(r"U\+([0-9a-fA-F]{4,6})", _cp, s)
+
+
+def _try_decode_utf8_bytes(value: str) -> str:
+    if not value:
+        return value
+    try:
+        b = bytes((ord(ch) & 0xFF) for ch in value)
+        return b.decode("utf-8", errors="replace")
+    except Exception:
+        return value
+
+
+def _arabic_repair_score(value: str) -> int:
+    arabic = len(re.findall(r"[\u0600-\u06FF]", value))
+    mojibake = len(re.findall(r"[ØÙÃÂÐÑÆ]", value))
+    qmarks = value.count("?")
+    return arabic * 5 - mojibake * 3 - qmarks * 4
+
+
+def _repair_arabic_display_text(value: Any) -> str:
+    original = str(value or "").strip()
+    if not original:
+        return ""
+
+    best = _decode_unicode_markers(original)
+    best_score = _arabic_repair_score(best)
+    suspicious = (
+        re.search(r"[ØÙÃÂÐÑÆ]", best) is not None
+        or re.search(r"\\u[0-9a-fA-F]{4}", original) is not None
+        or re.search(r"%u[0-9a-fA-F]{4}", original) is not None
+        or re.search(r"U\+[0-9a-fA-F]{4,6}", original) is not None
+    )
+    if not suspicious:
+        return best
+
+    candidate = best
+    for _ in range(2):
+        candidate = _try_decode_utf8_bytes(candidate).strip()
+        score = _arabic_repair_score(candidate)
+        if score > best_score:
+            best = candidate
+            best_score = score
+    return best
 
 def _ttl_sec(name: str, default: float) -> float:
     raw = (os.environ.get(name) or "").strip()
@@ -160,14 +218,8 @@ def _get_rows_cached(
                 "error": None,
                 "stale": False,
             }
-        if not allow_live:
-            return list(rows), {
-                "source": "memory-stale",
-                "fromMirror": bool(slot["from_mirror"]),
-                "error": slot.get("error"),
-                "stale": True,
-            }
-        # منتهي TTL — أعد القديم الآن وحدّث بالخلفية
+        # منتهي TTL — أعد القديم الآن وحدّث بالخلفية دائماً (حتى لو allow_live=False)
+        # allow_live=False يمنع الجلب المتزامن فقط، لا التحديث الخلفي
         _bg_refresh(tag, lambda: _load_rows_slot(slot, mirror_name, fetch_live))
 
         return list(rows), {
@@ -343,7 +395,7 @@ def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Op
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt, PinHash, SpecialistStationCode
+            SELECT TOP 500 Id, LoginName, DisplayName, RoleCode, IsActive, CreatedAt, PinHash, SpecialistStationCode, Email
             FROM dbo.MAT3AM_APP_USERS
             ORDER BY CreatedAt DESC
             """
@@ -354,12 +406,13 @@ def _fetch_users_live(get_connection: ConnectionFactory) -> Tuple[List[dict], Op
                 {
                     "id": str(r[0]),
                     "login": str(r[1] or ""),
-                    "name": str(r[2] or r[1] or ""),
+                    "name": _repair_arabic_display_text(r[2] or r[1] or ""),
                     "role": str(r[3] or "").lower(),
                     "isActive": bool(r[4]) if r[4] is not None else True,
                     "createdAt": str(r[5]) if r[5] else "",
                     "pinHash": str(r[6] or "").strip() if len(r) > 6 else "",
                     "specialistStationCode": str(r[7] or "").strip().lower() if len(r) > 7 and r[7] else "",
+                    "email": str(r[8] or "").strip() if len(r) > 8 and r[8] else "",
                 }
             )
         return users, None
@@ -416,8 +469,8 @@ def _fetch_tbl007_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
             rows.append(
                 {
                     "CardGuide": guid,
-                    "ProductName": row[1],
-                    "LatinName": row[2],
+                    "ProductName": _repair_arabic_display_text(row[1]),
+                    "LatinName": str(row[2] or ""),
                     "EndUserPrice": row[3],
                     "AgentPrice": row[4],
                     "GroupGuid": str(row[5]).strip() if row[5] is not None else None,
@@ -493,11 +546,11 @@ def _fetch_tbl006_live(get_connection: ConnectionFactory) -> Tuple[List[dict], O
                 {
                     "CardGuide": gid,
                     "MainGuide": str(row[1]).upper() if len(row) > 1 and row[1] else "",
-                    "LatinName": row[2] or "",
-                    "GroupName": row[3],
+                    "LatinName": str(row[2] or ""),
+                    "GroupName": _repair_arabic_display_text(row[3]),
                     "GroupImageUrl": str(row[4]).strip() if len(row) > 4 and row[4] else None,
                     "TextValue01": str(row[5]).strip() if len(row) > 5 and row[5] else "",
-                    "DisplayCategory": str(row[6]).strip() if len(row) > 6 and row[6] else "",
+                    "DisplayCategory": _repair_arabic_display_text(row[6]) if len(row) > 6 and row[6] else "",
                     "SampleProductGuide": str(row[7]).strip() if len(row) > 7 and row[7] else None,
                     "SampleProductImageUrl": str(row[8]).strip() if len(row) > 8 and row[8] else None,
                 }

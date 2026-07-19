@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getApiBase } from "../lib/apiBase";
+import { repairArabicDisplayText } from "../auth/displayUser";
 
 type ProductHit = {
     CardGuide: string;
     ProductName: string;
+    Price?: number;
+    BaseEndUserPrice?: number;
     AgentPrice?: number;
 };
 
@@ -13,7 +16,7 @@ type ProductHitContext = {
 };
 
 function normArabic(s: string) {
-    const t = (s || "").toLowerCase();
+    const t = repairArabicDisplayText(s || "").toLowerCase();
     return t
         .normalize("NFKD")
         .replace(/[\u064B-\u0652\u0670\u0640]/g, "")
@@ -61,10 +64,14 @@ export default function SmartProductSearch({
                 for (const p of arr) {
                     const id = String(p.CardGuide || p.ProductGuide || "");
                     if (!id) continue;
+                    const menuPrice = Number(p.Price ?? p.BaseEndUserPrice ?? p.EndUserPrice ?? 0);
+                    const agentPrice = Number(p.AgentPrice ?? 0);
                     unique.set(id, {
                         CardGuide: id,
-                        ProductName: String(p.ProductName || ""),
-                        AgentPrice: Number(p.AgentPrice || 0),
+                        ProductName: repairArabicDisplayText(String(p.ProductName || "")),
+                        Price: Number.isFinite(menuPrice) ? menuPrice : 0,
+                        BaseEndUserPrice: Number(p.BaseEndUserPrice ?? p.EndUserPrice ?? 0) || 0,
+                        AgentPrice: Number.isFinite(agentPrice) ? agentPrice : 0,
                     });
                 }
                 const list = Array.from(unique.values());
@@ -165,6 +172,7 @@ export default function SmartProductSearch({
                     ) : (
                         hits.map((h) => {
                             const oos = isOutOfStock?.(h) ?? false;
+                            const shownPrice = Number(h.Price ?? h.BaseEndUserPrice ?? h.AgentPrice ?? 0) || 0;
                             return (
                                 <button
                                     key={h.CardGuide}
@@ -231,7 +239,7 @@ export default function SmartProductSearch({
                                             {h.CardGuide}
                                         </div>
                                     </div>
-                                    <div style={{ fontWeight: 700 }}>{Math.round(h.AgentPrice || 0)} ج.م</div>
+                                    <div style={{ fontWeight: 700 }}>{Math.round(shownPrice)} ج.م</div>
                                 </button>
                             );
                         })

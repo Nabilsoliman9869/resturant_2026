@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel, model_validator
 from typing import Any, List, Optional, Tuple
+import functools
+import inspect
 import pyodbc
 from datetime import date as date_cls
 from datetime import datetime, timezone, timedelta
@@ -823,46 +825,72 @@ def _kds_item_is_speed_line(it: dict, gmap: dict, speed_guid: Optional[str]) -> 
 
 
 def _enrich_invoice_lines_from_menu(cursor, lines: list) -> list:
-    cache = {}
+    cache: dict[str, dict] = {}
     out = []
     for ln in lines:
         if not isinstance(ln, dict):
             continue
         pg = str(ln.get("ProductGuide") or "").strip()
-        rec = None
-        if pg:
-            rec = cache.get(pg)
-            if rec is None:
-                try:
-                    cursor.execute(
-                        "SELECT TOP 1 ProductName, AgentPrice FROM TBL007 WHERE CardGuide = CAST(? AS uniqueidentifier)",
-                        (pg,),
-                    )
-                    r = cursor.fetchone()
-                    rec = {
-                        "name": str(r[0]) if r and r[0] else "",
-                        "price": float(r[1]) if r and r[1] is not None else None,
-                    }
-                except Exception:
-                    rec = {"name": "", "price": None}
-                cache[pg] = rec
         x = dict(ln)
-        menu_name = (rec or {}).get("name") or ""
-        menu_price = (rec or {}).get("price")
-        if not str(x.get("ProductName") or "").strip() and menu_name:
-            x["ProductName"] = menu_name
-        if (float(x.get("UnitPrice") or 0) <= 0) and (menu_price is not None):
-            qty = float(x.get("Quantity") or 0)
-            x["UnitPrice"] = float(menu_price)
-            x["TotalValue"] = float(menu_price) * qty
+        if pg:
+            rec = _menu_product_pricing_record(cursor, pg, cache)
+            menu_name = str(rec.get("name") or "")
+            if not str(x.get("ProductName") or "").strip() and menu_name:
+                x["ProductName"] = menu_name
+            if float(x.get("UnitPrice") or 0) <= 0:
+                resolved, _src = _product_effective_unit_price(cursor, pg, cache)
+                if resolved > 0:
+                    qty = float(x.get("Quantity") or 0)
+                    x["UnitPrice"] = resolved
+                    x["TotalValue"] = round(resolved * qty, 4)
         out.append(x)
     return out
+
+
+def _historical_product_unit_price(cursor, product_guide: str) -> Optional[float]:
+    pg = str(product_guide or "").strip()
+    if not pg:
+        return None
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 TotalValue, Quantity
+            FROM dbo.TBL023
+            WHERE ProductGuide = CAST(? AS uniqueidentifier)
+              AND ISNULL(TotalValue, 0) > 0
+              AND ISNULL(Quantity, 0) > 0
+            ORDER BY ID DESC
+            """,
+            (pg,),
+        )
+        row = cursor.fetchone()
+        if row:
+            qty = float(row[1] or 0)
+            if qty > 0:
+                return round(float(row[0] or 0) / qty, 2)
+    except Exception:
+        pass
+    return None
+
+
+def _product_effective_unit_price(cursor, product_guide: str, cache: Optional[dict] = None) -> tuple[float, str]:
+    rec = _menu_product_pricing_record(cursor, product_guide, cache)
+    menu_price = rec.get("menu_price")
+    if menu_price is not None and float(menu_price) > 0:
+        return round(float(menu_price), 2), str(rec.get("price_source") or "menu")
+    cost_price = rec.get("cost_price")
+    if cost_price is not None and float(cost_price) > 0:
+        return round(float(cost_price), 2), "cost"
+    hist = rec.get("history_price")
+    if hist is not None and float(hist) > 0:
+        return round(float(hist), 2), "history"
+    return 0.0, ""
 
 
 def _menu_product_pricing_record(cursor, product_guide: str, cache: Optional[dict] = None) -> dict:
     pg = str(product_guide or "").strip().upper()
     if not pg:
-        return {"name": "", "menu_price": None, "cost_price": None}
+        return {"name": "", "menu_price": None, "cost_price": None, "history_price": None}
     if isinstance(cache, dict) and pg in cache:
         return cache[pg]
     try:
@@ -873,14 +901,228 @@ def _menu_product_pricing_record(cursor, product_guide: str, cache: Optional[dic
         row = cursor.fetchone()
         rec = {
             "name": str(row[0]) if row and row[0] else "",
-            "menu_price": float(row[1]) if row and row[1] is not None else None,
-            "cost_price": float(row[2]) if row and row[2] is not None else None,
+            "menu_price": float(row[1]) if row and row[1] is not None and float(row[1]) > 0 else None,
+            "cost_price": float(row[2]) if row and row[2] is not None and float(row[2]) > 0 else None,
+            "history_price": None,
+            "price_source": "menu",
         }
     except Exception:
-        rec = {"name": "", "menu_price": None, "cost_price": None}
+        rec = {"name": "", "menu_price": None, "cost_price": None, "history_price": None, "price_source": ""}
+    if (rec.get("menu_price") is None and rec.get("cost_price") is None) or (
+        float(rec.get("menu_price") or 0) <= 0 and float(rec.get("cost_price") or 0) <= 0
+    ):
+        hist = _historical_product_unit_price(cursor, product_guide)
+        if hist and hist > 0:
+            rec["history_price"] = hist
+            rec["price_source"] = "history"
     if isinstance(cache, dict):
         cache[pg] = rec
     return rec
+
+
+def _resolve_pos_invoice_line_prices(cursor, lines: list) -> list:
+    cache: dict[str, dict] = {}
+    out: list = []
+    for raw in lines or []:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        unit_price = float(row.get("UnitPrice") or row.get("unitPrice") or 0)
+        pg = str(row.get("ProductGuide") or row.get("productGuide") or "").strip()
+        qty = float(row.get("Quantity") or row.get("quantity") or 0)
+        if unit_price <= 0 and pg:
+            resolved, _src = _product_effective_unit_price(cursor, pg, cache)
+            if resolved > 0:
+                unit_price = resolved
+        row["UnitPrice"] = unit_price
+        row["unitPrice"] = unit_price
+        if qty > 0:
+            total = round(unit_price * qty, 4)
+            row["TotalValue"] = total
+            row["lineTotal"] = total
+        out.append(row)
+    return out
+
+
+def _restaurant_local_invoice_lookup(invoice_id: str) -> dict:
+    """بحث فاتورة في invoices.json بالمعرّف أو برقم الفاتورة المحاسبي."""
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    iid = str(invoice_id or "").strip()
+    if iid:
+        iid_upper = iid.upper()
+        for inv in raw:
+            if isinstance(inv, dict) and str(inv.get("invoiceId") or "").strip().upper() == iid_upper:
+                return inv
+    try:
+        bill_num = int(str(invoice_id or "").strip())
+    except (TypeError, ValueError):
+        bill_num = None
+    if bill_num is not None:
+        matches = [
+            inv
+            for inv in raw
+            if isinstance(inv, dict)
+            and int(inv.get("billNumber") or -1) == bill_num
+            and bool(inv.get("awaitingPayment"))
+            and not str(inv.get("paidAt") or "").strip()
+        ]
+        if len(matches) == 1:
+            return matches[0]
+    raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+
+
+def _invoice_needs_price_repair(inv: dict) -> bool:
+    if not isinstance(inv, dict):
+        return False
+    if not inv.get("awaitingPayment"):
+        return False
+    if str(inv.get("paidAt") or "").strip():
+        return False
+    if _money2_round(inv.get("total")) <= 0:
+        return True
+    for ln in list(inv.get("lines") or []) + list(inv.get("sourceLines") or []):
+        if not isinstance(ln, dict):
+            continue
+        up = ln.get("unitPrice")
+        if up is None:
+            up = ln.get("UnitPrice")
+        if float(up or 0) <= 0:
+            return True
+    return False
+
+
+def _reprice_local_awaiting_invoice(cursor, inv: dict) -> dict:
+    """إعادة تسعير فاتورة محلية منتظرة من المنيو/التاريخ وتحديث SQL + orders.json."""
+    invoice_id = str(inv.get("invoiceId") or "").strip()
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    pos_policy = _mat3am_pos_policy_row_from_cursor(cursor)
+    bp = inv.get("billingProfile") if isinstance(inv.get("billingProfile"), dict) else None
+    source = inv.get("sourceLines") if isinstance(inv.get("sourceLines"), list) else []
+    part_items: list[dict] = []
+    if source:
+        for src in source:
+            if not isinstance(src, dict):
+                continue
+            pg = str(src.get("productGuide") or "").strip()
+            qty = float(src.get("quantity") or 0)
+            if qty <= 0:
+                continue
+            part_items.append(
+                {
+                    "ProductGuide": pg,
+                    "ProductName": str(src.get("name") or "صنف"),
+                    "Quantity": qty,
+                    "Unit": "1",
+                    "UnitPrice": float(src.get("unitPrice") or 0),
+                    "TotalValue": float(src.get("lineTotal") or 0),
+                    "_orderId": str(src.get("orderId") or ""),
+                    "_lineId": str(src.get("lineId") or ""),
+                }
+            )
+    else:
+        for ln in inv.get("lines") or []:
+            if not isinstance(ln, dict):
+                continue
+            qty = float(ln.get("quantity") or 0)
+            if qty <= 0:
+                continue
+            part_items.append(
+                {
+                    "ProductGuide": str(ln.get("productGuide") or ""),
+                    "ProductName": str(ln.get("name") or "صنف"),
+                    "Quantity": qty,
+                    "Unit": "1",
+                    "UnitPrice": float(ln.get("unitPrice") or 0),
+                    "TotalValue": float(ln.get("lineTotal") or 0),
+                }
+            )
+    if not part_items:
+        raise HTTPException(status_code=409, detail="لا توجد بنود لإعادة التسعير")
+    if bp and bp.get("active") is not False:
+        part_items = _apply_billing_profile_to_invoice_lines(cursor, part_items, bp)
+    else:
+        part_items = _enrich_invoice_lines_from_menu(cursor, part_items)
+    part_items = _resolve_pos_invoice_line_prices(cursor, part_items)
+    zero_names = [
+        str(x.get("ProductName") or x.get("ProductGuide") or "صنف").strip()
+        for x in part_items
+        if float(x.get("UnitPrice") or 0) <= 0
+    ]
+    if zero_names:
+        preview = "، ".join(zero_names[:5])
+        raise HTTPException(status_code=409, detail=f"تعذر إيجاد سعر لأصناف: {preview}")
+    tip_amount = max(0.0, float(inv.get("tipAmount") or 0.0))
+    part_totals = _billing_profile_invoice_totals(part_items, bp if bp and bp.get("active") is not False else None, pos_policy, tip_amount)
+    for item in part_items:
+        pg = str(item.get("ProductGuide") or "").strip()
+        tv = float(item.get("TotalValue") or 0)
+        if not pg:
+            continue
+        cursor.execute(
+            """
+            UPDATE dbo.TBL023
+            SET TotalValue = ?
+            WHERE MainGuide = CAST(? AS uniqueidentifier)
+              AND ProductGuide = CAST(? AS uniqueidentifier)
+            """,
+            (tv, invoice_id, pg),
+        )
+    cursor.execute(
+        """
+        UPDATE dbo.TBL022
+        SET TaxValue = ?, LocalAdministrativeTax = ?, Discount = ?
+        WHERE CardGuide = CAST(? AS uniqueidentifier)
+        """,
+        (part_totals["tax"], part_totals["serviceCharge"], part_totals["discountValue"], invoice_id),
+    )
+    inv["subtotal"] = part_totals["netAfterDiscount"]
+    inv["tax"] = part_totals["tax"]
+    inv["serviceCharge"] = part_totals["serviceCharge"]
+    inv["discount"] = part_totals["discountValue"]
+    inv["total"] = part_totals["total"]
+    inv["lines"] = _invoice_lines_aggregate_for_store(part_items)
+    inv["sourceLines"] = _invoice_source_lines_from_part_items(part_items)
+    orders = _restaurant_load("orders", [])
+    if isinstance(orders, list):
+        price_by_order_line: dict[tuple[str, str], float] = {}
+        for src in inv["sourceLines"]:
+            if not isinstance(src, dict):
+                continue
+            oid = str(src.get("orderId") or "")
+            lid = str(src.get("lineId") or "")
+            if oid and lid:
+                price_by_order_line[(oid, lid)] = float(src.get("unitPrice") or 0)
+        orders_changed = False
+        for o in orders:
+            if not isinstance(o, dict):
+                continue
+            oid = str(o.get("id") or "")
+            for it in o.get("items") or []:
+                if not isinstance(it, dict):
+                    continue
+                lid = str(it.get("lineId") or "")
+                key = (oid, lid)
+                if key in price_by_order_line and float(it.get("unitPrice") or 0) <= 0:
+                    it["unitPrice"] = price_by_order_line[key]
+                    orders_changed = True
+        if orders_changed:
+            _restaurant_save("orders", orders)
+    return inv
+
+
+def _persist_repriced_local_invoice(inv: dict) -> None:
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    iid = str(inv.get("invoiceId") or "").strip().upper()
+    for idx, row in enumerate(raw):
+        if isinstance(row, dict) and str(row.get("invoiceId") or "").strip().upper() == iid:
+            raw[idx] = inv
+            _restaurant_save("invoices", raw)
+            return
 
 
 def _apply_billing_profile_to_invoice_lines(cursor, lines: list, billing_profile: Optional[dict]) -> list:
@@ -1154,6 +1396,167 @@ def api_settings_connection_put(body: dict):
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/settings/smtp")
+def api_settings_smtp_get():
+    """قراءة إعدادات SMTP من config/settings.json"""
+    try:
+        if os.path.exists(_settings_path):
+            with open(_settings_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            smtp = d.get("smtp") if isinstance(d.get("smtp"), dict) else {}
+            return {
+                "smtpHost": str(smtp.get("smtpHost") or ""),
+                "smtpPort": str(smtp.get("smtpPort") or "587"),
+                "smtpUser": str(smtp.get("smtpUser") or ""),
+                "smtpPass": str(smtp.get("smtpPass") or ""),
+                "smtpFrom": str(smtp.get("smtpFrom") or ""),
+                "baseUrl": str(smtp.get("baseUrl") or ""),
+                "frontendUrl": str(smtp.get("frontendUrl") or ""),
+                "emailLinkEpoch": int(smtp.get("emailLinkEpoch") or 0),
+            }
+    except Exception:
+        pass
+    return {
+        "smtpHost": "",
+        "smtpPort": "587",
+        "smtpUser": "",
+        "smtpPass": "",
+        "smtpFrom": "",
+        "baseUrl": "",
+        "frontendUrl": "",
+        "emailLinkEpoch": 0,
+    }
+
+
+@app.put("/api/settings/smtp")
+def api_settings_smtp_put(body: dict):
+    """حفظ إعدادات SMTP في config/settings.json دون مسح إعدادات SQL."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+
+    def _normalize_direct_service_url(raw: object, label: str, expected_port: int) -> str:
+        from urllib.parse import urlsplit
+
+        value = str(raw or "").strip()
+        if not value:
+            raise HTTPException(status_code=400, detail=f"{label} مطلوب.")
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} غير صالح. استخدم مثلاً: http://192.168.1.10:{expected_port}",
+            )
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise HTTPException(status_code=400, detail=f"{label} يجب أن يبدأ بـ http:// أو https://.")
+        if parsed.scheme == "https" and re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", parsed.hostname):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{label}: لا تستخدم https مع عنوان IP مباشر دون شهادة TLS. "
+                    f"استخدم http://192.168.1.10:{expected_port}"
+                ),
+            )
+        if port != expected_port:
+            raise HTTPException(status_code=400, detail=f"{label} يجب أن يستخدم المنفذ {expected_port}.")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} يجب أن يحتوي البروتوكول والعنوان والمنفذ فقط، دون مسار أو بيانات دخول.",
+            )
+        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        return f"{parsed.scheme}://{host}:{expected_port}"
+
+    try:
+        os.makedirs(os.path.dirname(_settings_path), exist_ok=True)
+        merged: dict = {}
+        if os.path.exists(_settings_path):
+            try:
+                with open(_settings_path, "r", encoding="utf-8") as f:
+                    merged = json.load(f)
+                if not isinstance(merged, dict):
+                    merged = {}
+            except Exception:
+                merged = {}
+        prev_smtp = merged.get("smtp") if isinstance(merged.get("smtp"), dict) else {}
+        host = str(body.get("smtpHost") or "").strip()
+        user = str(body.get("smtpUser") or "").strip()
+        if not host:
+            raise HTTPException(status_code=400, detail="خادم SMTP مطلوب، مثال: smtp.gmail.com")
+        if "@" in host:
+            raise HTTPException(
+                status_code=400,
+                detail="خادم SMTP ليس عنوان بريد. اكتب smtp.gmail.com، وضع البريد في خانة اسم المستخدم.",
+            )
+        base_url = _normalize_direct_service_url(body.get("baseUrl"), "رابط خادم API", 2288)
+        frontend_url = _normalize_direct_service_url(body.get("frontendUrl"), "رابط واجهة التطبيق", 9999)
+        try:
+            epoch = int(prev_smtp.get("emailLinkEpoch") or 0) + 1
+        except (TypeError, ValueError):
+            epoch = 1
+        smtp = {
+            "smtpHost": host,
+            "smtpPort": str(body.get("smtpPort") or "587").strip() or "587",
+            "smtpUser": user,
+            "smtpPass": str(body.get("smtpPass") or "").strip(),
+            "smtpFrom": str(body.get("smtpFrom") or "").strip(),
+            "baseUrl": base_url,
+            "frontendUrl": frontend_url,
+            "emailLinkEpoch": epoch,
+        }
+        merged["smtp"] = smtp
+        import tempfile
+
+        dirpath = os.path.dirname(os.path.abspath(_settings_path))
+        fd, tmp_path = tempfile.mkstemp(prefix="settings_", suffix=".json", dir=dirpath)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(merged, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, _settings_path)
+        except Exception:
+            try:
+                if os.path.isfile(tmp_path):
+                    os.unlink(tmp_path)
+            except Exception:
+                pass
+            raise
+        return {"ok": True, "smtpHost": smtp["smtpHost"], "smtpUser": smtp["smtpUser"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ إعدادات SMTP: {e}")
+
+
+@app.post("/api/test-email")
+def api_test_email(body: Optional[dict] = None):
+    """إرسال بريد اختبار لمديري المطعم (أو بريد محدد) للتحقق من SMTP."""
+    payload = body if isinstance(body, dict) else {}
+    to_raw = str(payload.get("to") or payload.get("email") or "").strip()
+    recipients = [to_raw] if "@" in to_raw else None
+    row = {
+        "id": f"test-email-{uuid.uuid4()}",
+        "type": "call_manager",
+        "title": str(payload.get("title") or "اختبار بريد المدير — MAT3AM").strip()[:200],
+        "body": str(
+            payload.get("body")
+            or "هذه رسالة اختبار من إعدادات SMTP. إن وصلتك فالتنبيهات وطلبات الاعتماد ستُرسل بنفس الإعدادات."
+        ).strip()[:500],
+        "targetRoles": list(MANAGER_OP_TARGET_ROLES),
+        "tableDisplayName": str(payload.get("tableDisplayName") or "T10").strip() or "T10",
+        "createdAt": datetime.now().isoformat(),
+    }
+    result = _role_inbox_send_manager_email(row, recipients=recipients)
+    return {
+        "ok": bool(result.get("ok")),
+        "sent": int(result.get("sent") or 0),
+        "failed": int(result.get("failed") or 0),
+        "skipped": result.get("skipped"),
+        "results": result.get("results") or [],
+    }
+
 
 def _settings_test_connection_sync(body: dict) -> dict:
     """اختبار ODBC — يُستدعى من thread pool حتى لا يجمّد حلقة FastAPI."""
@@ -1449,9 +1852,9 @@ def get_connection():
     if conn:
         try:
             # ضبط الترميز لضمان قراءة وكتابة اللغة العربية بشكل صحيح عبر pyodbc
-            conn.setencoding(encoding='utf-8')
+            conn.setencoding(encoding='utf-16le')
             conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
-            conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
+            conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-16le')
             conn.setdecoding(pyodbc.SQL_WMETADATA, encoding='utf-16le')
         except Exception as e:
             print(f"[DB] تحذير: فشل ضبط ترميز الاتصال: {e}")
@@ -2104,7 +2507,13 @@ def api_auth_users(include_role_schedule: bool = Query(False, alias="includeRole
     if not users:
         err = meta.get("error") or "فشل الاتصال بقاعدة البيانات"
         raise HTTPException(status_code=500, detail=f"تعذر قراءة المستخدمين: {err}")
-    safe_users = [{k: v for k, v in u.items() if k != "pinHash"} for u in users]
+    safe_users = []
+    for u in users:
+        if not isinstance(u, dict):
+            continue
+        row = {k: v for k, v in u.items() if k != "pinHash"}
+        row["hasPin"] = bool(str(u.get("pinHash") or "").strip())
+        safe_users.append(row)
     out: dict = {"users": safe_users, "dataSource": meta}
     if include_role_schedule:
         conn = get_connection()
@@ -2134,6 +2543,9 @@ def api_auth_user_create(body: dict):
     role = str(body.get("role") or "").strip().lower()
     display_name = (body.get("name") or login_name).strip()
     specialist_station_code = re.sub(r"[^a-z0-9_-]+", "_", str(body.get("specialistStationCode") or "").strip().lower())[:80].strip("_")
+    email = str(body.get("email") or "").strip()
+    if email and "@" not in email:
+        raise HTTPException(status_code=400, detail="بريد غير صالح")
     if not login_name or not pin or not role:
         raise HTTPException(status_code=400, detail="login و pin و role مطلوبة")
     if role not in ALLOWED_ROLE_CODES:
@@ -2155,10 +2567,10 @@ def api_auth_user_create(body: dict):
         cursor.execute(
             """
             INSERT INTO dbo.MAT3AM_APP_USERS
-            (Id, LoginName, PinHash, RoleCode, DisplayName, IsActive, CreatedAt, SpecialistStationCode)
-            VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?, 1, SYSUTCDATETIME(), ?)
+            (Id, LoginName, PinHash, RoleCode, DisplayName, IsActive, CreatedAt, SpecialistStationCode, Email)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?, 1, SYSUTCDATETIME(), ?, ?)
             """,
-            (new_id, login_name, pin, role, display_name, specialist_station_code or None),
+            (new_id, login_name, pin, role, display_name, specialist_station_code or None, email or None),
         )
         _audit_log(cursor, "CREATE_USER", "MAT3AM_APP_USERS", new_id, login_name, f"role={role}")
         conn.commit()
@@ -2349,6 +2761,12 @@ async def api_auth_user_update(user_id: str, request: Request):
                 raise HTTPException(status_code=400, detail="الرمز لا يمكن أن يكون فارغاً")
             updates.append("PinHash = ?")
             params.append(pin)
+        if "email" in body:
+            email = str(body.get("email") or "").strip()
+            if email and "@" not in email:
+                raise HTTPException(status_code=400, detail="بريد غير صالح")
+            updates.append("Email = ?")
+            params.append(email or None)
         if "isActive" in body:
             updates.append("IsActive = ?")
             params.append(1 if bool(body.get("isActive")) else 0)
@@ -2362,6 +2780,12 @@ async def api_auth_user_update(user_id: str, request: Request):
                 raise HTTPException(status_code=404, detail="المستخدم غير موجود")
             _audit_log(cursor, "UPDATE_USER", "MAT3AM_APP_USERS", user_id, str(body.get("actor") or ""), "patch update")
         conn.commit()
+        try:
+            from mat3am_sql_cache import invalidate_users
+
+            invalidate_users()
+        except Exception:
+            pass
         return {"ok": True, "scheduleChanged": schedule_touched, "userFieldsChanged": bool(updates)}
     except HTTPException:
         raise
@@ -3175,6 +3599,211 @@ def _payment_routing_account_for_key(cursor, route_key: str):
         return None
 
 
+def _mat3am_invoice_check_id01_value(body: dict) -> int:
+    """تصنيف الفاتورة الضريبي الذي يختاره الكاشير (مستقل عن قيمة TaxValue)."""
+    raw = body.get("checkID01", body.get("CheckID01", body.get("isTaxInvoice", 0)))
+    if isinstance(raw, str):
+        return 1 if raw.strip().lower() in ("1", "true", "yes", "on") else 0
+    return 1 if bool(raw) else 0
+
+
+def _mat3am_normalize_payment_route_key(raw: Any) -> str:
+    value = str(raw or "cash").strip().lower()
+    aliases = {
+        "cash": "cash",
+        "نقدي": "cash",
+        "card": "visa",
+        "visa": "visa",
+        "بطاقة": "visa",
+        "بطاقات مصرفيه": "visa",
+        "wallet": "wallet",
+        "digital": "wallet",
+        "محفظة": "wallet",
+        "instapay": "instapay",
+        "انستاباي": "instapay",
+    }
+    return aliases.get(value, value)
+
+
+def _mat3am_prepare_invoice_for_posting(cursor, invoice_guid: str, check_id01: int) -> dict:
+    """يثبت حساب العميل وحسابات نوع الفاتورة على الرأس قبل Prc008."""
+    cursor.execute(
+        """
+        SELECT b.MainGuide, b.AgentGuide, b.CurrencyGuide, ISNULL(NULLIF(b.Rate, 0), 1),
+               a.AccountID, t.ProductsAccount, t.CashAccount
+        FROM dbo.TBL022 b
+        LEFT JOIN dbo.TBL016 a ON a.CardGuide = b.AgentGuide
+        LEFT JOIN dbo.TBL020 t ON t.CardGuide = b.MainGuide
+        WHERE b.CardGuide = CAST(? AS uniqueidentifier)
+        """,
+        (invoice_guid,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="فاتورة TBL022 غير موجودة")
+    invoice_type, agent_guid, currency_guid, rate, agent_account, revenue_account, cash_account = row
+    if not agent_guid:
+        raise HTTPException(status_code=409, detail="لا يمكن الترحيل: AgentGuide غير محدد في الفاتورة.")
+    if not agent_account:
+        raise HTTPException(status_code=409, detail="لا يمكن الترحيل: العميل المحدد غير مربوط بحساب TBL004.")
+    if not revenue_account:
+        raise HTTPException(
+            status_code=409,
+            detail="لا يمكن الترحيل: نوع الفاتورة غير مربوط بحساب الإيراد. اضبطه من «ربط التحصيل والحسابات».",
+        )
+    columns = _tbl022_column_names_map(cursor)
+    sets = ["PostToAccount = ?", "ProductsAccount = ?"]
+    values: list = [agent_account, revenue_account]
+    if columns.get("cashaccount") and cash_account:
+        sets.append(f"{columns['cashaccount']} = ?")
+        values.append(cash_account)
+    if columns.get("checkid01"):
+        sets.append(f"{columns['checkid01']} = ?")
+        values.append(int(check_id01))
+    values.append(invoice_guid)
+    cursor.execute(
+        f"UPDATE dbo.TBL022 SET {', '.join(sets)} WHERE CardGuide = CAST(? AS uniqueidentifier)",
+        tuple(values),
+    )
+    return {
+        "invoiceTypeGuide": str(invoice_type).upper() if invoice_type else None,
+        "agentGuide": str(agent_guid).upper() if agent_guid else None,
+        "agentAccountGuide": str(agent_account).upper(),
+        "currencyGuide": str(currency_guid).upper() if currency_guid else None,
+        "rate": float(rate or 1),
+    }
+
+
+def _mat3am_post_invoice_and_verify(cursor, invoice_guid: str) -> dict:
+    """يعيد بناء قيد الفاتورة ويتحقق من وجود بنود متوازنة بدلاً من نجاح صامت."""
+    cursor.execute("EXEC dbo.Prc008 ?, ?, ?, ?", (invoice_guid, "", "", 0))
+    cursor.execute(
+        """
+        SELECT COUNT(DISTINCT h.CardGuide), COUNT(d.ID),
+               ISNULL(SUM(d.Debit), 0), ISNULL(SUM(d.Credit), 0)
+        FROM dbo.TBL011 h
+        LEFT JOIN dbo.TBL012 d ON d.MainGuide = h.CardGuide
+        WHERE h.BillGuide = CAST(? AS uniqueidentifier)
+        """,
+        (invoice_guid,),
+    )
+    row = cursor.fetchone()
+    heads = int(row[0] or 0) if row else 0
+    lines = int(row[1] or 0) if row else 0
+    debit = round(float(row[2] or 0), 2) if row else 0.0
+    credit = round(float(row[3] or 0), 2) if row else 0.0
+    if heads <= 0 or lines <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Prc008 لم يولد قيداً. راجع حساب العميل وحسابات نوع الفاتورة من الإعدادات.",
+        )
+    if abs(debit - credit) > 0.02:
+        raise HTTPException(
+            status_code=409,
+            detail=f"القيد الناتج غير متوازن: مدين={debit:.2f}، دائن={credit:.2f}.",
+        )
+    return {"entryCount": heads, "entryLineCount": lines, "debit": debit, "credit": credit}
+
+
+def _mat3am_write_invoice_payments(
+    cursor,
+    *,
+    invoice_guid: str,
+    session_id: Optional[str],
+    parts: dict,
+    check_id01: int,
+    notes_prefix: str = "مطاعم",
+) -> dict:
+    """يكتب المصدرين الرقابيين معاً: MAT3AM_INV_PAYMENT_LINE وTBL054، ثم يرحّل."""
+    positive = [
+        (str(route_key), round(float(amount or 0), 2))
+        for route_key, amount in parts.items()
+        if float(amount or 0) > 0.0001
+    ]
+    if not positive:
+        raise HTTPException(status_code=400, detail="لا توجد قيمة دفع موجبة للترحيل.")
+    posting = _mat3am_prepare_invoice_for_posting(cursor, invoice_guid, check_id01)
+    cursor.execute(
+        "SELECT COUNT(*), ISNULL(SUM(Value), 0) FROM dbo.TBL054 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+        (invoice_guid,),
+    )
+    old = cursor.fetchone()
+    if old and int(old[0] or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"الفاتورة تحتوي بالفعل على {int(old[0])} حركة دفع في TBL054 بقيمة {float(old[1] or 0):.2f}؛ أوقف التكرار وراجع تقرير المطابقة.",
+        )
+    total_paid = 0.0
+    for route_key, amount in positive:
+        account_guid = _payment_routing_account_for_key(cursor, route_key)
+        if not account_guid:
+            raise HTTPException(
+                status_code=409,
+                detail=f"طريقة الدفع {route_key} غير مربوطة بحساب. اضبطها من «ربط التحصيل والحسابات».",
+            )
+        note = f"{notes_prefix}|route={route_key}|session={session_id or ''}"[:500]
+        cursor.execute(
+            """
+            INSERT INTO dbo.TBL054
+            (MainGuide, CurrencyGuide, AccountGuide, CreditCardGuide, InDate, Value, ValueRate, Notes, AgentGuide)
+            VALUES
+            (CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier), CAST(? AS uniqueidentifier),
+             NULL, ?, ?, ?, ?, CAST(? AS uniqueidentifier))
+            """,
+            (
+                invoice_guid,
+                posting["currencyGuide"],
+                account_guid,
+                datetime.now(),
+                amount,
+                round(amount * float(posting["rate"] or 1), 2),
+                note,
+                posting["agentGuide"],
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO dbo.MAT3AM_INV_PAYMENT_LINE
+            (InvoiceGuid, SessionId, RouteKey, Amount, AccountGuide)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, CAST(? AS uniqueidentifier))
+            """,
+            (invoice_guid, session_id or None, route_key, amount, account_guid),
+        )
+        total_paid += amount
+    # نموذجنا المحاسبي موحد: الفاتورة آجل على العميل ثم TBL054 يثبت ما تم تحصيله.
+    cursor.execute(
+        """
+        UPDATE dbo.TBL022
+        SET Paid = ?, PayMethod = 2
+        WHERE CardGuide = CAST(? AS uniqueidentifier)
+        """,
+        (round(total_paid, 2), invoice_guid),
+    )
+    entry = _mat3am_post_invoice_and_verify(cursor, invoice_guid)
+    return {"paid": round(total_paid, 2), "paymentRows": len(positive), "posting": entry}
+
+
+def _mat3am_post_invoice_without_payment(cursor, *, invoice_guid: str, check_id01: int) -> dict:
+    """فاتورة مالك/VIP/ضيف على حساب العميل: قيد إيراد بلا أي حركة تحصيل."""
+    _mat3am_prepare_invoice_for_posting(cursor, invoice_guid, check_id01)
+    cursor.execute(
+        "SELECT COUNT(*) FROM dbo.TBL054 WHERE MainGuide = CAST(? AS uniqueidentifier)",
+        (invoice_guid,),
+    )
+    row = cursor.fetchone()
+    if row and int(row[0] or 0) > 0:
+        raise HTTPException(status_code=409, detail="لا يمكن الترحيل بلا دفع: توجد حركات TBL054 على الفاتورة.")
+    cursor.execute(
+        """
+        UPDATE dbo.TBL022
+        SET Paid = 0, PayMethod = 2
+        WHERE CardGuide = CAST(? AS uniqueidentifier)
+        """,
+        (invoice_guid,),
+    )
+    return _mat3am_post_invoice_and_verify(cursor, invoice_guid)
+
+
 def _get_invoice_type_name(cursor, invoice_type_guid: Optional[str]) -> str:
     if not invoice_type_guid:
         return ""
@@ -3208,6 +3837,7 @@ MAT3AM_RESTAURANT_ORDER_KINDS: Tuple[str, ...] = (
     "purchase",
     "bar_quick",
     "catering",
+    "kids",
 )
 MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR: dict[str, str] = {
     "table": "مطاعم — طاولات داخلية",
@@ -3216,6 +3846,7 @@ MAT3AM_ORDERKIND_INVOICE_DISPLAY_AR: dict[str, str] = {
     "purchase": "مطاعم — مشتريات",
     "bar_quick": "مطاعم — بار / طلب سريع",
     "catering": "مطاعم — مناسبات وكاترينج",
+    "kids": "مطاعم — كيدز إيريا",
 }
 # نفس LatinName المستخدم في تهيئة TBL020 — يُستخدم لـ TBL008.LatinName (توحيد مع النمط).
 MAT3AM_ORDERKIND_INVOICE_DISPLAY_LATIN: dict[str, str] = {
@@ -3225,6 +3856,7 @@ MAT3AM_ORDERKIND_INVOICE_DISPLAY_LATIN: dict[str, str] = {
     "purchase": "MAT3AM Purchase",
     "bar_quick": "MAT3AM Bar",
     "catering": "MAT3AM Catering",
+    "kids": "MAT3AM Kids Area",
 }
 MAT3AM_RESTAURANT_ORDER_KINDS_SET = frozenset(MAT3AM_RESTAURANT_ORDER_KINDS)
 
@@ -3236,6 +3868,7 @@ MAT3AM_ORDERKIND_TEXTVALUE01: dict[str, str] = {
     "purchase": "MAT3AM_ORDER_PURCHASE",
     "bar_quick": "MAT3AM_ORDER_BAR",
     "catering": "MAT3AM_ORDER_CATERING",
+    "kids": "MAT3AM_ORDER_KIDS",
 }
 
 
@@ -3266,6 +3899,8 @@ def _normalize_restaurant_order_kind(raw: Optional[str]) -> str:
         return "bar_quick"
     if s in ("catering", "كاترينج", "مناسبات"):
         return "catering"
+    if s in ("kids", "kids_area", "كيدز", "كيدز ايريا", "كيدز إيريا", "أطفال"):
+        return "kids"
     if s in ("purchase", "مشتريات"):
         return "purchase"
     return "table"
@@ -9281,6 +9916,7 @@ def get_reports_list():
             {"id": "customer_statement", "name_ar": "كشف حساب عميل", "name_en": "Customer Statement", "params": ["agent_guide", "from_date", "to_date", "currency_guide", "show_opening_balance", "posted_only"]},
             {"id": "relations_quantities", "name_ar": "مراقبة كميات الارتباطات", "name_en": "Relations Quantities Monitoring", "params": ["from_date", "to_date", "show_only_unlinked"]},
             {"id": "invoice_aging", "name_ar": "أعمار زمنية — فواتير مصدر ومولودة", "name_en": "Invoice Aging by Source", "params": ["agent_guide", "from_date", "to_date", "source_bill_guide", "show_opening_balance"]},
+            {"id": "payment_reconciliation", "name_ar": "مطابقة تحصيل الشيفت مع المحاسبة", "name_en": "Shift Payment Reconciliation", "params": ["from_date", "to_date"]},
             {"id": "daily_movement", "name_ar": "الحركة اليومية", "name_en": "Daily Movement", "params": ["from_date", "to_date"]},
             {"id": "item_movement", "name_ar": "تقرير حركة صنف", "name_en": "Item Movement", "params": ["product_guide", "from_date", "to_date"]},
             {"id": "inventory", "name_ar": "تقرير جرد", "name_en": "Inventory Report", "params": []},
@@ -9866,6 +10502,116 @@ def run_report(
         cursor = conn.cursor()
         fd = from_date or "1900-01-01"
         td = to_date or "2099-12-31"
+
+        if report_id == "payment_reconciliation":
+            _ensure_payment_routing_schema(cursor)
+            cursor.execute(
+                """
+                WITH op AS (
+                    SELECT InvoiceGuid, ISNULL(SUM(Amount), 0) AS OperationalPaid
+                    FROM dbo.MAT3AM_INV_PAYMENT_LINE
+                    GROUP BY InvoiceGuid
+                ),
+                xtra AS (
+                    SELECT MainGuide, ISNULL(SUM(Value), 0) AS XtraPaid
+                    FROM dbo.TBL054
+                    GROUP BY MainGuide
+                ),
+                ledger AS (
+                    SELECT h.BillGuide,
+                           COUNT(DISTINCT h.CardGuide) AS EntryCount,
+                           ISNULL(SUM(CASE WHEN r.AccountGuide IS NOT NULL THEN ISNULL(d.Debit, 0) ELSE 0 END), 0) AS LedgerPaid
+                    FROM dbo.TBL011 h
+                    LEFT JOIN dbo.TBL012 d ON d.MainGuide = h.CardGuide
+                    LEFT JOIN (
+                        SELECT DISTINCT AccountGuide
+                        FROM dbo.MAT3AM_PAYMENT_ROUTING
+                        WHERE IsActive = 1 AND AccountGuide IS NOT NULL
+                    ) r ON r.AccountGuide = d.AccountGuide
+                    WHERE h.BillGuide IS NOT NULL
+                    GROUP BY h.BillGuide
+                ),
+                invoice_total AS (
+                    SELECT MainGuide, ISNULL(SUM(TotalValue), 0) AS LinesTotal
+                    FROM dbo.TBL023
+                    GROUP BY MainGuide
+                )
+                SELECT b.CardGuide, b.BillNumber, b.BillDate, t.InvoiceName,
+                       ISNULL(a.AgentName, N''), ISNULL(it.LinesTotal, 0),
+                       ISNULL(b.LocalAdministrativeTax, 0), ISNULL(b.TaxValue, 0), ISNULL(b.Discount, 0),
+                       ISNULL(op.OperationalPaid, 0), ISNULL(xtra.XtraPaid, 0), ISNULL(ledger.LedgerPaid, 0),
+                       ISNULL(b.Paid, 0), ISNULL(ledger.EntryCount, 0), ISNULL(b.CheckID01, 0),
+                       CASE
+                           WHEN ABS(ISNULL(op.OperationalPaid, 0) - ISNULL(xtra.XtraPaid, 0)) > 0.02 THEN N'فرق تشغيلي / TBL054'
+                           WHEN ABS(ISNULL(xtra.XtraPaid, 0) - ISNULL(ledger.LedgerPaid, 0)) > 0.02 THEN N'فرق TBL054 / القيد'
+                           WHEN ISNULL(ledger.EntryCount, 0) = 0 THEN N'غير مرحل'
+                           WHEN ISNULL(op.OperationalPaid, 0) = 0 AND ISNULL(xtra.XtraPaid, 0) = 0 THEN N'على الحساب — مطابق'
+                           ELSE N'مطابق'
+                       END AS MatchStatus
+                FROM dbo.TBL022 b
+                INNER JOIN dbo.MAT3AM_RESTAURANT_INVOICE_TYPES m ON m.Tbl020CardGuide = b.MainGuide
+                INNER JOIN dbo.TBL020 t ON t.CardGuide = b.MainGuide
+                LEFT JOIN dbo.TBL016 a ON a.CardGuide = b.AgentGuide
+                LEFT JOIN invoice_total it ON it.MainGuide = b.CardGuide
+                LEFT JOIN op ON op.InvoiceGuid = b.CardGuide
+                LEFT JOIN xtra ON xtra.MainGuide = b.CardGuide
+                LEFT JOIN ledger ON ledger.BillGuide = b.CardGuide
+                WHERE CONVERT(date, b.BillDate) >= CAST(? AS date)
+                  AND CONVERT(date, b.BillDate) <= CAST(? AS date)
+                ORDER BY b.BillDate DESC, b.BillNumber DESC
+                """,
+                (fd, td),
+            )
+            rows = cursor.fetchall()
+            out = []
+            for r in rows:
+                invoice_total_value = round(
+                    float(r[5] or 0) + float(r[6] or 0) + float(r[7] or 0) - float(r[8] or 0),
+                    2,
+                )
+                op_paid = round(float(r[9] or 0), 2)
+                xtra_paid = round(float(r[10] or 0), 2)
+                ledger_paid = round(float(r[11] or 0), 2)
+                out.append(
+                    [
+                        str(r[0]),
+                        int(r[1] or 0),
+                        str(r[2]) if r[2] else "",
+                        r[3] or "",
+                        r[4] or "",
+                        invoice_total_value,
+                        op_paid,
+                        xtra_paid,
+                        ledger_paid,
+                        round(op_paid - xtra_paid, 2),
+                        round(xtra_paid - ledger_paid, 2),
+                        round(float(r[12] or 0), 2),
+                        int(r[13] or 0),
+                        int(r[14] or 0),
+                        r[15] or "",
+                    ]
+                )
+            return {
+                "columns": [
+                    "CardGuide",
+                    "رقم_الفاتورة",
+                    "التاريخ",
+                    "نوع_الفاتورة",
+                    "العميل",
+                    "إجمالي_الفاتورة",
+                    "تحصيل_تشغيلي",
+                    "تحصيل_TBL054",
+                    "تحصيل_بالقيد",
+                    "فرق_تشغيلي_عن_TBL054",
+                    "فرق_TBL054_عن_القيد",
+                    "Paid_TBL022",
+                    "عدد_القيود",
+                    "CheckID01",
+                    "حالة_المطابقة",
+                ],
+                "rows": out,
+                "message": "مطابقة مستقلة بين سجل الكاشير وTBL054 وحسابات التحصيل في TBL011/TBL012.",
+            }
 
         if report_id == "accounts_list":
             cursor.execute("SELECT CardGuide, CardCode, AccountName, LatinName FROM TBL004 WHERE AccountName IS NOT NULL ORDER BY CardCode")
@@ -12305,6 +13051,26 @@ _RESTAURANT_FAST_LOCAL_SQL_KEYS = frozenset()
 _restaurant_local_override_lock = threading.Lock()
 _restaurant_local_overrides: dict[str, Any] = {}
 _restaurant_sql_table_ready = False
+_restaurant_table_sessions_lock = threading.RLock()
+_restaurant_orders_lock = threading.RLock()
+
+
+def _with_restaurant_table_sessions_lock(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with _restaurant_table_sessions_lock:
+            return func(*args, **kwargs)
+    wrapper.__signature__ = inspect.signature(func)
+    return wrapper
+
+
+def _with_restaurant_orders_lock(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with _restaurant_orders_lock:
+            return func(*args, **kwargs)
+    wrapper.__signature__ = inspect.signature(func)
+    return wrapper
 
 
 def _restaurant_sql_ensure_table(cursor) -> None:
@@ -14761,8 +15527,35 @@ def _default_table_cashier_alert_presets_json() -> str:
     )
 
 
+def _arabic_label_is_corrupted(label: str) -> bool:
+    """يكشف تسميات عربية تالفة إلى ????? بسبب ترميز خاطئ عند الحفظ في SQL."""
+    s = str(label or "").strip()
+    if not s:
+        return True
+    if "\ufffd" in s:
+        return True
+    arabic = len(re.findall(r"[\u0600-\u06FF]", s))
+    qmarks = s.count("?")
+    if arabic == 0 and qmarks >= 2:
+        return True
+    if qmarks >= 3 and arabic == 0:
+        return True
+    # أغلب الحروف علامات استفهام بلا عربي
+    letters = re.findall(r"[^\s\W_]|[\u0600-\u06FF]", s)
+    if letters and qmarks >= max(3, len(letters) // 2) and arabic == 0:
+        return True
+    return False
+
+
 def _normalize_table_cashier_alert_presets_json(val: str) -> str:
     default_s = _default_table_cashier_alert_presets_json()
+    default_by_id: dict[str, dict] = {}
+    try:
+        for row in json.loads(default_s):
+            if isinstance(row, dict) and row.get("id"):
+                default_by_id[str(row["id"])] = row
+    except Exception:
+        default_by_id = {}
     raw = (val or "").strip()
     if not raw:
         return default_s
@@ -14774,19 +15567,33 @@ def _normalize_table_cashier_alert_presets_json(val: str) -> str:
         return default_s
     out: list[dict] = []
     seen_ids: set[str] = set()
+    healed = False
     for x in arr[:30]:
         if not isinstance(x, dict):
             continue
         pid = str(x.get("id") or "").strip()[:48]
         typ = str(x.get("type") or "").strip().lower()
         lab = str(x.get("label") or "").strip()[:200]
-        if not pid or not lab or typ not in _ALERT_PRESET_TYPES:
+        if not pid or typ not in _ALERT_PRESET_TYPES:
+            continue
+        if _arabic_label_is_corrupted(lab):
+            healed = True
+            fallback = default_by_id.get(pid)
+            if fallback:
+                typ = str(fallback.get("type") or typ)
+                lab = str(fallback.get("label") or "").strip()
+            else:
+                continue
+        if not lab:
             continue
         if pid in seen_ids:
             continue
         seen_ids.add(pid)
         out.append({"id": pid, "type": typ, "label": lab})
     if not out:
+        return default_s
+    # إذا تلفت كل العناوين المعروفة، أعد الافتراضي الكامل
+    if healed and not any(not _arabic_label_is_corrupted(str(r.get("label") or "")) for r in out):
         return default_s
     return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
 
@@ -15294,6 +16101,7 @@ def _restaurant_read_ops_storage() -> dict:
     merged: dict = dict(d)
     sql_obj = _ops_sql_read()
     sql_missing = not isinstance(sql_obj, dict)
+    sql_presets_raw = ""
 
     def _apply_ops_partial(src: dict) -> None:
         for k in list(merged.keys()):
@@ -15324,9 +16132,36 @@ def _restaurant_read_ops_storage() -> dict:
         return _restaurant_normalize_ops(merged)
 
     if isinstance(sql_obj, dict):
+        sql_presets_raw = str(sql_obj.get("tableCashierAlertPresetsJson") or "")
         _apply_ops_partial(sql_obj)
 
-    return _restaurant_normalize_ops(merged)
+    normalized = _restaurant_normalize_ops(merged)
+    # إصلاح دائم: إن كانت تسميات التنبيه في SQL تالفة إلى ????، أعد كتابتها عربياً.
+    try:
+        needs_heal = False
+        if sql_presets_raw and ("??" in sql_presets_raw or "\ufffd" in sql_presets_raw):
+            needs_heal = True
+        elif sql_presets_raw:
+            try:
+                arr = json.loads(sql_presets_raw)
+                if isinstance(arr, list):
+                    needs_heal = any(
+                        isinstance(x, dict) and _arabic_label_is_corrupted(str(x.get("label") or ""))
+                        for x in arr
+                    )
+            except Exception:
+                needs_heal = True
+        if needs_heal:
+            healed = str(normalized.get("tableCashierAlertPresetsJson") or "")
+            if healed and healed != sql_presets_raw and not _arabic_label_is_corrupted(healed):
+                _ops_sql_write(normalized, updated_by="heal_alert_presets_encoding")
+                try:
+                    _write_json_file_atomic(_restaurant_ops_settings_path(), normalized)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return normalized
 
 
 def _restaurant_read_ops() -> dict:
@@ -15444,7 +16279,34 @@ def restaurant_payment_routing_get():
                     "isActive": bool(r[4]),
                 }
             )
-        return {"routes": routes}
+        invoice_types = []
+        try:
+            cur.execute(
+                """
+                SELECT m.OrderKind, m.Tbl020CardGuide, t.InvoiceName,
+                       t.ProductsAccount, t.CashAccount, t.BankAccount,
+                       t.SubjectToTaxAccount, t.GenerateEntry
+                FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES m
+                INNER JOIN dbo.TBL020 t ON t.CardGuide = m.Tbl020CardGuide
+                ORDER BY m.OrderKind
+                """
+            )
+            for r in cur.fetchall() or []:
+                invoice_types.append(
+                    {
+                        "orderKind": str(r[0] or ""),
+                        "invoiceTypeGuide": str(r[1]).upper(),
+                        "invoiceName": str(r[2] or ""),
+                        "revenueAccountGuide": str(r[3]).upper() if r[3] else None,
+                        "cashAccountGuide": str(r[4]).upper() if r[4] else None,
+                        "bankAccountGuide": str(r[5]).upper() if r[5] else None,
+                        "taxAccountGuide": str(r[6]).upper() if r[6] else None,
+                        "generateEntry": int(r[7] or 0),
+                    }
+                )
+        except Exception:
+            invoice_types = []
+        return {"routes": routes, "invoiceTypes": invoice_types}
     finally:
         try:
             conn.close()
@@ -15458,6 +16320,7 @@ def restaurant_payment_routing_put(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
     routes = body.get("routes")
+    invoice_types = body.get("invoiceTypes")
     if not isinstance(routes, list) or not routes:
         raise HTTPException(status_code=400, detail="routes مطلوبة (مصفوفة غير فارغة)")
     conn = get_connection()
@@ -15509,6 +16372,60 @@ def restaurant_payment_routing_put(body: dict):
                 """,
                 (rk, dn, ag, so, is_act),
             )
+        if isinstance(invoice_types, list):
+            account_fields = (
+                ("revenueAccountGuide", "ProductsAccount"),
+                ("cashAccountGuide", "CashAccount"),
+                ("bankAccountGuide", "BankAccount"),
+                ("taxAccountGuide", "SubjectToTaxAccount"),
+            )
+            for item in invoice_types:
+                if not isinstance(item, dict):
+                    continue
+                invoice_type_guid = str(item.get("invoiceTypeGuide") or "").strip()
+                try:
+                    uuid.UUID(invoice_type_guid)
+                except Exception:
+                    raise HTTPException(status_code=400, detail="invoiceTypeGuide غير صالح") from None
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM dbo.MAT3AM_RESTAURANT_INVOICE_TYPES
+                    WHERE Tbl020CardGuide = CAST(? AS uniqueidentifier)
+                    """,
+                    (invoice_type_guid,),
+                )
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400, detail="نوع الفاتورة ليس ضمن أنواع المطعم المسجلة")
+                updates = []
+                params: list = []
+                for json_key, sql_column in account_fields:
+                    raw = str(item.get(json_key) or "").strip()
+                    account_guid = None
+                    if raw:
+                        try:
+                            uuid.UUID(raw)
+                        except Exception:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"{json_key} غير صالح لنوع الفاتورة {invoice_type_guid}",
+                            ) from None
+                        cur.execute(
+                            "SELECT 1 FROM dbo.TBL004 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                            (raw,),
+                        )
+                        if not cur.fetchone():
+                            raise HTTPException(status_code=400, detail=f"الحساب غير موجود: {json_key}")
+                        account_guid = raw
+                    updates.append(f"{sql_column} = ?")
+                    params.append(account_guid)
+                # GenerateEntry=2 يجعل Prc008 يولد قيداً غير مرحل نهائياً حسب إعداد إكسترا.
+                updates.append("GenerateEntry = 2")
+                params.append(invoice_type_guid)
+                cur.execute(
+                    f"UPDATE dbo.TBL020 SET {', '.join(updates)} WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    tuple(params),
+                )
         conn.commit()
         return restaurant_payment_routing_get()
     except HTTPException:
@@ -16121,6 +17038,7 @@ _MANAGER_APPROVAL_TYPE_CANCEL_SESSION_WITH_OPEN_ORDERS = "cancel_session_with_op
 _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS = "reset_table_with_open_orders"
 _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER = "captain_handover_request"
 _MANAGER_APPROVAL_TYPE_GUEST_SESSION = "guest_session_request"
+_MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT = "invoice_payment_approval"
 _MANAGER_APPROVAL_STATUS_PENDING = "pending_manager"
 
 
@@ -16442,6 +17360,11 @@ def _manager_approval_enqueue_inbox(req: dict) -> None:
         label = type_labels.get(requested_type, requested_type)
         title_text = f"طلب موافقة مدير: تحويل الجلسة إلى {label}"
         body_text = f"{table_label} · تحويل نوع العميل إلى {label} قبل إرسال أول طلب"
+    elif req_type == _MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT:
+        approval_type = str(req.get("approvalType") or "")
+        label = "ترحيل على حساب العميل (CL)" if approval_type == "on_account_credit" else "تصفير الفاتورة كضيف"
+        title_text = f"طلب موافقة مدير: {label}"
+        body_text = f"{table_label} · فاتورة {req.get('billNumber') or req.get('invoiceId') or ''} · {float(req.get('invoiceTotal') or 0):.2f} ج.م"
     else:
         title_text = "طلب موافقة مدير: إلغاء تسكين بعد المطبخ"
         body_text = (
@@ -16449,22 +17372,23 @@ def _manager_approval_enqueue_inbox(req: dict) -> None:
             f" · قيد التحضير: {int(summary.get('preparingCount') or 0)}"
             f" · جاهز: {int(summary.get('readyCount') or 0)}"
         )
-    rows.append(
-        {
-            "id": str(uuid.uuid4()),
-            "managerApprovalRequestId": req_id,
-            "type": "manager_approval_request",
-            "title": title_text,
-            "body": body_text,
-            "targetRoles": list(MANAGER_OP_TARGET_ROLES),
-            "createdAt": str(req.get("requestedAt") or datetime.now().isoformat()),
-            "sessionId": str(req.get("sessionId") or ""),
-            "tableId": str(req.get("tableId") or ""),
-            "tableDisplayName": table_label,
-            "dismissedAt": None,
-        }
-    )
+    inbox_row = {
+        "id": str(uuid.uuid4()),
+        "managerApprovalRequestId": req_id,
+        "type": "manager_approval_request",
+        "title": title_text,
+        "body": body_text,
+        "targetRoles": list(MANAGER_OP_TARGET_ROLES),
+        "createdAt": str(req.get("requestedAt") or datetime.now().isoformat()),
+        "sessionId": str(req.get("sessionId") or ""),
+        "tableId": str(req.get("tableId") or ""),
+        "tableDisplayName": table_label,
+        "dismissedAt": None,
+    }
+    rows.append(inbox_row)
     _role_inbox_save_rows(rows)
+    # طلبات الاعتماد كانت تُحفظ في وارد الأدوار فقط دون SMTP — أرسل البريد للمديرين.
+    _role_inbox_notify_managers_async(inbox_row)
 
 
 def _manager_approval_dismiss_inbox(request_id: str) -> None:
@@ -17928,6 +18852,61 @@ def restaurant_guest_returns_patch(request_id: str, body: dict):
     raise HTTPException(status_code=400, detail="action غير مدعوم: approve | reject")
 
 
+def _manager_approval_create_invoice_payment_request(invoice: dict, approval_type: str, actor: dict) -> dict:
+    invoice_id = str(invoice.get("invoiceId") or "").strip()
+    session_id = str(invoice.get("sessionId") or "").strip()
+    data = _manager_approval_requests_load()
+    for row in reversed(data):
+        if (
+            str(row.get("type") or "") == _MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT
+            and str(row.get("invoiceId") or "") == invoice_id
+            and str(row.get("approvalType") or "") == approval_type
+            and str(row.get("status") or "") == _MANAGER_APPROVAL_STATUS_PENDING
+        ):
+            _manager_approval_enqueue_inbox(row)
+            return row
+    label = "ترحيل الفاتورة على الحساب" if approval_type == "on_account_credit" else "تصفير الفاتورة كضيف صالة"
+    req = {
+        "id": str(uuid.uuid4()),
+        "type": _MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT,
+        "status": _MANAGER_APPROVAL_STATUS_PENDING,
+        "requestedAt": datetime.now().isoformat(),
+        "invoiceId": invoice_id,
+        "billNumber": invoice.get("billNumber"),
+        "invoiceTotal": _money2_round(invoice.get("total")),
+        "approvalType": approval_type,
+        "sessionId": session_id,
+        "tableId": str(invoice.get("tableIdResolved") or ""),
+        "tableLabel": str(invoice.get("tableName") or invoice.get("tableLabel") or "فاتورة"),
+        "reason": label,
+        "requestedBy": {
+            "userId": str(actor.get("id") or ""),
+            "name": str(actor.get("name") or actor.get("login") or ""),
+            "role": str(actor.get("role") or ""),
+        },
+        "openOrdersSummary": {"totalValue": _money2_round(invoice.get("total"))},
+        "decisionOptions": [
+            {
+                "id": "approve_invoice_payment_exception",
+                "label": f"اعتماد: {label}",
+                "description": "يسمح بتنفيذ طريقة التسوية الاستثنائية لهذه الفاتورة فقط.",
+                "recommended": True,
+            }
+        ],
+        "decisionFlags": [
+            {
+                "id": "notifyRequester",
+                "label": "إشعار مقدم الطلب بالقرار",
+                "description": "يرسل نتيجة الاعتماد أو الرفض لصاحب الطلب.",
+                "default": True,
+            }
+        ],
+    }
+    _manager_approval_requests_save(data + [req])
+    _manager_approval_enqueue_inbox(req)
+    return req
+
+
 @app.get("/api/restaurant/manager-approvals")
 def restaurant_manager_approvals_get(
     status: Optional[str] = None,
@@ -18087,6 +19066,15 @@ def restaurant_manager_approvals_patch(request_id: str, body: dict):
         )
     elif req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS:
         execution_result = _manager_approval_execute_reset_table(target, decision_id, reviewer, manager_note, flags_map)
+    elif req_type == _MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT:
+        if decision_id != "approve_invoice_payment_exception":
+            raise HTTPException(status_code=400, detail="قرار اعتماد التسوية غير صالح.")
+        execution_result = {
+            "action": "approve_invoice_payment_exception",
+            "invoiceId": str(target.get("invoiceId") or ""),
+            "approvalType": str(target.get("approvalType") or ""),
+            "decisionLabel": "تم اعتماد طريقة تسوية الفاتورة",
+        }
     else:
         raise HTTPException(status_code=400, detail="نوع الطلب غير مدعوم في التنفيذ الحالي.")
     target["status"] = "approved"
@@ -18105,8 +19093,31 @@ def restaurant_manager_approvals_patch(request_id: str, body: dict):
     return {"ok": True, "request": target}
 
 
+def _looks_like_table_guid(value: object) -> bool:
+    s = str(value or "").strip()
+    if not s:
+        return False
+    return bool(re.match(
+        r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+        s,
+    ))
+
+
+def _usable_table_display_name(value: object, *, reject_id: str = "") -> str:
+    """اسم عرض صالح — يرفض الفارغ و«—» والمعرف نفسه إن كان GUID."""
+    nm = str(value or "").strip()
+    if not nm or nm == "—":
+        return ""
+    rid = str(reject_id or "").strip()
+    if rid and nm.upper() == rid.upper():
+        return ""
+    if _looks_like_table_guid(nm):
+        return ""
+    return nm
+
+
 def _floor_plan_table_id_to_label() -> dict:
-    """خريطة id الطاولة في المخطط → تسمية للعرض (label أو name)."""
+    """خريطة id / linkedTableId في المخطط → تسمية للعرض (label أو name)."""
     out: dict = {}
     p = _restaurant_path("floor_plan")
     if not os.path.isfile(p):
@@ -18116,6 +19127,16 @@ def _floor_plan_table_id_to_label() -> dict:
             plan = json.load(f)
         if not isinstance(plan, dict):
             return out
+        # بعض الملفات تغلّف المخطط تحت مفتاح plan
+        if isinstance(plan.get("plan"), dict):
+            plan = plan["plan"]
+
+        def _put(key: str, lab: str) -> None:
+            k = str(key or "").strip()
+            if not k or not lab:
+                return
+            out[k] = lab
+            out[k.upper()] = lab
 
         def ingest_tables(tbl_list):
             if not isinstance(tbl_list, list):
@@ -18124,11 +19145,15 @@ def _floor_plan_table_id_to_label() -> dict:
                 if not isinstance(t, dict):
                     continue
                 tid = str(t.get("id") or "").strip()
-                if not tid:
-                    continue
+                linked = str(t.get("linkedTableId") or "").strip()
                 lab = (t.get("label") or t.get("name") or t.get("title") or "").strip()
-                out[tid] = lab if lab else tid
-                out[tid.upper()] = out[tid]
+                if not lab:
+                    # لا نخزّن GUID كاسم عرض — نترك الحقل للطبقات التالية
+                    continue
+                if tid:
+                    _put(tid, lab)
+                if linked:
+                    _put(linked, lab)
 
         if plan.get("schemaVersion") == 2:
             for fl in plan.get("floors") or []:
@@ -18149,12 +19174,19 @@ def _restaurant_file_tables_id_to_name() -> dict:
         tid = str(t.get("id")).strip()
         nm = (t.get("name") or "").strip()
         num = t.get("number")
-        out[tid] = nm if nm else (f"طاولة {num}" if num is not None else tid)
+        if nm and not _looks_like_table_guid(nm):
+            out[tid] = nm
+            out[tid.upper()] = nm
+        elif num is not None and str(num).strip() != "":
+            label = f"طاولة {num}"
+            out[tid] = label
+            out[tid.upper()] = label
+        # لا نضع tid→tid؛ يمنع الرجوع لمخطط الصالة / SQL
     return out
 
 
 def _restaurant_table_display_names_for_ids(table_ids: set) -> dict:
-    """حلّ أسماء عرض للطاولة: ملف tables.json، مخطط الأرضية، ثم TBL005."""
+    """حلّ أسماء عرض للطاولة: مخطط الأرضية (linkedTableId)، ثم tables.json، ثم TBL005."""
     result: dict = {}
     if not table_ids:
         return result
@@ -18166,18 +19198,10 @@ def _restaurant_table_display_names_for_ids(table_ids: set) -> dict:
             result[tid] = "—"
             continue
         ts = str(tid).strip()
-        if ts in fm:
-            result[tid] = fm[ts]
-            continue
-        if ts in fp:
-            result[tid] = fp[ts]
-            continue
         t_up = ts.upper()
-        hit = None
-        for k, v in fp.items():
-            if str(k).upper() == t_up:
-                hit = v
-                break
+        hit = _usable_table_display_name(fp.get(ts) or fp.get(t_up), reject_id=ts)
+        if not hit:
+            hit = _usable_table_display_name(fm.get(ts) or fm.get(t_up), reject_id=ts)
         if hit:
             result[tid] = hit
             continue
@@ -18293,11 +19317,1185 @@ def _iso_to_local_dt(iso_s: str) -> Optional[datetime]:
 
 
 def _is_today_iso(iso_s: str) -> bool:
+    """هل الطابع ضمن اليوم التشغيلي الحالي (10:00 → 10:00 التالي)؟"""
+    return _mat3am_in_current_business_day(iso_s)
+
+
+def _mat3am_business_day_window(now: Optional[datetime] = None) -> tuple[datetime, datetime, datetime, date_cls]:
+    """
+    يوم تشغيلي: يبدأ 10:00 وينتهي خدمةً عند 04:00، مع بقاء الهوية حتى 10:00 التالي.
+    يعيد: (start_10am, service_end_4am, next_open_10am, business_day_date)
+    """
+    now = now or datetime.now()
+    if now.hour < 10:
+        start_date = (now - timedelta(days=1)).date()
+    else:
+        start_date = now.date()
+    start = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0)
+    service_end = start + timedelta(hours=18)  # 04:00 اليوم التالي
+    next_open = start + timedelta(days=1)
+    return start, service_end, next_open, start_date
+
+
+def _mat3am_in_current_business_day(iso_s: str, now: Optional[datetime] = None) -> bool:
     dt = _iso_to_local_dt(iso_s)
     if not dt:
         return False
-    now = datetime.now()
-    return (dt.year, dt.month, dt.day) == (now.year, now.month, now.day)
+    start, _service_end, next_open, _bd = _mat3am_business_day_window(now)
+    return start <= dt < next_open
+
+
+def _mat3am_table_label_map() -> dict[str, str]:
+    out: dict[str, str] = {}
+    raw = _restaurant_load("tables", [])
+    if isinstance(raw, list):
+        for t in raw:
+            if not isinstance(t, dict):
+                continue
+            tid = str(t.get("id") or "").strip()
+            if not tid:
+                continue
+            name = str(t.get("name") or "").strip()
+            num = t.get("number")
+            if name:
+                out[tid.upper()] = name
+            elif num is not None:
+                out[tid.upper()] = f"T{num}"
+            else:
+                out[tid.upper()] = tid
+    return out
+
+
+def _mat3am_xlsx_escape(text: Any) -> str:
+    s = str(text if text is not None else "")
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _mat3am_build_xlsx(sheets: list[tuple[str, list[list]]]) -> bytes:
+    """بناء xlsx بسيط متعدد الأوراق بدون اعتماديات خارجية."""
+    import zipfile
+    from io import BytesIO
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+"""
+            + "".join(
+                f'  <Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\n'
+                for i in range(1, len(sheets) + 1)
+            )
+            + "</Types>",
+        )
+        zf.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        )
+        sheet_rels = "".join(
+            f'<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{i}.xml"/>'
+            for i in range(1, len(sheets) + 1)
+        )
+        zf.writestr(
+            "xl/_rels/workbook.xml.rels",
+            f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{sheet_rels}</Relationships>""",
+        )
+        wb_sheets = "".join(
+            f'<sheet name="{_mat3am_xlsx_escape(name)[:31] or f"Sheet{i}"}" sheetId="{i}" r:id="rId{i}"/>'
+            for i, (name, _rows) in enumerate(sheets, start=1)
+        )
+        zf.writestr(
+            "xl/workbook.xml",
+            f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>{wb_sheets}</sheets>
+</workbook>""",
+        )
+        for i, (_name, rows) in enumerate(sheets, start=1):
+            row_xml = []
+            for r_idx, row in enumerate(rows, start=1):
+                cells = []
+                for c_idx, val in enumerate(row):
+                    col = ""
+                    n = c_idx
+                    while True:
+                        col = chr(n % 26 + 65) + col
+                        n = n // 26 - 1
+                        if n < 0:
+                            break
+                    ref = f"{col}{r_idx}"
+                    if isinstance(val, (int, float)) and not isinstance(val, bool):
+                        cells.append(f'<c r="{ref}"><v>{val}</v></c>')
+                    else:
+                        cells.append(
+                            f'<c r="{ref}" t="inlineStr"><is><t>{_mat3am_xlsx_escape(val)}</t></is></c>'
+                        )
+                row_xml.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+            zf.writestr(
+                f"xl/worksheets/sheet{i}.xml",
+                f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{"".join(row_xml)}</sheetData>
+</worksheet>""",
+            )
+    return buf.getvalue()
+
+
+def _mat3am_hall_day_order_value(order_row: dict) -> float:
+    total = 0.0
+    for item in order_row.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            qty = float(item.get("quantity") or 0)
+            price = float(item.get("unitPrice") or 0)
+        except Exception:
+            qty, price = 0.0, 0.0
+        total += max(0.0, qty) * max(0.0, price)
+    if total <= 0:
+        try:
+            kt = order_row.get("kitchenTotals") if isinstance(order_row.get("kitchenTotals"), dict) else {}
+            total = float((kt or {}).get("total") or order_row.get("total") or 0)
+        except Exception:
+            total = 0.0
+    return round(max(0.0, total), 2)
+
+
+def _mat3am_hall_day_order_qty(order_row: dict) -> float:
+    qty = 0.0
+    for item in order_row.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            qty += float(item.get("quantity") or 0)
+        except Exception:
+            pass
+    return round(qty, 2)
+
+
+def _mat3am_hall_resolve_table_id(raw: Optional[str], labels: dict[str, str]) -> str:
+    """يقبل GUID أو اسم عرض مثل T20."""
+    want = str(raw or "").strip().upper()
+    if not want:
+        return ""
+    if want in labels:
+        return want
+    compact = want.replace(" ", "")
+    for tid, name in labels.items():
+        nm = str(name or "").strip().upper()
+        if nm == want or nm.replace(" ", "") == compact:
+            return tid
+        # T020 / 20 / T20
+        dig_a = re.sub(r"^T0*", "", nm)
+        dig_b = re.sub(r"^T0*", "", compact)
+        if dig_a.isdigit() and dig_a == dig_b:
+            return tid
+    return want
+
+
+def _mat3am_hall_policy_rates() -> dict:
+    try:
+        ops = _restaurant_read_ops() if "_restaurant_read_ops" in globals() else {}
+    except Exception:
+        ops = {}
+    if not isinstance(ops, dict):
+        ops = {}
+    try:
+        svc = float(ops.get("servicePercent") if ops.get("servicePercent") is not None else 12)
+    except Exception:
+        svc = 12.0
+    try:
+        vat = float(ops.get("vatPercent") if ops.get("vatPercent") is not None else 14)
+    except Exception:
+        vat = 14.0
+    before = bool(ops.get("serviceBeforeVat", True))
+    return {
+        "servicePercent": svc,
+        "vatPercent": vat,
+        "serviceBeforeVat": before,
+    }
+
+
+def _mat3am_hall_calc_financials(net: float, policy: Optional[dict] = None) -> dict:
+    pol = policy or _mat3am_hall_policy_rates()
+    svc_pct = float(pol.get("servicePercent") or 0)
+    vat_pct = float(pol.get("vatPercent") or 0)
+    before = bool(pol.get("serviceBeforeVat", True))
+    net = round(max(0.0, float(net or 0)), 2)
+    service = round(net * svc_pct / 100.0, 2)
+    tax_base = (net + service) if before else net
+    tax = round(tax_base * vat_pct / 100.0, 2)
+    total = round(net + service + tax, 2)
+    return {
+        "net": net,
+        "service": service,
+        "tax": tax,
+        "total": total,
+        "servicePercent": svc_pct,
+        "vatPercent": vat_pct,
+        "serviceBeforeVat": before,
+    }
+
+
+def _mat3am_hall_flatten_order_lines(s_orders: list) -> list[dict]:
+    lines: list[dict] = []
+    seen_oids: set[str] = set()
+    for o in s_orders:
+        if not isinstance(o, dict):
+            continue
+        oid_full = str(o.get("id") or "").strip()
+        oid_key = oid_full.casefold()
+        if oid_key and oid_key in seen_oids:
+            continue
+        if oid_key:
+            seen_oids.add(oid_key)
+        st = str(o.get("status") or "").lower()
+        at = str(o.get("at") or o.get("createdAt") or "")
+        oid = oid_full[:12]
+        raw_items = o.get("items") if isinstance(o.get("items"), list) else []
+        if not raw_items:
+            val = float(o.get("value") or 0)
+            qty = float(o.get("qty") or 0) or (1 if val else 0)
+            if qty or val:
+                lines.append(
+                    {
+                        "name": f"طلب {oid or '—'}",
+                        "quantity": qty or 1,
+                        "unitPrice": round(val / (qty or 1), 2) if val else 0,
+                        "lineTotal": round(val, 2),
+                        "orderStatus": st,
+                        "at": at,
+                        "orderId": oid,
+                        "cancelled": st == "cancelled",
+                    }
+                )
+            continue
+        for it in raw_items:
+            if not isinstance(it, dict):
+                continue
+            try:
+                q = float(it.get("quantity") or 0)
+                p = float(it.get("unitPrice") or 0)
+            except Exception:
+                q, p = 0.0, 0.0
+            if q <= 0:
+                continue
+            lines.append(
+                {
+                    "name": str(it.get("name") or "—").strip() or "—",
+                    "quantity": q,
+                    "unitPrice": round(p, 2),
+                    "lineTotal": round(q * p, 2),
+                    "orderStatus": st,
+                    "at": at,
+                    "orderId": oid,
+                    "cancelled": st == "cancelled",
+                }
+            )
+    return lines
+
+
+def _mat3am_hall_merge_item_lines(lines: list) -> list[dict]:
+    """دمج الأسطر المتطابقة (نفس الاسم والسعر وحالة الإلغاء) في صف واحد."""
+    buckets: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for ln in lines:
+        if not isinstance(ln, dict):
+            continue
+        key = (
+            str(ln.get("name") or "").strip().casefold(),
+            round(float(ln.get("unitPrice") or 0), 2),
+            bool(ln.get("cancelled")),
+        )
+        if key not in buckets:
+            buckets[key] = {
+                "name": str(ln.get("name") or "—").strip() or "—",
+                "quantity": 0.0,
+                "unitPrice": round(float(ln.get("unitPrice") or 0), 2),
+                "lineTotal": 0.0,
+                "orderStatus": str(ln.get("orderStatus") or ""),
+                "at": str(ln.get("at") or ""),
+                "orderId": str(ln.get("orderId") or ""),
+                "cancelled": bool(ln.get("cancelled")),
+            }
+            order.append(key)
+        row = buckets[key]
+        q = float(ln.get("quantity") or 0)
+        lt = float(ln.get("lineTotal") or 0)
+        if lt <= 0:
+            lt = q * float(ln.get("unitPrice") or 0)
+        row["quantity"] = round(float(row["quantity"]) + q, 2)
+        row["lineTotal"] = round(float(row["lineTotal"]) + lt, 2)
+        if not row["at"] and ln.get("at"):
+            row["at"] = str(ln.get("at") or "")
+        if not row["orderId"] and ln.get("orderId"):
+            row["orderId"] = str(ln.get("orderId") or "")
+    return [buckets[k] for k in order]
+
+
+def _mat3am_hall_parse_invoice_lines(inv: dict) -> list[dict]:
+    raw = inv.get("lines") if isinstance(inv.get("lines"), list) else []
+    if not raw:
+        raw = inv.get("sourceLines") if isinstance(inv.get("sourceLines"), list) else []
+    out: list[dict] = []
+    at = str(inv.get("paidAt") or inv.get("requestedAt") or "")
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        try:
+            q = float(it.get("quantity") or it.get("Quantity") or 0)
+            p = float(it.get("unitPrice") or it.get("UnitPrice") or 0)
+            lt = float(it.get("lineTotal") or it.get("TotalValue") or it.get("total") or 0)
+        except Exception:
+            q, p, lt = 0.0, 0.0, 0.0
+        if q <= 0 and lt <= 0:
+            continue
+        if q <= 0 and p > 0 and lt > 0:
+            q = round(lt / p, 2)
+        if lt <= 0:
+            lt = q * p
+        if p <= 0 and q > 0 and lt > 0:
+            p = round(lt / q, 2)
+        out.append(
+            {
+                "name": str(it.get("name") or it.get("Name") or it.get("itemName") or "—").strip() or "—",
+                "quantity": q or 1,
+                "unitPrice": round(p, 2),
+                "lineTotal": round(lt, 2),
+                "orderStatus": "invoiced",
+                "at": at,
+                "orderId": "",
+                "cancelled": False,
+            }
+        )
+    return _mat3am_hall_merge_item_lines(out)
+
+
+def _mat3am_hall_invoice_for_session(inv_by_sid: dict, sid: str) -> Optional[dict]:
+    rows = inv_by_sid.get(sid) or []
+    if not rows:
+        return None
+    # تفضيل فاتورة مسدّدة ثم الأعلى إجماليًا ثم الأحدث
+    def score(inv: dict) -> tuple:
+        paid = 1 if str(inv.get("paidAt") or "").strip() else 0
+        try:
+            total = float(inv.get("total") or inv.get("subtotal") or 0)
+        except Exception:
+            total = 0.0
+        at = str(inv.get("paidAt") or inv.get("requestedAt") or inv.get("createdAt") or "")
+        return (paid, total, at)
+
+    return sorted(rows, key=score, reverse=True)[0]
+
+
+def _mat3am_hall_enrich_session_brief(brief: dict, inv_by_sid: dict, policy: dict) -> dict:
+    """يحول ملخص الجلسة إلى كتلة شبيهة بفاتورة مبسّطة — البنود والإجمالي من مصدر واحد متسق."""
+    sid = str(brief.get("sessionId") or "").strip()
+    s_orders = brief.get("orders") if isinstance(brief.get("orders"), list) else []
+
+    # إزالة تكرار الطلبات (كان يحدث بسبب قصّ id إلى 12 حرفاً ثم إعادة الإضافة)
+    uniq_orders: list = []
+    seen_oids: set[str] = set()
+    for o in s_orders:
+        if not isinstance(o, dict):
+            continue
+        oid = str(o.get("id") or "").strip().casefold()
+        if oid and oid in seen_oids:
+            continue
+        if oid:
+            seen_oids.add(oid)
+        uniq_orders.append(o)
+    s_orders = uniq_orders
+    brief["orders"] = s_orders
+    brief["orderCount"] = len(s_orders)
+
+    order_lines = _mat3am_hall_merge_item_lines(_mat3am_hall_flatten_order_lines(s_orders))
+    active_order_lines = [ln for ln in order_lines if not ln.get("cancelled")]
+    net_from_orders = round(sum(float(ln.get("lineTotal") or 0) for ln in active_order_lines), 2)
+
+    inv = _mat3am_hall_invoice_for_session(inv_by_sid, sid) if sid else None
+    financials = _mat3am_hall_calc_financials(net_from_orders, policy)
+    financial_source = "orders_estimate"
+    invoice_meta = None
+    item_lines = list(order_lines)
+
+    if inv and isinstance(inv, dict):
+        try:
+            inv_net = float(inv.get("subtotal") or 0)
+            inv_svc = float(inv.get("serviceCharge") or 0)
+            inv_tax = float(inv.get("tax") or 0)
+            inv_total = float(inv.get("total") or 0)
+        except Exception:
+            inv_net = inv_svc = inv_tax = inv_total = 0.0
+
+        inv_lines = _mat3am_hall_parse_invoice_lines(inv)
+        inv_lines_sum = round(sum(float(ln.get("lineTotal") or 0) for ln in inv_lines), 2)
+
+        has_inv_money = inv_total > 0 or inv_net > 0 or inv_svc > 0 or inv_tax > 0
+        if has_inv_money:
+            if inv_net <= 0:
+                inv_net = inv_lines_sum if inv_lines_sum > 0 else net_from_orders
+            if inv_svc <= 0 and inv_tax <= 0 and inv_total <= 0:
+                # فاتورة بلا تفصيل خدمة/ضريبة — احسب من السياسة على صافي الفاتورة
+                calc = _mat3am_hall_calc_financials(inv_net, policy)
+                inv_svc, inv_tax, inv_total = calc["service"], calc["tax"], calc["total"]
+            elif inv_total <= 0:
+                inv_total = round(inv_net + inv_svc + inv_tax, 2)
+
+            financials = {
+                "net": round(inv_net, 2),
+                "service": round(inv_svc, 2),
+                "tax": round(inv_tax, 2),
+                "total": round(inv_total, 2),
+                "servicePercent": float(policy.get("servicePercent") or financials["servicePercent"]),
+                "vatPercent": float(policy.get("vatPercent") or financials["vatPercent"]),
+                "serviceBeforeVat": bool(policy.get("serviceBeforeVat", financials["serviceBeforeVat"])),
+            }
+            financial_source = "invoice"
+
+            # البنود يجب أن تطابق صافي الفاتورة
+            if inv_lines and abs(inv_lines_sum - inv_net) <= 0.05:
+                item_lines = inv_lines
+            elif inv_lines and inv_lines_sum > 0:
+                # أسطر الفاتورة موجودة لكن المجموع لا يطابق — اعرضها مع الإبقاء على صافي الفاتورة
+                item_lines = inv_lines
+            elif active_order_lines and abs(net_from_orders - inv_net) <= 0.05:
+                item_lines = order_lines
+            elif active_order_lines:
+                # إزالة التكرار الحرفي (صفّان متماثلان 120+120 بينما الصافي 120)
+                collapsed = _mat3am_hall_merge_item_lines(active_order_lines)
+                collapsed_sum = round(sum(float(ln.get("lineTotal") or 0) for ln in collapsed), 2)
+                if abs(collapsed_sum - inv_net) <= 0.05:
+                    item_lines = collapsed
+                else:
+                    # صف واحد يلخّص صافي الفاتورة لتفادي تضارب العرض
+                    item_lines = [
+                        {
+                            "name": "أصناف الفاتورة",
+                            "quantity": 1,
+                            "unitPrice": round(inv_net, 2),
+                            "lineTotal": round(inv_net, 2),
+                            "orderStatus": "invoiced",
+                            "at": str(inv.get("paidAt") or inv.get("requestedAt") or ""),
+                            "orderId": "",
+                            "cancelled": False,
+                        }
+                    ]
+            else:
+                item_lines = [
+                    {
+                        "name": "أصناف الفاتورة",
+                        "quantity": 1,
+                        "unitPrice": round(inv_net, 2),
+                        "lineTotal": round(inv_net, 2),
+                        "orderStatus": "invoiced",
+                        "at": str(inv.get("paidAt") or inv.get("requestedAt") or ""),
+                        "orderId": "",
+                        "cancelled": False,
+                    }
+                ]
+
+        invoice_meta = {
+            "invoiceId": str(inv.get("invoiceId") or inv.get("id") or "")[:36],
+            "billNumber": inv.get("billNumber"),
+            "paidAt": str(inv.get("paidAt") or "") or None,
+            "requestedAt": str(inv.get("requestedAt") or "") or None,
+            "status": "paid" if str(inv.get("paidAt") or "").strip() else "open",
+        }
+
+    # اتساق أخير: إن كان المجموع المعروض لا يساوي الصافي، لا تترك أرقاماً مضلّلة في الواجهة
+    shown_sum = round(
+        sum(float(ln.get("lineTotal") or 0) for ln in item_lines if not ln.get("cancelled")),
+        2,
+    )
+    net = float(financials.get("net") or 0)
+    if item_lines and net > 0 and abs(shown_sum - net) > 0.05 and financial_source == "invoice":
+        item_lines = [
+            {
+                "name": "أصناف الفاتورة",
+                "quantity": 1,
+                "unitPrice": round(net, 2),
+                "lineTotal": round(net, 2),
+                "orderStatus": "invoiced",
+                "at": str((invoice_meta or {}).get("paidAt") or (invoice_meta or {}).get("requestedAt") or ""),
+                "orderId": "",
+                "cancelled": False,
+            }
+        ]
+
+    brief["itemLines"] = item_lines
+    brief["financials"] = financials
+    brief["financialSource"] = financial_source
+    brief["invoice"] = invoice_meta
+    brief["orderValue"] = float(financials.get("net") or 0)
+    brief["cancelledOrders"] = sum(1 for o in s_orders if str(o.get("status") or "").lower() == "cancelled")
+    return brief
+
+
+def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) -> dict:
+    """تقرير اليوم التشغيلي للصالة (10ص→4ص) — طاولة واحدة أو مجمع."""
+    start, service_end, next_open, business_day = _mat3am_business_day_window()
+    labels = _mat3am_table_label_map()
+    want_tid = _mat3am_hall_resolve_table_id(table_id, labels)
+    policy = _mat3am_hall_policy_rates()
+
+    def in_window(iso_val: Any) -> bool:
+        dt = _iso_to_local_dt(str(iso_val or ""))
+        if not dt:
+            return False
+        return start <= dt < next_open
+
+    def tid_norm(raw: Any) -> str:
+        return str(raw or "").strip().upper()
+
+    def tname(tid: str) -> str:
+        return labels.get(tid, tid or "—")
+
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+    returns = _guest_return_requests_load() if "_guest_return_requests_load" in globals() else _restaurant_load("guest_return_requests", [])
+    if not isinstance(returns, list):
+        returns = []
+    approvals = _manager_approval_requests_load() if "_manager_approval_requests_load" in globals() else _restaurant_load("manager_approval_requests", [])
+    if not isinstance(approvals, list):
+        approvals = []
+    invoices_raw = _restaurant_load("invoices", [])
+    if not isinstance(invoices_raw, list):
+        invoices_raw = []
+    inv_by_sid: dict[str, list] = {}
+    for inv in invoices_raw:
+        if not isinstance(inv, dict):
+            continue
+        sid = str(inv.get("sessionId") or "").strip()
+        if not sid:
+            continue
+        # فلترة بسيطة لليوم التشغيلي عبر paidAt/requestedAt إن وُجدت
+        at = inv.get("paidAt") or inv.get("requestedAt") or inv.get("createdAt")
+        if at and not in_window(at):
+            # أبقِ الفاتورة إن جلستها ضمن اليوم (تُربط لاحقاً)
+            pass
+        inv_by_sid.setdefault(sid, []).append(inv)
+    session_by_id: dict[str, dict] = {}
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id") or "").strip()
+        if sid:
+            session_by_id[sid] = s
+
+    table_rows: dict[str, dict] = {}
+    captain_rows: dict[str, dict] = {}
+
+    def ensure_table(tid: str) -> Optional[dict]:
+        if not tid:
+            return None
+        if want_tid and tid != want_tid:
+            return None
+        row = table_rows.get(tid)
+        if row is None:
+            row = {
+                "tableId": tid,
+                "tableName": tname(tid),
+                "sessions": 0,
+                "orders": 0,
+                "cancelledOrders": 0,
+                "orderQty": 0.0,
+                "orderValue": 0.0,
+                "returns": 0,
+                "approvedReturns": 0,
+                "returnValue": 0.0,
+                "approvals": 0,
+                "approvedApprovals": 0,
+                "guests": 0,
+                "captains": set(),
+            }
+            table_rows[tid] = row
+        return row
+
+    def ensure_captain(user_id: str, login: str, name: str) -> dict:
+        key = f"id:{str(user_id).strip().upper()}" if user_id else f"login:{str(login or name).strip().casefold()}"
+        row = captain_rows.get(key)
+        if row is None:
+            row = {
+                "captainUserId": user_id,
+                "captainLogin": login,
+                "captainName": name or login or "غير محدد",
+                "sessions": 0,
+                "orders": 0,
+                "orderValue": 0.0,
+                "returns": 0,
+                "approvals": 0,
+            }
+            captain_rows[key] = row
+        return row
+
+    day_sessions: list[dict] = []
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if not in_window(s.get("startTime")):
+            continue
+        tid = tid_norm(s.get("tableId"))
+        trow = ensure_table(tid)
+        if trow is None and want_tid:
+            continue
+        if trow is None:
+            continue
+        day_sessions.append(s)
+        trow["sessions"] += 1
+        trow["guests"] += max(1, int(s.get("guestCount") or 1) or 1)
+        cap_name = str(s.get("captainName") or s.get("captainLogin") or "").strip()
+        if cap_name:
+            trow["captains"].add(cap_name)
+        crow = ensure_captain(
+            str(s.get("captainUserId") or "").strip(),
+            str(s.get("captainLogin") or "").strip(),
+            cap_name,
+        )
+        crow["sessions"] += 1
+
+    day_orders: list[dict] = []
+    for o in orders:
+        if not isinstance(o, dict):
+            continue
+        if not in_window(o.get("createdAt")):
+            continue
+        sid = str(o.get("sessionId") or "").strip()
+        sess = session_by_id.get(sid) if sid else None
+        tid = tid_norm(o.get("tableId") or (sess.get("tableId") if sess else ""))
+        trow = ensure_table(tid)
+        if trow is None:
+            continue
+        val = _mat3am_hall_day_order_value(o)
+        qty = _mat3am_hall_day_order_qty(o)
+        st = str(o.get("status") or "").lower()
+        day_orders.append(
+            {
+                "id": str(o.get("id") or "").strip(),
+                "sessionId": sid,
+                "at": str(o.get("createdAt") or ""),
+                "tableId": tid,
+                "tableName": tname(tid),
+                "status": st,
+                "qty": qty,
+                "value": val,
+                "captainName": str((sess or {}).get("captainName") or (sess or {}).get("captainLogin") or ""),
+                "items": [
+                    {
+                        "name": str(it.get("name") or "—"),
+                        "quantity": float(it.get("quantity") or 0),
+                        "unitPrice": float(it.get("unitPrice") or 0),
+                    }
+                    for it in (o.get("items") or [])
+                    if isinstance(it, dict)
+                ][:40],
+            }
+        )
+        trow["orders"] += 1
+        trow["orderQty"] = round(float(trow["orderQty"]) + qty, 2)
+        trow["orderValue"] = round(float(trow["orderValue"]) + val, 2)
+        if st == "cancelled":
+            trow["cancelledOrders"] += 1
+        if sess:
+            crow = ensure_captain(
+                str(sess.get("captainUserId") or "").strip(),
+                str(sess.get("captainLogin") or "").strip(),
+                str(sess.get("captainName") or sess.get("captainLogin") or "").strip(),
+            )
+            crow["orders"] += 1
+            crow["orderValue"] = round(float(crow["orderValue"]) + val, 2)
+
+    day_returns: list[dict] = []
+    for req in returns:
+        if not isinstance(req, dict):
+            continue
+        at = req.get("requestedAt") or req.get("createdAt") or req.get("at")
+        if not in_window(at):
+            continue
+        tid = tid_norm(req.get("tableId"))
+        if not tid:
+            sid = str(req.get("sessionId") or "").strip()
+            sess = session_by_id.get(sid)
+            tid = tid_norm((sess or {}).get("tableId"))
+        trow = ensure_table(tid)
+        if trow is None:
+            continue
+        lines = req.get("lines") if isinstance(req.get("lines"), list) else []
+        qty = 0.0
+        val = 0.0
+        for ln in lines:
+            if not isinstance(ln, dict):
+                continue
+            try:
+                rq = float(ln.get("returnQty") or ln.get("quantity") or 0)
+                up = float(ln.get("unitPrice") or 0)
+            except Exception:
+                rq, up = 0.0, 0.0
+            qty += rq
+            val += rq * up
+        st = str(req.get("status") or "").strip().lower()
+        day_returns.append(
+            {
+                "id": str(req.get("id") or "")[:12],
+                "sessionId": str(req.get("sessionId") or "").strip(),
+                "at": str(at or ""),
+                "tableId": tid,
+                "tableName": tname(tid),
+                "status": st,
+                "qty": round(qty, 2),
+                "value": round(val, 2),
+            }
+        )
+        trow["returns"] += 1
+        trow["returnValue"] = round(float(trow["returnValue"]) + val, 2)
+        if st == "approved":
+            trow["approvedReturns"] += 1
+        if sess := session_by_id.get(str(req.get("sessionId") or "").strip()):
+            crow = ensure_captain(
+                str(sess.get("captainUserId") or "").strip(),
+                str(sess.get("captainLogin") or "").strip(),
+                str(sess.get("captainName") or sess.get("captainLogin") or "").strip(),
+            )
+            crow["returns"] += 1
+
+    day_approvals: list[dict] = []
+    for ap in approvals:
+        if not isinstance(ap, dict):
+            continue
+        at = ap.get("createdAt") or ap.get("requestedAt") or ap.get("at")
+        if not in_window(at):
+            continue
+        tid = tid_norm(ap.get("tableId"))
+        if not tid:
+            sid = str(ap.get("sessionId") or "").strip()
+            sess = session_by_id.get(sid)
+            tid = tid_norm((sess or {}).get("tableId"))
+        trow = ensure_table(tid) if tid else None
+        if want_tid and (not trow or tid != want_tid):
+            continue
+        st = str(ap.get("status") or "").strip().lower()
+        day_approvals.append(
+            {
+                "id": str(ap.get("id") or "")[:12],
+                "sessionId": str(ap.get("sessionId") or "").strip(),
+                "at": str(at or ""),
+                "tableId": tid,
+                "tableName": tname(tid) if tid else "—",
+                "status": st,
+                "approvalType": str(ap.get("approvalType") or ap.get("type") or ""),
+                "note": str(ap.get("label") or ap.get("note") or ap.get("reason") or "")[:120],
+            }
+        )
+        if trow:
+            trow["approvals"] += 1
+            if st in ("approved", "accepted", "done"):
+                trow["approvedApprovals"] += 1
+
+    tables_out = []
+    for tid, row in table_rows.items():
+        caps = sorted(row.pop("captains", set()) or [])
+        tables_out.append(
+            {
+                **row,
+                "captainsLabel": "، ".join(caps) if caps else "—",
+                "captainNames": caps,
+            }
+        )
+    tables_out.sort(key=lambda r: (str(r.get("tableName") or ""), str(r.get("tableId") or "")))
+
+    captains_out = sorted(
+        captain_rows.values(),
+        key=lambda r: (-float(r.get("orderValue") or 0), -int(r.get("orders") or 0), str(r.get("captainName") or "")),
+    )
+
+    # ملخص مرحلي لكل جلسة (تقرير طاولة مختصر)
+    # اربط كل طلبات الجلسات ضمن اليوم حتى لو تأخّر ختم createdAt قليلاً
+    day_session_ids = {str(s.get("id") or "").strip() for s in day_sessions if str(s.get("id") or "").strip()}
+    orders_by_sid: dict[str, list] = {}
+    for o in day_orders:
+        sid = str(o.get("sessionId") or "").strip() or f"nosession:{o.get('tableId')}:{o.get('id')}"
+        orders_by_sid.setdefault(sid, []).append(o)
+    for o in orders:
+        if not isinstance(o, dict):
+            continue
+        sid = str(o.get("sessionId") or "").strip()
+        if not sid or sid not in day_session_ids:
+            continue
+        # تجنّب التكرار مع day_orders
+        oid = str(o.get("id") or "").strip()
+        existing = orders_by_sid.setdefault(sid, [])
+        oid_key = oid.casefold()
+        if oid_key and any(str(x.get("id") or "").strip().casefold() == oid_key for x in existing):
+            continue
+        st = str(o.get("status") or "").lower()
+        existing.append(
+            {
+                "id": oid,
+                "sessionId": sid,
+                "at": str(o.get("createdAt") or ""),
+                "tableId": tid_norm(o.get("tableId") or ""),
+                "tableName": tname(tid_norm(o.get("tableId") or "")),
+                "status": st,
+                "qty": _mat3am_hall_day_order_qty(o),
+                "value": _mat3am_hall_day_order_value(o),
+                "captainName": "",
+                "items": [
+                    {
+                        "name": str(it.get("name") or "—"),
+                        "quantity": float(it.get("quantity") or 0),
+                        "unitPrice": float(it.get("unitPrice") or 0),
+                    }
+                    for it in (o.get("items") or [])
+                    if isinstance(it, dict)
+                ][:40],
+            }
+        )
+    returns_by_sid: dict[str, list] = {}
+    for r in day_returns:
+        sid = str(r.get("sessionId") or "").strip()
+        if sid:
+            returns_by_sid.setdefault(sid, []).append(r)
+    approvals_by_sid: dict[str, list] = {}
+    for a in day_approvals:
+        sid = str(a.get("sessionId") or "").strip()
+        if sid:
+            approvals_by_sid.setdefault(sid, []).append(a)
+
+    session_briefs: list[dict] = []
+    used_order_sids: set[str] = set()
+    for idx, s in enumerate(sorted(day_sessions, key=lambda x: str(x.get("startTime") or ""))):
+        sid = str(s.get("id") or "").strip()
+        tid = tid_norm(s.get("tableId"))
+        s_orders = orders_by_sid.get(sid, [])
+        used_order_sids.add(sid)
+        s_returns = returns_by_sid.get(sid, [])
+        s_approvals = approvals_by_sid.get(sid, [])
+        order_value = round(sum(float(o.get("value") or 0) for o in s_orders), 2)
+        cancelled = sum(1 for o in s_orders if str(o.get("status") or "").lower() == "cancelled")
+        session_briefs.append(
+            {
+                "seq": idx + 1,
+                "sessionId": sid,
+                "tableId": tid,
+                "tableName": tname(tid),
+                "startTime": str(s.get("startTime") or ""),
+                "endTime": str(s.get("endTime") or ""),
+                "status": str(s.get("status") or ""),
+                "captainName": str(s.get("captainName") or s.get("captainLogin") or "").strip() or "—",
+                "guestCount": max(1, int(s.get("guestCount") or 1) or 1),
+                "guestSession": bool(s.get("guestSession")),
+                "orderCount": len(s_orders),
+                "cancelledOrders": cancelled,
+                "orderValue": order_value,
+                "returnCount": len(s_returns),
+                "returnValue": round(sum(float(r.get("value") or 0) for r in s_returns), 2),
+                "approvalCount": len(s_approvals),
+                "orders": s_orders,
+                "returns": s_returns,
+                "approvals": s_approvals,
+            }
+        )
+
+    # طلبات بلا جلسة ضمن day_sessions — تُعرض كمرحلة مستقلة (أو من سجل الجلسة إن وُجد)
+    orphan_idx = len(session_briefs)
+    for sid, s_orders in orders_by_sid.items():
+        if sid in used_order_sids:
+            continue
+        orphan_idx += 1
+        sess = session_by_id.get(sid) if sid and not str(sid).startswith("nosession:") else None
+        tid = tid_norm((sess or {}).get("tableId") or ((s_orders[0] or {}).get("tableId") if s_orders else ""))
+        if want_tid and tid != want_tid:
+            continue
+        session_briefs.append(
+            {
+                "seq": orphan_idx,
+                "sessionId": sid if sid and not str(sid).startswith("nosession:") else "",
+                "tableId": tid,
+                "tableName": tname(tid),
+                "startTime": str((sess or {}).get("startTime") or (s_orders[0] or {}).get("at") or ""),
+                "endTime": str((sess or {}).get("endTime") or ""),
+                "status": str((sess or {}).get("status") or "orders_only"),
+                "captainName": str(
+                    (sess or {}).get("captainName")
+                    or (sess or {}).get("captainLogin")
+                    or (s_orders[0] or {}).get("captainName")
+                    or "—"
+                ),
+                "guestCount": max(1, int((sess or {}).get("guestCount") or 0) or 0) if sess else 0,
+                "guestSession": bool((sess or {}).get("guestSession")),
+                "orderCount": len(s_orders),
+                "cancelledOrders": sum(1 for o in s_orders if str(o.get("status") or "").lower() == "cancelled"),
+                "orderValue": round(sum(float(o.get("value") or 0) for o in s_orders), 2),
+                "returnCount": len(returns_by_sid.get(sid, [])),
+                "returnValue": round(sum(float(r.get("value") or 0) for r in returns_by_sid.get(sid, [])), 2),
+                "approvalCount": len(approvals_by_sid.get(sid, [])),
+                "orders": s_orders,
+                "returns": returns_by_sid.get(sid, []),
+                "approvals": approvals_by_sid.get(sid, []),
+            }
+        )
+
+    session_briefs = [_mat3am_hall_enrich_session_brief(b, inv_by_sid, policy) for b in session_briefs]
+    for i, b in enumerate(session_briefs, start=1):
+        b["seq"] = i
+
+    fin_net = round(sum(float((b.get("financials") or {}).get("net") or 0) for b in session_briefs), 2)
+    fin_svc = round(sum(float((b.get("financials") or {}).get("service") or 0) for b in session_briefs), 2)
+    fin_tax = round(sum(float((b.get("financials") or {}).get("tax") or 0) for b in session_briefs), 2)
+    fin_total = round(sum(float((b.get("financials") or {}).get("total") or 0) for b in session_briefs), 2)
+
+    summary = {
+        "tablesTouched": len(tables_out) if not want_tid else (1 if session_briefs else 0),
+        "sessions": len(session_briefs),
+        "orders": sum(int(b.get("orderCount") or 0) for b in session_briefs),
+        "orderValue": fin_net,
+        "cancelledOrders": sum(int(b.get("cancelledOrders") or 0) for b in session_briefs),
+        "returns": sum(int(b.get("returnCount") or 0) for b in session_briefs),
+        "approvedReturns": sum(int(t.get("approvedReturns") or 0) for t in tables_out),
+        "returnValue": round(sum(float(b.get("returnValue") or 0) for b in session_briefs), 2),
+        "approvals": sum(int(b.get("approvalCount") or 0) for b in session_briefs),
+        "approvedApprovals": sum(int(t.get("approvedApprovals") or 0) for t in tables_out),
+        "guests": sum(int(b.get("guestCount") or 0) for b in session_briefs),
+        "net": fin_net,
+        "service": fin_svc,
+        "tax": fin_tax,
+        "total": fin_total,
+        "servicePercent": policy.get("servicePercent"),
+        "vatPercent": policy.get("vatPercent"),
+    }
+
+    report = {
+        "reportId": "hall_day",
+        "businessDay": business_day.isoformat(),
+        "windowStart": start.isoformat(timespec="seconds"),
+        "windowEnd": service_end.isoformat(timespec="seconds"),
+        "nextOpen": next_open.isoformat(timespec="seconds"),
+        "labelAr": f"يوم تشغيلي {business_day.isoformat()} (10:00 → 04:00)",
+        "generatedAt": datetime.now().isoformat(timespec="seconds"),
+        "tableId": want_tid or None,
+        "tableName": tname(want_tid) if want_tid else None,
+        "policy": policy,
+        "summary": summary,
+        "sessionBriefs": session_briefs,
+        "tables": tables_out,
+        "captains": captains_out,
+        "approvals": day_approvals,
+        "orders": day_orders,
+        "returns": day_returns,
+        "values": {
+            "orderValue": summary["orderValue"],
+            "returnValue": summary["returnValue"],
+            "net": fin_net,
+            "service": fin_svc,
+            "tax": fin_tax,
+            "total": fin_total,
+            "byTable": [{"tableId": t["tableId"], "tableName": t["tableName"], "orderValue": t["orderValue"]} for t in tables_out],
+            "byCaptain": [{"captainName": c.get("captainName"), "orderValue": c.get("orderValue")} for c in captains_out],
+        },
+        "message": "تقرير مرحلي لفواتير/جلسات الطاولة — أصناف وإجماليات ثم التجميعات.",
+        "storedPath": None,
+    }
+
+    if store:
+        report["storedPath"] = _mat3am_store_hall_day_report(report)
+
+    return report
+
+
+def _mat3am_store_hall_day_report(report: dict) -> str:
+    day = str(report.get("businessDay") or date_cls.today().isoformat())
+    folder = os.path.join(_restaurant_dir, "hall_day_reports")
+    os.makedirs(folder, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tid = str(report.get("tableId") or "").strip()
+    suffix = f"_T{tid[:8]}" if tid else "_ALL"
+    fname = f"hall_day_{day}{suffix}_{stamp}.json"
+    path = os.path.join(folder, fname)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    return f"config/restaurant/hall_day_reports/{fname}"
+
+
+def _mat3am_hall_day_excel_bytes(report: dict) -> bytes:
+    summary = report.get("summary") or {}
+    sheets: list[tuple[str, list[list]]] = [
+        (
+            "ملخص",
+            [
+                ["التقرير", "يوم تشغيلي للصالة"],
+                ["اليوم التشغيلي", report.get("businessDay")],
+                ["من", report.get("windowStart")],
+                ["إلى (خدمة)", report.get("windowEnd")],
+                ["أُنشئ", report.get("generatedAt")],
+                ["طاولة", report.get("tableName") or "مجمع الكل"],
+                [],
+                ["البند", "القيمة"],
+                ["طاولات", summary.get("tablesTouched")],
+                ["جلسات", summary.get("sessions")],
+                ["طلبات", summary.get("orders")],
+                ["قيمة الطلبات", summary.get("orderValue")],
+                ["صافي", summary.get("net")],
+                ["خدمة", summary.get("service")],
+                ["ضريبة", summary.get("tax")],
+                ["إجمالي", summary.get("total")],
+                ["ملغى", summary.get("cancelledOrders")],
+                ["مرتجعات", summary.get("returns")],
+                ["مرتجع معتمد", summary.get("approvedReturns")],
+                ["قيمة مرتجع", summary.get("returnValue")],
+                ["اعتمادات", summary.get("approvals")],
+                ["ضيوف", summary.get("guests")],
+            ],
+        ),
+        (
+            "الجلسات",
+            [["#", "الطاولة", "بداية", "نهاية", "الحالة", "الكابتن", "ضيوف", "طلبات", "صافي", "خدمة", "ضريبة", "إجمالي", "مرتجع", "اعتمادات", "مصدر"]]
+            + [
+                [
+                    b.get("seq"),
+                    b.get("tableName"),
+                    str(b.get("startTime") or "").replace("T", " ")[:16],
+                    str(b.get("endTime") or "").replace("T", " ")[:16],
+                    b.get("status"),
+                    b.get("captainName"),
+                    b.get("guestCount"),
+                    b.get("orderCount"),
+                    (b.get("financials") or {}).get("net"),
+                    (b.get("financials") or {}).get("service"),
+                    (b.get("financials") or {}).get("tax"),
+                    (b.get("financials") or {}).get("total"),
+                    b.get("returnCount"),
+                    b.get("approvalCount"),
+                    b.get("financialSource"),
+                ]
+                for b in (report.get("sessionBriefs") or [])
+            ],
+        ),
+        (
+            "بنود الجلسات",
+            [["جلسة", "الطاولة", "الصنف", "كمية", "سعر", "قيمة", "حالة الطلب", "الوقت"]]
+            + [
+                [
+                    b.get("seq"),
+                    b.get("tableName"),
+                    ln.get("name"),
+                    ln.get("quantity"),
+                    ln.get("unitPrice"),
+                    ln.get("lineTotal"),
+                    ln.get("orderStatus"),
+                    str(ln.get("at") or "").replace("T", " ")[:16],
+                ]
+                for b in (report.get("sessionBriefs") or [])
+                for ln in (b.get("itemLines") or [])
+            ],
+        ),
+        (
+            "الطاولات",
+            [["الطاولة", "المعرّف", "كباتن", "جلسات", "طلبات", "قيمة", "ملغى", "مرتجع", "مرتجع معتمد", "اعتمادات", "ضيوف"]]
+            + [
+                [
+                    t.get("tableName"),
+                    t.get("tableId"),
+                    t.get("captainsLabel"),
+                    t.get("sessions"),
+                    t.get("orders"),
+                    t.get("orderValue"),
+                    t.get("cancelledOrders"),
+                    t.get("returns"),
+                    t.get("approvedReturns"),
+                    t.get("approvals"),
+                    t.get("guests"),
+                ]
+                for t in (report.get("tables") or [])
+            ],
+        ),
+        (
+            "الكباتن",
+            [["الكابتن", "تسجيل", "جلسات", "طلبات", "قيمة", "مرتجع"]]
+            + [
+                [
+                    c.get("captainName"),
+                    c.get("captainLogin"),
+                    c.get("sessions"),
+                    c.get("orders"),
+                    c.get("orderValue"),
+                    c.get("returns"),
+                ]
+                for c in (report.get("captains") or [])
+            ],
+        ),
+        (
+            "الطلبات",
+            [["الوقت", "الطاولة", "الحالة", "كمية", "قيمة", "الكابتن", "المعرّف"]]
+            + [
+                [o.get("at"), o.get("tableName"), o.get("status"), o.get("qty"), o.get("value"), o.get("captainName"), o.get("id")]
+                for o in (report.get("orders") or [])
+            ],
+        ),
+        (
+            "المرتجعات",
+            [["الوقت", "الطاولة", "الحالة", "كمية", "قيمة", "المعرّف"]]
+            + [
+                [r.get("at"), r.get("tableName"), r.get("status"), r.get("qty"), r.get("value"), r.get("id")]
+                for r in (report.get("returns") or [])
+            ],
+        ),
+        (
+            "الاعتمادات",
+            [["الوقت", "النوع", "الحالة", "الطاولة", "ملاحظة", "المعرّف"]]
+            + [
+                [a.get("at"), a.get("approvalType"), a.get("status"), a.get("tableName"), a.get("note"), a.get("id")]
+                for a in (report.get("approvals") or [])
+            ],
+        ),
+    ]
+    return _mat3am_build_xlsx(sheets)
+
+
+@app.get("/api/restaurant/hall-day-report")
+def restaurant_hall_day_report(
+    table_id: Optional[str] = None,
+    store: Optional[str] = None,
+):
+    """تقرير اليوم التشغيلي للصالة (10ص→4ص) — JSON قابل للتخزين."""
+    do_store = str(store or "").strip().lower() in ("1", "true", "yes")
+    return _build_hall_day_report(table_id=table_id, store=do_store)
+
+
+@app.get("/api/restaurant/hall-day-report/excel")
+def restaurant_hall_day_report_excel(
+    table_id: Optional[str] = None,
+    store: Optional[str] = None,
+):
+    """تصدير Excel لتقرير اليوم التشغيلي (مجمع أو طاولة)."""
+    do_store = str(store or "").strip().lower() in ("1", "true", "yes")
+    report = _build_hall_day_report(table_id=table_id, store=do_store)
+    payload = _mat3am_hall_day_excel_bytes(report)
+    day = str(report.get("businessDay") or "day")
+    tid = str(report.get("tableId") or "").strip()
+    fname = f"hall_day_{day}_{tid[:8] if tid else 'ALL'}.xlsx"
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 def _local_table_state_map() -> dict:
@@ -18324,24 +20522,154 @@ def _session_active_today(s: dict) -> bool:
 
 
 def _close_stale_active_sessions(sessions: Optional[list] = None) -> int:
-    data = sessions if sessions is not None else _restaurant_load("table_sessions", [])
-    if not isinstance(data, list):
-        return 0
-    changed = 0
-    now_iso = datetime.now().isoformat()
-    for s in data:
-        if not isinstance(s, dict):
-            continue
-        if str(s.get("status") or "").lower() != "active":
-            continue
-        if _is_today_iso(str(s.get("startTime") or "")):
-            continue
-        s["status"] = "completed"
-        s["endTime"] = now_iso
-        changed += 1
-    if changed:
-        _restaurant_save("table_sessions", data)
-    return changed
+    def _apply(data: list) -> int:
+        changed = 0
+        now_iso = datetime.now().isoformat()
+        for s in data:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("status") or "").lower() != "active":
+                continue
+            if _is_today_iso(str(s.get("startTime") or "")):
+                continue
+            s["status"] = "completed"
+            s["endTime"] = now_iso
+            changed += 1
+        return changed
+
+    # القوائم المحمّلة مسبقاً قد تصبح قديمة أثناء طلب آخر (مثل نقل بند).
+    # نعدّلها للعرض فقط ولا نكتبها كي لا نمحو جلسة أُنشئت بالتزامن.
+    if sessions is not None:
+        return _apply(sessions) if isinstance(sessions, list) else 0
+
+    with _restaurant_table_sessions_lock:
+        data = _restaurant_load("table_sessions", [])
+        if not isinstance(data, list):
+            return 0
+        changed = _apply(data)
+        if changed:
+            _restaurant_save("table_sessions", data)
+        return changed
+
+
+_ORPHAN_RECOVERABLE_ORDER_STATUSES = frozenset(
+    {"pending", "preparing", "ready", "served", "delivered"}
+)
+
+
+def _repair_orphan_active_order_sessions() -> int:
+    """استعادة جلسة هدف محذوفة بتعارض كتابة إذا ظل طلب تشغيلي مرتبطاً بها.
+
+    يشمل البنود المنقولة بحالة served/ready أيضاً — سابقاً كانت تُستبعد فيبقى
+    إجمالي على الشريحة بلا تسكين/جلسة نشطة (مثل T150 بعد نقل من T10).
+    """
+    with _restaurant_table_sessions_lock:
+        sessions = _restaurant_load("table_sessions", [])
+        orders = _restaurant_load("orders", [])
+        if not isinstance(sessions, list) or not isinstance(orders, list):
+            return 0
+        known_ids = {
+            str(s.get("id") or "").strip()
+            for s in sessions
+            if isinstance(s, dict) and str(s.get("id") or "").strip()
+        }
+        session_by_id = {
+            str(s.get("id") or "").strip(): s
+            for s in sessions
+            if isinstance(s, dict) and str(s.get("id") or "").strip()
+        }
+        order_by_id = {
+            str(o.get("id") or "").strip(): o
+            for o in orders
+            if isinstance(o, dict) and str(o.get("id") or "").strip()
+        }
+        repaired = 0
+        changed = False
+        orders_changed = False
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            sid = str(order.get("sessionId") or "").strip()
+            tid = str(order.get("tableId") or "").strip()
+            st = str(order.get("status") or "").strip().lower()
+            source_order = order_by_id.get(str(order.get("sourceOrderId") or "").strip()) or {}
+            source_order_sid = str(source_order.get("sessionId") or "").strip()
+            existing_session = session_by_id.get(sid)
+            if (
+                isinstance(existing_session, dict)
+                and str(existing_session.get("startReason") or "")
+                in ("recovered_partial_transfer_target", "partial_transfer_target")
+                and not str(existing_session.get("captainUserId") or "").strip()
+                and source_order_sid
+                and isinstance(session_by_id.get(source_order_sid), dict)
+            ):
+                source_session = session_by_id[source_order_sid]
+                for key in (
+                    "captainUserId", "captainName", "captainLogin", "captainRole", "captainClaimedAt",
+                    "seatedByUserId", "seatedByName", "seatedByLogin",
+                ):
+                    if source_session.get(key) is not None:
+                        existing_session[key] = source_session.get(key)
+                changed = True
+            day_anchor = str(order.get("movedAt") or order.get("createdAt") or "")
+            has_active_items = any(
+                isinstance(item, dict)
+                and not bool(item.get("cancelled"))
+                and float(item.get("quantity") or 0) > 0
+                for item in (order.get("items") or [])
+            )
+            if (
+                not sid
+                or not tid
+                or sid in known_ids
+                or st not in _ORPHAN_RECOVERABLE_ORDER_STATUSES
+                or not has_active_items
+                or not _is_today_iso(day_anchor)
+            ):
+                continue
+            moved_from_sid = ""
+            for item in order.get("items") or []:
+                if isinstance(item, dict) and str(item.get("movedFromSessionId") or "").strip():
+                    moved_from_sid = str(item.get("movedFromSessionId")).strip()
+                    break
+            if not moved_from_sid:
+                moved_from_sid = source_order_sid
+            source = session_by_id.get(moved_from_sid) or {}
+            # إن وُجدت جلسة نشطة أخرى على نفس الطاولة: اربط الطلب بها بدل جلسة مزدوجة.
+            existing_active = _restaurant_active_session_for_table(sessions, tid)
+            if (
+                isinstance(existing_active, dict)
+                and str(existing_active.get("id") or "").strip()
+                and str(existing_active.get("id") or "").strip() != sid
+            ):
+                order["sessionId"] = str(existing_active.get("id") or "")
+                orders_changed = True
+                repaired += 1
+                continue
+            now_iso = str(order.get("movedAt") or order.get("createdAt") or datetime.now().isoformat())
+            restored = _restaurant_new_session_for_merge(tid, source, now_iso)
+            restored["id"] = sid
+            restored.pop("createdForMerge", None)
+            restored["startReason"] = "recovered_partial_transfer_target"
+            restored["status"] = "active"
+            if not restored.get("startTime"):
+                restored["startTime"] = now_iso
+            sessions.append(restored)
+            session_by_id[sid] = restored
+            known_ids.add(sid)
+            repaired += 1
+            changed = True
+            try:
+                restaurant_update_table_status(tid, {"status": "occupied"})
+            except Exception:
+                pass
+        if orders_changed:
+            _restaurant_save("orders", orders)
+            changed = True
+        if changed:
+            _restaurant_save("table_sessions", sessions)
+            cache_invalidate_restaurant()
+        return repaired
 
 
 def _table_no_order_overdue_map(
@@ -18781,6 +21109,15 @@ def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
     ops_raw = _restaurant_read_ops_storage()
     waiter_table_assignments = _restaurant_waiter_table_assignments_load()
     temp_captain_transfers = _restaurant_temp_captain_transfer_active_rows()
+    try:
+        relations_payload = restaurant_get_recent_table_relations(limit=500)
+        relations_raw = (
+            relations_payload.get("relations")
+            if isinstance(relations_payload, dict) and isinstance(relations_payload.get("relations"), list)
+            else []
+        )
+    except Exception:
+        relations_raw = []
 
     from mat3am_sql_cache import status as cache_status
 
@@ -18795,6 +21132,9 @@ def _restaurant_operational_snapshot_sync(include_users: bool = False) -> dict:
         "opsSettings": ops_raw if isinstance(ops_raw, dict) else {},
         "waiterTableAssignments": waiter_table_assignments,
         "tempCaptainTransfers": temp_captain_transfers,
+        # شاشة الطاولات تعتمد اللقطة السريعة ثم تعود فوراً؛ لذلك يجب تضمين
+        # العلاقات هنا، وإلا فلن تطلب endpoint المنفصل ولن تظهر لافتة النقل.
+        "relations": relations_raw,
         "sources": {
             "table_sessions": sessions_src,
             "orders": orders_src,
@@ -18895,10 +21235,14 @@ def _restaurant_get_tables_payload(
     def _normalized_table_status(table_id: str, raw_status: Any) -> str:
         st = str(raw_status or "ready").strip().lower() or "ready"
         tid = str(table_id or "").strip().upper()
-        # 1) إذا كان للطاولة جلسة أو طلب نشط فعلياً اليوم، فهي "مشغولة" حتماً
+        # دورة التنظيف أولوية تشغيلية: لا تُلغى بسبب طلب/جلسة عابرة بعد التحويل أو الإغلاق.
+        # هذا كان يسبب تذبذب الشريحة بين cleaning/occupied أثناء الاستطلاع.
+        if st in ("dirty", "cleaning"):
+            return st
+        # إذا كان للطاولة جلسة أو طلب نشط فعلياً اليوم، فهي "مشغولة" حتماً
         if tid in active_table_ids_upper:
             return "occupied"
-        # 2) إذا كانت الحالة "occupied" لكن لا يوجد نشاط فعلي، فهي "جاهزة"
+        # إذا كانت الحالة "occupied" لكن لا يوجد نشاط فعلي، فهي "جاهزة"
         if st == "occupied":
             return "ready"
         return st
@@ -19932,6 +22276,8 @@ def _restaurant_force_reset_table(table_id: str, *, reason: str = "", actor: Opt
 
 
 @app.post("/api/restaurant/tables/{table_id}/reset")
+@_with_restaurant_table_sessions_lock
+@_with_restaurant_orders_lock
 def restaurant_force_reset_table(table_id: str, body: dict):
     """Reset للطاولة على مستوى table_id حتى لو لم تعد هناك جلسة نشطة ظاهرة."""
     if not isinstance(body, dict):
@@ -20254,6 +22600,7 @@ def _body_wants_special_table(body: dict) -> bool:
 @app.get("/api/restaurant/table-sessions")
 def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = True):
     """جلسات الطاولات — يُضاف tableDisplayName و linkedOrderCount لصفحة الكاشير. Cache TTL 2s."""
+    _repair_orphan_active_order_sessions()
     cache_key = f"mat3am:restaurant:table-sessions:st={status}:today={today_only}"
     cached = cache_get(cache_key)
     if cached:
@@ -20301,6 +22648,245 @@ def restaurant_get_sessions(status: Optional[str] = None, today_only: bool = Tru
     return JSONResponse(content=result, headers={"X-Cache-Status": "MISS"})
 
 
+def _table_relation_key(table_id: object) -> str:
+    raw = str(table_id or "").strip()
+    if not raw:
+        return ""
+    norm = _norm_session_table_id(raw)
+
+    m = re.match(r"^(?:T|TABLE)?0*(\d+)$", norm.replace(" ", ""))
+    if m:
+        try:
+            return f"N:{int(m.group(1))}"
+        except Exception:
+            pass
+
+    guid_like = _mat3am_guid_norm(raw)
+    if guid_like:
+        return f"G:{guid_like}"
+    return f"S:{norm}"
+
+
+@app.get("/api/restaurant/table-relations/recent")
+def restaurant_get_recent_table_relations(limit: int = 300):
+    """العلاقات التشغيلية للطاولات — مرتبطة بآخر جلسة أو سياق التنظيف.
+
+    - الدمج: من الجلسات النشطة الحية (يختفي فور فك الدمج).
+    - التحويل / نقل البنود / التحريك: من سجل التدقيق، لكن فقط إذا كانت
+      الجلسة المذكورة هي الحالية، أو كانت آخر وضع مباشر قبل انتقال الطاولة
+      إلى متسخة/قيد التنظيف. تختفي اللافتة فور عودة الطاولة إلى جاهزة.
+    """
+    latest_by_table: dict = {}
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+
+    active_by_key: dict = {}
+    for session in sessions:
+        if not isinstance(session, dict) or not _session_active_today(session):
+            continue
+        sid = str(session.get("id") or "").strip()
+        tid = str(session.get("tableId") or "").strip()
+        key = _table_relation_key(tid)
+        if not sid or not key:
+            continue
+        # أحدث جلسة نشطة لكل طاولة (إن وُجد أكثر من واحدة بالخطأ).
+        prev = active_by_key.get(key)
+        if prev is not None:
+            prev_start = str(prev.get("startTime") or "")
+            cur_start = str(session.get("startTime") or "")
+            if cur_start <= prev_start:
+                continue
+        active_by_key[key] = session
+    active_ids = {
+        str(s.get("id") or "").strip()
+        for s in active_by_key.values()
+        if str(s.get("id") or "").strip()
+    }
+    latest_session_by_key: dict = {}
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        key = _table_relation_key(session.get("tableId"))
+        if not key:
+            continue
+        previous = latest_session_by_key.get(key)
+        if previous is None or str(session.get("startTime") or "") > str(previous.get("startTime") or ""):
+            latest_session_by_key[key] = session
+    table_state_by_id = _local_table_state_map()
+
+    for session in active_by_key.values():
+        target_session_id = str(session.get("mergedIntoSessionId") or "").strip()
+        if not target_session_id or target_session_id not in active_ids:
+            continue
+        target = next(
+            (
+                row
+                for row in active_by_key.values()
+                if str(row.get("id") or "").strip() == target_session_id
+            ),
+            None,
+        )
+        if not isinstance(target, dict):
+            continue
+        source_table = str(session.get("tableId") or "").strip()
+        target_table = str(target.get("tableId") or "").strip()
+        merged_at = str(session.get("mergedAt") or "").strip()
+        merge_id = str(session.get("mergeId") or "").strip()
+        for table_id, direction, other_id in (
+            (source_table, "source", target_table),
+            (target_table, "target", source_table),
+        ):
+            key = _table_relation_key(table_id)
+            if not key:
+                continue
+            latest_by_table[key] = {
+                "tableId": table_id,
+                "action": "merge_table",
+                "direction": direction,
+                "otherTableId": other_id,
+                "at": merged_at,
+                "mergeId": merge_id or None,
+                "sourceSessionId": str(session.get("id") or ""),
+                "targetSessionId": target_session_id,
+                "active": True,
+                "scope": "active_session",
+            }
+
+    audit = _restaurant_load("session_audit", [])
+    if not isinstance(audit, list):
+        audit = []
+
+    try:
+        lim = int(limit)
+    except Exception:
+        lim = 300
+    lim = max(50, min(2000, lim))
+
+    recent = audit[-lim:]
+    for entry in reversed(recent):
+        if not isinstance(entry, dict):
+            continue
+        action = str(entry.get("action") or "").strip().lower()
+        if action not in ("transfer_table", "move_table", "move_items"):
+            continue
+        from_tid = str(entry.get("fromTableId") or "").strip()
+        to_tid = str(entry.get("toTableId") or "").strip()
+        at = str(entry.get("at") or "").strip()
+        source_session_id = str(entry.get("sessionId") or "").strip()
+        target_session_id = str(entry.get("targetSessionId") or "").strip()
+
+        pairs = [
+            (from_tid, "source", to_tid),
+            (to_tid, "target", from_tid),
+        ]
+        for table_id, direction, other_id in pairs:
+            key = _table_relation_key(table_id)
+            if not key or key in latest_by_table:
+                continue
+            active_session = active_by_key.get(key)
+            relation_scope = "active_session"
+            relation_active = True
+            if isinstance(active_session, dict):
+                active_sid = str(active_session.get("id") or "").strip()
+                if direction == "source":
+                    # المصدر: اللافتة فقط إن كانت نفس الجلسة التي نفّذت النقل/التحويل.
+                    if not source_session_id or active_sid != source_session_id:
+                        continue
+                else:
+                    # الهدف:
+                    # - move_items: جلسة هدف جديدة = targetSessionId
+                    # - transfer/move_table: غالباً نفس sessionId انتقلت للطاولة الهدف
+                    if action == "move_items":
+                        if not target_session_id or active_sid != target_session_id:
+                            continue
+                    elif active_sid not in {sid for sid in (source_session_id, target_session_id) if sid}:
+                        continue
+            else:
+                # لا جلسة نشطة: نحتفظ بآخر تفسير تشغيلي فقط أثناء التنظيف.
+                table_state = table_state_by_id.get(str(table_id or "").strip().upper()) or {}
+                table_status = str(table_state.get("status") or "").strip().lower()
+                if table_status not in ("dirty", "cleaning"):
+                    continue
+                expected_sid = (
+                    source_session_id
+                    if direction == "source"
+                    else target_session_id
+                    if action == "move_items"
+                    else target_session_id or source_session_id
+                )
+                latest_session = latest_session_by_key.get(key)
+                latest_sid = (
+                    str(latest_session.get("id") or "").strip()
+                    if isinstance(latest_session, dict)
+                    else ""
+                )
+                matches_last_session = bool(expected_sid and latest_sid == expected_sid)
+                # في التحويل الكامل تنتقل نفس الجلسة إلى الهدف فلا تبقى على المصدر؛
+                # اربط المصدر بلحظة دخوله dirty/cleaning بدلاً من تاريخ قديم.
+                transition_iso = str(
+                    table_state.get("dirtyAt")
+                    or table_state.get("cleaningStartedAt")
+                    or table_state.get("statusUpdatedAt")
+                    or ""
+                ).strip()
+                relation_dt = _iso_to_local_dt(at)
+                transition_dt = _iso_to_local_dt(transition_iso)
+                matches_cleaning_transition = bool(
+                    relation_dt
+                    and transition_dt
+                    and abs((transition_dt - relation_dt).total_seconds()) <= 300
+                )
+                if not matches_last_session and not matches_cleaning_transition:
+                    continue
+                relation_scope = "cleaning_context"
+                relation_active = False
+            latest_by_table[key] = {
+                "tableId": table_id,
+                "action": action,
+                "direction": direction,
+                "otherTableId": other_id,
+                "at": at,
+                "sourceSessionId": source_session_id or None,
+                "targetSessionId": target_session_id or None,
+                "lineCount": entry.get("lineCount"),
+                "active": relation_active,
+                "scope": relation_scope,
+            }
+
+    # أسماء العرض حتى تظهر شارة «تحويل → T12» حتى لو تعذر مطابقة المخطط لحظياً
+    all_tids = set()
+    for row in latest_by_table.values():
+        tid = str(row.get("tableId") or "").strip()
+        oid = str(row.get("otherTableId") or "").strip()
+        if tid:
+            all_tids.add(tid)
+        if oid:
+            all_tids.add(oid)
+    name_map = _restaurant_table_display_names_for_ids(all_tids) if all_tids else {}
+    file_map = _restaurant_file_tables_id_to_name()
+    floor_map = _floor_plan_table_id_to_label()
+    for row in latest_by_table.values():
+        tid = str(row.get("tableId") or "").strip()
+        oid = str(row.get("otherTableId") or "").strip()
+        tdisp = _usable_table_display_name(
+            name_map.get(tid) or floor_map.get(tid) or floor_map.get(tid.upper()) or file_map.get(tid) or file_map.get(tid.upper()),
+            reject_id=tid,
+        )
+        odisp = _usable_table_display_name(
+            name_map.get(oid) or floor_map.get(oid) or floor_map.get(oid.upper()) or file_map.get(oid) or file_map.get(oid.upper()),
+            reject_id=oid,
+        )
+        if not tdisp:
+            tdisp = _session_table_display_fallback(tid) if tid else ""
+        if not odisp:
+            odisp = _session_table_display_fallback(oid) if oid else ""
+        row["tableDisplayName"] = tdisp or tid
+        row["otherTableDisplayName"] = odisp or oid
+
+    return {"relations": list(latest_by_table.values())}
+
+
 def _norm_session_table_id(table_id: str) -> str:
     """توحيد معرف الطاولة بين مخطط الأرضية والجداول (اختلاف الحالة كان يمنع مطابقة جلسة موجودة وتعيين المسند)."""
     return str(table_id or "").strip().upper()
@@ -20334,6 +22920,7 @@ def _restaurant_assign_captain_from_actor_if_needed(s: dict, actor: dict, body: 
 
 
 @app.post("/api/restaurant/table-sessions")
+@_with_restaurant_table_sessions_lock
 def restaurant_create_session(body: dict):
     """إنشاء جلسة طاولة (إسكان). جلسة نشطة واحدة منطقياً لكل tableId: إن وُجدت تُعاد كما هي ما لم يُمرَّر forceNewSession."""
     if not isinstance(body, dict):
@@ -20557,6 +23144,7 @@ def restaurant_create_session(body: dict):
 
 
 @app.patch("/api/restaurant/table-sessions/{session_id}/billing-profile")
+@_with_restaurant_table_sessions_lock
 def restaurant_patch_session_billing_profile(session_id: str, body: dict):
     """تطبيق/إلغاء سياسة الفوترة الخاصة (قالب VIP، أو عميل ملاك بـ vipAgentGuid، أو افتراضيات الإعدادات)."""
     if not isinstance(body, dict):
@@ -20642,6 +23230,7 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
 
 
 @app.post("/api/restaurant/table-sessions/{session_id}/claim-order-taker")
+@_with_restaurant_table_sessions_lock
 def restaurant_claim_order_taker(session_id: str, body: dict):
     """تسكين جرسون الطلبات (كابتن) على جلسة نشطة — يُعرض اسمه على شريحة الطاولة. مسجّل في session_audit."""
     if not isinstance(body, dict):
@@ -20712,14 +23301,36 @@ def _mat3am_guid_norm(s: Optional[str]) -> str:
 
 
 def _restaurant_table_ids_equal(a: object, b: object) -> bool:
-    """مطابقة tableId بين الجلسة والواجهة (GUID قد يختلف الحرف/الأقواس)."""
+    """مطابقة tableId بين الجلسة والواجهة (GUID أو رقم طاولة بصيغ مختلفة مثل T14/14)."""
     sa = str(a or "").strip()
     sb = str(b or "").strip()
     if not sa or not sb:
         return False
     if sa == sb:
         return True
-    return _mat3am_guid_norm(sa) == _mat3am_guid_norm(sb)
+    if _mat3am_guid_norm(sa) == _mat3am_guid_norm(sb):
+        return True
+
+    na = _norm_session_table_id(sa)
+    nb = _norm_session_table_id(sb)
+    if na == nb:
+        return True
+
+    def _numeric_table_token(v: str) -> str:
+        t = str(v or "").strip().upper().replace(" ", "")
+        m = re.match(r"^(?:T|TABLE)?0*(\d+)$", t)
+        if not m:
+            return ""
+        try:
+            return str(int(m.group(1)))
+        except Exception:
+            return ""
+
+    ta = _numeric_table_token(sa)
+    tb = _numeric_table_token(sb)
+    if ta and tb and ta == tb:
+        return True
+    return False
 
 
 def _captain_transfer_requests_load() -> List[dict]:
@@ -21056,6 +23667,7 @@ def restaurant_cancel_captain_transfer(request_id: str, body: dict):
 
 
 @app.post("/api/restaurant/table-sessions/{session_id}/reassign-order-taker")
+@_with_restaurant_table_sessions_lock
 def restaurant_reassign_order_taker(session_id: str, body: dict):
     """تحويل الكابتن — للمدير/المطوّر فقط."""
     if not isinstance(body, dict):
@@ -21123,6 +23735,7 @@ def restaurant_reassign_order_taker(session_id: str, body: dict):
 
 
 @app.post("/api/restaurant/table-sessions/cleanup-duplicate-empties")
+@_with_restaurant_table_sessions_lock
 def restaurant_cleanup_duplicate_empty_sessions():
     """إنهاء جلسات مكررة لنفس الطاولة إن كانت فارغة (0 طلبات) ولم يُطلب لها حساب. تُبقى جلسة واحدة مفضّلة (بطلبات / طلب حساب / الأحدث)."""
     data = _restaurant_load("table_sessions", [])
@@ -21210,6 +23823,8 @@ def _restaurant_cancel_open_kitchen_orders_for_session(session_id: str) -> int:
     return n
 
 
+@_with_restaurant_table_sessions_lock
+@_with_restaurant_orders_lock
 def _restaurant_complete_session_internal(
     session_id: str,
     *,
@@ -21369,6 +23984,238 @@ def _role_inbox_load_rows() -> List[dict]:
     return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
 
 
+_ROLE_INBOX_EMAIL_LOG_LOCK = threading.Lock()
+
+
+def _role_inbox_email_log(entry: dict) -> None:
+    """سجل مختصر لنتيجة تسليم البريد، دون تخزين كلمة مرور SMTP."""
+    try:
+        with _ROLE_INBOX_EMAIL_LOG_LOCK:
+            rows = _restaurant_load("email_delivery_log", [])
+            if not isinstance(rows, list):
+                rows = []
+            rows.append(
+                {
+                    "at": datetime.now().isoformat(),
+                    "inboxId": str(entry.get("inboxId") or ""),
+                    "type": str(entry.get("type") or ""),
+                    "recipient": str(entry.get("recipient") or ""),
+                    "status": str(entry.get("status") or ""),
+                    "detail": str(entry.get("detail") or "")[:500],
+                }
+            )
+            _restaurant_save("email_delivery_log", rows[-300:])
+    except Exception:
+        pass
+
+
+def _smtp_settings_for_notifications() -> dict:
+    try:
+        if os.path.exists(_settings_path):
+            with open(_settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cfg = data.get("smtp") if isinstance(data, dict) and isinstance(data.get("smtp"), dict) else {}
+            return {
+                "host": str(cfg.get("smtpHost") or "").strip(),
+                "port": int(str(cfg.get("smtpPort") or "587").strip()),
+                "user": str(cfg.get("smtpUser") or "").strip(),
+                "password": str(cfg.get("smtpPass") or "").strip(),
+                "sender": str(cfg.get("smtpFrom") or cfg.get("smtpUser") or "").strip(),
+                "frontendUrl": str(cfg.get("frontendUrl") or "").strip().rstrip("/"),
+            }
+    except Exception:
+        pass
+    return {
+        "host": str(os.environ.get("MAT3AM_SMTP_HOST") or "").strip(),
+        "port": int(str(os.environ.get("MAT3AM_SMTP_PORT") or "587").strip()),
+        "user": str(os.environ.get("MAT3AM_SMTP_USER") or "").strip(),
+        "password": str(os.environ.get("MAT3AM_SMTP_PASS") or "").strip(),
+        "sender": str(os.environ.get("MAT3AM_SMTP_FROM") or os.environ.get("MAT3AM_SMTP_USER") or "").strip(),
+        "frontendUrl": str(os.environ.get("MAT3AM_FRONTEND_URL") or "").strip().rstrip("/"),
+    }
+
+
+def _manager_notification_email_recipients() -> list[str]:
+    conn = get_connection()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor()
+        _ensure_mat3am_dev_schema(cur)
+        placeholders = ",".join("?" for _ in MANAGER_OP_TARGET_ROLES)
+        cur.execute(
+            f"""
+            SELECT Email
+            FROM dbo.MAT3AM_APP_USERS
+            WHERE IsActive = 1
+              AND RoleCode IN ({placeholders})
+              AND NULLIF(LTRIM(RTRIM(Email)), '') IS NOT NULL
+            """,
+            tuple(MANAGER_OP_TARGET_ROLES),
+        )
+        out: list[str] = []
+        seen: set[str] = set()
+        for rec in cur.fetchall() or []:
+            email = str(rec[0] or "").strip()
+            key = email.casefold()
+            if "@" not in email or key in seen:
+                continue
+            seen.add(key)
+            out.append(email)
+        return out
+    except Exception:
+        return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _role_inbox_send_manager_email(row: dict, recipients: Optional[list[str]] = None) -> dict:
+    """إرسال تنبيه/طلب اعتماد للمديرين. القرار نفسه يبقى داخل التطبيق بعد تسجيل الدخول."""
+    import html
+    import smtplib
+    from email.message import EmailMessage
+
+    cfg = _smtp_settings_for_notifications()
+    inbox_id = str(row.get("id") or "")
+    row_type = str(row.get("type") or "")
+    targets = _role_inbox_normalize_targets(row.get("targetRoles"))
+    if not any(role in MANAGER_OP_TARGET_ROLES for role in targets):
+        return {"ok": True, "sent": 0, "failed": 0, "skipped": "not_manager_target"}
+    if not cfg.get("host") or not cfg.get("sender"):
+        _role_inbox_email_log(
+            {"inboxId": inbox_id, "type": row_type, "status": "skipped", "detail": "SMTP غير مكتمل"}
+        )
+        return {"ok": False, "sent": 0, "failed": 0, "skipped": "smtp_not_configured"}
+
+    target_emails = recipients if isinstance(recipients, list) else _manager_notification_email_recipients()
+    target_emails = [str(x or "").strip() for x in target_emails if "@" in str(x or "")]
+    if not target_emails:
+        _role_inbox_email_log(
+            {"inboxId": inbox_id, "type": row_type, "status": "skipped", "detail": "لا يوجد بريد مدير نشط"}
+        )
+        return {"ok": False, "sent": 0, "failed": 0, "skipped": "no_manager_email"}
+
+    title = str(row.get("title") or "تنبيه مطعم")[:200]
+    body_text = str(row.get("body") or "").strip()
+    table_label = str(row.get("tableDisplayName") or "").strip()
+    if not table_label:
+        table_id = str(row.get("tableId") or "").strip()
+        if table_id:
+            try:
+                table_label = _restaurant_table_display_names_for_ids({table_id}).get(table_id) or ""
+            except Exception:
+                table_label = ""
+    frontend = str(cfg.get("frontendUrl") or "").rstrip("/")
+    is_approval = row_type == "manager_approval_request" or bool(row.get("managerApprovalRequestId"))
+    app_link = (
+        f"{frontend}/app/manager/manager-approvals"
+        if frontend and is_approval
+        else f"{frontend}/app/manager"
+        if frontend
+        else ""
+    )
+    subject_prefix = "طلب اعتماد" if is_approval else "تنبيه"
+    subject = f"[MAT3AM {subject_prefix}] {title}"
+    plain_parts = [title]
+    if table_label:
+        plain_parts.append(f"الطاولة: {table_label}")
+    if body_text:
+        plain_parts.append(body_text)
+    if app_link:
+        plain_parts.append(f"فتح التطبيق: {app_link}")
+    plain = "\n".join(plain_parts)
+    link_html = (
+        f'<p><a href="{html.escape(app_link)}" '
+        'style="display:inline-block;background:#2563eb;color:#fff;padding:12px 20px;'
+        'border-radius:8px;text-decoration:none;font-weight:bold">فتح صفحة الموافقات</a></p>'
+        if app_link and is_approval
+        else f'<p><a href="{html.escape(app_link)}">فتح التطبيق</a></p>'
+        if app_link
+        else ""
+    )
+    html_body = (
+        '<html dir="rtl"><body style="font-family:Arial,sans-serif;direction:rtl;text-align:right">'
+        f"<h2>{html.escape(title)}</h2>"
+        + (f"<p><strong>الطاولة:</strong> {html.escape(table_label)}</p>" if table_label else "")
+        + (f"<p>{html.escape(body_text)}</p>" if body_text else "")
+        + link_html
+        + "<p style=\"color:#64748b;font-size:12px\">يتم الاعتماد من داخل التطبيق بعد تسجيل الدخول.</p>"
+        + "</body></html>"
+    )
+
+    sent = 0
+    failed = 0
+    results: list[dict] = []
+    for recipient in target_emails:
+        try:
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = str(cfg["sender"])
+            msg["To"] = recipient
+            msg.set_content(plain)
+            msg.add_alternative(html_body, subtype="html")
+            port = int(cfg.get("port") or 587)
+            if port == 465:
+                server = smtplib.SMTP_SSL(str(cfg["host"]), port, timeout=20)
+            else:
+                server = smtplib.SMTP(str(cfg["host"]), port, timeout=20)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+            try:
+                if cfg.get("user") and cfg.get("password"):
+                    server.login(str(cfg["user"]), str(cfg["password"]))
+                server.send_message(msg)
+            finally:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
+            sent += 1
+            results.append({"recipient": recipient, "status": "sent"})
+            _role_inbox_email_log(
+                {"inboxId": inbox_id, "type": row_type, "recipient": recipient, "status": "sent"}
+            )
+        except Exception as exc:
+            failed += 1
+            detail = str(exc)[:300]
+            results.append({"recipient": recipient, "status": "failed", "detail": detail})
+            _role_inbox_email_log(
+                {
+                    "inboxId": inbox_id,
+                    "type": row_type,
+                    "recipient": recipient,
+                    "status": "failed",
+                    "detail": detail,
+                }
+            )
+    return {"ok": sent > 0 and failed == 0, "sent": sent, "failed": failed, "results": results}
+
+
+def _role_inbox_notify_managers_async(row: dict) -> None:
+    targets = _role_inbox_normalize_targets((row or {}).get("targetRoles"))
+    if not any(role in MANAGER_OP_TARGET_ROLES for role in targets):
+        return
+    snapshot = dict(row)
+
+    def _runner() -> None:
+        result = _role_inbox_send_manager_email(snapshot)
+        print(
+            f"[mat3am] manager email: inbox={snapshot.get('id')} sent={result.get('sent', 0)} "
+            f"failed={result.get('failed', 0)} skipped={result.get('skipped', '')}",
+            flush=True,
+        )
+
+    threading.Thread(
+        target=_runner,
+        name=f"mat3am-manager-email-{str(snapshot.get('id') or '')[:8]}",
+        daemon=True,
+    ).start()
+
+
 def _role_inbox_save_rows(rows: List[dict]) -> None:
     cap = 600
     if len(rows) > cap:
@@ -21405,6 +24252,7 @@ def _role_inbox_upsert_row(row: dict) -> str:
             return str(item["id"])
     rows.append(row)
     _role_inbox_save_rows(rows)
+    _role_inbox_notify_managers_async(row)
     return row_id
 
 
@@ -21665,29 +24513,52 @@ def _cashier_alert_role_inbox_targets(typ: str, body: dict) -> List[str]:
     out = _role_inbox_normalize_targets(body.get("targetRoles"))
     if out:
         return out
-    if typ in ("kitchen_urgent", "speed_order_urgent", "quick_clean", "call_manager", "no_order_overdue", "request_bill_help", "service_issue"):
+    if typ in ("call_manager", "request_bill_help", "service_issue"):
+        return ["cashier", *list(MANAGER_OP_TARGET_ROLES)]
+    if typ in ("no_order_overdue",):
+        return list(MANAGER_OP_TARGET_ROLES)
+    if typ in ("kitchen_urgent", "speed_order_urgent", "quick_clean"):
         return ["cashier"]
     if typ == "waiter_summon":
         return ["cashier"]
     return []
 
 
-def _role_inbox_append_for_alert(rec_id: str, typ: str, title: str, body_text: Optional[str], target_roles: List[str], created_iso: str) -> None:
+def _role_inbox_append_for_alert(
+    rec_id: str,
+    typ: str,
+    title: str,
+    body_text: Optional[str],
+    target_roles: List[str],
+    created_iso: str,
+    meta: Optional[dict] = None,
+) -> None:
     if not target_roles:
         return
+    meta = meta if isinstance(meta, dict) else {}
+    table_id = str(meta.get("tableId") or "").strip()
+    table_label = str(meta.get("tableDisplayName") or "").strip()
+    if not table_label and table_id:
+        try:
+            table_label = _restaurant_table_display_names_for_ids({table_id}).get(table_id) or ""
+        except Exception:
+            table_label = ""
     rows = _role_inbox_load_rows()
-    rows.append(
-        {
-            "id": str(rec_id),
-            "type": typ,
-            "title": title,
-            "body": body_text,
-            "targetRoles": target_roles,
-            "createdAt": created_iso,
-            "dismissedAt": None,
-        }
-    )
+    row = {
+        "id": str(rec_id),
+        "type": typ,
+        "title": title,
+        "body": body_text,
+        "targetRoles": target_roles,
+        "createdAt": created_iso,
+        "tableId": table_id or None,
+        "sessionId": str(meta.get("sessionId") or "").strip() or None,
+        "tableDisplayName": table_label or None,
+        "dismissedAt": None,
+    }
+    rows.append(row)
     _role_inbox_save_rows(rows)
+    _role_inbox_notify_managers_async(row)
 
 
 def _actor_may_handle_no_order_watch(session_row: dict, actor: dict) -> bool:
@@ -21700,6 +24571,7 @@ def _actor_may_handle_no_order_watch(session_row: dict, actor: dict) -> bool:
 
 
 @app.post("/api/restaurant/table-sessions/{session_id}/no-order-watch")
+@_with_restaurant_table_sessions_lock
 def restaurant_no_order_watch_action(session_id: str, body: dict):
     if not isinstance(body, dict):
         body = {}
@@ -22152,6 +25024,11 @@ def restaurant_cashier_alerts_create(body: dict):
         body_text,
         _cashier_alert_role_inbox_targets(typ, body_d),
         now_iso,
+        {
+            "tableId": rec.get("tableId"),
+            "sessionId": rec.get("sessionId"),
+            "tableDisplayName": str(body_d.get("tableDisplayName") or "").strip() or None,
+        },
     )
     cache_delete_pattern("mat3am:restaurant:role-inbox:*")
     return {"ok": True, "deduped": False, "id": rec["id"], "alert": rec}
@@ -22198,169 +25075,265 @@ def _append_session_audit_entry(entry: dict) -> None:
         json.dump(arr, f, ensure_ascii=False, indent=2)
 
 
+def _restaurant_active_session_for_table(sessions: list, table_id: object, exclude_session_id: str = "") -> Optional[dict]:
+    wanted = str(table_id or "").strip()
+    excluded = str(exclude_session_id or "").strip()
+    if not wanted:
+        return None
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        if excluded and str(session.get("id") or "").strip() == excluded:
+            continue
+        if str(session.get("status") or "").strip().lower() != "active":
+            continue
+        if _restaurant_table_ids_equal(session.get("tableId"), wanted):
+            return session
+    return None
+
+
+def _restaurant_transfer_cleaning_status() -> str:
+    workflow = _restaurant_read_workflow()
+    status = str(workflow.get("cleaningStartStatus") or "dirty").strip().lower()
+    return status if status in ("dirty", "cleaning") else "dirty"
+
+
+def _restaurant_new_session_for_merge(table_id: str, source: dict, now_iso: str) -> dict:
+    """ينشئ جلسة هدف فارغة داخلياً للدمج بدون المرور بتدفق التسكين والموافقات."""
+    source_count = _normalize_session_guest_count(source.get("guestCount") or 1, 1)
+    return {
+        "id": str(uuid.uuid4()),
+        "tableId": _norm_session_table_id(table_id),
+        "projectId": source.get("projectId"),
+        "hostId": source.get("hostId"),
+        "guestCount": source_count,
+        "childrenCount": 0,
+        "preferences": {},
+        "startTime": now_iso,
+        "status": "active",
+        "startedByRole": source.get("startedByRole") or "waiter",
+        "startReason": "merge_target",
+        "minimumChargePerSeat": _session_minimum_charge_per_seat(None, table_id),
+        "seatGuestLabels": dict(source.get("seatGuestLabels") or {}) if isinstance(source.get("seatGuestLabels"), dict) else {},
+        "captainUserId": source.get("captainUserId"),
+        "captainName": source.get("captainName"),
+        "captainLogin": source.get("captainLogin"),
+        "captainRole": source.get("captainRole"),
+        "captainClaimedAt": source.get("captainClaimedAt") or now_iso,
+        "createdForMerge": True,
+    }
+
+
 @app.patch("/api/restaurant/table-sessions/{session_id}")
 def restaurant_patch_session(session_id: str, body: dict):
-    """نقل جلسة نشطة لطاولة أخرى و/أو حفظ بيانات المقاعد (أسماء/سياسات فوترة) للسبليت والفاتورة."""
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="جسم غير صالح")
-    sid = str(session_id or "").strip()
-    data = _restaurant_load("table_sessions", [])
-    found = None
-    for s in data:
-        if str(s.get("id")) == sid:
-            found = s
-            break
-    if not found:
-        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
-    if str(found.get("status") or "").lower() != "active":
-        raise HTTPException(status_code=400, detail="لا يمكن تعديل جلسة غير نشطة")
-    if str(found.get("billingRequestedAt") or "").strip() and (
-        "guestCount" in body
-        or body.get("autoNumberSeats") is not None
-        or "seatGuestLabels" in body
-        or "seatBillingOverrides" in body
-        or str(body.get("tableId") or "").strip()
-    ):
-        raise HTTPException(status_code=409, detail="لا يمكن تعديل الجلسة أو نقلها بعد طلب الحساب.")
+    def _impl(session_id: str, body: dict):
+        """نقل جلسة نشطة لطاولة أخرى و/أو حفظ بيانات المقاعد (أسماء/سياسات فوترة) للسبليت والفاتورة."""
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="جسم غير صالح")
+        sid = str(session_id or "").strip()
+        data = _restaurant_load("table_sessions", [])
+        found = None
+        for s in data:
+            if str(s.get("id")) == sid:
+                found = s
+                break
+        if not found:
+            raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+        if str(found.get("status") or "").lower() != "active":
+            raise HTTPException(status_code=400, detail="لا يمكن تعديل جلسة غير نشطة")
+        if str(found.get("billingRequestedAt") or "").strip() and (
+            "guestCount" in body
+            or body.get("autoNumberSeats") is not None
+            or "seatGuestLabels" in body
+            or "seatBillingOverrides" in body
+            or str(body.get("tableId") or "").strip()
+        ):
+            raise HTTPException(status_code=409, detail="لا يمكن تعديل الجلسة أو نقلها بعد طلب الحساب.")
 
-    did = False
-    if "guestCount" in body:
-        found["guestCount"] = _normalize_session_guest_count(body.get("guestCount"), found.get("guestCount") or 1)
-        if body.get("autoNumberSeats") is not False:
+        did = False
+        if "guestCount" in body:
+            found["guestCount"] = _normalize_session_guest_count(body.get("guestCount"), found.get("guestCount") or 1)
+            if body.get("autoNumberSeats") is not False:
+                found["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
+                    int(found.get("guestCount") or 1),
+                    found.get("seatGuestLabels") if isinstance(found.get("seatGuestLabels"), dict) else None,
+                )
+            did = True
+        elif body.get("autoNumberSeats") is True:
             found["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
-                int(found.get("guestCount") or 1),
+                _normalize_session_guest_count(found.get("guestCount") or 1, 1),
                 found.get("seatGuestLabels") if isinstance(found.get("seatGuestLabels"), dict) else None,
             )
-        did = True
-    elif body.get("autoNumberSeats") is True:
-        found["seatGuestLabels"] = _auto_numbered_seat_guest_labels(
-            _normalize_session_guest_count(found.get("guestCount") or 1, 1),
-            found.get("seatGuestLabels") if isinstance(found.get("seatGuestLabels"), dict) else None,
-        )
-        did = True
-
-    if "seatGuestLabels" in body:
-        slab = body.get("seatGuestLabels")
-        if isinstance(slab, dict):
-            merged = found.get("seatGuestLabels")
-            if not isinstance(merged, dict):
-                merged = {}
-            for k, v in slab.items():
-                ks = str(k).strip()
-                if not ks.isdigit():
-                    continue
-                n = int(ks)
-                if n < 1 or n > 13:
-                    continue
-                merged[str(n)] = str(v or "").strip()[:120]
-            found["seatGuestLabels"] = merged
             did = True
 
-    if "seatBillingOverrides" in body:
-        ov = body.get("seatBillingOverrides")
-        if isinstance(ov, dict):
-            merged = found.get("seatBillingOverrides")
-            if not isinstance(merged, dict):
-                merged = {}
-            for k, v in ov.items():
-                ks = str(k).strip()
-                if not ks.isdigit():
-                    continue
-                n = int(ks)
-                if n < 1 or n > 12:
-                    continue
-                if not isinstance(v, dict):
-                    continue
-                agent_guid = str(v.get("agentGuid") or "").strip()
-                try:
-                    if agent_guid:
-                        agent_guid = str(uuid.UUID(agent_guid)).upper()
-                except Exception:
-                    agent_guid = ""
-                price_mode = str(v.get("priceMode") or "").strip().lower()
-                if price_mode not in ("", "menu", "cost_plus"):
-                    price_mode = ""
-                try:
-                    disc = float(v.get("discountPct") or 0)
-                except Exception:
-                    disc = 0.0
-                disc = max(0.0, min(100.0, disc))
-                try:
-                    cm = float(v.get("costMarkupPct") or 0)
-                except Exception:
-                    cm = 0.0
-                cm = max(0.0, min(300.0, cm))
-                merged[str(n)] = {
-                    "agentGuid": agent_guid or "",
-                    "noService": bool(v.get("noService") or False),
-                    "noVat": bool(v.get("noVat") or False),
-                    "discountPct": disc,
-                    "priceMode": price_mode or "",
-                    "costMarkupPct": cm,
-                }
-            found["seatBillingOverrides"] = merged
-            did = True
+        if "seatGuestLabels" in body:
+            slab = body.get("seatGuestLabels")
+            if isinstance(slab, dict):
+                merged = found.get("seatGuestLabels")
+                if not isinstance(merged, dict):
+                    merged = {}
+                for k, v in slab.items():
+                    ks = str(k).strip()
+                    if not ks.isdigit():
+                        continue
+                    n = int(ks)
+                    if n < 1 or n > 13:
+                        continue
+                    merged[str(n)] = str(v or "").strip()[:120]
+                found["seatGuestLabels"] = merged
+                did = True
 
-    new_table = str(body.get("tableId") or "").strip()
-    if new_table:
-        for s in data:
-            if not isinstance(s, dict):
-                continue
-            if str(s.get("id") or "").strip() == sid:
-                continue
-            if str(s.get("status") or "").lower() != "active":
-                continue
-            if _restaurant_table_ids_equal(s.get("tableId"), new_table):
+        if "seatBillingOverrides" in body:
+            ov = body.get("seatBillingOverrides")
+            if isinstance(ov, dict):
+                merged = found.get("seatBillingOverrides")
+                if not isinstance(merged, dict):
+                    merged = {}
+                for k, v in ov.items():
+                    ks = str(k).strip()
+                    if not ks.isdigit():
+                        continue
+                    n = int(ks)
+                    if n < 1 or n > 12:
+                        continue
+                    if not isinstance(v, dict):
+                        continue
+                    agent_guid = str(v.get("agentGuid") or "").strip()
+                    try:
+                        if agent_guid:
+                            agent_guid = str(uuid.UUID(agent_guid)).upper()
+                    except Exception:
+                        agent_guid = ""
+                    price_mode = str(v.get("priceMode") or "").strip().lower()
+                    if price_mode not in ("", "menu", "cost_plus"):
+                        price_mode = ""
+                    try:
+                        disc = float(v.get("discountPct") or 0)
+                    except Exception:
+                        disc = 0.0
+                    disc = max(0.0, min(100.0, disc))
+                    try:
+                        cm = float(v.get("costMarkupPct") or 0)
+                    except Exception:
+                        cm = 0.0
+                    cm = max(0.0, min(300.0, cm))
+                    merged[str(n)] = {
+                        "agentGuid": agent_guid or "",
+                        "noService": bool(v.get("noService") or False),
+                        "noVat": bool(v.get("noVat") or False),
+                        "discountPct": disc,
+                        "priceMode": price_mode or "",
+                        "costMarkupPct": cm,
+                    }
+                found["seatBillingOverrides"] = merged
+                did = True
+
+        new_table = str(body.get("tableId") or "").strip()
+        transfer_target_session = None
+        if new_table:
+            if str(found.get("mergedIntoSessionId") or "").strip() or (
+                isinstance(found.get("mergedSourceSessionIds"), list) and found.get("mergedSourceSessionIds")
+            ):
+                raise HTTPException(status_code=409, detail="فك دمج الطاولة أولاً قبل تحويلها.")
+            target_session = _restaurant_active_session_for_table(data, new_table, sid)
+            transfer_target_session = target_session
+            confirm_occupied = body.get("confirmOccupiedTarget") in (True, "1", "true", "yes", 1)
+            if target_session and not confirm_occupied:
                 raise HTTPException(
                     status_code=409,
-                    detail="الطاولة الهدف لها جلسة نشطة أخرى. اختر طاولة فارغة أو أغلق الجلسة هناك أولاً.",
+                    detail="الطاولة الهدف مشغولة. أكد التحويل لضم الطلبات والضيوف إلى حسابها.",
                 )
-        did = True
-        old_table = found.get("tableId")
-        found["tableId"] = new_table
-        found["minimumChargePerSeat"] = _session_minimum_charge_per_seat(None, new_table)
-        actor = _mat3am_actor_from_body(body)
-        aid = str(actor.get("id") or "").strip()
-        if aid and not str(found.get("captainUserId") or "").strip():
+            did = True
+            old_table = found.get("tableId")
+            actor = _mat3am_actor_from_body(body)
+            aid = str(actor.get("id") or "").strip()
             now_iso = datetime.now().isoformat()
-            found["captainUserId"] = aid
-            found["captainName"] = str(actor.get("name") or actor.get("login") or "")[:200]
-            found["captainLogin"] = str(actor.get("login") or "")[:120]
-            found["captainClaimedAt"] = now_iso
-        try:
-            if old_table and str(old_table).strip() and not _restaurant_table_ids_equal(old_table, new_table):
-                restaurant_update_table_status(str(old_table).strip(), {"status": "ready"})
-        except Exception:
-            pass
-        try:
-            restaurant_update_table_status(new_table, {"status": "occupied"})
-        except Exception:
-            pass
-        odata = _restaurant_load("orders", [])
-        for o in odata:
-            if str(o.get("sessionId") or "") == sid:
-                o["tableId"] = new_table
-        _restaurant_save("orders", odata)
-        _append_session_audit_entry(
-            {
-                "at": datetime.now().isoformat(),
-                "action": "transfer_table",
-                "sessionId": sid,
-                "fromTableId": old_table,
-                "toTableId": new_table,
-                "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
-            }
-        )
+            if target_session:
+                if str(target_session.get("billingRequestedAt") or "").strip():
+                    raise HTTPException(status_code=409, detail="لا يمكن التحويل إلى طاولة طُلب حسابها.")
+                source_count = _normalize_session_guest_count(found.get("guestCount") or 1, 1)
+                target_count = _normalize_session_guest_count(target_session.get("guestCount") or 1, 1)
+                target_session["guestCount"] = target_count + source_count
+                target_labels = target_session.get("seatGuestLabels")
+                if not isinstance(target_labels, dict):
+                    target_labels = {}
+                source_labels = found.get("seatGuestLabels") if isinstance(found.get("seatGuestLabels"), dict) else {}
+                next_seat = max([int(k) for k in target_labels.keys() if str(k).isdigit()] or [target_count])
+                for key in sorted(source_labels.keys(), key=lambda x: int(x) if str(x).isdigit() else 999):
+                    if not str(key).isdigit():
+                        continue
+                    next_seat += 1
+                    if next_seat > 12:
+                        break
+                    target_labels[str(next_seat)] = str(source_labels.get(key) or f"ضيف {next_seat}")[:120]
+                target_session["seatGuestLabels"] = target_labels
+                found["status"] = "transferred"
+                found["transferredIntoSessionId"] = str(target_session.get("id") or "")
+                found["transferredAt"] = now_iso
+                destination_session_id = str(target_session.get("id") or "")
+            else:
+                found["tableId"] = new_table
+                found["minimumChargePerSeat"] = _session_minimum_charge_per_seat(None, new_table)
+                if aid and not str(found.get("captainUserId") or "").strip():
+                    found["captainUserId"] = aid
+                    found["captainName"] = str(actor.get("name") or actor.get("login") or "")[:200]
+                    found["captainLogin"] = str(actor.get("login") or "")[:120]
+                    found["captainClaimedAt"] = now_iso
+                destination_session_id = sid
+            try:
+                if old_table and str(old_table).strip() and not _restaurant_table_ids_equal(old_table, new_table):
+                    restaurant_update_table_status(
+                        str(old_table).strip(),
+                        {"status": _restaurant_transfer_cleaning_status()},
+                    )
+            except Exception as _e:
+                import logging
+                logging.warning(f"restaurant_patch_session: failed to update old table {old_table} status to ready: {_e}")
+            try:
+                restaurant_update_table_status(new_table, {"status": "occupied"})
+            except Exception as _e:
+                import logging
+                logging.warning(f"restaurant_patch_session: failed to update new table {new_table} status to occupied: {_e}")
+            odata = _restaurant_load("orders", [])
+            for o in odata:
+                if str(o.get("sessionId") or "") == sid:
+                    o["tableId"] = new_table
+                    if target_session:
+                        o["sessionId"] = destination_session_id
+                        o["billingSessionId"] = destination_session_id
+            _restaurant_save("orders", odata)
+            _append_session_audit_entry(
+                {
+                    "at": datetime.now().isoformat(),
+                    "action": "transfer_table",
+                    "sessionId": sid,
+                    "fromTableId": old_table,
+                    "toTableId": new_table,
+                    "targetSessionId": destination_session_id,
+                    "targetWasOccupied": bool(target_session),
+                    "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
+                }
+            )
 
-    if not did:
-        raise HTTPException(status_code=400, detail="أرسل guestCount أو autoNumberSeats أو tableId أو seatGuestLabels أو seatBillingOverrides")
+        if not did:
+            raise HTTPException(status_code=400, detail="أرسل guestCount أو autoNumberSeats أو tableId أو seatGuestLabels أو seatBillingOverrides")
 
-    _restaurant_save("table_sessions", data)
-    cache_invalidate_restaurant()
-    return {"ok": True, "session": found}
+        _restaurant_save("table_sessions", data)
+        cache_invalidate_restaurant()
+        return {
+            "ok": True,
+            "session": transfer_target_session if transfer_target_session else found,
+            "sourceSession": found if transfer_target_session else None,
+            "targetWasOccupied": bool(transfer_target_session),
+        }
+    with _restaurant_table_sessions_lock:
+        with _restaurant_orders_lock:
+            return _impl(session_id, body)
 
 
 @app.post("/api/restaurant/table-sessions/{session_id}/merge")
+@_with_restaurant_table_sessions_lock
+@_with_restaurant_orders_lock
 def restaurant_merge_session(session_id: str, body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="جسم غير صالح")
@@ -22383,22 +25356,31 @@ def restaurant_merge_session(session_id: str, body: dict):
         raise HTTPException(status_code=404, detail="الجلسة المصدر غير موجودة")
     if str(src.get("status") or "").lower() != "active":
         raise HTTPException(status_code=400, detail="الجلسة المصدر غير نشطة")
-    if not dst:
-        raise HTTPException(status_code=404, detail="لا توجد جلسة نشطة للطاولة الهدف")
-    if str(dst.get("id") or "") == str(session_id):
+    if dst and str(dst.get("id") or "") == str(session_id):
         raise HTTPException(status_code=400, detail="لا يمكن دمج الجلسة مع نفسها")
-    if str(src.get("billingRequestedAt") or "").strip() or str(dst.get("billingRequestedAt") or "").strip():
+    if str(src.get("mergedIntoSessionId") or "").strip():
+        raise HTTPException(status_code=409, detail="الطاولة المصدر مدموجة بالفعل. فك الدمج الحالي أولاً.")
+    if isinstance(src.get("mergedSourceSessionIds"), list) and src.get("mergedSourceSessionIds"):
+        raise HTTPException(status_code=409, detail="الطاولة المصدر هي هدف دمج حالي. فك الدمج الحالي أولاً.")
+    if dst and str(dst.get("mergedIntoSessionId") or "").strip():
+        raise HTTPException(status_code=409, detail="الطاولة الهدف تابعة لدمج آخر. اختر الطاولة الرئيسية لذلك الدمج.")
+    if str(src.get("billingRequestedAt") or "").strip() or (dst and str(dst.get("billingRequestedAt") or "").strip()):
         raise HTTPException(status_code=409, detail="لا يمكن دمج الجلسات بعد طلب الحساب.")
-    src_cap = str(src.get("captainUserId") or "").strip()
-    dst_cap = str(dst.get("captainUserId") or "").strip()
-    if src_cap and dst_cap and _mat3am_guid_norm(dst_cap) != _mat3am_guid_norm(src_cap):
+    target_was_occupied = bool(dst)
+    confirm_occupied = body.get("confirmOccupiedTarget") in (True, "1", "true", "yes", 1)
+    if target_was_occupied and not confirm_occupied:
         raise HTTPException(
             status_code=409,
-            detail="الدمج مسموح فقط بين جلسات لنفس مسند الطلب (الكابتن).",
+            detail="الطاولة الهدف مشغولة. أكد أن حسابها الحالي سيشمل جميع طلبات الطاولة المصدر.",
         )
+    now_iso = datetime.now().isoformat()
+    if not dst:
+        dst = _restaurant_new_session_for_merge(target_table_id, src, now_iso)
+        sessions.append(dst)
+    src_cap = str(src.get("captainUserId") or "").strip()
+    dst_cap = str(dst.get("captainUserId") or "").strip()
     # جلسة الهدف بلا كابتن: نورّث مسند المصدر حتى يبقى الدمج تحت نفس «الساكن»
     if src_cap and not dst_cap:
-        now_iso = datetime.now().isoformat()
         dst["captainUserId"] = src_cap
         dst["captainName"] = str(src.get("captainName") or src.get("captainLogin") or "")[:200]
         dst["captainLogin"] = str(src.get("captainLogin") or "")[:120]
@@ -22415,16 +25397,31 @@ def restaurant_merge_session(session_id: str, body: dict):
         if str(o.get("sessionId") or "") == str(session_id):
             o["billingSessionId"] = str(dst.get("id"))
     _restaurant_save("orders", orders)
-    try:
-        src_gc = int(src.get("guestCount") or 0)
-        dst_gc = int(dst.get("guestCount") or 0)
-        if src_gc > 0:
-            dst["guestCount"] = dst_gc + src_gc
-    except Exception:
-        pass
+    src_gc = _normalize_session_guest_count(src.get("guestCount") or 1, 1)
+    dst_gc_before = 0 if not target_was_occupied else _normalize_session_guest_count(dst.get("guestCount") or 1, 1)
+    dst["guestCount"] = dst_gc_before + src_gc
+    merge_id = str(uuid.uuid4())
+    source_ids = dst.get("mergedSourceSessionIds")
+    if not isinstance(source_ids, list):
+        source_ids = []
+    if str(session_id) not in [str(x) for x in source_ids]:
+        source_ids.append(str(session_id))
+    dst["mergedSourceSessionIds"] = source_ids
+    dst["mergeRole"] = "target"
+    dst["mergeId"] = merge_id
     src["status"] = "active"
     src["mergedIntoSessionId"] = str(dst.get("id"))
-    src["mergedAt"] = datetime.now().isoformat()
+    src["mergedAt"] = now_iso
+    src["mergeId"] = merge_id
+    src["mergeRole"] = "source"
+    src["mergeTargetWasCreated"] = not target_was_occupied
+    src["mergeSourceGuestCount"] = src_gc
+    src["mergeTargetGuestCountBefore"] = dst_gc_before
+    try:
+        restaurant_update_table_status(str(src.get("tableId") or ""), {"status": "occupied"})
+        restaurant_update_table_status(str(dst.get("tableId") or ""), {"status": "occupied"})
+    except Exception:
+        pass
     _restaurant_save("table_sessions", sessions)
     _append_session_audit_entry(
         {
@@ -22434,11 +25431,463 @@ def restaurant_merge_session(session_id: str, body: dict):
             "fromTableId": src.get("tableId"),
             "toTableId": dst.get("tableId"),
             "targetSessionId": str(dst.get("id")),
+            "mergeId": merge_id,
+            "targetWasOccupied": target_was_occupied,
             "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
         }
     )
     cache_invalidate_restaurant()
-    return {"ok": True, "sourceSessionId": str(session_id), "targetSession": dst}
+    return {
+        "ok": True,
+        "mergeId": merge_id,
+        "sourceSessionId": str(session_id),
+        "sourceSession": src,
+        "targetSession": dst,
+        "targetWasOccupied": target_was_occupied,
+    }
+
+
+@app.get("/api/restaurant/table-sessions/{session_id}/merge-preview")
+def restaurant_merge_preview(session_id: str, sourceSessionId: Optional[str] = None):
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    requested = next(
+        (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == str(session_id)),
+        None,
+    )
+    if not isinstance(requested, dict):
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(requested.get("mergedIntoSessionId") or "").strip():
+        source = requested
+        target_id = str(source.get("mergedIntoSessionId") or "")
+    else:
+        source_ids = requested.get("mergedSourceSessionIds")
+        source_ids = [str(x) for x in source_ids] if isinstance(source_ids, list) else []
+        picked = str(sourceSessionId or "").strip()
+        if not picked and len(source_ids) == 1:
+            picked = source_ids[0]
+        if not picked or picked not in source_ids:
+            raise HTTPException(status_code=400, detail="حدد جلسة المصدر المدموجة المطلوب مراجعتها.")
+        source = next(
+            (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == picked),
+            None,
+        )
+        target_id = str(requested.get("id") or "")
+    target = next(
+        (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == target_id),
+        None,
+    )
+    if not isinstance(source, dict) or not isinstance(target, dict):
+        raise HTTPException(status_code=404, detail="علاقة الدمج غير مكتملة.")
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+    lines = []
+    relevant_ids = {str(source.get("id") or ""), str(target.get("id") or "")}
+    for order in orders:
+        if not isinstance(order, dict) or str(order.get("sessionId") or "") not in relevant_ids:
+            continue
+        if str(order.get("status") or "").lower() == "cancelled":
+            continue
+        origin = "source" if str(order.get("sessionId") or "") == str(source.get("id") or "") else "target"
+        for item in order.get("items") or []:
+            if not isinstance(item, dict) or bool(item.get("cancelled")):
+                continue
+            lines.append(
+                {
+                    "orderId": str(order.get("id") or ""),
+                    "lineId": str(item.get("lineId") or ""),
+                    "name": str(item.get("name") or "صنف"),
+                    "quantity": item.get("quantity") or 0,
+                    "seatNo": item.get("seatNo"),
+                    "origin": origin,
+                    "tableId": source.get("tableId") if origin == "source" else target.get("tableId"),
+                    "sessionId": source.get("id") if origin == "source" else target.get("id"),
+                }
+            )
+    return {"sourceSession": source, "targetSession": target, "lines": lines}
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/unmerge")
+@_with_restaurant_table_sessions_lock
+@_with_restaurant_orders_lock
+def restaurant_unmerge_session(session_id: str, body: dict):
+    """فك دمج نشط وإعادة كل جلسة إلى طاولتها الأصلية قبل طلب الحساب."""
+    if not isinstance(body, dict):
+        body = {}
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    requested = next(
+        (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == str(session_id)),
+        None,
+    )
+    if not isinstance(requested, dict):
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    source_id = str(body.get("sourceSessionId") or "").strip()
+    if str(requested.get("mergedIntoSessionId") or "").strip():
+        source = requested
+        target_id = str(source.get("mergedIntoSessionId") or "").strip()
+    else:
+        if not source_id:
+            source_ids = requested.get("mergedSourceSessionIds")
+            source_ids = source_ids if isinstance(source_ids, list) else []
+            if len(source_ids) != 1:
+                raise HTTPException(status_code=400, detail="حدد sourceSessionId للدمج المطلوب فكه.")
+            source_id = str(source_ids[0])
+        source = next(
+            (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == source_id),
+            None,
+        )
+        target_id = str(requested.get("id") or "")
+    target = next(
+        (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == target_id),
+        None,
+    )
+    if not isinstance(source, dict) or not isinstance(target, dict):
+        raise HTTPException(status_code=404, detail="علاقة الدمج غير مكتملة.")
+    if str(source.get("billingRequestedAt") or "").strip() or str(target.get("billingRequestedAt") or "").strip():
+        raise HTTPException(status_code=409, detail="لا يمكن فك الدمج بعد طلب الحساب.")
+    if str(source.get("mergedIntoSessionId") or "") != str(target.get("id") or ""):
+        raise HTTPException(status_code=409, detail="لا توجد علاقة دمج نشطة بين الجلستين.")
+
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+    assignments = body.get("assignments")
+    assignments = assignments if isinstance(assignments, list) else []
+    assignment_map = {}
+    for row in assignments:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("orderId") or ""), str(row.get("lineId") or ""))
+        if key != ("", ""):
+            assignment_map[key] = row
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("sessionId") or "") == str(source.get("id") or ""):
+            order.pop("billingSessionId", None)
+        for item in order.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            row = assignment_map.get((str(order.get("id") or ""), str(item.get("lineId") or "")))
+            if not row:
+                continue
+            raw_seat = row.get("seatNo")
+            if raw_seat in (None, "", 0, "0"):
+                item["seatNo"] = None
+            else:
+                try:
+                    seat_no = int(raw_seat)
+                except Exception:
+                    raise HTTPException(status_code=400, detail="رقم مقعد غير صالح في إعادة التوزيع.")
+                if seat_no < 1 or seat_no > 13:
+                    raise HTTPException(status_code=400, detail="رقم المقعد يجب أن يكون بين 1 و13.")
+                item["seatNo"] = seat_no
+    _restaurant_save("orders", orders)
+
+    source_count = _normalize_session_guest_count(source.get("mergeSourceGuestCount") or source.get("guestCount") or 1, 1)
+    current_target_count = _normalize_session_guest_count(target.get("guestCount") or 1, 1)
+    remaining_target_count = max(0, current_target_count - source_count)
+    target_created = bool(source.get("mergeTargetWasCreated"))
+    source_table = str(source.get("tableId") or "")
+    target_table = str(target.get("tableId") or "")
+    merge_id = str(source.get("mergeId") or "")
+    source.pop("mergedIntoSessionId", None)
+    source.pop("mergedAt", None)
+    source.pop("mergeId", None)
+    source.pop("mergeRole", None)
+    source.pop("mergeTargetWasCreated", None)
+    source.pop("mergeSourceGuestCount", None)
+    source.pop("mergeTargetGuestCountBefore", None)
+    target_sources = target.get("mergedSourceSessionIds")
+    target_sources = [str(x) for x in target_sources] if isinstance(target_sources, list) else []
+    target_sources = [x for x in target_sources if x != str(source.get("id") or "")]
+    if target_sources:
+        target["mergedSourceSessionIds"] = target_sources
+    else:
+        target.pop("mergedSourceSessionIds", None)
+        target.pop("mergeRole", None)
+        target.pop("mergeId", None)
+    target_has_own_orders = any(
+        isinstance(order, dict)
+        and str(order.get("sessionId") or "") == str(target.get("id") or "")
+        and str(order.get("status") or "").lower() != "cancelled"
+        for order in orders
+    )
+    if target_created and not target_sources and not target_has_own_orders:
+        target["status"] = "cancelled"
+        target["closedAt"] = datetime.now().isoformat()
+        target["closeReason"] = "unmerge_created_target"
+        try:
+            restaurant_update_table_status(target_table, {"status": "ready"})
+        except Exception:
+            pass
+    else:
+        target["guestCount"] = max(1, remaining_target_count)
+    _restaurant_save("table_sessions", sessions)
+    _append_session_audit_entry(
+        {
+            "at": datetime.now().isoformat(),
+            "action": "unmerge_table",
+            "mergeId": merge_id,
+            "sessionId": str(source.get("id") or ""),
+            "fromTableId": source_table,
+            "toTableId": target_table,
+            "targetSessionId": str(target.get("id") or ""),
+            "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
+        }
+    )
+    cache_invalidate_restaurant()
+    return {"ok": True, "sourceSession": source, "targetSession": target}
+
+
+def _scaled_kitchen_totals_for_items(template: object, items: list) -> dict:
+    """تقسيم إجماليات الطلب بنسبة قيمة البنود بدلاً من نسخ إجمالي المصدر كاملاً."""
+    old = template if isinstance(template, dict) else {}
+    subtotal = round(
+        sum(
+            max(0.0, float(item.get("quantity") or 0)) * max(0.0, float(item.get("unitPrice") or 0))
+            for item in (items or [])
+            if isinstance(item, dict) and not bool(item.get("cancelled"))
+        ),
+        2,
+    )
+    try:
+        old_subtotal = max(0.0, float(old.get("subtotal") or 0))
+    except Exception:
+        old_subtotal = 0.0
+    ratio = subtotal / old_subtotal if old_subtotal > 0 else 0.0
+    out = {"subtotal": subtotal}
+    for key in ("tax", "serviceCharge", "discount", "tip"):
+        if key not in old:
+            continue
+        try:
+            out[key] = round(max(0.0, float(old.get(key) or 0)) * ratio, 2)
+        except Exception:
+            out[key] = 0.0
+    try:
+        out["total"] = round(max(0.0, float(old.get("total") or 0)) * ratio, 2)
+    except Exception:
+        out["total"] = round(
+            subtotal + float(out.get("tax") or 0) + float(out.get("serviceCharge") or 0),
+            2,
+        )
+    return out
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/move-items")
+@_with_restaurant_table_sessions_lock
+@_with_restaurant_orders_lock
+def restaurant_move_session_items(session_id: str, body: dict):
+    """نقل بنود مختارة (أو جزء من كميتها) من جلسة إلى طاولة فارغة أو مشغولة."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    target_table_id = str(body.get("targetTableId") or "").strip()
+    selections = body.get("items")
+    if not target_table_id:
+        raise HTTPException(status_code=400, detail="targetTableId مطلوب")
+    if not isinstance(selections, list) or not selections:
+        raise HTTPException(status_code=400, detail="اختر بنداً واحداً على الأقل للنقل.")
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    source = next(
+        (s for s in sessions if isinstance(s, dict) and str(s.get("id") or "") == str(session_id)),
+        None,
+    )
+    if not isinstance(source, dict) or str(source.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=404, detail="الجلسة المصدر غير موجودة أو غير نشطة.")
+    if _restaurant_table_ids_equal(source.get("tableId"), target_table_id):
+        raise HTTPException(status_code=400, detail="استخدم إعادة التوزيع للنقل داخل الطاولة نفسها.")
+    if str(source.get("billingRequestedAt") or "").strip():
+        raise HTTPException(status_code=409, detail="لا يمكن نقل البنود بعد طلب الحساب.")
+    target = _restaurant_active_session_for_table(sessions, target_table_id, str(session_id))
+    target_was_occupied = bool(target)
+    confirm_occupied = body.get("confirmOccupiedTarget") in (True, "1", "true", "yes", 1)
+    if target_was_occupied and not confirm_occupied:
+        raise HTTPException(
+            status_code=409,
+            detail="الطاولة الهدف مشغولة. أكد إضافة البنود المختارة إلى جلستها الحالية.",
+        )
+    if target and str(target.get("billingRequestedAt") or "").strip():
+        raise HTTPException(status_code=409, detail="لا يمكن النقل إلى طاولة طُلب حسابها.")
+    now_iso = datetime.now().isoformat()
+    try:
+        moved_guest_count = max(0, int(body.get("guestCount") or 0))
+    except Exception:
+        moved_guest_count = 0
+    if not target:
+        target = _restaurant_new_session_for_merge(target_table_id, source, now_iso)
+        target.pop("createdForMerge", None)
+        target["startReason"] = "partial_transfer_target"
+        target["guestCount"] = max(1, moved_guest_count or 1)
+        target["seatGuestLabels"] = {}
+        sessions.append(target)
+    elif moved_guest_count > 0:
+        target["guestCount"] = _normalize_session_guest_count(target.get("guestCount") or 1, 1) + moved_guest_count
+    if moved_guest_count > 0:
+        source_count = _normalize_session_guest_count(source.get("guestCount") or 1, 1)
+        source["guestCount"] = max(1, source_count - moved_guest_count)
+
+    wanted = {}
+    for row in selections:
+        if not isinstance(row, dict):
+            continue
+        order_id = str(row.get("orderId") or "").strip()
+        line_id = str(row.get("lineId") or "").strip()
+        if not order_id or not line_id:
+            continue
+        try:
+            quantity = float(row.get("quantity") or 0)
+        except Exception:
+            quantity = 0.0
+        raw_seat = row.get("seatNo")
+        seat_no = None
+        if raw_seat not in (None, "", 0, "0"):
+            try:
+                seat_no = int(raw_seat)
+            except Exception:
+                raise HTTPException(status_code=400, detail="رقم المقعد الهدف غير صالح.")
+            if seat_no < 1 or seat_no > 13:
+                raise HTTPException(status_code=400, detail="رقم المقعد الهدف يجب أن يكون بين 1 و13.")
+        wanted[(order_id, line_id)] = {"quantity": quantity, "seatNo": seat_no}
+    if not wanted:
+        raise HTTPException(status_code=400, detail="لم تصل بنود صالحة للنقل.")
+
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        orders = []
+    moved_keys = set()
+    new_orders = []
+    for order in orders:
+        if not isinstance(order, dict) or str(order.get("sessionId") or "") != str(session_id):
+            continue
+        order_id = str(order.get("id") or "")
+        source_items = [dict(x) for x in (order.get("items") or []) if isinstance(x, dict)]
+        remaining_items = []
+        moved_items = []
+        for item in source_items:
+            line_id = str(item.get("lineId") or "")
+            selection = wanted.get((order_id, line_id))
+            if not selection:
+                remaining_items.append(item)
+                continue
+            if bool(item.get("cancelled")):
+                raise HTTPException(status_code=409, detail=f"البند {item.get('name') or line_id} ملغى ولا يمكن نقله.")
+            try:
+                available = float(item.get("quantity") or 0)
+            except Exception:
+                available = 0.0
+            move_qty = float(selection.get("quantity") or available)
+            if move_qty <= 0 or move_qty > available:
+                raise HTTPException(status_code=400, detail=f"كمية النقل غير صالحة للبند {item.get('name') or line_id}.")
+            moved = dict(item)
+            moved["quantity"] = move_qty
+            moved["seatNo"] = selection.get("seatNo")
+            moved["movedFromSessionId"] = str(session_id)
+            moved["movedAt"] = now_iso
+            if move_qty < available:
+                item["quantity"] = available - move_qty
+                moved["lineId"] = f"{line_id}-mv-{uuid.uuid4().hex[:8]}"
+                remaining_items.append(item)
+            moved_items.append(moved)
+            moved_keys.add((order_id, line_id))
+        if not moved_items:
+            continue
+        original_totals = dict(order.get("kitchenTotals") or {}) if isinstance(order.get("kitchenTotals"), dict) else {}
+        order["items"] = remaining_items
+        order["kitchenTotals"] = _scaled_kitchen_totals_for_items(original_totals, remaining_items)
+        if not [x for x in remaining_items if not bool(x.get("cancelled")) and float(x.get("quantity") or 0) > 0]:
+            order["status"] = "cancelled"
+            order["cancelledAt"] = now_iso
+            order["cancelReason"] = "all_items_moved"
+        else:
+            _kds_refresh_order_status(order)
+        cloned = dict(order)
+        cloned["id"] = str(uuid.uuid4())
+        cloned["sessionId"] = str(target.get("id") or "")
+        cloned["tableId"] = str(target.get("tableId") or target_table_id)
+        cloned["tableGuid"] = cloned["tableId"]
+        target_names = _restaurant_table_display_names_for_ids({cloned["tableId"]})
+        cloned["tableLabel"] = target_names.get(cloned["tableId"]) or _session_table_display_fallback(cloned["tableId"])
+        cloned["items"] = moved_items
+        cloned["kitchenTotals"] = _scaled_kitchen_totals_for_items(original_totals, moved_items)
+        cloned["sourceOrderId"] = order_id
+        cloned["movedAt"] = now_iso
+        cloned.pop("cancelledAt", None)
+        cloned.pop("cancelReason", None)
+        cloned.pop("finalInvoiceId", None)
+        cloned.pop("invoiceId", None)
+        cloned["status"] = str(order.get("status") or "pending")
+        if cloned["status"] == "cancelled":
+            cloned["status"] = "pending"
+        _kds_refresh_order_status(cloned)
+        new_orders.append(cloned)
+    missing = [key for key in wanted.keys() if key not in moved_keys]
+    if missing:
+        raise HTTPException(status_code=404, detail="تعذر العثور على بعض البنود المحددة؛ حدّث الشاشة ثم حاول مجدداً.")
+    orders.extend(new_orders)
+    # احفظ الجلسات أولاً ثم الطلبات؛ ثم تحقّق من بقاء جلسة الهدف بعد تعارضات الكتابة.
+    target_id = str(target.get("id") or "").strip()
+    target_table = str(target.get("tableId") or target_table_id).strip()
+    if not str(target.get("startTime") or "").strip():
+        target["startTime"] = now_iso
+    target["status"] = "active"
+    _restaurant_save("table_sessions", sessions)
+    _restaurant_save("orders", orders)
+    persisted = _restaurant_load("table_sessions", [])
+    if not isinstance(persisted, list):
+        persisted = []
+    persisted_target = next(
+        (
+            row
+            for row in persisted
+            if isinstance(row, dict) and str(row.get("id") or "").strip() == target_id
+        ),
+        None,
+    )
+    if not isinstance(persisted_target, dict):
+        # تعارض كتابة محى جلسة الهدف — أعد إدراجها فوراً قبل أن يظهر الإجمالي بلا تسكين.
+        sessions.append(target)
+        _restaurant_save("table_sessions", sessions)
+        print(
+            f"[mat3am] move-items: restored wiped target session {target_id} on table {target_table}",
+            flush=True,
+        )
+    elif str(persisted_target.get("status") or "").lower() != "active":
+        persisted_target["status"] = "active"
+        if not str(persisted_target.get("startTime") or "").strip():
+            persisted_target["startTime"] = now_iso
+        _restaurant_save("table_sessions", persisted)
+        target = persisted_target
+    try:
+        restaurant_update_table_status(target_table, {"status": "occupied"})
+    except Exception:
+        pass
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "move_items",
+            "sessionId": str(session_id),
+            "fromTableId": source.get("tableId"),
+            "toTableId": target.get("tableId") or target_table,
+            "targetSessionId": target.get("id"),
+            "lineCount": len(moved_keys),
+            "targetWasOccupied": target_was_occupied,
+            "actor": (body.get("actor") or body.get("userLogin") or body.get("user") or "")[:200],
+        }
+    )
+    cache_invalidate_restaurant()
+    return {
+        "ok": True,
+        "movedLineCount": len(moved_keys),
+        "targetWasOccupied": target_was_occupied,
+        "sourceSession": source,
+        "targetSession": target,
+    }
 
 
 def _restaurant_billing_session_ids(root_session_id: str) -> list[str]:
@@ -23073,6 +26522,19 @@ def _restaurant_enrich_invoice_with_table(inv: dict) -> dict:
     ct = str(sess_row.get("customerType") or "").strip()
     if ct:
         out["customerType"] = ct
+    # اعتماد التسكين — للكاشير لتخطي طلب اعتماد التسوية إن وُجد
+    approved_at = str(sess_row.get("guestApprovedAt") or "").strip()
+    if approved_at:
+        out["guestApprovedAt"] = approved_at
+        out["seatingApprovedAt"] = approved_at
+    out["guestSession"] = bool(sess_row.get("guestSession"))
+    out["guestApprovalPending"] = bool(sess_row.get("guestApprovalPending"))
+    try:
+        lim = sess_row.get("maxInvoiceLimit")
+        if lim is not None and str(lim).strip() != "":
+            out["maxInvoiceLimit"] = float(lim)
+    except (TypeError, ValueError):
+        pass
     # agentGuid/agentName من الجلسة إن لم تكن موجودة في الفاتورة
     if not out.get("agentGuid"):
         ag = str(sess_row.get("agentGuid") or "").strip()
@@ -23108,20 +26570,68 @@ def _restaurant_enrich_invoice_with_table(inv: dict) -> dict:
                 out["tableLabel"] = tid
         else:
             out["tableLabel"] = tid
+    # إشارات جاهزة للواجهة: هل اعتماد التسكين يكفي لتسوية الضيف/CL؟
+    inv_id = str(out.get("invoiceId") or "").strip()
+    if inv_id and approved_at and not sess_row.get("guestApprovalPending"):
+        guest_sat = _invoice_seating_covers_payment_approval(inv_id, "guest_payment")
+        cl_sat = _invoice_seating_covers_payment_approval(inv_id, "on_account_credit")
+        out["seatingCoversGuestPayment"] = bool(guest_sat.get("covered"))
+        out["seatingCoversOnAccount"] = bool(cl_sat.get("covered"))
+    else:
+        out["seatingCoversGuestPayment"] = False
+        out["seatingCoversOnAccount"] = False
     return out
 
 
 @app.get("/api/restaurant/invoices-local/by-id/{invoice_id}")
-def restaurant_invoices_local_by_id(invoice_id: str):
+def restaurant_invoices_local_by_id(invoice_id: str, autoReprice: bool = True):
     """فاتورة محلية واحدة (لنافذة التسديد من لوحة الشرائح أو من القائمة)."""
-    raw = _restaurant_load("invoices", [])
-    if not isinstance(raw, list):
-        raw = []
-    iid = str(invoice_id or "").strip()
-    for inv in raw:
-        if isinstance(inv, dict) and str(inv.get("invoiceId") or "") == iid:
-            return _restaurant_enrich_invoice_with_table(_restaurant_invoice_apply_guest_return_settlements(inv))
-    raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+    inv = _restaurant_local_invoice_lookup(invoice_id)
+    if autoReprice and _invoice_needs_price_repair(inv):
+        conn = get_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                _ensure_menu_tables(cursor)
+                inv = _reprice_local_awaiting_invoice(cursor, inv)
+                conn.commit()
+                _persist_repriced_local_invoice(inv)
+            except HTTPException:
+                conn.rollback()
+                raise
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                print("[mat3am] auto-reprice invoice failed:", e)
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            columns = _tbl022_column_names_map(cursor)
+            check_col = columns.get("checkid01")
+            if check_col:
+                cursor.execute(
+                    f"SELECT {check_col} FROM dbo.TBL022 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    (invoice_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    inv["checkID01"] = 1 if bool(row[0]) else 0
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return _restaurant_enrich_invoice_with_table(_restaurant_invoice_apply_guest_return_settlements(inv))
 
 
 @app.post("/api/restaurant/invoices-local/mark-printed")
@@ -23169,6 +26679,193 @@ def restaurant_invoices_local_mark_printed(body: dict):
     return {"ok": True, "invoice": _restaurant_enrich_invoice_with_table(found), "printCount": found.get("printCount") or 0}
 
 
+def _invoice_seating_covers_payment_approval(invoice_id: str, approval_type: str) -> dict:
+    """
+    إن اعتُمدت الجلسة عند التسكين (guestApprovedAt من المدير) فلا يُعاد طلب اعتماد الكاشير
+    لنفس المسار: ضيف → guest_payment، مالك/VIP/آجل → on_account_credit.
+    يحترم حد الفاتورة maxInvoiceLimit إن وُجد.
+    """
+    out = {
+        "covered": False,
+        "source": None,
+        "seatingApprovedAt": None,
+        "customerType": None,
+        "maxInvoiceLimit": None,
+        "reason": "",
+    }
+    approval_type = str(approval_type or "").strip()
+    if approval_type not in ("guest_payment", "on_account_credit"):
+        out["reason"] = "unsupported_type"
+        return out
+    try:
+        inv = _restaurant_local_invoice_lookup(invoice_id)
+    except Exception:
+        out["reason"] = "invoice_not_found"
+        return out
+    if not isinstance(inv, dict):
+        out["reason"] = "invoice_not_found"
+        return out
+    sess = _restaurant_session_by_id(str(inv.get("sessionId") or ""))
+    if not isinstance(sess, dict):
+        out["reason"] = "no_session"
+        return out
+    approved_at = str(sess.get("guestApprovedAt") or "").strip()
+    out["seatingApprovedAt"] = approved_at or None
+    ct = str(sess.get("customerType") or "").strip().lower()
+    out["customerType"] = ct or None
+    if sess.get("guestApprovalPending"):
+        out["reason"] = "seating_pending"
+        return out
+    if not approved_at:
+        out["reason"] = "no_seating_approval"
+        return out
+    try:
+        limit_raw = sess.get("maxInvoiceLimit")
+        limit_val = float(limit_raw) if limit_raw is not None and str(limit_raw).strip() != "" else 0.0
+    except (TypeError, ValueError):
+        limit_val = 0.0
+    if limit_val > 0:
+        out["maxInvoiceLimit"] = limit_val
+        try:
+            inv_total = float(inv.get("total") or 0)
+        except (TypeError, ValueError):
+            inv_total = 0.0
+        if inv_total > limit_val + 0.02:
+            out["reason"] = "over_max_invoice_limit"
+            return out
+    if approval_type == "guest_payment":
+        if ct == "guest" or bool(sess.get("guestSession")):
+            out["covered"] = True
+            out["source"] = "seating"
+            out["reason"] = "seating_guest"
+            return out
+        out["reason"] = "customer_type_mismatch"
+        return out
+    # on_account_credit: مالك / VIP / عميل آجل اعتُمدوا عند التسكين
+    if ct in ("owner", "vip", "credit", "vip_owner"):
+        out["covered"] = True
+        out["source"] = "seating"
+        out["reason"] = "seating_on_account"
+        return out
+    out["reason"] = "customer_type_mismatch"
+    return out
+
+
+def _invoice_payment_approval_satisfied(invoice_id: str, approval_type: str) -> dict:
+    """اعتماد تسوية الضيف/CL: إما طلب فاتورة معتمد، أو اعتماد تسكين سابق."""
+    status = _invoice_payment_approval_status(invoice_id, approval_type)
+    if status == "approved":
+        return {"ok": True, "status": "approved", "source": "invoice_approval", "seating": None}
+    seating = _invoice_seating_covers_payment_approval(invoice_id, approval_type)
+    if seating.get("covered"):
+        return {"ok": True, "status": "approved", "source": "seating", "seating": seating}
+    return {"ok": False, "status": status, "source": None, "seating": seating}
+
+
+def _invoice_payment_approval_status(invoice_id: str, approval_type: str) -> str:
+    for row in reversed(_manager_approval_requests_load()):
+        if (
+            str(row.get("type") or "") == _MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT
+            and str(row.get("invoiceId") or "") == str(invoice_id)
+            and str(row.get("approvalType") or "") == str(approval_type)
+        ):
+            status = str(row.get("status") or "").strip().lower()
+            return "pending" if status == _MANAGER_APPROVAL_STATUS_PENDING else status
+    return "not_requested"
+
+
+@app.post("/api/restaurant/invoices-local/request-payment-approval")
+def restaurant_invoice_request_payment_approval(body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    invoice_id = str(body.get("invoiceId") or "").strip()
+    approval_type = str(body.get("approvalType") or "").strip()
+    if approval_type not in ("on_account_credit", "guest_payment"):
+        raise HTTPException(status_code=400, detail="approvalType غير صالح")
+    invoice = _restaurant_local_invoice_lookup(invoice_id)
+    # إن كان اعتماد التسكين كافياً — لا ترسل طلباً مكرراً
+    sat = _invoice_payment_approval_satisfied(invoice_id, approval_type)
+    if sat.get("ok"):
+        return {
+            "ok": True,
+            "status": "approved",
+            "source": sat.get("source"),
+            "requestId": None,
+            "message": "معتمد مسبقاً من اعتماد التسكين — لا حاجة لطلب جديد.",
+            "seating": sat.get("seating"),
+        }
+    actor = _mat3am_actor_from_body(body)
+    if not str(actor.get("id") or "").strip():
+        raise HTTPException(status_code=400, detail="بيانات مقدم طلب الاعتماد مطلوبة")
+    req = _manager_approval_create_invoice_payment_request(invoice, approval_type, actor)
+    return {
+        "ok": True,
+        "status": _invoice_payment_approval_status(invoice_id, approval_type),
+        "source": "invoice_approval",
+        "requestId": req.get("id"),
+        "message": "تم إرسال طلب الاعتماد إلى المدير.",
+    }
+
+
+@app.get("/api/restaurant/invoices-local/{invoice_id}/payment-approval-status")
+def restaurant_invoice_payment_approval_status(invoice_id: str, approvalType: str):
+    approval_type = str(approvalType or "").strip()
+    if approval_type not in ("on_account_credit", "guest_payment"):
+        raise HTTPException(status_code=400, detail="approvalType غير صالح")
+    sat = _invoice_payment_approval_satisfied(invoice_id, approval_type)
+    return {
+        "status": sat.get("status") if sat.get("ok") else sat.get("status"),
+        "source": sat.get("source"),
+        "seating": sat.get("seating"),
+        "ok": bool(sat.get("ok")),
+    }
+
+@app.post("/api/restaurant/invoices-local/reprice-awaiting")
+def restaurant_invoices_local_reprice_awaiting(body: dict):
+    """إعادة تسعير فاتورة منتظرة للتسديد (من المنيو أو آخر سعر في TBL023)."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    invoice_id = str(body.get("invoiceId") or body.get("billNumber") or "").strip()
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    inv = _restaurant_local_invoice_lookup(invoice_id)
+    if not inv.get("awaitingPayment"):
+        raise HTTPException(status_code=409, detail="الفاتورة ليست في انتظار التسديد")
+    if str(inv.get("paidAt") or "").strip():
+        raise HTTPException(status_code=409, detail="الفاتورة مُسدَّدة مسبقاً")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        _ensure_menu_tables(cursor)
+        inv = _reprice_local_awaiting_invoice(cursor, inv)
+        conn.commit()
+        _persist_repriced_local_invoice(inv)
+        return {
+            "ok": True,
+            "invoice": _restaurant_enrich_invoice_with_table(_restaurant_invoice_apply_guest_return_settlements(inv)),
+            "message": "تمت إعادة تسعير الفاتورة.",
+        }
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.post("/api/restaurant/invoices-local/mark-paid")
 def restaurant_invoices_local_mark_paid(body: dict):
     """تسديد فاتورة انتظار الكاشير — TBL022.Paid + سجل تسديد SQL + تحديث السجل المحلي بعد نجاح القاعدة."""
@@ -23192,16 +26889,36 @@ def restaurant_invoices_local_mark_paid(body: dict):
         found.update(found_effective)
     if str(found.get("paidAt") or "").strip():
         raise HTTPException(status_code=409, detail="الفاتورة مُسدَّدة مسبقاً")
+    if _money2_round(found.get("total")) <= 0 and body.get("_approvedGuestPayment") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="لا يمكن تسديد فاتورة صفرية. توجد أصناف بلا سعر؛ صحّح أسعار الأصناف ثم ألغِ الفاتورة وأعد طلب الحساب، أو استخدم دفع ضيف بعد اعتماد المدير.",
+        )
 
     amt = found.get("total")
     paid_amt = _money2_round(amt)
     tot_body = body.get("totals")
     merged_totals: dict = dict(tot_body) if isinstance(tot_body, dict) else {}
     sid = str(found.get("sessionId") or "").strip()
+    guest_full = body.get("_approvedGuestPayment") is True or bool(merged_totals.get("guestPayment"))
+    remainder_settlement = str(body.get("remainderSettlement") or merged_totals.get("remainderSettlement") or "").strip().lower()
+    if remainder_settlement not in ("", "on_account", "guest"):
+        raise HTTPException(status_code=400, detail="remainderSettlement غير صالح")
 
     bd = body.get("paymentBreakdown")
     parts: Optional[dict] = None
-    if isinstance(bd, dict) and bd:
+    payment_status_mark = ""
+    if guest_full and remainder_settlement:
+        raise HTTPException(status_code=400, detail="لا يمكن الجمع بين تصفير الضيف الكامل والترحيل الجزئي.")
+    if guest_full:
+        # تحميل كامل على ضيف صالة: لا يُطلب سداد نقدي/إلكتروني.
+        pm = "guest"
+        paid_amt = 0.0
+        parts = None
+        merged_totals["grandTotal"] = 0.0
+        merged_totals["guestPayment"] = True
+        payment_status_mark = "guest"
+    elif isinstance(bd, dict) and bd:
         parts = {}
         for k in ("cash", "visa", "wallet", "instapay"):
             try:
@@ -23210,19 +26927,42 @@ def restaurant_invoices_local_mark_paid(body: dict):
                 parts[k] = 0.0
         split_sum = _money2_round(sum(float(parts.get(x) or 0) for x in ("cash", "visa", "wallet", "instapay")))
         paid_amt = split_sum
-        merged_totals["grandTotal"] = split_sum
-        if split_sum <= 0.0001:
-            owe = _money2_round(amt)
-            if owe > 0.02:
-                raise HTTPException(status_code=400, detail="أدخل مبالغ التسديد.")
-        nz = [k for k in ("cash", "visa", "wallet", "instapay") if float(parts.get(k) or 0) > 0.0001]
-        if len(nz) == 1:
-            pm = nz[0]
-        elif len(nz) > 1:
-            pm = "mixed"
+        invoice_total = _money2_round(amt)
+        if remainder_settlement in ("on_account", "guest"):
+            approval_type = "on_account_credit" if remainder_settlement == "on_account" else "guest_payment"
+            if not _invoice_payment_approval_satisfied(invoice_id, approval_type).get("ok"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="ترحيل المتبقي يتطلب اعتماد المدير أولاً.",
+                )
+            remainder = _money2_round(invoice_total - split_sum)
+            if split_sum <= 0.02:
+                raise HTTPException(status_code=400, detail="أدخل الجزء المدفوع الآن قبل ترحيل المتبقي.")
+            if remainder <= 0.02:
+                raise HTTPException(status_code=400, detail="لا يوجد متبقي للترحيل؛ استخدم تسديداً كاملاً.")
+            paid_amt = split_sum
+            merged_totals["grandTotal"] = invoice_total
+            merged_totals["paidNow"] = split_sum
+            merged_totals["remainder"] = remainder
+            merged_totals["remainderSettlement"] = remainder_settlement
+            payment_status_mark = "partial_on_account" if remainder_settlement == "on_account" else "partial_guest"
+            pm = "mixed_account" if remainder_settlement == "on_account" else "mixed_guest"
         else:
-            pm = "cash"
+            merged_totals["grandTotal"] = split_sum
+            if split_sum <= 0.0001:
+                owe = invoice_total
+                if owe > 0.02:
+                    raise HTTPException(status_code=400, detail="أدخل مبالغ التسديد.")
+            nz = [k for k in ("cash", "visa", "wallet", "instapay") if float(parts.get(k) or 0) > 0.0001]
+            if len(nz) == 1:
+                pm = nz[0]
+            elif len(nz) > 1:
+                pm = "mixed"
+            else:
+                pm = "cash"
     else:
+        if remainder_settlement:
+            raise HTTPException(status_code=400, detail="أدخل الجزء المدفوع الآن قبل ترحيل المتبقي.")
         pm = str(body.get("paymentMethod") or "cash").strip()[:40] or "cash"
         if merged_totals.get("grandTotal") is not None:
             try:
@@ -23231,17 +26971,25 @@ def restaurant_invoices_local_mark_paid(body: dict):
                 pass
 
     now_iso = datetime.now().isoformat()
+    check_id01 = _mat3am_invoice_check_id01_value(body)
+    posting_result: dict = {}
 
     def _apply_found_payment_state() -> None:
         found["awaitingPayment"] = False
         found["paidAt"] = now_iso
         found["paymentMethod"] = pm[:40]
+        found["checkID01"] = check_id01
+        if payment_status_mark:
+            found["paymentStatus"] = payment_status_mark
         if merged_totals:
             found["settledTotals"] = merged_totals
-            try:
-                found["total"] = float(paid_amt)
-            except (TypeError, ValueError):
-                pass
+            # للإجمالي الأصلي للفواتير الجزئية/الضيف نحتفظ بإجمالي الفاتورة المحفوظة
+            # ونسجّل المدفوع في settledTotals.paidNow عند الحاجة.
+            if payment_status_mark not in ("guest", "partial_on_account", "partial_guest"):
+                try:
+                    found["total"] = float(paid_amt)
+                except (TypeError, ValueError):
+                    pass
         if parts is not None:
             found["paymentBreakdown"] = parts
         elif "paymentBreakdown" in found:
@@ -23255,37 +27003,23 @@ def restaurant_invoices_local_mark_paid(body: dict):
         try:
             cur = conn.cursor()
             _ensure_payment_routing_schema(cur)
-            cur.execute(
-                "UPDATE TBL022 SET Paid = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
-                (paid_amt, invoice_id),
-            )
-            if parts:
-                for rk in ("cash", "visa", "wallet", "instapay"):
-                    val = float(parts.get(rk) or 0)
-                    if val <= 0.0001:
-                        continue
-                    ag = _payment_routing_account_for_key(cur, rk)
-                    cur.execute(
-                        """
-                        INSERT INTO dbo.MAT3AM_INV_PAYMENT_LINE
-                        (InvoiceGuid, SessionId, RouteKey, Amount, AccountGuide)
-                        VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?)
-                        """,
-                        (invoice_id, sid or None, rk, val, ag),
-                    )
+            if guest_full:
+                posting_result = _mat3am_post_invoice_without_payment(
+                    cur,
+                    invoice_guid=invoice_id,
+                    check_id01=check_id01,
+                )
             else:
                 rk = pm if pm in ("cash", "visa", "wallet", "instapay") else "cash"
-                if pm != "mixed" and paid_amt > 0.0001:
-                    ag = _payment_routing_account_for_key(cur, rk)
-                    cur.execute(
-                        """
-                        INSERT INTO dbo.MAT3AM_INV_PAYMENT_LINE
-                        (InvoiceGuid, SessionId, RouteKey, Amount, AccountGuide)
-                        VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?)
-                        """,
-                        (invoice_id, sid or None, rk, paid_amt, ag),
-                    )
-            det = f"paid={paid_amt};method={pm};parts={parts}"
+                effective_parts = parts if parts else {rk: paid_amt}
+                posting_result = _mat3am_write_invoice_payments(
+                    cur,
+                    invoice_guid=invoice_id,
+                    session_id=sid or None,
+                    parts=effective_parts,
+                    check_id01=check_id01,
+                )
+            det = f"paid={paid_amt};method={pm};parts={parts};checkID01={check_id01};posting={posting_result}"
             if len(det) > 990:
                 det = det[:990] + "…"
             _audit_log(cur, "INV_PAID", "TBL022", invoice_id, None, det)
@@ -23306,8 +27040,7 @@ def restaurant_invoices_local_mark_paid(body: dict):
             except Exception:
                 pass
     else:
-        _apply_found_payment_state()
-        _restaurant_save("invoices", raw)
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات؛ لم يُسجل الدفع محلياً حفاظاً على المطابقة.")
     if sid:
         # إغلاق تلقائي عند اكتمال التسديد لكل فواتير الجلسة في السجل المحلي.
         # closeSession=true يبقى إجبارياً، وإلا يغلق فقط عند عدم وجود أي فاتورة معلّقة.
@@ -23339,7 +27072,7 @@ def restaurant_invoices_local_mark_paid(body: dict):
                         _workflow_apply_cleaning_policy(table_id, event="payment_completed")
                     except Exception:
                         pass
-    return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso}
+    return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso, "checkID01": check_id01, "posting": posting_result}
 
 
 @app.post("/api/restaurant/invoices-local/mark-on-account")
@@ -23351,6 +27084,8 @@ def restaurant_invoices_local_mark_on_account(body: dict):
     invoice_id = str(body.get("invoiceId") or "").strip()
     if not invoice_id:
         raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    if not _invoice_payment_approval_satisfied(invoice_id, "on_account_credit").get("ok"):
+        raise HTTPException(status_code=409, detail="ترحيل CL يتطلب اعتماد المدير أولاً.")
     raw = _restaurant_load("invoices", [])
     if not isinstance(raw, list):
         raw = []
@@ -23365,10 +27100,14 @@ def restaurant_invoices_local_mark_on_account(body: dict):
         raise HTTPException(status_code=409, detail="الفاتورة مُسدَّدة مسبقاً")
     if str(found.get("paymentStatus") or "").strip() == "on_account":
         raise HTTPException(status_code=409, detail="الفاتورة مرحّلة على حساب مسبقاً")
+    if _money2_round(found.get("total")) <= 0:
+        raise HTTPException(status_code=409, detail="لا يمكن ترحيل فاتورة صفرية على حساب العميل.")
 
     now_iso = datetime.now().isoformat()
     sid = str(found.get("sessionId") or "").strip()
     agent_guid = str(found.get("agentGuid") or found.get("AgentGuide") or "").strip()
+    check_id01 = _mat3am_invoice_check_id01_value(body)
+    posting_result: dict = {}
 
     def _apply_found_on_account_state() -> None:
         found["awaitingPayment"] = False
@@ -23376,21 +27115,21 @@ def restaurant_invoices_local_mark_on_account(body: dict):
         found["onAccountAt"] = now_iso
         found["paymentMethod"] = "on_account"
         found["paymentBreakdown"] = None
-        if not agent_guid:
+        found["checkID01"] = check_id01
+        if agent_guid:
             found["onAccountAgentGuid"] = agent_guid
 
     conn = get_connection()
     if conn:
         try:
             cur = conn.cursor()
-            # لا نُحدّث Paid في TBL022 (تبقى 0) لأنها لم تُسدّد
-            # نسجّل حركة ترحيل في جدول المدفوعات إن وُجد
             _ensure_payment_routing_schema(cur)
-            cur.execute(
-                "UPDATE TBL022 SET PayMethod = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
-                (2, invoice_id),
+            posting_result = _mat3am_post_invoice_without_payment(
+                cur,
+                invoice_guid=invoice_id,
+                check_id01=check_id01,
             )
-            det = f"on_account;agent={agent_guid or 'none'}"
+            det = f"on_account;agent={agent_guid or 'none'};checkID01={check_id01};posting={posting_result}"
             if len(det) > 990:
                 det = det[:990] + "…"
             _audit_log(cur, "INV_ON_ACCOUNT", "TBL022", invoice_id, None, det)
@@ -23411,8 +27150,7 @@ def restaurant_invoices_local_mark_on_account(body: dict):
             except Exception:
                 pass
     else:
-        _apply_found_on_account_state()
-        _restaurant_save("invoices", raw)
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات؛ لم يُرحل الحساب محلياً.")
 
     if sid:
         should_close = bool(body.get("closeSession", True))
@@ -23436,7 +27174,113 @@ def restaurant_invoices_local_mark_on_account(body: dict):
                         _workflow_apply_cleaning_policy(table_id, event="payment_completed")
                     except Exception:
                         pass
-    return {"ok": True, "invoiceId": invoice_id, "onAccountAt": now_iso}
+    return {
+        "ok": True,
+        "invoiceId": invoice_id,
+        "onAccountAt": now_iso,
+        "checkID01": check_id01,
+        "posting": posting_result,
+    }
+
+
+@app.post("/api/restaurant/invoices-local/mark-guest")
+def restaurant_invoices_local_mark_guest(body: dict):
+    """إقفال تشغيلي كضيف مع إبقاء كامل القيمة مديونية على AgentGuide، بلا حركة دفع."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    invoice_id = str(body.get("invoiceId") or "").strip()
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    if not _invoice_payment_approval_satisfied(invoice_id, "guest_payment").get("ok"):
+        raise HTTPException(status_code=409, detail="ترحيل فاتورة الضيف على حسابه يتطلب اعتماد المدير أولاً.")
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    found = next(
+        (
+            invoice
+            for invoice in raw
+            if isinstance(invoice, dict) and str(invoice.get("invoiceId") or "") == invoice_id
+        ),
+        None,
+    )
+    if not found:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+    if str(found.get("paidAt") or "").strip() or str(found.get("onAccountAt") or "").strip():
+        raise HTTPException(status_code=409, detail="الفاتورة تمت تسويتها مسبقاً")
+    if _money2_round(found.get("total")) <= 0:
+        raise HTTPException(status_code=409, detail="لا يمكن ترحيل فاتورة صفرية على حساب الضيف.")
+    sid = str(found.get("sessionId") or "").strip()
+    now_iso = datetime.now().isoformat()
+    check_id01 = _mat3am_invoice_check_id01_value(body)
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات؛ لم تُسجل التسوية.")
+    posting_result: dict = {}
+    try:
+        cur = conn.cursor()
+        _ensure_payment_routing_schema(cur)
+        posting_result = _mat3am_post_invoice_without_payment(
+            cur,
+            invoice_guid=invoice_id,
+            check_id01=check_id01,
+        )
+        det = f"guest_on_account;checkID01={check_id01};posting={posting_result}"
+        _audit_log(cur, "INV_GUEST_ACCOUNT", "TBL022", invoice_id, None, det[:990])
+        conn.commit()
+        found["awaitingPayment"] = False
+        found["paymentStatus"] = "guest_on_account"
+        found["paymentMethod"] = "guest_on_account"
+        found["guestPaymentApproved"] = True
+        found["onAccountAt"] = now_iso
+        found["paymentBreakdown"] = None
+        found["checkID01"] = check_id01
+        _restaurant_save("invoices", raw)
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as ex:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر ترحيل فاتورة الضيف: {ex}") from ex
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if sid and bool(body.get("closeSession", True)):
+        sessions = _restaurant_load("table_sessions", [])
+        if isinstance(sessions, list):
+            table_id = None
+            for session in sessions:
+                if isinstance(session, dict) and str(session.get("id") or "") == sid:
+                    session["endTime"] = now_iso
+                    session["status"] = "completed"
+                    table_id = str(session.get("tableId") or "").strip()
+                    break
+            _restaurant_save("table_sessions", sessions)
+            try:
+                _restaurant_cancel_open_kitchen_orders_for_session(sid)
+            except Exception:
+                pass
+            if table_id:
+                try:
+                    _workflow_apply_cleaning_policy(table_id, event="payment_completed")
+                except Exception:
+                    pass
+    return {
+        "ok": True,
+        "invoiceId": invoice_id,
+        "paymentStatus": "guest_on_account",
+        "onAccountAt": now_iso,
+        "checkID01": check_id01,
+        "posting": posting_result,
+    }
 
 
 @app.get("/api/restaurant/orders")
@@ -23446,6 +27290,7 @@ def restaurant_get_orders(
     tableId: Optional[str] = None,
     status: Optional[str] = None,
     today_only: bool = False,
+    includeMerged: bool = False,
     kdsStation: Optional[str] = None,
 ):
     """الطلبات — يدعم الفلترة حسب session_id/sessionId أو tableId أو status.
@@ -23482,6 +27327,15 @@ def restaurant_get_orders(
                     changed = True
                     break
         o["items"] = norm_items
+        # إصلاح سجلات نقل جزئي قديمة كانت تحتفظ باسم/معرف وإجمالي الطاولة المصدر.
+        order_tid = str(o.get("tableId") or "").strip()
+        order_guid = str(o.get("tableGuid") or "").strip()
+        if str(o.get("sourceOrderId") or "").strip() and order_tid and not _restaurant_table_ids_equal(order_tid, order_guid):
+            o["tableGuid"] = order_tid
+            names = _restaurant_table_display_names_for_ids({order_tid})
+            o["tableLabel"] = names.get(order_tid) or _session_table_display_fallback(order_tid)
+            o["kitchenTotals"] = _scaled_kitchen_totals_for_items(o.get("kitchenTotals"), norm_items)
+            changed = True
         prev = str(o.get("status") or "").lower()
         prev_target = o.get("prepTargetMinutes")
         _kds_refresh_order_status(o)
@@ -23491,7 +27345,27 @@ def restaurant_get_orders(
             changed = True
 
     if sid:
-        data = [o for o in data if isinstance(o, dict) and str(o.get("sessionId") or "") == str(sid)]
+        wanted_session_ids = {str(sid)}
+        if includeMerged:
+            session_rows = _restaurant_load("table_sessions", [])
+            session_rows = session_rows if isinstance(session_rows, list) else []
+            selected_session = next(
+                (
+                    s
+                    for s in session_rows
+                    if isinstance(s, dict) and str(s.get("id") or "") == str(sid)
+                ),
+                None,
+            )
+            if isinstance(selected_session, dict):
+                billing_root = str(selected_session.get("mergedIntoSessionId") or sid)
+                wanted_session_ids = set(_restaurant_billing_session_ids(billing_root))
+                wanted_session_ids.add(billing_root)
+        data = [
+            o
+            for o in data
+            if isinstance(o, dict) and str(o.get("sessionId") or "") in wanted_session_ids
+        ]
     if tid:
         data = [
             o
@@ -23998,7 +27872,7 @@ def _kids_create_open_invoice(
     except Exception:
         pass
     main_guide = str(uuid.uuid4()).upper()
-    invoice_type = (invoice_type_guid or _get_restaurant_invoice_type_guid(cursor, "table") or FALLBACK_INVOICE_TYPE_GUID).upper()
+    invoice_type = (invoice_type_guid or _get_restaurant_invoice_type_guid(cursor, "kids") or FALLBACK_INVOICE_TYPE_GUID).upper()
     now_dt = datetime.now()
     bill_date = now_dt
     done_in = now_dt
@@ -24090,8 +27964,6 @@ def _kids_create_open_invoice(
         ],
     )
     _mat3am_insert_tbl023_invoice_lines_xtra_style(cursor, main_guide, inv_for_lines, None)
-    conn.commit()
-
     total_value = round(sum(float(it.get("quantity") or 1) * float(it.get("unitPrice") or 0) for it in items_to_invoice), 2)
     return {
         "invoiceCardGuide": main_guide,
@@ -25660,6 +29532,23 @@ def kids_ticket_settle(ticket_id: str, body: dict):
         amount_paid_in = remaining
     if amount_paid_in < 0:
         amount_paid_in = 0
+    amount_paid_in = round(amount_paid_in, 2)
+    settlement_paid = round(already_paid + amount_paid_in, 2)
+    if abs(settlement_paid - total) > 0.02:
+        raise HTTPException(
+            status_code=400,
+            detail=f"إقفال كيدز يتطلب سداداً كاملاً: الإجمالي {total:.2f}، المدفوع {settlement_paid:.2f}.",
+        )
+    payment_parts: dict[str, float] = {}
+    for payment in payments:
+        route_key = _mat3am_normalize_payment_route_key(payment.get("method"))
+        payment_parts[route_key] = round(
+            float(payment_parts.get(route_key) or 0) + float(payment.get("amount") or 0),
+            2,
+        )
+    if amount_paid_in > 0:
+        route_key = _mat3am_normalize_payment_route_key(method)
+        payment_parts[route_key] = round(float(payment_parts.get(route_key) or 0) + amount_paid_in, 2)
 
     # 3) إنشاء فاتورة TBL022/023 موحّدة (الفاتورة الحقيقية)
     conn = get_connection()
@@ -25700,15 +29589,37 @@ def kids_ticket_settle(ticket_id: str, body: dict):
             bill_notes5=f"ticketId={t['id']}",
             customer_name=str(t.get("childName") or "")[:60],
             cost_center=cost_center,
-            down_payment=already_paid + amount_paid_in,
+            # التحصيل يُسجل في TBL054؛ إبقاء DownPayment صفراً يمنع تكرار قيد التحصيل في Prc001.
+            down_payment=0,
             down_payment_notes=f"Kids settle — {t.get('childName') or ''}"[:240],
         )
-        # إقفال الفاتورة فوراً (Paid=1, LockRelations=1)
-        _kids_settle_invoice_close(
-            cur, conn,
-            main_guide=final_inv["invoiceCardGuide"],
-            paid_value=already_paid + amount_paid_in,
+        _ensure_payment_routing_schema(cur)
+        posting_result = _mat3am_write_invoice_payments(
+            cur,
+            invoice_guid=final_inv["invoiceCardGuide"],
+            session_id=f"kids:{t['id']}",
+            parts=payment_parts,
+            check_id01=_mat3am_invoice_check_id01_value(body),
+            notes_prefix="KIDS",
         )
+        cur.execute(
+            "UPDATE dbo.TBL022 SET LockRelations = 1 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            (final_inv["invoiceCardGuide"],),
+        )
+        conn.commit()
+        final_inv["posting"] = posting_result
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         try: conn.close()
         except Exception: pass
@@ -26724,8 +30635,37 @@ def restaurant_create_invoice(body: dict):
                 inv["CostCenter"] = cc_quick
         invoice_header = InvoiceHeader(**inv)
         result = save_invoice(invoice_header)
+        direct_invoice_guid = str(result.get("MainGuide") or "").strip()
+        payment_breakdown = body.get("paymentBreakdown") if isinstance(body.get("paymentBreakdown"), dict) else None
+        if payment_breakdown:
+            direct_parts = {
+                _mat3am_normalize_payment_route_key(key): float(value or 0)
+                for key, value in payment_breakdown.items()
+                if float(value or 0) > 0.0001
+            }
+        else:
+            direct_parts = {_mat3am_normalize_payment_route_key(payment_method): float(total)}
+        _ensure_payment_routing_schema(cursor)
+        direct_posting = _mat3am_write_invoice_payments(
+            cursor,
+            invoice_guid=direct_invoice_guid,
+            session_id=str(session_id or "") or None,
+            parts=direct_parts,
+            check_id01=_mat3am_invoice_check_id01_value(body),
+        )
+        conn.commit()
         inv_list = _restaurant_load("invoices", [])
-        inv_list.append({"sessionId": session_id, "invoiceId": result.get("MainGuide"), "total": total, "paidAt": datetime.now().isoformat()})
+        inv_list.append(
+            {
+                "sessionId": session_id,
+                "invoiceId": direct_invoice_guid,
+                "total": total,
+                "paidAt": datetime.now().isoformat(),
+                "paymentBreakdown": direct_parts,
+                "checkID01": _mat3am_invoice_check_id01_value(body),
+                "posting": direct_posting,
+            }
+        )
         _restaurant_save("invoices", inv_list)
         # طلب مطبخ (KDS):
         # - table: مرتبط بجلسة الطاولة المعتادة.
@@ -27044,6 +30984,32 @@ def restaurant_sessions_request_bill(body: dict):
     if not items_body:
         raise HTTPException(status_code=400, detail="لا توجد بنود صالحة للفاتورة")
 
+    _price_conn = get_connection()
+    if _price_conn:
+        try:
+            _price_cur = _price_conn.cursor()
+            _ensure_menu_tables(_price_cur)
+            items_body = _resolve_pos_invoice_line_prices(_price_cur, items_body)
+        except Exception:
+            pass
+        finally:
+            try:
+                _price_conn.close()
+            except Exception:
+                pass
+
+    zero_price_names = [
+        str(item.get("ProductName") or item.get("ProductGuide") or "صنف").strip()
+        for item in items_body
+        if float(item.get("UnitPrice") or 0) <= 0
+    ]
+    if zero_price_names:
+        preview = "، ".join(zero_price_names[:5])
+        raise HTTPException(
+            status_code=409,
+            detail=f"لا يمكن إصدار الفاتورة: أصناف بلا سعر ({preview}). حدّث AgentPrice أو EndUserPrice في بيانات الأصناف ثم أعد المحاولة.",
+        )
+
     agg_sub = 0.0
     agg_tax = 0.0
     agg_svc = 0.0
@@ -27055,6 +31021,27 @@ def restaurant_sessions_request_bill(body: dict):
             agg_svc += float(kt.get("serviceCharge") or 0)
     if agg_sub <= 0 and agg_tax <= 0 and agg_svc <= 0:
         agg_sub = sum(float(x.get("TotalValue") or 0) for x in items_body)
+        _policy_conn = get_connection()
+        if _policy_conn:
+            try:
+                _policy_cur = _policy_conn.cursor()
+                _preview_policy = _mat3am_pos_policy_row_from_cursor(_policy_cur)
+                _preview_totals = _billing_profile_invoice_totals(
+                    items_body,
+                    session_billing_profile if billing_profile_active else None,
+                    _preview_policy,
+                    tip_amount,
+                )
+                agg_tax = float(_preview_totals.get("tax") or 0)
+                agg_svc = float(_preview_totals.get("serviceCharge") or 0)
+                agg_sub = float(_preview_totals.get("netAfterDiscount") or agg_sub)
+            except Exception:
+                pass
+            finally:
+                try:
+                    _policy_conn.close()
+                except Exception:
+                    pass
     agg_total = agg_sub + agg_tax + agg_svc + tip_amount
 
     if isinstance(session_row, dict):
@@ -27200,19 +31187,27 @@ def restaurant_sessions_request_bill(body: dict):
                 )
             else:
                 part_items = _enrich_invoice_lines_from_menu(cursor, part_items)
-                subtotal_p = float(part.get("subtotal") or 0)
-                tax_p = float(share_tax if split_enabled else agg_tax)
-                svc_p = float(share_svc if split_enabled else agg_svc)
-                tip_p = float(share_tip if split_enabled else tip_amount)
-                part_totals = {
-                    "subtotal": round(subtotal_p, 2),
-                    "discountPct": 0.0,
-                    "discountValue": 0.0,
-                    "netAfterDiscount": round(subtotal_p, 2),
-                    "serviceCharge": round(svc_p, 2),
-                    "tax": round(tax_p, 2),
-                    "total": round(subtotal_p + svc_p + tax_p + tip_p, 2),
-                }
+                subtotal_p = sum(float(x.get("TotalValue") or 0) for x in part_items if isinstance(x, dict))
+                if agg_tax <= 0.0001 and agg_svc <= 0.0001:
+                    part_totals = _billing_profile_invoice_totals(
+                        part_items,
+                        None,
+                        pos_policy,
+                        share_tip if split_enabled else tip_amount,
+                    )
+                else:
+                    tax_p = float(share_tax if split_enabled else agg_tax)
+                    svc_p = float(share_svc if split_enabled else agg_svc)
+                    tip_p = float(share_tip if split_enabled else tip_amount)
+                    part_totals = {
+                        "subtotal": round(subtotal_p, 2),
+                        "discountPct": 0.0,
+                        "discountValue": 0.0,
+                        "netAfterDiscount": round(subtotal_p, 2),
+                        "serviceCharge": round(svc_p, 2),
+                        "tax": round(tax_p, 2),
+                        "total": round(subtotal_p + svc_p + tax_p + tip_p, 2),
+                    }
             inv = {
                 "BillNumber": bill_num + idx,
                 "BillDate": bill_date,
@@ -27298,10 +31293,13 @@ def restaurant_sessions_request_bill(body: dict):
         sess = _restaurant_load("table_sessions", [])
         table_id_for_policy = str(pending[0].get("tableId") or "").strip() if pending else ""
         for s in sess:
-            if isinstance(s, dict) and str(s.get("id")) == session_id:
+            if not isinstance(s, dict):
+                continue
+            current_session_id = str(s.get("id") or "")
+            if current_session_id in billing_session_ids:
                 s["billingRequestedAt"] = now_iso
-                if not table_id_for_policy:
-                    table_id_for_policy = str(s.get("tableId") or "").strip()
+            if current_session_id == session_id and not table_id_for_policy:
+                table_id_for_policy = str(s.get("tableId") or "").strip()
         _restaurant_save("table_sessions", sess)
         if table_id_for_policy:
             try:
@@ -27579,6 +31577,7 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
                 RoleCode NVARCHAR(20) NOT NULL,
                 DisplayName NVARCHAR(200) NULL,
                 SpecialistStationCode NVARCHAR(80) NULL,
+                Email NVARCHAR(200) NULL,
                 IsActive BIT NOT NULL DEFAULT 1,
                 CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
             );
@@ -27590,6 +31589,14 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
         IF COL_LENGTH(N'dbo.MAT3AM_APP_USERS', N'SpecialistStationCode') IS NULL
         BEGIN
             ALTER TABLE dbo.MAT3AM_APP_USERS ADD SpecialistStationCode NVARCHAR(80) NULL;
+        END
+        """
+    )
+    cursor.execute(
+        """
+        IF COL_LENGTH(N'dbo.MAT3AM_APP_USERS', N'Email') IS NULL
+        BEGIN
+            ALTER TABLE dbo.MAT3AM_APP_USERS ADD Email NVARCHAR(200) NULL;
         END
         """
     )

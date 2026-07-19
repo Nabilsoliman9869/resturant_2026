@@ -77,6 +77,14 @@ export type CashierInvoiceRow = {
   customerType?: string | null;
   paymentStatus?: string | null;
   onAccountAt?: string | null;
+  checkID01?: number | boolean | null;
+  /** اعتماد المدير عند التسكين */
+  guestApprovedAt?: string | null;
+  seatingApprovedAt?: string | null;
+  guestSession?: boolean | null;
+  seatingCoversGuestPayment?: boolean | null;
+  seatingCoversOnAccount?: boolean | null;
+  maxInvoiceLimit?: number | null;
 };
 
 type CashierPricingSnapshot = {
@@ -551,6 +559,7 @@ export function CashierPayInvoiceModal({
   const [discountInput, setDiscountInput] = useState("");
   const [applyServiceCharge, setApplyServiceCharge] = useState(true);
   const [applyVatCharge, setApplyVatCharge] = useState(true);
+  const [isTaxInvoice, setIsTaxInvoice] = useState(false);
   const [tipInput, setTipInput] = useState("");
   const [billingMode, setBillingMode] = useState<"full_table" | "split_equal" | "split_by_order">("full_table");
   const [splitGuestsInput, setSplitGuestsInput] = useState("");
@@ -564,8 +573,16 @@ export function CashierPayInvoiceModal({
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [onAccount, setOnAccount] = useState(false);
+  /** طريقة التسوية: سداد فوري | حساب كامل | ضيف كامل | جزئي+حساب | جزئي+ضيف */
+  const [settlementMode, setSettlementMode] = useState<
+    "pay_now" | "on_account_full" | "guest_full" | "partial_to_account" | "partial_to_guest"
+  >("pay_now");
   const [onAccountBusy, setOnAccountBusy] = useState(false);
+  const [guestPaymentBusy, setGuestPaymentBusy] = useState(false);
+  const [creditLimitApprovalPending, setCreditLimitApprovalPending] = useState(false);
+  const [guestApprovalPending, setGuestApprovalPending] = useState(false);
+  const [creditLimitApproved, setCreditLimitApproved] = useState(false);
+  const [guestApproved, setGuestApproved] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [msg, setMsg] = useState("");
   const autoPrintedRef = useRef(false);
@@ -577,6 +594,10 @@ export function CashierPayInvoiceModal({
     setSplitGuestsInput("");
     setSplitShareLocked(false);
     autoPrintedRef.current = false;
+    setCreditLimitApprovalPending(false);
+    setGuestApprovalPending(false);
+    setCreditLimitApproved(false);
+    setGuestApproved(false);
   }, [open, invoiceId]);
 
   useEffect(() => {
@@ -585,7 +606,10 @@ export function CashierPayInvoiceModal({
     if (typeof g === "number" && Number.isFinite(g) && g >= 1) {
       setSplitGuestsInput(String(Math.floor(g)));
     }
-  }, [row?.invoiceId, row?.sessionGuestCount]);
+    // اعتماد التسكين يغني عن طلب اعتماد جديد عند الكاشير
+    if (row.seatingCoversGuestPayment) setGuestApproved(true);
+    if (row.seatingCoversOnAccount) setCreditLimitApproved(true);
+  }, [row?.invoiceId, row?.sessionGuestCount, row?.seatingCoversGuestPayment, row?.seatingCoversOnAccount]);
 
   useEffect(() => {
     if (billingMode !== "split_equal") setSplitShareLocked(false);
@@ -629,13 +653,18 @@ export function CashierPayInvoiceModal({
       setDiscountInput("");
       setApplyServiceCharge(true);
       setApplyVatCharge(true);
+      setIsTaxInvoice(false);
       setPricingSnapshot(null);
       setCash("");
       setVisa("");
       setWallet("");
       setInstapay("");
       setCloseSession(true);
-      setOnAccount(false);
+      setSettlementMode("pay_now");
+      setCreditLimitApprovalPending(false);
+      setGuestApprovalPending(false);
+      setCreditLimitApproved(false);
+      setGuestApproved(false);
       setMsg("");
       return;
     }
@@ -651,6 +680,11 @@ export function CashierPayInvoiceModal({
     }
     void loadLocal();
   }, [open, invoiceId, initialRow, loadLocal]);
+
+  useEffect(() => {
+    if (!row) return;
+    setIsTaxInvoice(Number(row.checkID01 || 0) === 1);
+  }, [row?.invoiceId, row?.checkID01]);
 
   useEffect(() => {
     if (!open) return;
@@ -942,19 +976,44 @@ export function CashierPayInvoiceModal({
   const totalDue2 = round2(totalDue);
   const sum2 = round2(sum);
   const sumOk = sum2 === totalDue2;
+  const remainderDue = round2(Math.max(0, totalDue2 - sum2));
+  const partialOk = sum2 > 0.02 && remainderDue > 0.02;
+  const onAccount = settlementMode === "on_account_full";
+  const guestPayment = settlementMode === "guest_full";
+  const isPartialAccount = settlementMode === "partial_to_account";
+  const isPartialGuest = settlementMode === "partial_to_guest";
+  const needsCashFields = settlementMode === "pay_now" || isPartialAccount || isPartialGuest;
+  const needsCreditApproval = onAccount || isPartialAccount;
+  const needsGuestApproval = guestPayment || isPartialGuest;
+  const zeroPricedLineNames = useMemo(
+    () => lines.filter((line) => Number(line.unitPrice || 0) <= 0).map((line) => String(line.name || "صنف")),
+    [lines],
+  );
+  const settlementReady =
+    settlementMode === "pay_now"
+      ? sumOk
+      : settlementMode === "on_account_full"
+        ? creditLimitApproved
+        : settlementMode === "guest_full"
+          ? guestApproved
+          : settlementMode === "partial_to_account"
+            ? partialOk && creditLimitApproved
+            : settlementMode === "partial_to_guest"
+              ? partialOk && guestApproved
+              : false;
   const canSubmit = Boolean(
     allowPayment &&
       row?.awaitingPayment &&
       row?.invoiceId &&
       !loading &&
       !detailLoading &&
-      (onAccount || sumOk) &&
+      zeroPricedLineNames.length === 0 &&
+      settlementReady &&
       totalDue >= 0 &&
       (lines.length === 0 || ledger.linesSum > 0.0001 || ledger.grand > 0.0001),
   );
 
-  const userRole = String(user?.role || "").trim().toLowerCase();
-  const waiterPrintLocked = userRole === "waiter" && Number(row?.printCount || 0) >= 1;
+  const nextPrintCopyNo = Math.max(1, Number(row?.printCount || 0) + 1);
   const showOnAccount = Boolean(
     row?.agentGuid || (row?.customerType && row.customerType !== "cash")
   );
@@ -1040,7 +1099,6 @@ export function CashierPayInvoiceModal({
     if (!receiptHtml || !row?.invoiceId) return;
     setMsg("");
     setPrinting(true);
-    const w = window.open("", "_blank", "noopener,noreferrer,width=420,height=720");
     try {
       const r = await fetch(`${base}/api/restaurant/invoices-local/mark-printed`, {
         method: "POST",
@@ -1058,27 +1116,8 @@ export function CashierPayInvoiceModal({
       }
       if (j.invoice) setRow(j.invoice);
       onChanged?.();
-      if (w) {
-        w.document.open();
-        w.document.write(receiptHtml);
-        w.document.close();
-        w.focus();
-        window.setTimeout(() => {
-          try {
-            w.print();
-          } catch {
-            /* ignore */
-          }
-        }, 350);
-        return;
-      }
       printHtmlInIframe(receiptHtml);
     } catch (e) {
-      try {
-        w?.close();
-      } catch {
-        /* ignore */
-      }
       setMsg(String(e));
     } finally {
       setPrinting(false);
@@ -1088,10 +1127,10 @@ export function CashierPayInvoiceModal({
   useEffect(() => {
     if (!open || !autoPrintOnOpen) return;
     if (autoPrintedRef.current) return;
-    if (!row?.invoiceId || !receiptHtml || loading || detailLoading || printing || waiterPrintLocked) return;
+    if (!row?.invoiceId || !receiptHtml || loading || detailLoading || printing) return;
     autoPrintedRef.current = true;
     void runThermalPrint();
-  }, [autoPrintOnOpen, detailLoading, loading, open, printing, receiptHtml, row?.invoiceId, runThermalPrint, waiterPrintLocked]);
+  }, [autoPrintOnOpen, detailLoading, loading, open, printing, receiptHtml, row?.invoiceId, runThermalPrint]);
 
   async function submit() {
     const id = String(row?.invoiceId || "").trim();
@@ -1099,9 +1138,14 @@ export function CashierPayInvoiceModal({
     setPaying(true);
     setMsg("");
     try {
-      if (!sumOk) {
+      if (settlementMode === "pay_now" && !sumOk) {
         throw new Error(`مجموع حقول الدفع يجب أن يساوي إجمالي الفاتورة (${totalDue2.toFixed(2)} ج.م) بعد التقريب لمنزلتين عشريتين.`);
       }
+      if ((isPartialAccount || isPartialGuest) && !partialOk) {
+        throw new Error("للتسوية الجزئية: أدخل مبلغاً مدفوعاً الآن أقل من الإجمالي، والمتبقي يُرحَّل.");
+      }
+      const remainderSettlement =
+        settlementMode === "partial_to_account" ? "on_account" : settlementMode === "partial_to_guest" ? "guest" : undefined;
       const body = {
         invoiceId: id,
         closeSession,
@@ -1111,6 +1155,8 @@ export function CashierPayInvoiceModal({
           wallet: pbWallet,
           instapay: pbInsta,
         },
+        remainderSettlement,
+        checkID01: isTaxInvoice ? 1 : 0,
         totals: {
           subtotal: round2(ledger.linesSum),
           discount: round2(ledger.discount),
@@ -1118,7 +1164,10 @@ export function CashierPayInvoiceModal({
           tax: round2(ledger.tax),
           tableTip: tableTipAdditive,
           extraTip: round2(extraTip),
-          grandTotal: sum2,
+          grandTotal: totalDue2,
+          paidNow: sum2,
+          remainder: remainderSettlement ? remainderDue : undefined,
+          remainderSettlement,
           applyServiceCharge,
           applyVatCharge,
           billingMode,
@@ -1157,6 +1206,7 @@ export function CashierPayInvoiceModal({
       const body = {
         invoiceId: id,
         closeSession: closeSession ?? true,
+        checkID01: isTaxInvoice ? 1 : 0,
       };
       const r = await fetch(`${base}/api/restaurant/invoices-local/mark-on-account`, {
         method: "POST",
@@ -1177,6 +1227,105 @@ export function CashierPayInvoiceModal({
       setOnAccountBusy(false);
     }
   }
+
+  async function requestApproval(approvalType: "on_account_credit" | "guest_payment") {
+    const id = String(row?.invoiceId || "").trim();
+    if (!id) return;
+    setMsg("");
+    if (approvalType === "on_account_credit") setOnAccountBusy(true);
+    else setGuestPaymentBusy(true);
+    try {
+      const body = {
+        invoiceId: id,
+        approvalType,
+        mat3amActor: buildMat3amActor(user),
+      };
+      const r = await fetch(`${base}/api/restaurant/invoices-local/request-payment-approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const txt = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(txt) ?? {};
+        throw new Error(typeof j.detail === "string" ? j.detail : txt.slice(0, 200) || "فشل طلب الاعتماد");
+      }
+      const j = tryParseJson<{ status?: string; message?: string }>(txt) ?? {};
+      if (approvalType === "on_account_credit") {
+        setCreditLimitApprovalPending(j.status === "pending");
+      } else {
+        setGuestApprovalPending(j.status === "pending");
+      }
+      setMsg(j.message || "تم إرسال الطلب");
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      if (approvalType === "on_account_credit") setOnAccountBusy(false);
+      else setGuestPaymentBusy(false);
+    }
+  }
+
+  async function submitGuest() {
+    const id = String(row?.invoiceId || "").trim();
+    if (!id) return;
+    setGuestPaymentBusy(true);
+    setMsg("");
+    try {
+      const body = {
+        invoiceId: id,
+        closeSession: closeSession ?? true,
+        checkID01: isTaxInvoice ? 1 : 0,
+      };
+      const r = await fetch(`${base}/api/restaurant/invoices-local/mark-guest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const txt = await r.text();
+      if (!r.ok) {
+        const j = tryParseJson<{ detail?: unknown }>(txt) ?? {};
+        throw new Error(typeof j.detail === "string" ? j.detail : txt.slice(0, 200) || "فشل تسجيل دفع الضيف");
+      }
+      onPaid();
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setGuestPaymentBusy(false);
+    }
+  }
+
+  // polling لحالة اعتماد الـ CL أو Guest
+  useEffect(() => {
+    if (!open || !invoiceId) return;
+    if (!creditLimitApprovalPending && !guestApprovalPending) return;
+    let stop = false;
+    const tick = async () => {
+      if (stop) return;
+      const id = String(row?.invoiceId || "").trim();
+      if (!id) return;
+      try {
+        if (creditLimitApprovalPending) {
+          const r = await fetch(`${base}/api/restaurant/invoices-local/${encodeURIComponent(id)}/payment-approval-status?approvalType=on_account_credit`);
+          const j = tryParseJson<{ status?: string }>(await r.text()) ?? {};
+          if (j.status === "approved") { setCreditLimitApprovalPending(false); setCreditLimitApproved(true); }
+          if (j.status === "rejected") { setCreditLimitApprovalPending(false); setMsg("تم رفض طلب CL من المدير."); }
+        }
+        if (guestApprovalPending) {
+          const r = await fetch(`${base}/api/restaurant/invoices-local/${encodeURIComponent(id)}/payment-approval-status?approvalType=guest_payment`);
+          const j = tryParseJson<{ status?: string }>(await r.text()) ?? {};
+          if (j.status === "approved") { setGuestApprovalPending(false); setGuestApproved(true); }
+          if (j.status === "rejected") { setGuestApprovalPending(false); setMsg("تم رفض طلب دفع الضيف من المدير."); }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void tick();
+    const iv = window.setInterval(tick, 5000);
+    return () => { stop = true; window.clearInterval(iv); };
+  }, [open, invoiceId, creditLimitApprovalPending, guestApprovalPending, row?.invoiceId, base]);
 
   if (!open || !invoiceId) return null;
 
@@ -1259,6 +1408,7 @@ export function CashierPayInvoiceModal({
               <div style={{ textAlign: "center", fontSize: "0.76rem", color: "var(--muted)" }}>
                 مرات الطباعة: {Number(row.printCount || 0)}
                 {row.firstPrintedAt ? <> · أول طباعة: {String(row.firstPrintedAt).replace("T", " ").slice(0, 19)}</> : null}
+                {row.lastPrintedAt ? <> · آخر طباعة: {String(row.lastPrintedAt).replace("T", " ").slice(0, 19)}</> : null}
                 {row.firstPrintedByRole ? <> · بواسطة: {String(row.firstPrintedByRole)}</> : null}
               </div>
               {printerHint ? (
@@ -1408,6 +1558,11 @@ export function CashierPayInvoiceModal({
                   <span>الإجمالي المطلوب</span>
                   <span>{totalDue.toFixed(2)} ج.م</span>
                 </div>
+                {zeroPricedLineNames.length > 0 ? (
+                  <div style={{ marginTop: "0.55rem", padding: "0.55rem 0.65rem", borderRadius: 8, background: "#fef2f2", color: "#991b1b", fontWeight: 800, fontSize: "0.82rem" }}>
+                    ممنوع التسديد: أصناف بلا سعر ({zeroPricedLineNames.slice(0, 4).join("، ")}). صحّح سعر الصنف ثم ألغِ الفاتورة وأعد طلب الحساب.
+                  </div>
+                ) : null}
                 {billingMode === "split_equal" && splitPersonsN >= 1 && lines.length > 0 ? (
                   <div style={{ marginTop: "0.5rem", fontSize: "0.74rem", lineHeight: 1.45 }}>
                     <div style={{ fontWeight: 700, marginBottom: "0.25rem" }}>نصيب تقديري لكل بند (÷ {splitPersonsN})</div>
@@ -1469,24 +1624,175 @@ export function CashierPayInvoiceModal({
 
             {allowPayment ? (
               <>
-            {showOnAccount ? (
-              <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "1px dashed rgba(148,163,184,0.55)", background: onAccount ? "rgba(234,179,8,0.08)" : "rgba(0,0,0,0.02)" }}>
-                <label style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}>
-                  <input type="checkbox" checked={onAccount} onChange={(e) => setOnAccount(e.target.checked)} />
-                  <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>ترحيل على حساب العميل (بدون سداد فوري)</span>
-                </label>
-                <p style={{ margin: "0.35rem 0 0", fontSize: "0.78rem", color: "var(--muted)" }}>
-                  يُسجّل الفاتورة كمديونية على حساب العميل المربوط بالجلسة (مالك / VIP / عميل آجل).
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.6rem",
+                marginTop: "0.75rem",
+                padding: "0.7rem 0.75rem",
+                borderRadius: 10,
+                border: `1px solid ${isTaxInvoice ? "var(--accent2)" : "var(--border)"}`,
+                background: isTaxInvoice ? "rgba(34,197,94,0.08)" : "rgba(0,0,0,0.02)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={isTaxInvoice}
+                onChange={(e) => setIsTaxInvoice(e.target.checked)}
+                disabled={foldLocked}
+              />
+              <span>
+                <strong>فاتورة ضريبية</strong>
+                <span style={{ display: "block", color: "var(--muted)", fontSize: "0.76rem", marginTop: 2 }}>
+                  يكتب التصنيف في TBL022.CheckID01 ({isTaxInvoice ? "1" : "0"})، وهو مستقل عن قيمة الضريبة المحسوبة.
+                </span>
+              </span>
+            </label>
+            <div
+              style={{
+                marginTop: "0.75rem",
+                padding: "0.7rem 0.75rem",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "rgba(0,0,0,0.02)",
+              }}
+            >
+              <div style={{ fontWeight: 800, fontSize: "0.92rem", marginBottom: "0.35rem" }}>طريقة التسوية</div>
+              <p style={{ margin: "0 0 0.55rem", fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                اختر كيف تُغلق الفاتورة. الترحيل على حساب أو ضيف يعني إدخال المبلغ على الحساب — بدون طلب مبالغ نقدية.
+              </p>
+              <div style={{ display: "grid", gap: "0.45rem" }}>
+                {(
+                  [
+                    {
+                      id: "pay_now" as const,
+                      label: "سداد فوري كامل",
+                      hint: "نقدي / فيزا / محفظة / انستاباي بما يساوي الإجمالي.",
+                    },
+                    ...(showOnAccount
+                      ? [
+                          {
+                            id: "on_account_full" as const,
+                            label: "ترحيل كامل على حساب العميل (CL)",
+                            hint: "الفاتورة كلها مديونية على حساب العميل. يتطلب اعتماد مدير.",
+                          },
+                        ]
+                      : []),
+                    {
+                      id: "guest_full" as const,
+                      label: "تحميل كامل على ضيف صالة",
+                      hint: "تُصفَّر الفاتورة كضيافة صالة. يتطلب اعتماد مدير — بدون مبالغ سداد.",
+                    },
+                    ...(showOnAccount
+                      ? [
+                          {
+                            id: "partial_to_account" as const,
+                            label: "سداد جزئي + الباقي على حساب العميل",
+                            hint: "يُدخل المدفوع الآن، والمتبقي يُرحَّل على الحساب بعد اعتماد المدير.",
+                          },
+                        ]
+                      : []),
+                    {
+                      id: "partial_to_guest" as const,
+                      label: "سداد جزئي + الباقي ضيافة",
+                      hint: "يُدخل المدفوع الآن، والمتبقي يُحمَّل كضيف بعد اعتماد المدير.",
+                    },
+                  ] as const
+                ).map((opt) => (
+                  <label
+                    key={opt.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "auto 1fr",
+                      gap: "0.45rem 0.55rem",
+                      alignItems: "start",
+                      padding: "0.5rem 0.55rem",
+                      borderRadius: 8,
+                      border: settlementMode === opt.id ? "1px solid rgba(59,130,246,0.55)" : "1px solid transparent",
+                      background: settlementMode === opt.id ? "rgba(59,130,246,0.07)" : "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="settlement-mode"
+                      checked={settlementMode === opt.id}
+                      onChange={() => {
+                        setSettlementMode(opt.id);
+                        setMsg("");
+                        if (opt.id === "pay_now") {
+                          setCreditLimitApprovalPending(false);
+                          setGuestApprovalPending(false);
+                          setCreditLimitApproved(false);
+                          setGuestApproved(false);
+                        } else if (opt.id === "on_account_full" || opt.id === "partial_to_account") {
+                          setGuestApprovalPending(false);
+                          setGuestApproved(false);
+                        } else if (opt.id === "guest_full" || opt.id === "partial_to_guest") {
+                          setCreditLimitApprovalPending(false);
+                          setCreditLimitApproved(false);
+                        }
+                      }}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <strong style={{ fontSize: "0.88rem" }}>{opt.label}</strong>
+                      <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>{opt.hint}</div>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {onAccount && row?.agentName ? (
+                <p style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", fontWeight: 700 }}>العميل: {row.agentName}</p>
+              ) : null}
+              {creditLimitApprovalPending || guestApprovalPending ? (
+                <p style={{ margin: "0.5rem 0 0", fontSize: "0.8rem", color: "#b45309", fontWeight: 700 }}>
+                  في انتظار اعتماد المدير…
                 </p>
-                {onAccount && row?.agentName ? (
-                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", fontWeight: 700 }}>العميل: {row.agentName}</p>
-                ) : null}
+              ) : null}
+              {creditLimitApproved && needsCreditApproval ? (
+                <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "#15803d", fontWeight: 700 }}>
+                  {row?.seatingCoversOnAccount
+                    ? "معتمد من التسكين — لا حاجة لاعتماد جديد عند الكاشير (CL)."
+                    : "تم اعتماد المدير للحساب (CL)."}
+                </p>
+              ) : null}
+              {guestApproved && needsGuestApproval ? (
+                <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "#15803d", fontWeight: 700 }}>
+                  {row?.seatingCoversGuestPayment
+                    ? "معتمد من التسكين — لا حاجة لاعتماد جديد عند الكاشير (ضيف)."
+                    : "تم اعتماد المدير للضيافة."}
+                </p>
+              ) : null}
+            </div>
+
+            {needsCashFields ? (
+              <>
+            <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.35rem" }}>
+              {settlementMode === "pay_now" ? "توزيع السداد وسياسة السبليت" : "الجزء المدفوع الآن"}
+            </h3>
+            {(isPartialAccount || isPartialGuest) ? (
+              <div
+                style={{
+                  marginBottom: "0.65rem",
+                  padding: "0.55rem 0.65rem",
+                  borderRadius: 10,
+                  border: "1px solid rgba(59,130,246,0.35)",
+                  background: "rgba(59,130,246,0.06)",
+                  fontSize: "0.82rem",
+                  lineHeight: 1.5,
+                }}
+              >
+                <div>الإجمالي المطلوب: <strong>{totalDue2.toFixed(2)}</strong> ج.م</div>
+                <div>مدفوع الآن: <strong>{sum2.toFixed(2)}</strong> ج.م</div>
+                <div>
+                  متبقي للترحيل ({isPartialAccount ? "حساب العميل" : "ضيافة"}):{" "}
+                  <strong style={{ color: remainderDue > 0.02 ? "#b45309" : "inherit" }}>{remainderDue.toFixed(2)}</strong> ج.م
+                </div>
               </div>
             ) : null}
-
-            {!onAccount ? (
-              <>
-            <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.35rem" }}>توزيع السداد وسياسة السبليت</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.65rem", fontSize: "0.8rem" }}>
               <span style={{ color: "var(--muted)" }}>سياسة السبليت</span>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-start" }}>
@@ -1599,7 +1905,7 @@ export function CashierPayInvoiceModal({
                   value={cash}
                   onChange={(e) => setCash(e.target.value)}
                   onFocus={() => {
-                    if (!String(cash || "").trim()) setCash(String(suggestRemainder("cash")));
+                    if (!String(cash || "").trim() && settlementMode === "pay_now") setCash(String(suggestRemainder("cash")));
                   }}
                   placeholder="0"
                 />
@@ -1619,7 +1925,7 @@ export function CashierPayInvoiceModal({
                   value={visa}
                   onChange={(e) => setVisa(e.target.value)}
                   onFocus={() => {
-                    if (!String(visa || "").trim()) setVisa(String(suggestRemainder("visa")));
+                    if (!String(visa || "").trim() && settlementMode === "pay_now") setVisa(String(suggestRemainder("visa")));
                   }}
                   placeholder="0"
                 />
@@ -1639,7 +1945,7 @@ export function CashierPayInvoiceModal({
                   value={wallet}
                   onChange={(e) => setWallet(e.target.value)}
                   onFocus={() => {
-                    if (!String(wallet || "").trim()) setWallet(String(suggestRemainder("wallet")));
+                    if (!String(wallet || "").trim() && settlementMode === "pay_now") setWallet(String(suggestRemainder("wallet")));
                   }}
                   placeholder="0"
                 />
@@ -1659,7 +1965,7 @@ export function CashierPayInvoiceModal({
                   value={instapay}
                   onChange={(e) => setInstapay(e.target.value)}
                   onFocus={() => {
-                    if (!String(instapay || "").trim()) setInstapay(String(suggestRemainder("instapay")));
+                    if (!String(instapay || "").trim() && settlementMode === "pay_now") setInstapay(String(suggestRemainder("instapay")));
                   }}
                   placeholder="0"
                 />
@@ -1725,12 +2031,22 @@ export function CashierPayInvoiceModal({
               style={{
                 marginTop: "0.75rem",
                 fontWeight: 700,
-                color: sumOk ? "#22c55e" : "var(--danger)",
+                color:
+                  settlementMode === "pay_now"
+                    ? sumOk
+                      ? "#22c55e"
+                      : "var(--danger)"
+                    : partialOk
+                      ? "#22c55e"
+                      : "var(--danger)",
                 fontSize: "0.95rem",
               }}
             >
               مجموع المدخلات: {sum2.toFixed(2)} ج.م
-              {!sumOk ? ` — يجب أن يساوي ${totalDue2.toFixed(2)} ج.م` : null}
+              {settlementMode === "pay_now" && !sumOk ? ` — يجب أن يساوي ${totalDue2.toFixed(2)} ج.م` : null}
+              {(isPartialAccount || isPartialGuest) && !partialOk
+                ? " — أدخل مبلغاً أكبر من صفر وأقل من الإجمالي"
+                : null}
             </p>
             <button
               type="button"
@@ -1755,8 +2071,27 @@ export function CashierPayInvoiceModal({
 
             {onAccount ? (
               <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "2px solid rgba(234,179,8,0.45)", background: "rgba(234,179,8,0.06)", textAlign: "center" }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>سيتم ترحيل الفاتورة على حساب العميل بدون سداد فوري.</div>
-                <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>الفاتورة تُسجّل كمديونية ويُمكن متابعتها لاحقاً من شاشة كشف الحساب.</div>
+                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>ترحيل كامل — بدون سداد فوري</div>
+                <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+                  تُسجَّل الفاتورة ({totalDue2.toFixed(2)} ج.م) كمديونية على حساب العميل.
+                </div>
+                <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginTop: "0.55rem", fontSize: "0.86rem" }}>
+                  <input type="checkbox" checked={closeSession} onChange={(e) => setCloseSession(e.target.checked)} />
+                  إغلاق الجلسة بعد الترحيل
+                </label>
+              </div>
+            ) : null}
+
+            {guestPayment ? (
+              <div style={{ marginTop: "0.65rem", padding: "0.55rem 0.65rem", borderRadius: 10, border: "2px solid rgba(22,163,74,0.45)", background: "rgba(22,163,74,0.06)", textAlign: "center" }}>
+                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>تحميل كامل على ضيف صالة</div>
+                <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+                  تُصفَّر الفاتورة ({totalDue2.toFixed(2)} ج.م) كضيافة — لا يُطلب إدخال مبالغ سداد.
+                </div>
+                <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginTop: "0.55rem", fontSize: "0.86rem" }}>
+                  <input type="checkbox" checked={closeSession} onChange={(e) => setCloseSession(e.target.checked)} />
+                  إغلاق الجلسة بعد التحميل
+                </label>
               </div>
             ) : null}
               </>
@@ -1770,25 +2105,70 @@ export function CashierPayInvoiceModal({
           <button
             type="button"
             className="btn btn-ghost"
-            disabled={paying || printing || !row || !receiptHtml || waiterPrintLocked}
+            disabled={paying || printing || !row || !receiptHtml}
             onClick={() => void runThermalPrint()}
-            title={waiterPrintLocked ? "تمت طباعة الشيك مرة من الكابتن؛ أي إعادة طباعة تكون من الكاشير أو المدير." : "فتح حوار الطباعة"}
+            title={`طباعة النسخة رقم ${nextPrintCopyNo}`}
           >
-            {printing ? "..." : waiterPrintLocked ? "طبع الكابتن" : "طباعة إيصال"}
+            {printing ? "..." : `طباعة نسخة ${nextPrintCopyNo}`}
           </button>
           <button type="button" className="btn btn-ghost" disabled={paying || printing} onClick={onClose}>
             إلغاء
           </button>
           {allowPayment ? (
             onAccount ? (
-              <button type="button" className="btn btn-primary" disabled={!canSubmit || onAccountBusy || printing} onClick={() => void submitOnAccount()} style={{ background: "#ca8a04", borderColor: "#ca8a04" }}>
-                {onAccountBusy ? "…" : "ترحيل على الحساب"}
-              </button>
+              creditLimitApprovalPending ? (
+                <button type="button" className="btn btn-primary" disabled style={{ background: "#ca8a04", borderColor: "#ca8a04" }}>
+                  في انتظار اعتماد المدير…
+                </button>
+              ) : (
+                <button type="button" className="btn btn-primary" disabled={!creditLimitApproved || onAccountBusy || printing} onClick={() => void submitOnAccount()} style={{ background: "#ca8a04", borderColor: "#ca8a04" }}>
+                  {onAccountBusy ? "…" : creditLimitApproved ? "ترحيل على الحساب" : "اعتماد المدير مطلوب"}
+                </button>
+              )
+            ) : guestPayment ? (
+              guestApprovalPending ? (
+                <button type="button" className="btn btn-primary" disabled style={{ background: "#16a34a", borderColor: "#16a34a" }}>
+                  في انتظار اعتماد المدير…
+                </button>
+              ) : (
+                <button type="button" className="btn btn-primary" disabled={!guestApproved || guestPaymentBusy || printing} onClick={() => void submitGuest()} style={{ background: "#16a34a", borderColor: "#16a34a" }}>
+                  {guestPaymentBusy ? "…" : guestApproved ? "تحميل على ضيف" : "اعتماد المدير مطلوب"}
+                </button>
+              )
+            ) : isPartialAccount || isPartialGuest ? (
+              (isPartialAccount ? creditLimitApprovalPending : guestApprovalPending) ? (
+                <button type="button" className="btn btn-primary" disabled>
+                  في انتظار اعتماد المدير…
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!canSubmit || paying || printing}
+                  onClick={() => void submit()}
+                >
+                  {paying
+                    ? "…"
+                    : (isPartialAccount ? creditLimitApproved : guestApproved)
+                      ? `تسديد ${sum2.toFixed(2)} وترحيل المتبقي`
+                      : "اعتماد المدير مطلوب"}
+                </button>
+              )
             ) : (
               <button type="button" className="btn btn-primary" disabled={!canSubmit || paying || printing} onClick={() => void submit()}>
                 {paying ? "…" : "تأكيد التسديد"}
               </button>
             )
+          ) : null}
+          {allowPayment && needsCreditApproval && !creditLimitApprovalPending && !creditLimitApproved ? (
+            <button type="button" className="btn btn-primary" disabled={onAccountBusy} onClick={() => void requestApproval("on_account_credit")} style={{ background: "#ca8a04", borderColor: "#ca8a04" }}>
+              {onAccountBusy ? "…" : "طلب اعتماد الحساب (CL)"}
+            </button>
+          ) : null}
+          {allowPayment && needsGuestApproval && !guestApprovalPending && !guestApproved ? (
+            <button type="button" className="btn btn-primary" disabled={guestPaymentBusy} onClick={() => void requestApproval("guest_payment")} style={{ background: "#16a34a", borderColor: "#16a34a" }}>
+              {guestPaymentBusy ? "…" : "طلب اعتماد الضيافة"}
+            </button>
           ) : null}
         </div>
       </div>

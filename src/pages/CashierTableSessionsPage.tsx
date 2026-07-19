@@ -3,6 +3,7 @@ import { useAuth } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
 import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { tryParseJson } from "../lib/tryParseJson";
+import { buildMat3amActor } from "../lib/mat3amActor";
 
 type RestTable = { id: string; name: string; number?: number; seats?: number };
 type TableSession = {
@@ -117,8 +118,11 @@ export default function CashierTableSessionsPage() {
       return;
     setMsg("");
     try {
+      const actor = buildMat3amActor(user);
       const r = await fetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/complete`, {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mat3amActor: actor }),
       });
       const t = await r.text();
       if (!r.ok) {

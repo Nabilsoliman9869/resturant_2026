@@ -19,7 +19,7 @@
 | `src/App.tsx` | Router + AuthContext |
 | `src/lib/apiBase.ts` | تحديد عنوان API (localhost أو IP) |
 | `src/auth/AuthContext.tsx` | صلاحيات المستخدمين والأدوار |
-| `run_api.bat` | تشغيل السيرفر (Port 2288) |
+| `run_api.bat` | تشغيل السيرفر (Port 2288) 
 
 ### صفحات Frontend الرئيسية
 

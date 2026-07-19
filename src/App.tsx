@@ -27,6 +27,7 @@ import GuestReturnsManagerPage from "./pages/GuestReturnsManagerPage";
 import ManagerApprovalsPage from "./pages/ManagerApprovalsPage";
 import ServerTablesPage from "./pages/ServerTablesPage";
 import SettingsLayout from "./pages/settings/SettingsLayout";
+import SystemPlaybookPage from "./pages/settings/SystemPlaybookPage";
 import VenueFloorSettingsPage from "./pages/settings/VenueFloorSettingsPage";
 import MenusDailySettingsPage from "./pages/settings/MenusDailySettingsPage";
 import FloorPlanEditorPage from "./pages/settings/FloorPlanEditorPage";
@@ -157,7 +158,8 @@ export default function App() {
         <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />
         <Route path="settings" element={<SettingsLayout />}>
-          <Route index element={<Navigate to="venue" replace />} />
+          <Route index element={<Navigate to="playbook" replace />} />
+          <Route path="playbook" element={<SystemPlaybookPage />} />
           <Route path="venue" element={<VenueFloorSettingsPage />} />
           <Route path="floor-editor" element={<FloorPlanEditorPage />} />
           <Route path="tables" element={<TablesLayoutPage />} />
@@ -225,11 +227,36 @@ export default function App() {
         <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
+        <Route path="pos" element={<PosPlaceholder />} />
+        <Route path="purchases" element={<PurchasesPage />} />
+        <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="flash-report" element={<FlashReportPage />} />
         <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
+        <Route path="cashflow" element={<CashflowFrame />} />
         <Route path="settings" element={<SettingsLayout />}>
           <Route index element={<Navigate to="role-schedule" replace />} />
+          <Route path="venue" element={<VenueFloorSettingsPage />} />
+          <Route path="floor-editor" element={<FloorPlanEditorPage />} />
+          <Route path="tables" element={<TablesLayoutPage />} />
+          <Route path="menus" element={<MenusDailySettingsPage />} />
+          <Route path="display-categories" element={<DisplayCategorySettingsPage />} />
+          <Route path="product-images" element={<ProductImagesSettingsPage />} />
+          <Route path="price-lists" element={<PriceListSettingsPage />} />
+          <Route path="modifier-groups" element={<ModifierGroupsSettingsPage />} />
+          <Route path="product-modifier-links" element={<ProductModifierLinksPage />} />
+          <Route path="addons" element={<AddonsSettingsPage />} />
+          <Route path="pos-tax" element={<PosTaxPolicySettingsPage />} />
+          <Route path="pos-promos" element={<PosPromotionsSettingsPage />} />
+          <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
+          <Route path="customer-vip" element={<CustomerVipSettingsPage />} />
+          <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
+          <Route path="daily-opening-custody" element={<DailyOpeningCustodyPage />} />
+          <Route path="daily-return" element={<DailyReturnPage />} />
+          <Route path="daily-overhead" element={<DailyOverheadPage />} />
+          <Route path="daily-cost-engine" element={<DailyCostEnginePage />} />
+          <Route path="daily-result" element={<DailyResultPage />} />
+          <Route path="costing" element={<CostingPage />} />
           <Route path="role-schedule" element={<RoleScheduleSettingsPage />} />
           <Route path="waiter-table-assignments" element={<WaiterTableAssignmentsPage />} />
           <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />

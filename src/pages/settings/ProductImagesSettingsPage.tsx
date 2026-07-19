@@ -340,6 +340,7 @@ export default function ProductImagesSettingsPage() {
               <div key={p.CardGuide} className="product-images-settings-row">
                 <div className="product-images-settings-row__thumb">
                   <img
+                    key={preview}
                     src={preview}
                     alt={p.ProductName}
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -430,6 +431,7 @@ export default function ProductImagesSettingsPage() {
               <div key={`grp-${g.CardGuide}`} className="product-images-settings-row">
                 <div className="product-images-settings-row__thumb">
                   <img
+                    key={preview}
                     src={preview}
                     alt={g.GroupName}
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}

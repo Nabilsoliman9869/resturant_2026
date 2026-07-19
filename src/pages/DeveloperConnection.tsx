@@ -32,6 +32,35 @@ function networkErrHint(raw: string): string {
   return raw;
 }
 
+function normalizeDirectServiceUrl(raw: string, label: string, expectedPort: string): string {
+  const value = raw.trim();
+  if (!value) throw new Error(`${label} مطلوب.`);
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${label} غير صالح. استخدم مثلاً: http://192.168.1.10:${expectedPort}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${label} يجب أن يبدأ بـ http:// أو https://.`);
+  }
+  if (
+    parsed.protocol === "https:" &&
+    /^(\d{1,3}\.){3}\d{1,3}$/.test(parsed.hostname)
+  ) {
+    throw new Error(
+      `${label}: لا تستخدم https مع عنوان IP مباشر دون شهادة TLS. استخدم http://192.168.1.10:${expectedPort}`,
+    );
+  }
+  if (parsed.port !== expectedPort) {
+    throw new Error(`${label} يجب أن يستخدم المنفذ ${expectedPort}.`);
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname && parsed.pathname !== "/")) {
+    throw new Error(`${label} يجب أن يحتوي البروتوكول والعنوان والمنفذ فقط، دون مسار أو بيانات دخول.`);
+  }
+  return `${parsed.protocol}//${parsed.hostname}:${expectedPort}`;
+}
+
 async function readApiJson(
   url: string,
   init?: RequestInit,
@@ -195,6 +224,14 @@ export default function DeveloperConnection() {
   const [database, setDatabase] = useState("");
   const [uid, setUid] = useState("");
   const [password, setPassword] = useState("");
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("587");
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPass, setSmtpPass] = useState("");
+  const [smtpFrom, setSmtpFrom] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [frontendUrl, setFrontendUrl] = useState("");
+  const [smtpMsg, setSmtpMsg] = useState("");
   const [connectionMsg, setConnectionMsg] = useState("");
   const [workflowMsg, setWorkflowMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -214,6 +251,59 @@ export default function DeveloperConnection() {
     setDatabase(String(d.database || ""));
     setUid(String(d.uid || ""));
     setPassword(String(d.password || ""));
+  }
+
+  async function loadSmtpSettings() {
+    try {
+      const res = await readApiJson(`${getApiBase()}/api/settings/smtp`);
+      if (res.data) {
+        const d = res.data;
+        setSmtpHost(String(d.smtpHost || ""));
+        setSmtpPort(String(d.smtpPort || "587"));
+        setSmtpUser(String(d.smtpUser || ""));
+        setSmtpPass(String(d.smtpPass || ""));
+        setSmtpFrom(String(d.smtpFrom || ""));
+        setBaseUrl(String(d.baseUrl || ""));
+        setFrontendUrl(String(d.frontendUrl || ""));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveSmtp() {
+    setSmtpMsg("");
+    setBusy(true);
+    try {
+      const host = smtpHost.trim();
+      if (!host) throw new Error("خادم SMTP مطلوب، مثال: smtp.gmail.com");
+      if (host.includes("@")) {
+        throw new Error("خادم SMTP ليس عنوان بريد. اكتب smtp.gmail.com، وضع البريد في خانة اسم المستخدم.");
+      }
+      const normalizedBaseUrl = normalizeDirectServiceUrl(baseUrl, "رابط خادم API", "2288");
+      const normalizedFrontendUrl = normalizeDirectServiceUrl(frontendUrl, "رابط واجهة التطبيق", "9999");
+      const res = await readApiJson(`${getApiBase()}/api/settings/smtp`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          smtpHost: host,
+          smtpPort: smtpPort.trim(),
+          smtpUser: smtpUser.trim(),
+          smtpPass: smtpPass.trim(),
+          smtpFrom: smtpFrom.trim(),
+          baseUrl: normalizedBaseUrl,
+          frontendUrl: normalizedFrontendUrl,
+        }),
+      });
+      if (!res.ok || !res.data?.ok) {
+        throw new Error(String(res.data?.detail || res.raw || `HTTP ${res.status}`));
+      }
+      setSmtpMsg("تم حفظ إعدادات البريد.");
+    } catch (e) {
+      setSmtpMsg(networkErrHint(String(e)));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadLogs() {
@@ -252,7 +342,7 @@ export default function DeveloperConnection() {
       .then((t) => setWhoamiText((t || "").trim()))
       .catch(() => setWhoamiText(""));
     loadSettings()
-      .then(() => loadLogs())
+      .then(() => { loadSmtpSettings(); return loadLogs(); })
       .catch((e) => {
         const s = String(e);
         if (/failed to fetch|networkerror/i.test(s)) setConnectionMsg(networkErrHint(s));
@@ -603,6 +693,40 @@ export default function DeveloperConnection() {
           {busy ? <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>…</span> : null}
         </div>
         <StatusBox text={connectionMsg} />
+      </SetupStep>
+
+      <SetupStep
+        step={1.5}
+        title="إعدادات البريد الإلكتروني (SMTP)"
+        summary="لإرسال إشعارات الاعتمادات للمديرين. يُحفظ في config/settings.json."
+      >
+        <label style={{ display: "block", marginBottom: 4 }}>خادم SMTP (ليس البريد الإلكتروني)</label>
+        <input value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com" style={{ width: "100%", marginBottom: 10 }} />
+        <label style={{ display: "block", marginBottom: 4 }}>المنفذ</label>
+        <input value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} placeholder="587" style={{ width: "100%", marginBottom: 10 }} />
+        <label style={{ display: "block", marginBottom: 4 }}>اسم المستخدم (بريد المرسل)</label>
+        <input value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} placeholder="your-email@gmail.com" style={{ width: "100%", marginBottom: 10 }} />
+        <label style={{ display: "block", marginBottom: 4 }}>كلمة المرور (App Password)</label>
+        <input type="password" value={smtpPass} onChange={(e) => setSmtpPass(e.target.value)} placeholder="App Password من Gmail" style={{ width: "100%", marginBottom: 10 }} />
+        <label style={{ display: "block", marginBottom: 4 }}>عنوان المرسل (From)</label>
+        <input value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)} placeholder="noreply@restaurant.local" style={{ width: "100%", marginBottom: 10 }} />
+        <label style={{ display: "block", marginBottom: 4 }}>رابط خادم API على الشبكة (HTTP — المنفذ 2288)</label>
+        <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://192.168.1.10:2288" style={{ width: "100%", marginBottom: 4 }} />
+        <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: "0.78rem" }}>
+          مثال هذا الجهاز: http://192.168.1.10:2288 — لا تستخدم HTTPS مع عنوان IP مباشر ما لم توجد شهادة TLS.
+        </p>
+        <label style={{ display: "block", marginBottom: 4 }}>رابط واجهة التطبيق على الشبكة (HTTP — المنفذ 9999)</label>
+        <input value={frontendUrl} onChange={(e) => setFrontendUrl(e.target.value)} placeholder="http://192.168.1.10:9999" style={{ width: "100%", marginBottom: 4 }} />
+        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "0.78rem" }}>
+          مثال هذا الجهاز: http://192.168.1.10:9999
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" className="btn btn-primary" onClick={() => void saveSmtp()} disabled={busy}>
+            حفظ إعدادات البريد
+          </button>
+          {busy ? <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>…</span> : null}
+        </div>
+        <StatusBox text={smtpMsg} />
       </SetupStep>
 
       <SetupStep

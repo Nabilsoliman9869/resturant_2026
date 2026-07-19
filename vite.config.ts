@@ -9,27 +9,27 @@ const mat3amNoCacheHeaders = {
 
 const mat3amProxyConfig = {
   "/__whoami__": {
-    target: "http://127.0.0.1:2288",
+    target: "http://localhost:2288",
     changeOrigin: true,
     timeout: 120_000,
     proxyTimeout: 120_000,
   },
   "/api": {
-    target: "http://127.0.0.1:2288",
+    target: "http://localhost:2288",
     changeOrigin: true,
     timeout: 120_000,
     proxyTimeout: 120_000,
   },
-  "/static": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/modules": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/app-settings": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/dashboard": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/dashboard.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/custody.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/create-agent.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/create_agent.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/link-invoices.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
-  "/link_invoices.html": { target: "http://127.0.0.1:2288", changeOrigin: true },
+  "/static": { target: "http://localhost:2288", changeOrigin: true },
+  "/modules": { target: "http://localhost:2288", changeOrigin: true },
+  "/app-settings": { target: "http://localhost:2288", changeOrigin: true },
+  "/dashboard": { target: "http://localhost:2288", changeOrigin: true },
+  "/dashboard.html": { target: "http://localhost:2288", changeOrigin: true },
+  "/custody.html": { target: "http://localhost:2288", changeOrigin: true },
+  "/create-agent.html": { target: "http://localhost:2288", changeOrigin: true },
+  "/create_agent.html": { target: "http://localhost:2288", changeOrigin: true },
+  "/link-invoices.html": { target: "http://localhost:2288", changeOrigin: true },
+  "/link_invoices.html": { target: "http://localhost:2288", changeOrigin: true },
 };
 
 export default defineConfig({

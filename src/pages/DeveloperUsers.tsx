@@ -11,9 +11,202 @@ type Row = {
   isActive: boolean;
   createdAt: string;
   specialistStationCode?: string;
+  email?: string;
+  /** هل للمستخدم PIN محفوظ (لا يُعاد الرقم نفسه من الخادم) */
+  hasPin?: boolean;
 };
 type AuditRow = { id: number; action: string; entity: string; actor: string; details: string; loggedAt: string };
 type SpecialistStationRow = { id: string; label: string; stationCode: string; active: boolean };
+
+function EmailCell({ value, onSave }: { value: string; onSave: (v: string) => Promise<boolean> }) {
+  const [val, setVal] = useState(value || "");
+  const [status, setStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
+  const [hint, setHint] = useState("");
+  const changed = val.trim() !== (value || "").trim();
+  useEffect(() => {
+    setVal(value || "");
+    setStatus("idle");
+    setHint("");
+  }, [value]);
+
+  async function save() {
+    if (status === "saving") return;
+    setStatus("saving");
+    setHint("");
+    try {
+      const ok = await onSave(val);
+      if (ok) {
+        setStatus("ok");
+        setHint("تم الحفظ");
+      } else {
+        setStatus("err");
+        setHint("فشل الحفظ");
+      }
+    } catch (e) {
+      setStatus("err");
+      setHint(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const bg =
+    status === "saving"
+      ? "#95a5a6"
+      : status === "ok"
+        ? "#27ae60"
+        : status === "err"
+          ? "#c0392b"
+          : changed
+            ? "#e67e22"
+            : "#7f8c8d";
+  const label = status === "saving" ? "…" : status === "ok" ? "تم" : status === "err" ? "فشل" : "حفظ";
+
+  return (
+    <div style={{ display: "grid", gap: 4, minWidth: 180 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          type="email"
+          value={val}
+          onChange={(e) => {
+            setVal(e.target.value);
+            setStatus("idle");
+            setHint("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+          }}
+          placeholder="-"
+          disabled={status === "saving"}
+          style={{ flex: 1, fontSize: "0.85rem", minWidth: 60 }}
+        />
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={status === "saving" || (!changed && status !== "err")}
+          title={hint || (changed ? "حفظ البريد" : "لا تغيير")}
+          style={{
+            padding: "3px 10px",
+            fontSize: "0.75rem",
+            whiteSpace: "nowrap",
+            borderRadius: 4,
+            border: "none",
+            cursor: status === "saving" || (!changed && status !== "err") ? "default" : "pointer",
+            background: bg,
+            color: "#fff",
+            opacity: !changed && status === "idle" ? 0.7 : 1,
+          }}
+        >
+          {label}
+        </button>
+      </div>
+      {hint ? (
+        <div style={{ fontSize: "0.72rem", color: status === "err" ? "#c0392b" : "#27ae60", lineHeight: 1.3 }}>
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PinCell({
+  hasPin,
+  onSave,
+}: {
+  hasPin: boolean;
+  onSave: (pin: string) => Promise<boolean>;
+}) {
+  const [val, setVal] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
+  const [hint, setHint] = useState("");
+
+  async function save() {
+    const pin = val.trim();
+    if (!pin) {
+      setStatus("err");
+      setHint("أدخل PIN");
+      return;
+    }
+    if (status === "saving") return;
+    setStatus("saving");
+    setHint("");
+    try {
+      const ok = await onSave(pin);
+      if (ok) {
+        setStatus("ok");
+        setHint("تم حفظ PIN");
+        setVal("");
+      } else {
+        setStatus("err");
+        setHint("فشل الحفظ");
+      }
+    } catch (e) {
+      setStatus("err");
+      setHint(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const bg =
+    status === "saving"
+      ? "#95a5a6"
+      : status === "ok"
+        ? "#27ae60"
+        : status === "err"
+          ? "#c0392b"
+          : val.trim()
+            ? "#e67e22"
+            : "#7f8c8d";
+  const label = status === "saving" ? "…" : status === "ok" ? "تم" : status === "err" ? "فشل" : "حفظ PIN";
+
+  return (
+    <div style={{ display: "grid", gap: 4, minWidth: 160 }}>
+      <div style={{ fontSize: "0.72rem", fontWeight: 800, color: hasPin ? "#047857" : "#b45309" }}>
+        {hasPin ? "معيّن ●●●●" : "غير معيّن"}
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="new-password"
+          value={val}
+          onChange={(e) => {
+            setVal(e.target.value);
+            setStatus("idle");
+            setHint("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+          }}
+          placeholder={hasPin ? "PIN جديد…" : "أدخل PIN…"}
+          disabled={status === "saving"}
+          style={{ flex: 1, fontSize: "0.85rem", minWidth: 70 }}
+        />
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={status === "saving" || !val.trim()}
+          title={hasPin ? "تغيير PIN" : "تعيين PIN"}
+          style={{
+            padding: "3px 10px",
+            fontSize: "0.75rem",
+            whiteSpace: "nowrap",
+            borderRadius: 4,
+            border: "none",
+            cursor: status === "saving" || !val.trim() ? "default" : "pointer",
+            background: bg,
+            color: "#fff",
+            opacity: !val.trim() && status === "idle" ? 0.7 : 1,
+          }}
+        >
+          {label}
+        </button>
+      </div>
+      {hint ? (
+        <div style={{ fontSize: "0.72rem", color: status === "err" ? "#c0392b" : "#27ae60", lineHeight: 1.3 }}>
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const ALL_ROLES: RoleId[] = [
   "cashier",
@@ -38,6 +231,7 @@ export default function DeveloperUsers() {
   const [role, setRole] = useState<RoleId>("cashier");
   const [pin, setPin] = useState("");
   const [specialistStationCode, setSpecialistStationCode] = useState("");
+  const [email, setEmail] = useState("");
   const [stations, setStations] = useState<SpecialistStationRow[]>([]);
   const [msg, setMsg] = useState("");
 
@@ -102,6 +296,7 @@ export default function DeveloperUsers() {
           name: name.trim() || loginName.trim(),
           role,
           pin: pin.trim(),
+          email: email.trim(),
           specialistStationCode: role === "kitchen_specialist" ? specialistStationCode.trim().toLowerCase() : "",
         }),
       });
@@ -110,6 +305,7 @@ export default function DeveloperUsers() {
       setLoginName("");
       setName("");
       setPin("");
+      setEmail("");
       setSpecialistStationCode("");
       await load();
       setMsg("تم إنشاء المستخدم.");
@@ -134,21 +330,24 @@ export default function DeveloperUsers() {
     }
   }
 
-  async function resetPin(u: Row) {
-    const newPin = window.prompt(`رمز جديد للمستخدم ${u.login}`, "123");
-    if (!newPin) return;
+  async function resetPin(u: Row, newPin?: string) {
+    const pin = (newPin ?? window.prompt(`رمز PIN جديد للمستخدم ${u.login}`, "") ?? "").trim();
+    if (!pin) return false;
     setMsg("");
     try {
       const r = await fetch(`${getApiBase()}/api/auth/users/${encodeURIComponent(u.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: newPin }),
+        body: JSON.stringify({ pin }),
       });
       const j = await r.json().catch(() => ({} as { detail?: string }));
       if (!r.ok) throw new Error(j.detail || "تعذر تغيير الرمز");
-      setMsg("تم تغيير الرمز.");
+      await load();
+      setMsg(`تم حفظ PIN لـ ${u.login}.`);
+      return true;
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
+      throw e;
     }
   }
 
@@ -169,6 +368,32 @@ export default function DeveloperUsers() {
     }
   }
 
+  async function editEmail(u: Row, nextEmail: string): Promise<boolean> {
+    setMsg("");
+    const email = nextEmail.trim();
+    if (email && !email.includes("@")) {
+      setMsg("بريد غير صالح");
+      throw new Error("بريد غير صالح");
+    }
+    const r = await fetch(`${getApiBase()}/api/auth/users/${encodeURIComponent(u.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const j = await r.json().catch(() => ({} as { detail?: string; message?: string; userFieldsChanged?: boolean }));
+    if (!r.ok) {
+      const detail = j.detail || "تعذر تحديث البريد";
+      setMsg(String(detail));
+      throw new Error(String(detail));
+    }
+    if (j.userFieldsChanged === false && j.message === "لا تغييرات") {
+      setMsg("لم يُحفظ البريد: الخادم لم يطبّق التعديل.");
+      throw new Error("لم يُحفظ البريد");
+    }
+    await load();
+    setMsg(`تم تحديث بريد ${u.login}.`);
+    return true;
+  }
   async function removeUser(u: Row) {
     const ok = window.confirm(`حذف المستخدم ${u.login} ؟`);
     if (!ok) return;
@@ -186,7 +411,10 @@ export default function DeveloperUsers() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>مستخدمون وأدوار</h2>
+      <h2 style={{ marginTop: 0 }}>مستخدمو التطبيق</h2>
+      <p style={{ color: "var(--muted)", fontSize: "0.88rem", marginTop: "-0.35rem", marginBottom: "0.85rem" }}>
+        عيّن أو غيّر <strong>PIN</strong> من عمود PIN في الجدول أدناه (مطلوب عند تفعيل «جهاز مشترك» في نقاط البيع المشتركة).
+      </p>
       <form className="card" onSubmit={add} style={{ maxWidth: 620, marginBottom: "1rem" }}>
         <div style={{ display: "grid", gap: 10 }}>
           <input value={loginName} onChange={(e) => setLoginName(e.target.value)} placeholder="اسم المستخدم (login)" />
@@ -214,7 +442,14 @@ export default function DeveloperUsers() {
                 ))}
             </select>
           ) : null}
-          <input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="رمز الدخول" />
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="البريد الإلكتروني (اختياري)" />
+          <input
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            placeholder="PIN / رمز الدخول (إلزامي عند الإضافة)"
+            inputMode="numeric"
+            autoComplete="new-password"
+          />
           <button type="submit" className="btn btn-primary">
             إضافة مستخدم
           </button>
@@ -231,6 +466,8 @@ export default function DeveloperUsers() {
                 <th>الاسم</th>
                 <th>الدور</th>
                 <th>المحطة</th>
+                <th>البريد</th>
+                <th>PIN</th>
                 <th>الحالة</th>
                 <th />
               </tr>
@@ -259,13 +496,16 @@ export default function DeveloperUsers() {
                       r.specialistStationCode || "-"
                     )}
                   </td>
+                  <td>
+                    <EmailCell value={r.email || ""} onSave={(v) => editEmail(r, v)} />
+                  </td>
+                  <td>
+                    <PinCell hasPin={Boolean(r.hasPin)} onSave={(p) => resetPin(r, p)} />
+                  </td>
                   <td>{r.isActive ? "مفعل" : "موقوف"}</td>
                   <td style={{ display: "flex", gap: 6, padding: "0.4rem" }}>
                     <button type="button" className="btn btn-ghost" onClick={() => void toggleActive(r)}>
                       {r.isActive ? "تعطيل" : "تفعيل"}
-                    </button>
-                    <button type="button" className="btn btn-ghost" onClick={() => void resetPin(r)}>
-                      تغيير الرمز
                     </button>
                     <button type="button" className="btn btn-ghost" onClick={() => void removeUser(r)}>
                       حذف

@@ -1,4 +1,4 @@
-@echo off
+d @echo off
 setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
@@ -42,6 +42,9 @@ echo يجب أن ترى في whoami: VERIFY_SCHEMA_REVISION=11 و FEATURE_GUEST_
 echo و API_FILE_PATH=مسار هذا المشروع\backend\api_server.py
 echo.
 echo إيقاف الخادم: Ctrl+C
+echo.
+echo ملاحظة: للتشغيل المستمر مع إعادة تشغيل تلقائية عند أي خروج،
+echo استخدم بدلاً من ذلك: run_api_watchdog.bat
 echo ========================================
 if "%MAT3AM_PY%"=="python" (
   python api_server.py

@@ -8,10 +8,9 @@ import { useTerminalLock } from "../context/TerminalLockContext";
 
 type Mat3amActorPayload = { id: string; login: string; name: string; role: string };
 
-/** استطلاع أسرع حتى تصل الرسائل بين الأقسام بلا انتظار طويل (كان 8 ث). */
-/** استطلاع الوارد — أبطأ لتقليل ضغط ODBC على Railway */
-/** مزامنة مع RESTAURANT_POLL_MS — تقليل ضغط ODBC على Railway */
+/** استطلاع الوارد — مزامنة مع شاشات التشغيل لتقليل ضغط الشبكة/SQL */
 const POLL_MS = 18_000;
+const INBOX_BASES = ["/api/restaurant/cashier/role-inbox", "/api/restaurant/role-inbox"] as const;
 
 type InboxItem = {
   id: string;
@@ -97,12 +96,16 @@ function RedInboxBell({
   const [busyNoOrderId, setBusyNoOrderId] = useState<string | null>(null);
   const [transferMsg, setTransferMsg] = useState("");
   const [loadErr, setLoadErr] = useState("");
-  const inboxBases = ["/api/restaurant/cashier/role-inbox", "/api/restaurant/role-inbox"];
   const seenIdsRef = useRef<Set<string>>(new Set());
   const skipBeepRef = useRef(true);
   const processedTerminalActionIdsRef = useRef<Set<string>>(new Set());
+  const loadInFlightRef = useRef(false);
+  const openRef = useRef(open);
+  openRef.current = open;
 
   const load = useCallback(async () => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     try {
       setLoadErr("");
       let lastErr = "";
@@ -110,7 +113,7 @@ function RedInboxBell({
         userId && String(userId).trim()
           ? `&userId=${encodeURIComponent(String(userId).trim())}`
           : "";
-      for (const p of inboxBases) {
+      for (const p of INBOX_BASES) {
         const r = await fetch(`${base}${p}?forRole=${encodeURIComponent(role)}${uidQ}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache" },
@@ -136,7 +139,7 @@ function RedInboxBell({
               }
             }
             const repeatManagerBeep =
-              !open && roleHasManagerOpsAccess(role) && hasPendingManagerApproval;
+              !openRef.current && roleHasManagerOpsAccess(role) && hasPendingManagerApproval;
             if (hasNew || repeatManagerBeep) playInterDeptInboxBeep();
           }
           setItems(next);
@@ -151,8 +154,10 @@ function RedInboxBell({
       setLoadErr(lastErr || "HTTP 404");
     } catch (e) {
       setLoadErr(String(e));
+    } finally {
+      loadInFlightRef.current = false;
     }
-  }, [base, role, inboxBases, userId]);
+  }, [base, role, userId]);
 
   useEffect(() => {
     skipBeepRef.current = true;
@@ -225,7 +230,7 @@ function RedInboxBell({
   const dismiss = async (id: string) => {
     setBusyId(id);
     try {
-      for (const p of inboxBases) {
+      for (const p of INBOX_BASES) {
         const r = await fetch(`${base}${p}/${encodeURIComponent(id)}/dismiss`, { method: "PATCH" });
         if (r.ok) {
           await load();

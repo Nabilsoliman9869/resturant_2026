@@ -1,5 +1,6 @@
 import { getApiBase } from "./apiBase";
 import { tryParseJson } from "./tryParseJson";
+import { repairArabicDisplayText } from "../auth/displayUser";
 
 export const DAILY_MENU_STORAGE_KEY = "mat3am_daily_menu_v1";
 
@@ -25,6 +26,24 @@ export type DailyMenuScheduleEntry = {
 export type DailyMenuScheduleResponse = {
   entries: DailyMenuScheduleEntry[];
 };
+
+function normalizeScheduleItem(raw: DailyMenuScheduleItem): DailyMenuScheduleItem {
+  return {
+    ProductGuide: String(raw.ProductGuide || "").trim(),
+    ProductName: repairArabicDisplayText(String(raw.ProductName || "")),
+    imageUrl: raw.imageUrl ? String(raw.imageUrl) : undefined,
+    selected: raw.selected,
+  };
+}
+
+function normalizeScheduleEntry(raw: DailyMenuScheduleEntry): DailyMenuScheduleEntry {
+  const items = Array.isArray(raw.items) ? raw.items.map((it) => normalizeScheduleItem(it as DailyMenuScheduleItem)) : [];
+  return {
+    dateFrom: String(raw.dateFrom || "").trim(),
+    dateTo: String(raw.dateTo || "").trim(),
+    items,
+  };
+}
 
 export function todayYmd(): string {
   const d = new Date();
@@ -160,7 +179,7 @@ export async function fetchDailyMenuSchedule(): Promise<{
       };
     }
     if (!Array.isArray(j.entries)) return { entries: [] };
-    return { entries: j.entries };
+    return { entries: j.entries.map((e) => normalizeScheduleEntry(e as DailyMenuScheduleEntry)) };
   } catch (e) {
     return { entries: [], error: String(e) };
   }
@@ -207,10 +226,11 @@ export function scheduleRestrictionForDate(
 
 export async function pushDailyMenuSchedule(entries: DailyMenuScheduleEntry[]): Promise<{ ok: boolean; detail?: string }> {
   try {
+    const normalized = (entries || []).map((e) => normalizeScheduleEntry(e));
     const r = await fetch(`${getApiBase()}/api/restaurant/daily-menu-schedule`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries }),
+      body: JSON.stringify({ entries: normalized }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return { ok: false, detail: typeof j.detail === "string" ? j.detail : "فشل الحفظ" };

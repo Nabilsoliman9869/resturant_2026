@@ -5,8 +5,10 @@ import { normalizeFloorPlanDocument } from "../lib/floorPlanDocument";
 import { normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
 import { safeFetch } from "../lib/safeFetch";
+import { getBusinessDayWindow } from "../lib/businessDay";
 import { type FloorPlan, type FloorTable, type TableLiveMap, type TableLiveStatus } from "../lib/floorPlanModel";
 import { FloorPlanSvgView } from "./FloorPlanSvgView";
+import { HallDayReportPanel } from "./HallDayReportPanel";
 
 type TableRec = {
   id: string;
@@ -140,9 +142,11 @@ function mergeLiveMaps(maps: TableLiveMap[]): TableLiveMap {
 function LegacyTablesLayout({
   tables,
   busyIds,
+  onTableClick,
 }: {
   tables: TableRec[];
   busyIds: Set<string>;
+  onTableClick?: (t: TableRec) => void;
 }) {
   const layout = useMemo(() => {
     if (!tables.length) {
@@ -186,9 +190,11 @@ function LegacyTablesLayout({
           border = "#64748b";
         }
         return (
-          <div
+          <button
             key={t.id}
-            title={tableLabel(t)}
+            type="button"
+            title={`${tableLabel(t)} — تقرير اليوم التشغيلي`}
+            onClick={() => onTableClick?.(t)}
             style={{
               position: "absolute",
               left: t.lx,
@@ -207,10 +213,11 @@ function LegacyTablesLayout({
               textAlign: "center",
               padding: 4,
               boxShadow: occ ? "0 0 0 2px rgba(251,191,36,0.5)" : undefined,
+              cursor: onTableClick ? "pointer" : "default",
             }}
           >
             {tableLabel(t)}
-          </div>
+          </button>
         );
       })}
     </div>
@@ -227,6 +234,24 @@ export default function FloorPlanLive() {
   const [planStatus, setPlanStatus] = useState<PlanStatus>("missing");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(true);
+  const [hallReportOpen, setHallReportOpen] = useState(false);
+  const [hallReportTableId, setHallReportTableId] = useState<string | null>(null);
+  const [hallReportTableName, setHallReportTableName] = useState<string | null>(null);
+  const businessDayLabel = useMemo(() => getBusinessDayWindow().labelAr, []);
+
+  const openHallReport = useCallback((tableId?: string | null, tableName?: string | null) => {
+    setHallReportTableId(tableId ? String(tableId) : null);
+    setHallReportTableName(tableName ? String(tableName) : null);
+    setHallReportOpen(true);
+  }, []);
+
+  const onSvgTableClick = useCallback(
+    (ft: FloorTable) => {
+      const linked = String(ft.linkedTableId || ft.id || "").trim();
+      openHallReport(linked, String(ft.label || "").trim() || null);
+    },
+    [openHallReport],
+  );
 
   const applySnapshot = useCallback(
     (snap: NonNullable<Awaited<ReturnType<typeof fetchOperationalSnapshot>>["data"]>) => {
@@ -360,6 +385,15 @@ export default function FloorPlanLive() {
                 {f.name}
               </button>
             ))}
+          <span style={{ fontWeight: 700, color: "#0f172a" }}>{businessDayLabel}</span>
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ fontSize: "0.82rem", fontWeight: 800 }}
+            onClick={() => openHallReport(null, null)}
+          >
+            مجمع
+          </button>
           <span>
             <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: "#22c55e", marginLeft: 6 }} />
             متاحة
@@ -397,7 +431,7 @@ export default function FloorPlanLive() {
       )}
 
       {plan && plan.tables.length > 0 ? (
-        <FloorPlanSvgView plan={plan} live={live} />
+        <FloorPlanSvgView plan={plan} live={live} onTableClick={onSvgTableClick} />
       ) : (
         <div
           style={{
@@ -412,9 +446,20 @@ export default function FloorPlanLive() {
             padding: 8,
           }}
         >
-          <LegacyTablesLayout tables={tables} busyIds={busyIds} />
+          <LegacyTablesLayout
+            tables={tables}
+            busyIds={busyIds}
+            onTableClick={(t) => openHallReport(String(t.id), tableLabel(t))}
+          />
         </div>
       )}
+      <HallDayReportPanel
+        open={hallReportOpen}
+        onClose={() => setHallReportOpen(false)}
+        tableId={hallReportTableId}
+        tableName={hallReportTableName}
+        apiBase={base}
+      />
     </div>
   );
 }

@@ -298,7 +298,7 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
                 />
               </label>
               <div style={{ color: "var(--muted)", fontSize: "0.77rem", marginTop: 8, lineHeight: 1.5 }}>
-                بعد الاعتماد ستُفتح طباعة الشيك مباشرة على الفاتورة الحقيقية، ويُسجَّل حق الكابتن في الطباعة مرة واحدة.
+                بعد الاعتماد تُغلق نافذة طلب الحساب وتظهر الشيكات في قائمة الشيكات. يمكن بعد ذلك طباعة نسخة 1 ثم نسخة 2 وهكذا من نفس الشيك.
               </div>
             </div>
 

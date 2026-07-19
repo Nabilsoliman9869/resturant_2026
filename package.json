@@ -7,9 +7,11 @@
     "dev": "vite",
     "dev:fresh": "vite --force",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:op-manager": "node scripts/verify-operation-manager-policy.cjs"
   },
   "dependencies": {
+    "esbuild": "^0.28.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.6.0",

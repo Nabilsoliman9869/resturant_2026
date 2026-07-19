@@ -1,0 +1,394 @@
+/* تقرير اليوم التشغيلي — ألوان داكنة صريحة ضد ثيم الشل الداكن */
+
+.hall-day-report__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.5);
+  z-index: 1200;
+}
+
+.hall-day-report {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(880px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  z-index: 1201;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 2px solid #0284c7;
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(2, 6, 23, 0.4);
+  padding: 1rem 1.15rem 1.2rem;
+  direction: rtl;
+  text-align: right;
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, system-ui, sans-serif;
+}
+
+.hall-day-report,
+.hall-day-report * {
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.hall-day-report__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 12px;
+}
+
+.hall-day-report__title {
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: #0f172a !important;
+  line-height: 1.35;
+}
+
+.hall-day-report__subtitle {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #334155 !important;
+}
+
+.hall-day-report__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hall-day-report__btn {
+  font-weight: 800;
+  font-size: 0.84rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #94a3b8;
+  background: #f8fafc;
+  color: #0f172a !important;
+  cursor: pointer;
+}
+
+.hall-day-report__btn--primary {
+  background: #ea580c;
+  border-color: #c2410c;
+  color: #ffffff !important;
+}
+
+.hall-day-report__btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.hall-day-report__muted {
+  margin-top: 12px;
+  color: #475569 !important;
+  font-weight: 600;
+}
+
+.hall-day-report__error {
+  margin-top: 12px;
+  color: #b91c1c !important;
+  font-weight: 700;
+}
+
+.hall-day-report__empty {
+  margin: 8px 0 0;
+  color: #475569 !important;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.hall-day-report__section {
+  margin-top: 16px;
+}
+
+.hall-day-report__section-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #0f172a !important;
+  border-right: 3px solid #0284c7;
+  padding-right: 8px;
+}
+
+.hall-day-report__sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hall-day-report__session {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.hall-day-report__session-head {
+  margin-bottom: 8px;
+}
+
+.hall-day-report__session-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #0f172a !important;
+  font-size: 0.95rem;
+}
+
+.hall-day-report__session-title strong {
+  color: #0f172a !important;
+  font-weight: 900;
+}
+
+.hall-day-report__badge {
+  display: inline-block;
+  background: #0f172a;
+  color: #ffffff !important;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.hall-day-report__chip {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #e2e8f0;
+  color: #1e293b !important;
+  border: 1px solid #94a3b8;
+}
+
+.hall-day-report__chip--guest {
+  background: #d1fae5;
+  border-color: #059669;
+  color: #065f46 !important;
+}
+
+.hall-day-report__session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1e293b !important;
+}
+
+.hall-day-report__session-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #1e293b !important;
+}
+
+.hall-day-report__session-kpis b {
+  color: #0f172a !important;
+  font-weight: 900;
+}
+
+.hall-day-report__block {
+  margin-top: 8px;
+}
+
+.hall-day-report__block-title {
+  font-size: 0.82rem;
+  font-weight: 900;
+  color: #0f172a !important;
+  margin-bottom: 6px;
+}
+
+.hall-day-report__scroll {
+  overflow: auto;
+  max-height: 240px;
+}
+
+.hall-day-report__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  background: #ffffff;
+}
+
+.hall-day-report__table th {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+  font-weight: 900;
+  text-align: right;
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+
+.hall-day-report__table td {
+  color: #0f172a !important;
+  font-weight: 600;
+  text-align: right;
+  padding: 7px 8px;
+  border: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.hall-day-report__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.hall-day-report__stat {
+  text-align: center;
+  padding: 10px 6px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 1px solid #94a3b8;
+}
+
+.hall-day-report__stat--danger {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.hall-day-report__stat-value {
+  font-size: 1.08rem;
+  font-weight: 900;
+  color: #0f172a !important;
+}
+
+.hall-day-report__stat--danger .hall-day-report__stat-value {
+  color: #b91c1c !important;
+}
+
+.hall-day-report__stat-label {
+  margin-top: 2px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #1e293b !important;
+}
+
+.hall-day-report__footer {
+  margin-top: 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569 !important;
+}
+
+/* —— فاتورة جلسة مبسّطة —— */
+.hall-day-report__invoice {
+  background: #ffffff !important;
+  border: 1px solid #94a3b8;
+}
+
+.hall-day-report__invoice-head {
+  margin-bottom: 10px;
+}
+
+.hall-day-report__invoice-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+}
+
+.hall-day-report__invoice-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hall-day-report__meta-k {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #334155 !important;
+}
+
+.hall-day-report__meta-v {
+  font-size: 0.9rem;
+  font-weight: 900;
+  color: #0f172a !important;
+}
+
+.hall-day-report__table--invoice {
+  margin-top: 4px;
+}
+
+.hall-day-report__row--cancelled td {
+  color: #94a3b8 !important;
+  text-decoration: line-through;
+}
+
+.hall-day-report__totals {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1;
+  display: grid;
+  gap: 6px;
+}
+
+.hall-day-report__totals > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #1e293b !important;
+}
+
+.hall-day-report__totals > div span {
+  color: #334155 !important;
+}
+
+.hall-day-report__totals > div strong {
+  color: #0f172a !important;
+  font-weight: 900;
+}
+
+.hall-day-report__totals-grand {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 2px solid #0f172a;
+  font-size: 1rem !important;
+}
+
+.hall-day-report__totals-grand span,
+.hall-day-report__totals-grand strong {
+  color: #047857 !important;
+  font-size: 1.05rem;
+}
+
+.hall-day-report__mini-list {
+  margin: 0;
+  padding: 0 1.1rem 0 0;
+  list-style: disc;
+  color: #0f172a !important;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.hall-day-report__mini-list li {
+  color: #0f172a !important;
+}
+

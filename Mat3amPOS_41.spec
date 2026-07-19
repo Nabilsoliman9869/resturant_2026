@@ -38,7 +38,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='mat3amPos_38',
+    name='mat3amPos_41',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

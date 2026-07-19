@@ -9,6 +9,7 @@ import {
 } from "../../lib/dailyMenuSettings";
 import { getApiBase } from "../../lib/apiBase";
 import { tryParseJson } from "../../lib/tryParseJson";
+import { repairArabicDisplayText } from "../../auth/displayUser";
 
 export default function MenusDailySettingsPage() {
   const base = getApiBase();
@@ -90,7 +91,10 @@ export default function MenusDailySettingsPage() {
       setSearchResults(
         arr.map((p) => {
           const row = p as Record<string, unknown>;
-          return { CardGuide: String(row.CardGuide ?? ""), ProductName: String(row.ProductName || "") };
+          return {
+            CardGuide: String(row.CardGuide ?? ""),
+            ProductName: repairArabicDisplayText(String(row.ProductName || "")),
+          };
         }),
       );
     } catch (e) {
@@ -108,9 +112,10 @@ export default function MenusDailySettingsPage() {
 
   function addRangeItem(it: { CardGuide: string; ProductName: string }) {
     if (!it.CardGuide) return;
+    const safeName = repairArabicDisplayText(it.ProductName);
     setRangeItems((prev) => {
       if (prev.some((x) => x.ProductGuide === it.CardGuide)) return prev;
-      return [...prev, { ProductGuide: it.CardGuide, ProductName: it.ProductName }];
+      return [...prev, { ProductGuide: it.CardGuide, ProductName: safeName }];
     });
   }
 
@@ -211,7 +216,7 @@ export default function MenusDailySettingsPage() {
           {entries.map((e, i) => (
             <Fragment key={`${e.dateFrom}-${e.dateTo}-${i}`}>
               <div>{e.dateFrom} → {e.dateTo}</div>
-              <div>{e.items.map((it) => it.ProductName).join("، ")}</div>
+              <div>{e.items.map((it) => repairArabicDisplayText(it.ProductName)).join("، ")}</div>
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setEntries((prev) => prev.filter((_, idx) => idx !== i))}>حذف</button>
               </div>

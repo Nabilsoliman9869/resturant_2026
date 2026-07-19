@@ -152,11 +152,15 @@ export default function ReceptionPage() {
           return;
         }
       } catch {}
-      await fetch(`${base}/api/restaurant/tables/${encodeURIComponent(modal.id)}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "occupied" }),
-      });
+      try {
+        await fetch(`${base}/api/restaurant/tables/${encodeURIComponent(modal.id)}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "occupied" }),
+        });
+      } catch {
+        /* ignore: backend already attempts to update status */
+      }
       setModal(null);
       await load();
       setMsg(`تم إسكان العملاء على ${modal.name}`);

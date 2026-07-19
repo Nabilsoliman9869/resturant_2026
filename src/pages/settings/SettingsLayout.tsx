@@ -16,6 +16,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
     {
       title: "1. النظام والتعريفات",
       items: [
+        { to: "playbook", label: "📖 دليل تشغيل النظام", hint: "الدليل الشامل لفهم تأثير كل إعداد على سير العمل" },
         { to: "master-data", label: "التعريفات الأساسية", hint: "يؤثر على: الوحدات، العملات، ومجموعات البيانات المرجعية في كل الشاشات" },
         { to: "connection", label: "اتصال القاعدة", hint: "يؤثر على: حفظ وقراءة كل الإعدادات والبيانات من SQL Server" },
         { to: "init-db", label: "تهيئة SQL", hint: "يؤثر على: إنشاء الجداول الأولية قبل أي تشغيل فعلي" },
@@ -96,6 +97,10 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
       {
         title: "1. الصالة والمتابعة اليومية",
         items: [
+          { to: "playbook", label: "📖 دليل تشغيل النظام", hint: "الدليل الشامل لفهم تأثير كل إعداد على سير العمل" },
+          { to: "venue", label: "المكان والطابق", hint: "يؤثر على: إعدادات الصالة المستخدمة فعلياً اليوم" },
+          { to: "floor-editor", label: "مخطط الصالة (رسم)", hint: "يؤثر على: توزيع الطاولات على المخطط التشغيلي" },
+          { to: "tables", label: "الطاولات والمناطق", hint: "يؤثر على: حالة الطاولة وتوزيعها اليومي" },
           { to: "kitchen-ops", label: "سياسات تشغيل الصالة", hint: "يؤثر على: التسكين، التنبيهات، وسير الخدمة اليومي" },
           { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "يؤثر على: من يعمل اليوم ومن يُسمح له بالدخول" },
           { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "يؤثر على: الطاولات المرئية لكل جرسون في الوردية" },
@@ -103,17 +108,29 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
         ],
       },
       {
-        title: "2. المطبخ والتجهيز الفوري",
+        title: "2. المنيو والمطبخ والتجهيز",
         items: [
+          { to: "menus", label: "المنيو", hint: "يؤثر على: تفعيل/تعطيل أصناف اليوم" },
+          { to: "display-categories", label: "تصنيفات عرض المنيو", hint: "يؤثر على: ترتيب فئات الشاشة للجرسون" },
+          { to: "product-images", label: "صور المنتجات", hint: "يؤثر على: وضوح شاشة الطلب اليومية" },
+          { to: "price-lists", label: "قوائم الأسعار", hint: "يؤثر على: أسعار البيع الفعلية اليوم" },
+          { to: "modifier-groups", label: "إعدادات الشرائح (Wizard)", hint: "يؤثر على: اختيارات الصنف أثناء الطلب" },
+          { to: "product-modifier-links", label: "بروفايلات الأصناف", hint: "يؤثر على: الشرائح المربوطة بكل صنف" },
+          { to: "addons", label: "الإضافات (كتالوج)", hint: "يؤثر على: الإضافات السريعة في شاشة الطلب" },
           { to: "pos-kds", label: "شاشة المطبخ (KDS)", hint: "يؤثر على: عرض الطلبات والتنبيه عند التباطؤ" },
           { to: "pos-prep-times", label: "زمن التحضير لكل صنف", hint: "يؤثر على: وقت التسليم المتوقع وقياس الأداء" },
           { to: "kitchen-item-stop", label: "إيقاف أصناف المطبخ", hint: "يؤثر على: ظهور الصنف للبيع والطلب" },
         ],
       },
       {
-        title: "3. السياسات الساخنة",
+        title: "3. السياسات المالية اليومية",
         items: [
           { to: "minimum-charge", label: "الحد الأدنى للطاولة", hint: "يؤثر على: الحد الأدنى التشغيلي لكل جلسة وحسابها" },
+          { to: "pos-tax", label: "الضريبة والخدمة", hint: "يؤثر على: إجمالي الفاتورة في اليوم التشغيلي" },
+          { to: "pos-promos", label: "العروض والتخفيضات", hint: "يؤثر على: خصومات اليوم" },
+          { to: "payment-routing", label: "ربط التحصيل (حسابات)", hint: "يؤثر على: توجيه التحصيل حسب وسيلة الدفع" },
+          { to: "customer-vip", label: "تعريف العملاء والمالكين", hint: "يؤثر على: Owner/VIP خلال التشغيل" },
+          { to: "kids-area-packages", label: "باقات منطقة الأطفال", hint: "يؤثر على: تسعير خدمات الأطفال" },
         ],
       },
       {
@@ -126,6 +143,21 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
           { to: `${roleBase}/reports`, label: "تقارير", absolute: true, hint: "يؤثر على: تحليل الأداء والقرارات التشغيلية" },
           { to: `${roleBase}/flash-report`, label: "تقرير سريع", absolute: true, hint: "يؤثر على: لقطة فورية للوضع الحالي" },
           { to: `${roleBase}/table-sessions-report`, label: "تقرير جلسات الطاولات", absolute: true, hint: "يؤثر على: تحليل الجلسات، الطلبات، وقياسات الزمن" },
+          { to: `${roleBase}/pos`, label: "نقطة البيع", absolute: true, hint: "يؤثر على: تشغيل POS اليومي" },
+          { to: `${roleBase}/purchases`, label: "المشتريات", absolute: true, hint: "يؤثر على: احتياجات الشراء اليومية" },
+          { to: `${roleBase}/cash-expense`, label: "صرف مصروفات", absolute: true, hint: "يؤثر على: المصروفات التشغيلية" },
+          { to: `${roleBase}/cashflow`, label: "التدفق النقدي", absolute: true, hint: "يؤثر على: متابعة النقدية" },
+        ],
+      },
+      {
+        title: "5. التكاليف اليومية",
+        items: [
+          { to: "costing", label: "التكاليف اليومية", hint: "يؤثر على: تكلفة التشغيل اليومية" },
+          { to: "daily-opening-custody", label: "عهدة أول اليوم", hint: "يؤثر على: رصيد بداية الوردية" },
+          { to: "daily-return", label: "المسترد والمرتجعات", hint: "يؤثر على: تسويات اليوم" },
+          { to: "daily-overhead", label: "مصاريف التشغيل", hint: "يؤثر على: مصروفات اليوم" },
+          { to: "daily-cost-engine", label: "محرك التكلفة", hint: "يؤثر على: تحليل التكلفة اللحظي" },
+          { to: "daily-result", label: "النتيجة اليومية", hint: "يؤثر على: ربح/خسارة اليوم" },
         ],
       },
     ];
@@ -280,3 +312,5 @@ export default function SettingsLayout() {
     </div>
   );
 }
+
+

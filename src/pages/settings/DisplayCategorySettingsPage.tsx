@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiBase } from "../../lib/apiBase";
+import { repairArabicDisplayText } from "../../auth/displayUser";
 
 interface ProductGroup {
   CardGuide: string;
@@ -36,10 +37,15 @@ export default function DisplayCategorySettingsPage() {
       const r = await fetch(`${base}/api/product-groups?displayMenu=true`);
       const j = await r.json();
       const list: ProductGroup[] = Array.isArray(j?.groups) ? j.groups : [];
-      setGroups(list);
+      const normalizedList = list.map((g) => ({
+        ...g,
+        GroupName: repairArabicDisplayText(String(g.GroupName || "")),
+        DisplayCategory: repairArabicDisplayText(String(g.DisplayCategory || "")),
+      }));
+      setGroups(normalizedList);
       const init: Record<string, string> = {};
       const newInputs: Record<string, string> = {};
-      for (const g of list) {
+      for (const g of normalizedList) {
         init[g.CardGuide] = g.DisplayCategory || "";
         newInputs[g.CardGuide] = "";
       }

@@ -11,6 +11,8 @@ import { tryParseJson } from "../lib/tryParseJson";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import { buildSegmentedTablesFromFloorPlan, type SegmentedTableRow } from "../lib/restaurantTableView";
 import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantOperationalSnapshot";
+import { getBusinessDayWindow, isInCurrentBusinessDay } from "../lib/businessDay";
+import { HallDayReportPanel } from "../components/HallDayReportPanel";
 import {
   effectiveTableIdsForUser,
   normalizeAssignedTableId,
@@ -46,6 +48,9 @@ type TableSession = {
   guestApprovalPending?: boolean;
   customerType?: string;
   customerTypeLocked?: boolean;
+  mergedIntoSessionId?: string;
+  mergedSourceSessionIds?: string[];
+  mergeId?: string;
   billingProfile?: {
     active?: boolean;
     source?: string;
@@ -73,6 +78,16 @@ type GuestApprovalRequestRow = {
   sessionId?: string;
   status?: string;
   type?: string;
+};
+type TableRelationMarker = {
+  tableId?: string;
+  action?: string;
+  direction?: string;
+  otherTableId?: string;
+  otherTableDisplayName?: string;
+  tableDisplayName?: string;
+  at?: string;
+  scope?: "active_session" | "cleaning_context" | string;
 };
 type TableReport = {
   tableName: string;
@@ -116,6 +131,7 @@ export default function WaiterTablesPage() {
   const [msg, setMsg] = useState("");
   const [sessions, setSessions] = useState<TableSession[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [relationByTable, setRelationByTable] = useState<Record<string, TableRelationMarker>>({});
   const [report, setReport] = useState<TableReport | null>(null);
   const [policy, setPolicy] = useState({ servicePercent: 12, vatPercent: 14, serviceBeforeVat: true });
   const [defaultMinimumCharge, setDefaultMinimumCharge] = useState(0);
@@ -145,6 +161,7 @@ export default function WaiterTablesPage() {
   const [tableJumpQuery, setTableJumpQuery] = useState("");
   const [tableJumpHighlightId, setTableJumpHighlightId] = useState<string | null>(null);
   const tableCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const loadTablesInFlight = useRef(false);
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
   const [approvalModalSessionId, setApprovalModalSessionId] = useState<string>("");
   const [approvalDecisionId, setApprovalDecisionId] = useState("approve_guest_session");
@@ -155,6 +172,10 @@ export default function WaiterTablesPage() {
   const [agentPickerSearch, setAgentPickerSearch] = useState("");
   const [agentPickerResults, setAgentPickerResults] = useState<OwnersVipAgent[]>([]);
   const [agentPickerBusy, setAgentPickerBusy] = useState(false);
+  const [hallReportOpen, setHallReportOpen] = useState(false);
+  const [hallReportTableId, setHallReportTableId] = useState<string | null>(null);
+  const [hallReportTableName, setHallReportTableName] = useState<string | null>(null);
+  const businessDayLabel = useMemo(() => getBusinessDayWindow().labelAr, []);
 
   /**
    * قالب صالح للعرض = مفعّل **و** عنده ما يميّزه (اسم محدد أو عميل مربوط).
@@ -195,11 +216,18 @@ export default function WaiterTablesPage() {
   }, [tempCaptainTransfers]);
 
   function isTodayIso(iso?: string): boolean {
-    if (!iso) return false;
-    const d = new Date(iso);
-    if (!Number.isFinite(d.getTime())) return false;
-    const n = new Date();
-    return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+    return isInCurrentBusinessDay(iso);
+  }
+
+  function openHallDayReport(table?: RestTable | null) {
+    if (table && !table.isSeparator) {
+      setHallReportTableId(String(table.id));
+      setHallReportTableName(String(table.name || "").trim() || null);
+    } else {
+      setHallReportTableId(null);
+      setHallReportTableName(null);
+    }
+    setHallReportOpen(true);
   }
 
   function diffMinutesFromIso(iso?: string): number {
@@ -269,7 +297,17 @@ export default function WaiterTablesPage() {
     return "ready";
   }
 
+  function normalizeRelationTableId(raw: unknown): string {
+    const s = String(raw || "").trim();
+    if (!s) return "";
+    const direct = normalizeAssignedTableId(s);
+    if (direct) return direct;
+    return s.toUpperCase();
+  }
+
   const loadTables = useCallback(async () => {
+    if (loadTablesInFlight.current) return;
+    loadTablesInFlight.current = true;
     const needUsers = roleHasManagerOpsAccess(user?.role);
 
     const applyLoadedPayload = (
@@ -281,6 +319,7 @@ export default function WaiterTablesPage() {
       opsj: Record<string, unknown>,
       assignmentRowsRaw: unknown,
       tempTransfersRaw: unknown,
+      relationRowsRaw: unknown,
       hint?: string,
     ) => {
       const ex = String((wfj as { orderTakerExclusiveTable?: string })?.orderTakerExclusiveTable || "").toLowerCase();
@@ -316,20 +355,42 @@ export default function WaiterTablesPage() {
       try {
         const raw = String((opsj as { tableCashierAlertPresetsJson?: unknown })?.tableCashierAlertPresetsJson || "").trim();
         const arr = raw ? (JSON.parse(raw) as unknown) : [];
+        const fallbackById: Record<string, string> = {
+          kitchen_rush: "استعجال المطبخ",
+          tbl_quick_clean: "نظافة سريعة",
+          tbl_call_manager: "استدعاء مدير",
+        };
         const out: AlertPreset[] = [];
         if (Array.isArray(arr)) {
           for (const x of arr) {
             const row = x && typeof x === "object" ? (x as Record<string, unknown>) : {};
             const id = String(row.id || "").trim();
             const type = String(row.type || "").trim().toLowerCase();
-            const label = String(row.label || "").trim();
+            let label = repairArabicDisplayText(String(row.label || "").trim());
+            const qCount = (label.match(/\?/g) || []).length;
+            const hasArabic = /[\u0600-\u06FF]/.test(label);
+            if ((!label || (qCount >= 2 && !hasArabic)) && fallbackById[id]) {
+              label = fallbackById[id];
+            }
             if (!id || !type || !label) continue;
             out.push({ id, type, label });
           }
         }
-        setAlertPresets(out);
+        if (!out.length) {
+          setAlertPresets([
+            { id: "kitchen_rush", type: "kitchen_urgent", label: "استعجال المطبخ" },
+            { id: "tbl_quick_clean", type: "quick_clean", label: "نظافة سريعة" },
+            { id: "tbl_call_manager", type: "call_manager", label: "استدعاء مدير" },
+          ]);
+        } else {
+          setAlertPresets(out);
+        }
       } catch {
-        setAlertPresets([]);
+        setAlertPresets([
+          { id: "kitchen_rush", type: "kitchen_urgent", label: "استعجال المطبخ" },
+          { id: "tbl_quick_clean", type: "quick_clean", label: "نظافة سريعة" },
+          { id: "tbl_call_manager", type: "call_manager", label: "استدعاء مدير" },
+        ]);
       }
 
       try {
@@ -421,6 +482,16 @@ export default function WaiterTablesPage() {
         isTodayIso(String((o as OrderRow)?.createdAt || "")),
       ) as OrderRow[];
       setOrders(orders);
+
+      const relMap: Record<string, TableRelationMarker> = {};
+      const relRows = Array.isArray(relationRowsRaw) ? (relationRowsRaw as TableRelationMarker[]) : [];
+      for (const row of relRows) {
+        const key = normalizeRelationTableId(row?.tableId);
+        if (!key) continue;
+        if (!relMap[key]) relMap[key] = row;
+      }
+      setRelationByTable(relMap);
+
       for (const o of orders) {
         const tid = String(o?.tableId || "");
         const st = String(o?.status || "").toLowerCase();
@@ -464,7 +535,7 @@ export default function WaiterTablesPage() {
         if (tblDs?.error) hint = `تحذير SQL (الطاولات): ${tblDs.error}`;
         else if (src?.tables === "sql" || tblDs?.source === "sql") hint = "";
         else if (tblDs?.fromMirror) hint = "عرض طاولات من نسخة JSON احتياطية — تحقق من اتصال SQL.";
-        applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, snap.waiterTableAssignments, snap.tempCaptainTransfers, hint);
+        applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, snap.waiterTableAssignments, snap.tempCaptainTransfers, snap.relations, hint);
         if (needUsers) {
           const u = Array.isArray(snap.users) ? (snap.users as StaffUser[]) : [];
           const sched = Array.isArray(snap.roleSchedule) ? (snap.roleSchedule as RoleSchedEntry[]) : [];
@@ -484,7 +555,7 @@ export default function WaiterTablesPage() {
         return;
       }
 
-      const [fp, rt, rs, ro, wf, ops, wa] = await Promise.all([
+      const [fp, rt, rs, ro, wf, ops, wa, rel] = await Promise.all([
         safeFetch(`${base}/api/restaurant/floor-plan?t=${Date.now()}`),
         safeFetch(`${base}/api/restaurant/tables`),
         safeFetch(`${base}/api/restaurant/table-sessions?status=active`),
@@ -492,6 +563,7 @@ export default function WaiterTablesPage() {
         safeFetch(`${base}/api/restaurant/workflow-settings`),
         safeFetch(`${base}/api/restaurant/ops-settings`),
         safeFetch(`${base}/api/restaurant/waiter-table-assignments`),
+        safeFetch(`${base}/api/restaurant/table-relations/recent?limit=500`),
       ]);
       const fpj = (tryParseJson(await fp.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const jt = (tryParseJson(await rt.text().catch(() => "")) ?? {}) as Record<string, unknown>;
@@ -500,6 +572,7 @@ export default function WaiterTablesPage() {
       const wfj = (tryParseJson(await wf.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const opsj = (tryParseJson(await ops.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const waj = (tryParseJson(await wa.text().catch(() => "")) ?? {}) as Record<string, unknown>;
+      const relj = (tryParseJson(await rel.text().catch(() => "")) ?? {}) as Record<string, unknown>;
       const httpLabel = (r: Response, nameAr: string) =>
         `${nameAr} (${r.status === 0 ? "لا اتصال بالخادم" : `HTTP ${r.status}`})`;
       const bad: string[] = [];
@@ -514,7 +587,7 @@ export default function WaiterTablesPage() {
         const allNet = [fp, rt, rs, ro, wf, ops].every((r) => r.status === 0);
         const tail = allNet
           ? "تحقق من /api/ping على نفس عنوان الموقع ثم حدّث الصفحة."
-          : "راجع سجلات Railway واتصال SQL في إعدادات المطوّر.";
+          : "راجع سجلات الـ API واتصال SQL في إعدادات المطوّر.";
         setMsg(`تعذّر تحميل البيانات: ${bad.join(" · ")}. ${tail}`);
         setTables([]);
         setSessionByTable(new Map());
@@ -524,9 +597,11 @@ export default function WaiterTablesPage() {
       }
       const rtDs = (jt as { dataSource?: { error?: string } }).dataSource;
       const sqlHint = rtDs?.error ? `تحذير SQL: ${rtDs.error}` : "";
-      applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, waj.items, [], sqlHint);
+      applyLoadedPayload(fpj, jt, js, oj, wfj, opsj, waj.items, [], relj.relations, sqlHint);
     } catch (e) {
       setMsg(briefNetworkHint(e));
+    } finally {
+      loadTablesInFlight.current = false;
     }
   }, [base, user?.id, user?.role]);
 
@@ -1502,6 +1577,7 @@ export default function WaiterTablesPage() {
       <div className="role-op__main">
         <div className="waiter-tables-toolbar">
           <h2 className="role-op__section-title">اختر الطاولة</h2>
+          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)" }}>{businessDayLabel}</span>
           <div className="waiter-tables-toolbar__jump">
             <input
               type="search"
@@ -1522,6 +1598,9 @@ export default function WaiterTablesPage() {
               انتقل
             </button>
           </div>
+          <button type="button" className="btn btn-primary" onClick={() => openHallDayReport(null)} style={{ fontWeight: 800 }}>
+            مجمع
+          </button>
           <button type="button" className="btn btn-ghost" onClick={() => void loadTables()} style={{ fontWeight: 800 }}>
             تحديث القائمة
           </button>
@@ -1605,7 +1684,67 @@ export default function WaiterTablesPage() {
                 ? `طلب الحساب ${billAgeMinutes} د`
                 : "طلب حساب"
               : "";
-            const sessionStateLabel = tStatus === "dirty" ? "متسخة" : tStatus === "cleaning" ? "قيد التنظيف" : isBusy ? "مشغولة" : "جاهزة";
+            const relationKey = normalizeRelationTableId(t.id);
+            const relation = relationByTable[relationKey];
+            const relationOther = String(relation?.otherTableId || "").trim();
+            const relationOtherTable = tables.find(
+              (candidate) => normalizeRelationTableId(candidate.id) === normalizeRelationTableId(relationOther),
+            );
+            const relationOtherLabel =
+              relationOtherTable?.name ||
+              String(relation?.otherTableDisplayName || "").trim() ||
+              relationOther;
+            const relationAge = diffMinutesFromIso(String(relation?.at || ""));
+            const relationAction = String(relation?.action || "").trim().toLowerCase();
+            const relationDirection = String(relation?.direction || "").trim().toLowerCase();
+            const relationScope = String(relation?.scope || "").trim().toLowerCase();
+            const relationVerb =
+              relationAction === "merge_table"
+                ? "دمج"
+                : relationAction === "move_table"
+                  ? "تحريك"
+                  : relationAction === "transfer_table"
+                    ? "تحويل"
+                    : relationAction === "move_items"
+                      ? "نقل بنود"
+                      : "";
+            const relationArrow = relationDirection === "source" ? "→" : relationDirection === "target" ? "←" : "↔";
+            const relationOperationLabel =
+              relationAction === "merge_table" && relationOtherLabel
+                ? relationDirection === "source"
+                  ? `مدموجة مع ${relationOtherLabel} — الحساب هناك`
+                  : `حساب مشترك مع ${relationOtherLabel}`
+                : relationAction === "transfer_table" && relationOtherLabel
+                  ? relationDirection === "source"
+                    ? `حُوّلت إلى ${relationOtherLabel}`
+                    : `تحويل من ${relationOtherLabel}`
+                  : relationAction === "move_items" && relationOtherLabel
+                    ? relationDirection === "source"
+                      ? `نُقلت بنود إلى ${relationOtherLabel}`
+                      : `محوّل إليها من ${relationOtherLabel}`
+                : relationVerb && relationOtherLabel
+                  ? `${relationVerb} ${relationArrow} ${relationOtherLabel}`
+                  : "";
+            const relationChipLabel =
+              relationOperationLabel && relationScope === "cleaning_context"
+                ? `آخر وضع: ${relationOperationLabel} — بانتظار اكتمال التنظيف`
+                : relationOperationLabel;
+            const relationChipHint =
+              relationChipLabel && relationAge > 0
+                ? `${relationChipLabel} منذ ${relationAge} د`
+                : relationChipLabel;
+            const isIncomingItemTransfer =
+              relationAction === "move_items" && relationDirection === "target";
+            const sessionStateLabel =
+              tStatus === "dirty"
+                ? sidStr
+                  ? "متسخة — جلسة ما زالت مفتوحة"
+                  : "متسخة — بانتظار التنظيف"
+                : tStatus === "cleaning"
+                  ? "قيد التنظيف — لا تسكين حتى الانتهاء"
+                  : isBusy
+                    ? "مشغولة"
+                    : "جاهزة";
             const customerTypeLabels: Record<string, string> = {
               cash: "نقدي",
               guest: "ضيف صالة",
@@ -1613,7 +1752,9 @@ export default function WaiterTablesPage() {
               vip: "شخص مهم",
             };
             const currentCustomerType = String(sessRow?.customerType || "cash");
-            const customerStateLabel = guestApprovalPending
+            const customerStateLabel = !sidStr
+              ? "لا يوجد عميل على الطاولة الآن"
+              : guestApprovalPending
               ? `العميل: ${customerTypeLabels[currentCustomerType] || currentCustomerType} بانتظار اعتماد`
               : isGuestSession
                 ? "العميل: ضيف صالة"
@@ -1626,7 +1767,9 @@ export default function WaiterTablesPage() {
               ? `الكابتن: ${captainLabel}`
               : sidStr
                 ? "الجلسة مفتوحة بدون كابتن"
-                : "لا توجد جلسة نشطة";
+                : tStatus === "cleaning" || tStatus === "dirty"
+                  ? "الجلسة غادرت الطاولة — أكمل التنظيف"
+                  : "لا توجد جلسة نشطة";
             const isClaimBusy = claimBusyTableIds.has(String(t.id));
             const claimButtonTitle =
               isClaimBusy
@@ -1646,9 +1789,11 @@ export default function WaiterTablesPage() {
             const seatedByMe = Boolean(sidStr && capId && user?.id && String(capId) === String(user.id));
             const seatingLabel = guestApprovalPending
               ? "بانتظار الاعتماد"
-              : notReady
-                ? "الطاولة غير جاهزة"
-                : seatedByMe
+              : tStatus === "cleaning"
+                ? "أكمل التنظيف أولاً"
+                : tStatus === "dirty"
+                  ? "ابدأ التنظيف أولاً"
+                  : seatedByMe
                   ? "متابعة الطلب"
                   : "تسكين";
             const seatingHint = guestApprovalPending
@@ -1721,7 +1866,7 @@ export default function WaiterTablesPage() {
                 }}
               >
                 <div
-                  className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}`}
+                  className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}${isIncomingItemTransfer ? " waiter-tblcard--incoming-transfer" : ""}`}
                   onClick={openOrderTakerForTable}
                   onContextMenu={(ev) => showTableReport(t, ev)}
                   aria-label={`بطاقة طاولة ${displayLabel}`}
@@ -1754,6 +1899,18 @@ export default function WaiterTablesPage() {
                       ) : null}
                       {noOrderStatusLabel ? <span className="waiter-tblcard__mini-chip" data-tooltip="متابعة التسكين بلا طلبات">⏱ {noOrderStatusLabel}</span> : null}
                     </div>
+                    {relationChipLabel ? (
+                      <div
+                        className={`waiter-tblcard__relation-banner${isIncomingItemTransfer ? " waiter-tblcard__relation-banner--incoming" : ""}`}
+                        title={relationChipHint}
+                        role="status"
+                      >
+                        <span className="waiter-tblcard__relation-banner-icon" aria-hidden="true">
+                          {isIncomingItemTransfer ? "↙" : "↔"}
+                        </span>
+                        <span>{relationChipLabel}</span>
+                      </div>
+                    ) : null}
                     <div className="waiter-tblcard__spec-seated-by">
                       {captainLabel ? <span className="waiter-tblcard__spec-captain">{captainStateLabel}</span> : <span className="waiter-tblcard__spec-muted">{captainStateLabel}</span>}
                     </div>
@@ -2150,10 +2307,10 @@ export default function WaiterTablesPage() {
                       className="waiter-tblcard__report"
                       onClick={(e) => {
                         e.stopPropagation();
-                        showTableReport(t, e);
+                        openHallDayReport(t);
                       }}
                     >
-                      تقرير سريع
+                      تقرير اليوم
                     </button>
                     {tStatus === "dirty" ? (
                       <button
@@ -2764,6 +2921,13 @@ export default function WaiterTablesPage() {
           </div>
         </div>
       ) : null}
+      <HallDayReportPanel
+        open={hallReportOpen}
+        onClose={() => setHallReportOpen(false)}
+        tableId={hallReportTableId}
+        tableName={hallReportTableName}
+        apiBase={base}
+      />
     </div>
   );
 }

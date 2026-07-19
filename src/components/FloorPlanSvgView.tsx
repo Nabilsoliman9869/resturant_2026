@@ -3,6 +3,8 @@ import type { FloorPlan, FloorTable, Point, TableLiveMap, Obstacle, AislePath, F
 type Props = {
   plan: FloorPlan;
   live?: TableLiveMap;
+  /** عند الضغط على طاولة — تقرير اليوم التشغيلي */
+  onTableClick?: (table: FloorTable) => void;
 };
 
 function polygonToSvgPoints(points: Point[]) {
@@ -68,21 +70,40 @@ function TableNode({
   progress,
   orderCount,
   orderPreview,
+  onClick,
 }: {
   table: FloorTable;
   status?: string;
   progress?: number;
   orderCount?: number;
   orderPreview?: string;
+  onClick?: (table: FloorTable) => void;
 }) {
   const fill = statusColor(status);
   const cx = table.x + table.w / 2;
   const cy = table.y + table.h / 2;
   const rotation = table.rotation ?? 0;
   const noOrderDelay = String(orderPreview || "").includes("تأخر أخذ الطلب");
+  const clickable = Boolean(onClick);
 
   return (
-    <g transform={`rotate(${rotation} ${cx} ${cy})`}>
+    <g
+      transform={`rotate(${rotation} ${cx} ${cy})`}
+      onClick={clickable ? () => onClick?.(table) : undefined}
+      style={clickable ? { cursor: "pointer" } : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.(table);
+              }
+            }
+          : undefined
+      }
+    >
       {table.shape === "circle" ? (
         <circle
           cx={cx}
@@ -269,10 +290,17 @@ function renderArrowAnnotations(list?: FloorArrowAnnotation[]) {
 }
 
 /** عرض مخطط الصالة v1 — مضلع + طاولات؛ الحالة الحية منفصلة (TableLiveMap). */
-export function FloorPlanSvgView({ plan, live = {} }: Props) {
+export function FloorPlanSvgView({ plan, live = {}, onTableClick }: Props) {
   return (
     <div style={{ width: "100%", overflow: "auto", background: "#f8fafc", padding: 16, borderRadius: 12 }}>
-      <div style={{ marginBottom: 12, fontWeight: 700 }}>{plan.name}</div>
+      <div style={{ marginBottom: 12, fontWeight: 700 }}>
+        {plan.name}
+        {onTableClick ? (
+          <span style={{ marginRight: 10, fontWeight: 600, fontSize: "0.78rem", color: "#64748b" }}>
+            — اضغط طاولة لتقرير اليوم (10ص→4ص)
+          </span>
+        ) : null}
+      </div>
 
       <svg
         width={plan.width}
@@ -302,6 +330,7 @@ export function FloorPlanSvgView({ plan, live = {} }: Props) {
               progress={liveState?.progress}
               orderCount={liveState?.orderCount}
               orderPreview={liveState?.orderPreview}
+              onClick={onTableClick}
             />
           );
         })}

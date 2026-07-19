@@ -78,7 +78,8 @@ function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
       { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
       { title: "2. الموافقات والخدمة", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
       { title: "3. الإعدادات اليومية", items: mark(pickNavItems(items, ["settings"])) },
-      { title: "4. التقارير التشغيلية", items: mark(pickNavItems(items, ["reports", "flash-report", "table-sessions-report"])) },
+      { title: "4. التشغيل المالي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "cashflow"])) },
+      { title: "5. التقارير التشغيلية", items: mark(pickNavItems(items, ["reports", "flash-report", "table-sessions-report"])) },
     );
   } else if (role === "developer") {
     sections.push(
@@ -155,6 +156,10 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "call-center", label: "Call Center (دليفري)" },
     { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "settings", label: "إعدادات التشغيل اليومية" },
+    { to: "pos", label: "نقطة البيع" },
+    { to: "purchases", label: "مشتريات" },
+    { to: "cash-expense", label: "صرف مصروفات" },
+    { to: "cashflow", label: "التدفق النقدي" },
     { to: "reports", label: "تقارير" },
     { to: "flash-report", label: "تقرير سريع" },
     { to: "table-sessions-report", label: "تقرير جلسات الطاولات" },

@@ -110,15 +110,41 @@ export function mapTablesToFloorPlanLabels<T extends TableLike>(planRaw: unknown
   });
 }
 
+/** مفتاح ترتيب تصاعدي لرقم الطاولة (الأصغر → الأكبر). */
+export function tableNumericSortKey(row: { number?: number; name?: string; id?: string }): number {
+  if (Number.isFinite(row.number) && Number(row.number) > 0) return Number(row.number);
+  const name = String(row.name || "").trim();
+  const fromLabel =
+    /^t\s*0*(\d+)$/i.exec(name) ||
+    /^#\s*0*(\d+)$/i.exec(name) ||
+    /^(?:table|طاولة)\s*0*(\d+)$/i.exec(name) ||
+    /^0*(\d+)$/.exec(name);
+  if (fromLabel?.[1]) return Number(fromLabel[1]);
+  const anyDigits = /(\d+)/.exec(name);
+  if (anyDigits?.[1]) return Number(anyDigits[1]);
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function sortTablesAscending<T extends { number?: number; name?: string; id?: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const ka = tableNumericSortKey(a);
+    const kb = tableNumericSortKey(b);
+    if (ka !== kb) return ka - kb;
+    return String(a.name || a.id || "").localeCompare(String(b.name || b.id || ""), "ar");
+  });
+}
+
 function apiTablesToSegmentedRows(base: TableLike[]): SegmentedTableRow[] {
-  return base.map((table) => ({
-    id: String(table.id),
-    name: normalizeTableDisplayLabel(table.name, table.number, table.id),
-    seats: table.seats,
-    number: table.number,
-    status: table.status,
-    features: (table as { features?: SegmentedTableRow["features"] }).features,
-  }));
+  return sortTablesAscending(
+    base.map((table) => ({
+      id: String(table.id),
+      name: normalizeTableDisplayLabel(table.name, table.number, table.id),
+      seats: table.seats,
+      number: table.number,
+      status: table.status,
+      features: (table as { features?: SegmentedTableRow["features"] }).features,
+    })),
+  );
 }
 
 export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: TableLike[]): SegmentedTableRow[] {
@@ -144,6 +170,7 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
 
     const seen = new Set<string>();
     const prefix = floorPrefix(floor.name, floorIndex);
+    const floorRows: SegmentedTableRow[] = [];
     floor.tables.forEach((table, tableIndex) => {
       const apiId = String(table.linkedTableId ?? table.id);
       const key = tableKey(apiId);
@@ -153,7 +180,7 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
       const code = tableCode(prefix, tableIndex);
       const label = normalizeTableDisplayLabel(apiMatch?.name || planTableLabel(table as { label?: string }, code), tableIndex + 1, apiId);
       planTableCount += 1;
-      out.push({
+      floorRows.push({
         id: apiId,
         name: label,
         seats: table.seats ?? apiMatch?.seats,
@@ -164,6 +191,7 @@ export function buildSegmentedTablesFromFloorPlan(planRaw: unknown, apiTables: T
         features: apiMatch && "features" in apiMatch ? (apiMatch as { features?: SegmentedTableRow["features"] }).features : undefined,
       });
     });
+    out.push(...sortTablesAscending(floorRows));
   });
 
   // مخطط موجود لكن tables: [] (شائع على Railway) — كان يُعرض «Main Hall» فقط ويُخفى كل API.
