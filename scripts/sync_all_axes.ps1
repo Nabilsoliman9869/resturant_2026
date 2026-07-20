@@ -102,7 +102,9 @@ if (-not $SkipRailway) {
     Write-Warning "Railway CLI not found — skip deploy. Install: npm i -g @railway/cli"
   } else {
     & $RailwayCmd link -p $RailwayProject -s $RailwayService -e production 2>&1 | Out-Null
+    $ErrorActionPreference = "Continue"
     & $RailwayCmd redeploy --service $RailwayService --from-source -y 2>&1 | Out-Null
+    $ErrorActionPreference = "Stop"
     $deployed = $false
     for ($i = 1; $i -le 24; $i++) {
       Start-Sleep -Seconds 15
