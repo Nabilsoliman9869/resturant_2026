@@ -19,6 +19,7 @@ alwaysApply: true
 | متغير الواجهة | **`VITE_XTRA_API=http://127.0.0.1:2288`** في `.env` (انسخ من `.env.example`) |
 
 - سكربتات: `run.bat` (واجهة فقط)، `run_full_stack.bat` (API + واجهة)، `run_api.bat` (API فقط).
+- **تزامن تلقائي:** بعد تعديلات جوهرية نفّذ `scripts/sync_all_axes.ps1 -Message "..."` — يرفع `main` على GitHub ويعيد نشر Railway ويحدّث API محلياً (2288). انظر `.cursor/rules/sync-all-axes.mdc`.
 - البروكسي في Vite يوجّه `/api` و`/modules` وغيرها إلى **2288**.
 
 ## علاقة بمشروع إكسترا القديم (مرجع فقط)
