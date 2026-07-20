@@ -58,6 +58,7 @@ COPY backend ./backend
 COPY --from=frontend /app/ui/restaurant ./ui/restaurant
 
 ENV MAT3AM_BASE_DIR=/data
+ENV MAT3AM_TZ=Africa/Cairo
 ENV MAT3AM_UVICORN_WORKERS=2
 ENV MAT3AM_REFERENCE_CACHE_ONLY=1
 WORKDIR /app/backend

@@ -219,6 +219,19 @@ export default function WaiterTablesPage() {
     return isInCurrentBusinessDay(iso);
   }
 
+  /** جلسة/طلب نشط يُعرض دائماً — لا نخفيه بفلتر اليوم التشغيلي (كان يختفي بعد الرجوع من شريحة الطلب). */
+  function keepActiveSession(row: TableSession): boolean {
+    const st = String(row?.status || "").toLowerCase();
+    if (st === "active") return true;
+    return isTodayIso(String(row?.startTime || ""));
+  }
+
+  function keepOpenOrder(row: OrderRow): boolean {
+    const st = String(row?.status || "").toLowerCase();
+    if (["pending", "preparing", "ready"].includes(st)) return true;
+    return isTodayIso(String(row?.createdAt || ""));
+  }
+
   function openHallDayReport(table?: RestTable | null) {
     if (table && !table.isSeparator) {
       setHallReportTableId(String(table.id));
@@ -458,7 +471,7 @@ export default function WaiterTablesPage() {
       });
       const m = new Map<string, string>();
       const sessions = ((Array.isArray(js["sessions"]) ? js["sessions"] : []).filter((s: unknown) =>
-        isTodayIso(String((s as TableSession)?.startTime || "")),
+        keepActiveSession(s as TableSession),
       ) as TableSession[]).slice().sort(compareSessionRecencyDesc);
       setSessions(sessions);
       for (const s of sessions) {
@@ -479,7 +492,7 @@ export default function WaiterTablesPage() {
         if (tid && s?.billingRequestedAt) billreq.add(tid);
       }
       const orders = (Array.isArray(oj["orders"]) ? oj["orders"] : []).filter((o: unknown) =>
-        isTodayIso(String((o as OrderRow)?.createdAt || "")),
+        keepOpenOrder(o as OrderRow),
       ) as OrderRow[];
       setOrders(orders);
 

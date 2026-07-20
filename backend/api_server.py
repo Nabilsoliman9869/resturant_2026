@@ -143,6 +143,7 @@ def cache_invalidate_restaurant():
     try:
         cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
         cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
+        cache_delete_pattern("mat3am:restaurant:table-sessions:*")
         cache_delete_pattern("mat3am:restaurant:tables")
         cache_delete_pattern("mat3am:restaurant:products:*")
     except Exception:
@@ -19304,6 +19305,26 @@ def _merge_mat3am_vip_tables_into(tables: list) -> list:
     return tables
 
 
+def _mat3am_tz():
+    """منطقة تشغيل المطعم — افتراضي القاهرة (Railway يعمل UTC وإلا يختل اليوم التشغيلي)."""
+    name = str(os.environ.get("MAT3AM_TZ") or "Africa/Cairo").strip() or "Africa/Cairo"
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(name)
+    except Exception:
+        return timezone(timedelta(hours=2))
+
+
+def _mat3am_now() -> datetime:
+    """وقت تشغيل المطعم (naive) — يُستخدم في اليوم التشغيلي وطوابع الجلسات."""
+    return datetime.now(_mat3am_tz()).replace(tzinfo=None)
+
+
+def _mat3am_now_iso() -> str:
+    return _mat3am_now().isoformat()
+
+
 def _iso_to_local_dt(iso_s: str) -> Optional[datetime]:
     try:
         s = str(iso_s or "").strip()
@@ -19326,7 +19347,7 @@ def _mat3am_business_day_window(now: Optional[datetime] = None) -> tuple[datetim
     يوم تشغيلي: يبدأ 10:00 وينتهي خدمةً عند 04:00، مع بقاء الهوية حتى 10:00 التالي.
     يعيد: (start_10am, service_end_4am, next_open_10am, business_day_date)
     """
-    now = now or datetime.now()
+    now = now or _mat3am_now()
     if now.hour < 10:
         start_date = (now - timedelta(days=1)).date()
     else:
@@ -22916,7 +22937,7 @@ def _restaurant_assign_captain_from_actor_if_needed(s: dict, actor: dict, body: 
     s["captainLogin"] = actor_login
     s["captainName"] = actor_name
     s["captainRole"] = actor_role
-    s["captainClaimedAt"] = datetime.now().isoformat()
+    s["captainClaimedAt"] = _mat3am_now_iso()
 
 
 @app.post("/api/restaurant/table-sessions")
@@ -23080,7 +23101,7 @@ def restaurant_create_session(body: dict):
         "guestCount": guest_count,
         "childrenCount": body.get("childrenCount", 0),
         "preferences": body.get("preferences", {}) if isinstance(body.get("preferences"), dict) else {},
-        "startTime": datetime.now().isoformat(),
+        "startTime": _mat3am_now_iso(),
         "status": "active",
         "startedByRole": started_by_role or None,
         "startReason": start_reason or None,
@@ -29991,7 +30012,7 @@ def restaurant_create_order(body: dict):
         "waiterId": body.get("waiterId"),
         "items": incoming_items,
         "status": "pending",
-        "createdAt": datetime.now().isoformat(),
+        "createdAt": _mat3am_now_iso(),
         "prepTargetMinutes": ptm_f,
         "ticketNo": _restaurant_next_kds_ticket_no(data),
     }
