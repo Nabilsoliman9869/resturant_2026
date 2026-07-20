@@ -761,7 +761,11 @@ eserved + active.
 - **`CashierPayInvoiceModal.tsx`**: تفعيل الأزرار مباشرة عند أعلام التسكين مع رسالة توضيحية.
 - **التحقق**: `ast.parse` للخادم؛ واجهة تعتمد على الحقول المثراة.
 
+### 105 — تزامن تلقائي للمحاور الثلاثة — `UTC 2026-07-20T13:05:00Z` — ID `syncaxes-ebfb5fec8ee4`
 
+- **`.cursor/rules/sync-all-axes.mdc`**: سياسة إلزامية — بعد تعديلات جوهرية commit+push+Railway دون انتظار طلب المستخدم.
+- **`scripts/sync_all_axes.ps1`**: commit منتجات فقط → push `main` → redeploy `resturant_2026` → إعادة تشغيل API 2288 عند تغيير backend.
+- **`.cursor/rules/mat3am-context.mdc`**: إشارة للسكربت.
 
 
 
