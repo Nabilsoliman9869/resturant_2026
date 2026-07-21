@@ -23961,6 +23961,14 @@ def _restaurant_complete_session_internal(
                     "actorRole": str(actor.get("role") or "") or None,
                 }
             )
+            _restaurant_finalize_merged_source_sessions(
+                session_id,
+                now_iso=now_iso,
+                table_status_on_complete=table_status_on_complete or "dirty",
+                apply_cleaning_policy=False,
+                actor=actor,
+                reason=reason_txt or "merged_with_host_complete",
+            )
             cache_invalidate_restaurant()
             return s
     raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
@@ -25931,6 +25939,125 @@ def _restaurant_billing_session_ids(root_session_id: str) -> list[str]:
     return list(ids)
 
 
+def _restaurant_finalize_merged_source_sessions(
+    target_session_id: str,
+    *,
+    now_iso: str,
+    table_status_on_complete: Optional[str] = None,
+    apply_cleaning_policy: bool = False,
+    actor: Optional[dict] = None,
+    reason: str = "merged_with_host_settlement",
+) -> list[dict]:
+    """عند تسوية/إغلاق الطاولة الهدف (المدمج إليها) — طبّق نفس الإنهاء على الطاولات المصدر."""
+    rid = str(target_session_id or "").strip()
+    if not rid:
+        return []
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        return []
+    reason_txt = str(reason or "").strip()[:500]
+    actor = actor if isinstance(actor, dict) else {}
+    finalized: list[dict] = []
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("mergedIntoSessionId") or "").strip() != rid:
+            continue
+        if str(s.get("status") or "").lower() != "active":
+            continue
+        src_sid = str(s.get("id") or "").strip()
+        s["endTime"] = now_iso
+        s["status"] = "completed"
+        if reason_txt:
+            s["completionReason"] = reason_txt
+        if actor:
+            s["completedByUserId"] = str(actor.get("id") or "")[:120] or None
+            s["completedByLogin"] = str(actor.get("login") or "")[:120] or None
+            s["completedByName"] = str(actor.get("name") or actor.get("login") or "")[:200] or None
+        _session_no_order_watch_clear(s)
+        for key in (
+            "captainUserId",
+            "captainLogin",
+            "captainName",
+            "captainRole",
+            "captainClaimedAt",
+        ):
+            s.pop(key, None)
+        tid = str(s.get("tableId") or "").strip()
+        if tid:
+            if apply_cleaning_policy:
+                try:
+                    _workflow_apply_cleaning_policy(tid, event="payment_completed")
+                except Exception:
+                    pass
+            elif table_status_on_complete:
+                try:
+                    restaurant_update_table_status(tid, {"status": table_status_on_complete})
+                except Exception:
+                    pass
+        if src_sid:
+            try:
+                _restaurant_cancel_open_kitchen_orders_for_session(src_sid)
+            except Exception:
+                pass
+            _session_no_order_watch_dismiss_alerts_async(src_sid)
+            _append_session_audit_entry(
+                {
+                    "at": now_iso,
+                    "action": "complete_session",
+                    "sessionId": src_sid,
+                    "tableId": tid,
+                    "reason": reason_txt or "merged_source_after_host_settlement",
+                    "actorId": str(actor.get("id") or "") or None,
+                    "actorRole": str(actor.get("role") or "") or None,
+                    "mergedIntoSessionId": rid,
+                }
+            )
+        finalized.append(s)
+    if finalized:
+        _restaurant_save("table_sessions", sessions)
+        cache_invalidate_restaurant()
+    return finalized
+
+
+def _restaurant_close_session_cluster_after_payment(root_session_id: str, now_iso: str) -> None:
+    """إغلاق جلسة الفوترة (الهدف) + كل الجلسات المدموجة منها + سياسة النظافة."""
+    rid = str(root_session_id or "").strip()
+    if not rid:
+        return
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    host_table_id = None
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("id") or "").strip() != rid:
+            continue
+        s["endTime"] = now_iso
+        s["status"] = "completed"
+        host_table_id = str(s.get("tableId") or "").strip() or None
+        break
+    _restaurant_save("table_sessions", sessions)
+    for cluster_sid in _restaurant_billing_session_ids(rid):
+        try:
+            _restaurant_cancel_open_kitchen_orders_for_session(cluster_sid)
+        except Exception:
+            pass
+    _restaurant_finalize_merged_source_sessions(
+        rid,
+        now_iso=now_iso,
+        apply_cleaning_policy=True,
+        reason="merged_source_after_host_payment",
+    )
+    if host_table_id:
+        try:
+            _workflow_apply_cleaning_policy(host_table_id, event="payment_completed")
+        except Exception:
+            pass
+    cache_invalidate_restaurant()
+
+
 @app.get("/api/restaurant/daily-menu")
 def restaurant_daily_menu_get():
     """قائمة اليوم للفلترة في الجرسون/POS — يُفضّل التخزين في SQL (MAT3AM_RESTAURANT_STATE) لمزامنة الأجهزة."""
@@ -27074,25 +27201,10 @@ def restaurant_invoices_local_mark_paid(body: dict):
         )
         should_close = bool(body.get("closeSession")) or (not pending_for_session)
         if should_close:
-            sess = _restaurant_load("table_sessions", [])
-            if isinstance(sess, list):
-                table_id = None
-                for s in sess:
-                    if isinstance(s, dict) and str(s.get("id") or "") == sid:
-                        s["endTime"] = now_iso
-                        s["status"] = "completed"
-                        table_id = str(s.get("tableId") or "").strip()
-                        break
-                _restaurant_save("table_sessions", sess)
-                try:
-                    _restaurant_cancel_open_kitchen_orders_for_session(sid)
-                except Exception:
-                    pass
-                if table_id:
-                    try:
-                        _workflow_apply_cleaning_policy(table_id, event="payment_completed")
-                    except Exception:
-                        pass
+            try:
+                _restaurant_close_session_cluster_after_payment(sid, now_iso)
+            except Exception:
+                pass
     return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso, "checkID01": check_id01, "posting": posting_result}
 
 
@@ -27176,25 +27288,10 @@ def restaurant_invoices_local_mark_on_account(body: dict):
     if sid:
         should_close = bool(body.get("closeSession", True))
         if should_close:
-            sess = _restaurant_load("table_sessions", [])
-            if isinstance(sess, list):
-                table_id = None
-                for s in sess:
-                    if isinstance(s, dict) and str(s.get("id") or "") == sid:
-                        s["endTime"] = now_iso
-                        s["status"] = "completed"
-                        table_id = str(s.get("tableId") or "").strip()
-                        break
-                _restaurant_save("table_sessions", sess)
-                try:
-                    _restaurant_cancel_open_kitchen_orders_for_session(sid)
-                except Exception:
-                    pass
-                if table_id:
-                    try:
-                        _workflow_apply_cleaning_policy(table_id, event="payment_completed")
-                    except Exception:
-                        pass
+            try:
+                _restaurant_close_session_cluster_after_payment(sid, now_iso)
+            except Exception:
+                pass
     return {
         "ok": True,
         "invoiceId": invoice_id,
@@ -27275,25 +27372,10 @@ def restaurant_invoices_local_mark_guest(body: dict):
         except Exception:
             pass
     if sid and bool(body.get("closeSession", True)):
-        sessions = _restaurant_load("table_sessions", [])
-        if isinstance(sessions, list):
-            table_id = None
-            for session in sessions:
-                if isinstance(session, dict) and str(session.get("id") or "") == sid:
-                    session["endTime"] = now_iso
-                    session["status"] = "completed"
-                    table_id = str(session.get("tableId") or "").strip()
-                    break
-            _restaurant_save("table_sessions", sessions)
-            try:
-                _restaurant_cancel_open_kitchen_orders_for_session(sid)
-            except Exception:
-                pass
-            if table_id:
-                try:
-                    _workflow_apply_cleaning_policy(table_id, event="payment_completed")
-                except Exception:
-                    pass
+        try:
+            _restaurant_close_session_cluster_after_payment(sid, now_iso)
+        except Exception:
+            pass
     return {
         "ok": True,
         "invoiceId": invoice_id,

@@ -767,6 +767,10 @@ eserved + active.
 - **`scripts/sync_all_axes.ps1`**: commit منتجات فقط → push `main` → redeploy `resturant_2026` → إعادة تشغيل API 2288 عند تغيير backend.
 - **`.cursor/rules/mat3am-context.mdc`**: إشارة للسكربت.
 
+### 106 — إنهاء طاولات الدمج «منها» عند دفع الطاولة «إليها» — `UTC 2026-07-20T13:10:00Z` — ID `mergepay-a8c3f21b9e04`
+
+- **`backend/api_server.py`**: `_restaurant_finalize_merged_source_sessions` + `_restaurant_close_session_cluster_after_payment` — عند تسديد/إغلاق الطاولة الهدف تُكمَل جلسات المصدر وتُطبَّق سياسة النظافة (dirty/cleaning) على طاولاتها أيضاً.
+
 
 
 
