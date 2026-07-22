@@ -771,6 +771,10 @@ eserved + active.
 
 - **`backend/api_server.py`**: `_restaurant_finalize_merged_source_sessions` + `_restaurant_close_session_cluster_after_payment` — عند تسديد/إغلاق الطاولة الهدف تُكمَل جلسات المصدر وتُطبَّق سياسة النظافة (dirty/cleaning) على طاولاتها أيضاً.
 
+### 107 — تشيك «فاتورة ضريبية» عند الكاشير → ✓ أخضر — `UTC 2026-07-22T00:25:00Z` — ID `taxchk-7c2e9a41b0d8`
+
+- **`src/components/CashierPayInvoiceModal.tsx`**: استبدال نص «فاتورة ضريبية» بعلامة ✓ خضراء (مع tooltip/aria)؛ المنطق كما هو (`checkID01` → TBL022).
+
 
 
 

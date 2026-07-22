@@ -1625,16 +1625,19 @@ export function CashierPayInvoiceModal({
             {allowPayment ? (
               <>
             <label
+              title={isTaxInvoice ? "فاتورة ضريبية (CheckID01=1)" : "غير ضريبية (CheckID01=0)"}
+              aria-label="فاتورة ضريبية"
               style={{
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                gap: "0.6rem",
+                gap: "0.45rem",
                 marginTop: "0.75rem",
-                padding: "0.7rem 0.75rem",
+                padding: "0.45rem 0.65rem",
                 borderRadius: 10,
-                border: `1px solid ${isTaxInvoice ? "var(--accent2)" : "var(--border)"}`,
-                background: isTaxInvoice ? "rgba(34,197,94,0.08)" : "rgba(0,0,0,0.02)",
-                cursor: "pointer",
+                border: `1px solid ${isTaxInvoice ? "#16a34a" : "var(--border)"}`,
+                background: isTaxInvoice ? "rgba(22,163,74,0.1)" : "rgba(0,0,0,0.02)",
+                cursor: foldLocked ? "not-allowed" : "pointer",
+                userSelect: "none",
               }}
             >
               <input
@@ -1642,12 +1645,19 @@ export function CashierPayInvoiceModal({
                 checked={isTaxInvoice}
                 onChange={(e) => setIsTaxInvoice(e.target.checked)}
                 disabled={foldLocked}
+                style={{ width: 16, height: 16, accentColor: "#16a34a" }}
               />
-              <span>
-                <strong>فاتورة ضريبية</strong>
-                <span style={{ display: "block", color: "var(--muted)", fontSize: "0.76rem", marginTop: 2 }}>
-                  يكتب التصنيف في TBL022.CheckID01 ({isTaxInvoice ? "1" : "0"})، وهو مستقل عن قيمة الضريبة المحسوبة.
-                </span>
+              <span
+                aria-hidden
+                style={{
+                  color: isTaxInvoice ? "#16a34a" : "var(--muted)",
+                  fontSize: "1.35rem",
+                  fontWeight: 900,
+                  lineHeight: 1,
+                  opacity: isTaxInvoice ? 1 : 0.35,
+                }}
+              >
+                ✓
               </span>
             </label>
             <div
