@@ -1624,42 +1624,31 @@ export function CashierPayInvoiceModal({
 
             {allowPayment ? (
               <>
-            <label
-              title={isTaxInvoice ? "فاتورة ضريبية (CheckID01=1)" : "غير ضريبية (CheckID01=0)"}
-              aria-label="فاتورة ضريبية"
+            <button
+              type="button"
+              disabled={foldLocked}
+              onClick={() => setIsTaxInvoice((v) => !v)}
+              aria-pressed={isTaxInvoice}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "0.45rem",
+                justifyContent: "center",
+                width: 28,
+                height: 28,
                 marginTop: "0.75rem",
-                padding: "0.45rem 0.65rem",
-                borderRadius: 10,
-                border: `1px solid ${isTaxInvoice ? "#16a34a" : "var(--border)"}`,
-                background: isTaxInvoice ? "rgba(22,163,74,0.1)" : "rgba(0,0,0,0.02)",
+                padding: 0,
+                borderRadius: 6,
+                border: `2px solid ${isTaxInvoice ? "#16a34a" : "var(--border)"}`,
+                background: isTaxInvoice ? "#16a34a" : "transparent",
+                color: "#fff",
                 cursor: foldLocked ? "not-allowed" : "pointer",
-                userSelect: "none",
+                fontSize: "1.05rem",
+                fontWeight: 900,
+                lineHeight: 1,
               }}
             >
-              <input
-                type="checkbox"
-                checked={isTaxInvoice}
-                onChange={(e) => setIsTaxInvoice(e.target.checked)}
-                disabled={foldLocked}
-                style={{ width: 16, height: 16, accentColor: "#16a34a" }}
-              />
-              <span
-                aria-hidden
-                style={{
-                  color: isTaxInvoice ? "#16a34a" : "var(--muted)",
-                  fontSize: "1.35rem",
-                  fontWeight: 900,
-                  lineHeight: 1,
-                  opacity: isTaxInvoice ? 1 : 0.35,
-                }}
-              >
-                ✓
-              </span>
-            </label>
+              {isTaxInvoice ? "✓" : ""}
+            </button>
             <div
               style={{
                 marginTop: "0.75rem",

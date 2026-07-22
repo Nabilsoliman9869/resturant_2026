@@ -773,7 +773,7 @@ eserved + active.
 
 ### 107 — تشيك «فاتورة ضريبية» عند الكاشير → ✓ أخضر — `UTC 2026-07-22T00:25:00Z` — ID `taxchk-7c2e9a41b0d8`
 
-- **`src/components/CashierPayInvoiceModal.tsx`**: استبدال نص «فاتورة ضريبية» بعلامة ✓ خضراء (مع tooltip/aria)؛ المنطق كما هو (`checkID01` → TBL022).
+- **`src/components/CashierPayInvoiceModal.tsx`**: مربع اختيار فقط بعلامة ✓ خضراء بلا أي نص «ضريبية»؛ المنطق كما هو (`checkID01` → TBL022).
 
 
 
