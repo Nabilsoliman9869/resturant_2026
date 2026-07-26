@@ -1,0 +1,236 @@
+/* لوحة الطاولات الحية — إضافات بصرية دون كسر التخطيط العام */
+
+@keyframes hall-live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes hall-live-glow-amber {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(234, 179, 8, 0);
+  }
+}
+
+.hall-live-board__kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 0.55rem;
+  margin: 0.75rem 0;
+}
+
+.hall-live-board__kpi {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.55rem 0.7rem;
+  background: rgba(0, 0, 0, 0.14);
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.hall-live-board__kpi--clickable {
+  cursor: pointer;
+}
+
+.hall-live-board__kpi--clickable:hover {
+  transform: translateY(-1px);
+  border-color: rgba(34, 211, 238, 0.45);
+}
+
+.hall-live-board__kpi-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.hall-live-board__kpi-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  font-family: var(--display);
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.hall-live-board__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+  align-items: center;
+}
+
+.hall-live-board__chip {
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.12);
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hall-live-board__chip--on {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(34, 211, 238, 0.14);
+}
+
+.hall-live-board__table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-height: min(52vh, 520px);
+}
+
+.hall-live-board__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.hall-live-board__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: right;
+  padding: 0.55rem 0.65rem;
+  background: rgba(15, 23, 42, 0.92);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.hall-live-board__table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: middle;
+}
+
+.hall-live-board__row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.hall-live-board__row:hover {
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.hall-live-board__row--pay {
+  background: rgba(234, 179, 8, 0.07);
+  outline: 1px solid rgba(234, 179, 8, 0.35);
+  outline-offset: -1px;
+  animation: hall-live-glow-amber 2.4s ease-in-out infinite;
+}
+
+.hall-live-board__row--urgent {
+  background: rgba(239, 68, 68, 0.1);
+  outline: 1px solid rgba(239, 68, 68, 0.45);
+  outline-offset: -1px;
+  animation: hall-live-pulse 1.8s ease-in-out infinite;
+}
+
+.hall-live-board__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.hall-live-board__status--active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.hall-live-board__status--bill {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fb923c;
+}
+
+.hall-live-board__status--pay {
+  background: rgba(234, 179, 8, 0.22);
+  color: #facc15;
+}
+
+.hall-live-board__status--urgent {
+  background: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+.hall-live-board__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.06);
+  margin-inline-start: 0.25rem;
+}
+
+.hall-live-board__drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(2, 6, 23, 0.55);
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  padding: 0;
+}
+
+.hall-live-board__drawer {
+  width: min(420px, 100vw);
+  background: var(--panel, #0f172a);
+  border-inline-start: 1px solid var(--border);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
+  padding: 1rem 1.1rem;
+  overflow: auto;
+  animation: hall-live-drawer-in 0.22s ease;
+}
+
+@keyframes hall-live-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+[dir="rtl"] .hall-live-board__drawer {
+  animation-name: hall-live-drawer-in-rtl;
+}
+
+@keyframes hall-live-drawer-in-rtl {
+  from {
+    transform: translateX(-24px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.hall-live-board__drawer-actions {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+}

@@ -76,7 +76,7 @@ export default function DashboardPage() {
 
       {shouldShowLiveFloor && (
         <>
-          {role === "cashier" && <CashierTableStripBoard />}
+          {(role === "cashier" || roleHasManagerOpsAccess(role)) && <CashierTableStripBoard />}
           <FloorPlanLive />
         </>
       )}

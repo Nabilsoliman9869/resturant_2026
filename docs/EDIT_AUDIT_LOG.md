@@ -775,6 +775,12 @@ eserved + active.
 
 - **`src/components/CashierPayInvoiceModal.tsx`**: مربع اختيار فقط بعلامة ✓ خضراء بلا أي نص «ضريبية»؛ المنطق كما هو (`checkID01` → TBL022).
 
+### 108 — لوحة الطاولات الحية: KPIs + جدول + نافذة تفتيش — `UTC 2026-07-26T12:20:00Z` — ID `hallive-c9e4a17b2f60`
+
+- **`backend/api_server.py`**: إثراء `/api/restaurant/cashier/table-overview` بحقول اختيارية (عمر الجلسة، خمول، كابتن، قسم، دمج، مرتجعات معلّقة) دون كسر العملاء القدامى.
+- **`src/components/CashierTableStripBoard.tsx`** + **`src/styles/hallLiveBoard.css`**: شريط KPIs، فلاتر، عرض جدول/بطاقات، وميض للطاولات العاجلة، ودرج تفاصيل سريع مع تسديد.
+- **`src/pages/DashboardPage.tsx`**: إظهار اللوحة للمدير/المطوّر أيضاً (وليس الكاشير فقط).
+
 
 
 

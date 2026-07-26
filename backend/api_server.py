@@ -24904,6 +24904,37 @@ def restaurant_cashier_table_overview():
         if sid:
             await_inv[sid] = str(inv.get("invoiceId") or "")
 
+    # مرتجعات معلّقة + خريطة الطاولات (منطقة/قسم) — إضافات اختيارية لا تكسر العملاء القدامى
+    pending_returns_by_session: dict[str, int] = {}
+    try:
+        for req in _guest_return_requests_load():
+            if not isinstance(req, dict):
+                continue
+            if str(req.get("status") or "").strip().lower() != "pending_manager":
+                continue
+            rsid = str(req.get("sessionId") or "").strip()
+            if rsid:
+                pending_returns_by_session[rsid] = pending_returns_by_session.get(rsid, 0) + 1
+    except Exception:
+        pending_returns_by_session = {}
+
+    zone_by_table: dict[str, str] = {}
+    try:
+        file_tables = _restaurant_load("tables", [])
+        if isinstance(file_tables, list):
+            for tr in file_tables:
+                if not isinstance(tr, dict):
+                    continue
+                tid0 = str(tr.get("id") or "").strip()
+                if not tid0:
+                    continue
+                feats = tr.get("features") if isinstance(tr.get("features"), dict) else {}
+                zone = str(feats.get("zone") or tr.get("zone") or tr.get("section") or "").strip()
+                if zone:
+                    zone_by_table[tid0] = zone[:80]
+    except Exception:
+        zone_by_table = {}
+
     items_out: list = []
     for s in active:
         sid = str(s.get("id") or "")
@@ -24924,10 +24955,14 @@ def restaurant_cashier_table_overview():
         subtotal = 0.0
         preview_parts: list = []
         kitchen_pending = 0
+        last_order_at = ""
         for o in sess_orders:
             st = str(o.get("status") or "").lower()
             if st in ("pending", "preparing"):
                 kitchen_pending += 1
+            created = str(o.get("createdAt") or o.get("sentAt") or o.get("updatedAt") or "").strip()
+            if created and created > last_order_at:
+                last_order_at = created
             for it in o.get("items") or []:
                 if not isinstance(it, dict):
                     continue
@@ -24961,6 +24996,26 @@ def restaurant_cashier_table_overview():
         minimum_per_seat = _session_minimum_charge_per_seat(s, tid)
         minimum_charge = round(max(0.0, minimum_per_seat) * guest_count, 2)
         minimum_gap = max(0.0, round(minimum_charge - round(subtotal, 2), 2)) if minimum_charge > 0 else 0.0
+        start_time = str(s.get("startTime") or "").strip() or None
+        session_age = 0
+        if start_time:
+            dt_start = _iso_to_local_dt(start_time)
+            if dt_start:
+                session_age = max(0, int((datetime.now() - dt_start).total_seconds() // 60))
+        idle_minutes = 0
+        if last_order_at:
+            dt_last = _iso_to_local_dt(last_order_at)
+            if dt_last:
+                idle_minutes = max(0, int((datetime.now() - dt_last).total_seconds() // 60))
+        elif start_time:
+            idle_minutes = session_age
+        merged_into = str(s.get("mergedIntoSessionId") or "").strip() or None
+        merged_sources = s.get("mergedSourceSessionIds")
+        merged_source_ids = (
+            [str(x).strip() for x in merged_sources if str(x).strip()]
+            if isinstance(merged_sources, list)
+            else []
+        )
         items_out.append(
             {
                 "sessionId": sid,
@@ -24981,6 +25036,19 @@ def restaurant_cashier_table_overview():
                 "customerType": str(s.get("customerType") or "").strip() or None,
                 "agentGuid": str(s.get("agentGuid") or "").strip() or None,
                 "agentName": str(s.get("agentName") or "").strip() or None,
+                # إضافات حية للوحة الصالة (اختيارية)
+                "startTime": start_time,
+                "sessionAgeMinutes": session_age,
+                "lastOrderAt": last_order_at or None,
+                "idleMinutes": idle_minutes,
+                "captainName": str(s.get("captainName") or s.get("captainLogin") or "").strip() or None,
+                "captainLogin": str(s.get("captainLogin") or "").strip() or None,
+                "zone": zone_by_table.get(tid) or None,
+                "mergedIntoSessionId": merged_into,
+                "isMergedSource": bool(merged_into),
+                "isMergedHost": bool(merged_source_ids),
+                "mergedSourceCount": len(merged_source_ids),
+                "pendingReturnCount": int(pending_returns_by_session.get(sid, 0) or 0),
             }
         )
 
