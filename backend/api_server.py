@@ -27736,11 +27736,15 @@ def restaurant_delivery_queue(role: Optional[str] = None):
                 "area": tick.get("area"),
                 "address": tick.get("address"),
                 "shippingFee": tick.get("shippingFee"),
+                "shippingMode": tick.get("shippingMode"),
                 "driverName": tick.get("driverName"),
                 "noVat": tick.get("noVat"),
                 "platformName": tick.get("platformName"),
                 "platformOrderId": tick.get("platformOrderId"),
                 "mapsUrl": tick.get("mapsUrl"),
+                "paymentMode": tick.get("paymentMode"),
+                "prepaidAmount": tick.get("prepaidAmount"),
+                "prepaidMethod": tick.get("prepaidMethod"),
             }
         enriched.append(row)
     return {
@@ -27894,6 +27898,79 @@ def restaurant_delivery_resolve_maps_url(body: dict):
     }
 
 
+def _ensure_mat3am_delivery_shipping_product(cursor) -> Optional[str]:
+    """صنف خدمة توصيل/شحن لفاتورة الدليفري (يُنشأ مرة واحدة في TBL007 إن لم يوجد)."""
+    name = "خدمة توصيل / شحن"
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide FROM dbo.TBL007
+            WHERE ProductName = ? OR LatinName = N'MAT3AM_DELIVERY_SHIPPING'
+            """,
+            (name,),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip().upper()
+    except Exception:
+        pass
+    try:
+        gid = str(uuid.uuid4()).upper()
+        group_guid = None
+        try:
+            cursor.execute("SELECT TOP 1 CardGuide FROM dbo.TBL006 ORDER BY CardCode")
+            g = cursor.fetchone()
+            if g and g[0]:
+                group_guid = str(g[0]).strip().upper()
+        except Exception:
+            group_guid = None
+        if group_guid:
+            cursor.execute(
+                """
+                INSERT INTO dbo.TBL007 (CardGuide, ProductName, LatinName, EndUserPrice, AgentPrice, GroupGuid)
+                VALUES (CAST(? AS uniqueidentifier), ?, N'MAT3AM_DELIVERY_SHIPPING', 0, 0, CAST(? AS uniqueidentifier))
+                """,
+                (gid, name, group_guid),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO dbo.TBL007 (CardGuide, ProductName, LatinName, EndUserPrice, AgentPrice)
+                VALUES (CAST(? AS uniqueidentifier), ?, N'MAT3AM_DELIVERY_SHIPPING', 0, 0)
+                """,
+                (gid, name),
+            )
+        return gid
+    except Exception as e:
+        print("[mat3am] ensure delivery shipping product:", e)
+        return None
+
+
+def _parse_delivery_prepaid(body_or_delivery: dict) -> dict:
+    """استخراج دفعة مسبقة من جسم الاستقبال أو كائن delivery."""
+    src = body_or_delivery if isinstance(body_or_delivery, dict) else {}
+    try:
+        amount = float(src.get("prepaidAmount") or src.get("deposit") or src.get("downPayment") or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    amount = max(0.0, round(amount, 2))
+    method = str(src.get("prepaidMethod") or src.get("depositMethod") or "cash").strip().lower()
+    if method not in ("cash", "card", "digital", "transfer", "wallet"):
+        method = "cash"
+    mode = str(src.get("paymentMode") or "").strip().lower()
+    if mode not in ("cod", "prepaid", "partial"):
+        mode = "cod" if amount <= 0 else ("prepaid" if amount > 0 else "cod")
+        # إذا دفعة جزئية واضحة لاحقاً تُضبط من الواجهة بـ paymentMode=partial
+    note = str(src.get("prepaidNote") or src.get("depositNote") or "").strip()[:300] or None
+    return {
+        "paymentMode": mode if amount > 0 or mode == "cod" else "cod",
+        "prepaidAmount": amount,
+        "prepaidMethod": method if amount > 0 else None,
+        "prepaidNote": note,
+        "prepaidAt": datetime.now().isoformat() if amount > 0 else None,
+    }
+
+
 @app.get("/api/restaurant/delivery/tickets")
 def restaurant_delivery_tickets_list(status: Optional[str] = None, limit: int = 80):
     rows = _delivery_tickets_load()
@@ -27974,6 +28051,10 @@ def restaurant_delivery_intake(body: dict):
         shipping_fee = 0.0
     shipping_fee = max(0.0, round(shipping_fee, 2))
     no_vat = bool(body.get("noVat") or body.get("skipVat") or True)  # دليفري: بدون ضريبة افتراضياً حسب طلب التشغيل
+    prepaid = _parse_delivery_prepaid(body)
+    shipping_mode = str(body.get("shippingMode") or body.get("shippingAs") or "service_item").strip().lower()
+    if shipping_mode not in ("service_item", "fee"):
+        shipping_mode = "service_item"
 
     gps = body.get("gps") if isinstance(body.get("gps"), dict) else None
     gps_out = None
@@ -28008,7 +28089,13 @@ def restaurant_delivery_intake(body: dict):
         "specialNotes": str(body.get("specialNotes") or body.get("notes") or "")[:2000] or None,
         "agentGuid": agent_guid or None,
         "shippingFee": shipping_fee,
+        "shippingMode": shipping_mode,
         "noVat": no_vat,
+        "paymentMode": prepaid["paymentMode"],
+        "prepaidAmount": prepaid["prepaidAmount"],
+        "prepaidMethod": prepaid["prepaidMethod"],
+        "prepaidNote": prepaid["prepaidNote"],
+        "prepaidAt": prepaid["prepaidAt"],
         "driverName": str(body.get("driverName") or body.get("courierName") or "")[:120] or None,
         "platformName": str(body.get("platformName") or "")[:120] or None,
         "platformOrderId": str(body.get("platformOrderId") or "")[:120] or None,
@@ -28110,7 +28197,13 @@ def restaurant_delivery_ticket_patch(ticket_id: str, body: dict):
         "status",
         "driverName",
         "shippingFee",
+        "shippingMode",
         "noVat",
+        "paymentMode",
+        "prepaidAmount",
+        "prepaidMethod",
+        "prepaidNote",
+        "prepaidAt",
         "deliveryTime",
         "specialNotes",
         "requestedItemsText",
@@ -31226,6 +31319,37 @@ def restaurant_create_invoice(body: dict):
             if line:
                 normalized_items.append(line)
         items_body = _enrich_invoice_lines_from_menu(cursor, normalized_items)
+        if order_type == "delivery":
+            try:
+                ship_fee = float(delivery.get("shippingFee") or body.get("shippingFee") or 0)
+            except (TypeError, ValueError):
+                ship_fee = 0.0
+            ship_fee = max(0.0, round(ship_fee, 2))
+            ship_mode = str(delivery.get("shippingMode") or body.get("shippingMode") or "service_item").strip().lower()
+            already_ship = any(
+                "توصيل" in str(x.get("ProductName") or "") or "شحن" in str(x.get("ProductName") or "")
+                or str(x.get("isShippingService") or "").lower() in ("1", "true")
+                for x in items_body
+            )
+            if ship_fee > 0 and ship_mode != "fee" and not already_ship:
+                ship_pg = _ensure_mat3am_delivery_shipping_product(cursor)
+                if ship_pg:
+                    items_body.append(
+                        {
+                            "ProductGuide": ship_pg,
+                            "ProductName": "خدمة توصيل / شحن",
+                            "Quantity": 1.0,
+                            "Unit": "1",
+                            "UnitPrice": ship_fee,
+                            "TotalValue": ship_fee,
+                        }
+                    )
+                    # الشحن أصبح بنداً — لا تُضاعفه على total إن كان الواجهة أضافته للإجمالي كرسوم فقط
+                    try:
+                        if float(total) + 0.001 < (sum(float(x.get("TotalValue") or 0) for x in items_body) - 0.001):
+                            pass
+                    except (TypeError, ValueError):
+                        pass
         if not items_body:
             raise HTTPException(status_code=400, detail="لا توجد بنود للفاتورة")
 
@@ -31316,11 +31440,29 @@ def restaurant_create_invoice(body: dict):
             ]
             courier_line = " / ".join(str(x).strip() for x in courier_bits if x and str(x).strip())
             delivery_note = (
-                f" | دليفري: هاتف={delivery.get('phone') or delivery.get('mobile') or ''}"
+                f" | دليفري: عميل={delivery.get('name') or delivery.get('AgentName') or ''}"
+                f" | هاتف={delivery.get('phone') or delivery.get('mobile') or ''}"
                 f" | عنوان={delivery.get('address') or ''}"
+                f" | شحن={delivery.get('shippingFee') if delivery.get('shippingFee') is not None else ''}"
+                f" | وضع_الشحن={delivery.get('shippingMode') or 'service_item'}"
                 f" | وقت التسليم={delivery.get('deliveryTime') or ''}"
                 f" | دفع={delivery.get('payment') or payment_method}"
             )
+            prepaid_amt = 0.0
+            try:
+                prepaid_amt = float(delivery.get("prepaidAmount") or 0)
+            except (TypeError, ValueError):
+                prepaid_amt = 0.0
+            if prepaid_amt > 0:
+                delivery_note += (
+                    f" | مسبق={prepaid_amt}"
+                    f" | وسيلة_مسبق={delivery.get('prepaidMethod') or ''}"
+                    f" | وضع_دفع={delivery.get('paymentMode') or 'prepaid'}"
+                )
+                if delivery.get("prepaidNote"):
+                    delivery_note += f" | ملاحظة_مسبق={delivery.get('prepaidNote')}"
+                bal = max(0.0, round(float(total) - prepaid_amt, 2))
+                delivery_note += f" | متبقي={bal}"
             if student_line:
                 delivery_note += f" | طالب/هاتف عميل={student_line}"
             if courier_line:
@@ -31349,6 +31491,20 @@ def restaurant_create_invoice(body: dict):
         result = save_invoice(invoice_header)
         direct_invoice_guid = str(result.get("MainGuide") or "").strip()
         payment_breakdown = body.get("paymentBreakdown") if isinstance(body.get("paymentBreakdown"), dict) else None
+        if not payment_breakdown and order_type == "delivery":
+            try:
+                prepaid_amt = float(delivery.get("prepaidAmount") or 0)
+            except (TypeError, ValueError):
+                prepaid_amt = 0.0
+            prepaid_amt = max(0.0, round(prepaid_amt, 2))
+            if prepaid_amt > 0:
+                prepaid_method = str(delivery.get("prepaidMethod") or payment_method or "cash").strip().lower()
+                rem = max(0.0, round(float(total) - prepaid_amt, 2))
+                payment_breakdown = {prepaid_method: min(prepaid_amt, float(total))}
+                if rem > 0.0001:
+                    # المتبقي يُحصَّل عند التسليم بنفس وسيلة الدفع المختارة للطلب
+                    rem_key = str(payment_method or "cash").strip().lower()
+                    payment_breakdown[rem_key] = float(payment_breakdown.get(rem_key) or 0) + rem
         if payment_breakdown:
             direct_parts = {
                 _mat3am_normalize_payment_route_key(key): float(value or 0)

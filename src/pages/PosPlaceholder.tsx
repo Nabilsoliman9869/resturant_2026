@@ -36,6 +36,8 @@ export type PosPlaceholderProps = {
   saleChannel?: string;
   pageTitle?: string;
   backTo?: string;
+  /** وضع دليفري مقفول: بدون طاولات / بدون تغيير نوع الطلب — لا يؤثر على POS العادي */
+  deliveryOnly?: boolean;
 };
 
 function initialOrderTypeFromSaleChannel(saleChannel: string | undefined) {
@@ -49,7 +51,7 @@ function initialOrderTypeFromSaleChannel(saleChannel: string | undefined) {
 }
 
 export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
-  const { saleChannel, pageTitle = "نقطة البيع — احترافي", backTo } = props;
+  const { saleChannel, pageTitle = "نقطة البيع — احترافي", backTo, deliveryOnly = false } = props;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { venueType, ready } = useVenue();
@@ -63,7 +65,7 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [orderType, setOrderType] = useState<
     "table" | "takeaway" | "delivery" | "bar_quick" | "catering"
-  >(() => initialOrderTypeFromSaleChannel(saleChannel));
+  >(() => (deliveryOnly ? "delivery" : initialOrderTypeFromSaleChannel(saleChannel)));
   /** للطلب على الطاولة: يُفعَّل بعد «اكتمل الطلب» لاحتساب بند الخدمة */
   const [orderFinalized, setOrderFinalized] = useState(false);
   const [payment, setPayment] = useState("cash");
@@ -78,8 +80,13 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const [courierName, setCourierName] = useState("");
   const [shippingCompany, setShippingCompany] = useState("");
   const [shippingFee, setShippingFee] = useState(0);
-  const [noVat, setNoVat] = useState(false);
+  const [shippingMode, setShippingMode] = useState<"service_item" | "fee">("service_item");
+  const [prepaidAmount, setPrepaidAmount] = useState(0);
+  const [prepaidMethod, setPrepaidMethod] = useState("cash");
+  const [paymentMode, setPaymentMode] = useState<"cod" | "prepaid" | "partial">("cod");
+  const [noVat, setNoVat] = useState(deliveryOnly);
   const [deliveryTicketId, setDeliveryTicketId] = useState("");
+  const SHIPPING_LINE_ID = "__delivery_shipping_svc__";
 
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -125,10 +132,18 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
     const nv = searchParams.get("noVat") === "1" || searchParams.get("noVat") === "true";
     const driver = String(searchParams.get("driverName") || "").trim();
     const tid = String(searchParams.get("deliveryTicketId") || "").trim();
+    const sm = String(searchParams.get("shippingMode") || "").trim().toLowerCase();
+    const pm = String(searchParams.get("paymentMode") || "").trim().toLowerCase();
+    const prepaid = Number(searchParams.get("prepaidAmount") || 0);
+    const prepaidM = String(searchParams.get("prepaidMethod") || "").trim().toLowerCase();
     if (ph) setPhone(ph);
     if (nm) setDeliveryName(nm);
     if (addr) setDeliveryAddress(addr);
     if (Number.isFinite(fee) && fee > 0) setShippingFee(fee);
+    if (sm === "fee" || sm === "service_item") setShippingMode(sm);
+    if (pm === "cod" || pm === "prepaid" || pm === "partial") setPaymentMode(pm);
+    if (Number.isFinite(prepaid) && prepaid > 0) setPrepaidAmount(prepaid);
+    if (prepaidM) setPrepaidMethod(prepaidM);
     if (nv) setNoVat(true);
     if (driver) setCourierName(driver);
     if (tid) setDeliveryTicketId(tid);
@@ -138,9 +153,13 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   }, [searchParams]);
 
   useEffect(() => {
+    if (deliveryOnly) {
+      setOrderType("delivery");
+      return;
+    }
     if (!ready || saleChannel) return;
     setOrderType(defaultOrderTypeForVenue(venueType));
-  }, [ready, venueType, saleChannel]);
+  }, [ready, venueType, saleChannel, deliveryOnly]);
 
   useEffect(() => {
     if (orderType !== "table") setOrderFinalized(false);
@@ -222,7 +241,33 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const netBeforeTax = totals.sumNet;
   const serviceCharge = totals.serviceCharge;
   const vatValue = orderType === "delivery" && noVat ? 0 : totals.vatValue;
-  const total = (orderType === "delivery" && noVat ? totals.sumNet + serviceCharge : totals.total) + (orderType === "delivery" ? shippingFee : 0);
+  const shippingInCart = orderType === "delivery" && shippingMode === "service_item";
+  const shippingAddOn = orderType === "delivery" && !shippingInCart ? shippingFee : 0;
+  const total =
+    (orderType === "delivery" && noVat ? totals.sumNet + serviceCharge : totals.total) + shippingAddOn;
+  const balanceDue = Math.max(0, Math.round((total - prepaidAmount) * 100) / 100);
+
+  useEffect(() => {
+    if (orderType !== "delivery" || shippingMode !== "service_item") {
+      setCart((prev) => prev.filter((l) => l.id !== SHIPPING_LINE_ID));
+      return;
+    }
+    setCart((prev) => {
+      const rest = prev.filter((l) => l.id !== SHIPPING_LINE_ID);
+      if (!(shippingFee > 0)) return rest;
+      return [
+        ...rest,
+        {
+          id: SHIPPING_LINE_ID,
+          productGuide: "MAT3AM_DELIVERY_SHIPPING",
+          name: "خدمة توصيل / شحن",
+          qty: 1,
+          unitPrice: shippingFee,
+          excludeServiceCharge: true,
+        },
+      ];
+    });
+  }, [orderType, shippingMode, shippingFee]);
 
   function addProduct(p: Product) {
     setCart((prev) => {
@@ -258,6 +303,12 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
       setMsg("السلة فارغة.");
       return;
     }
+    if (orderType === "delivery") {
+      if (!deliveryName.trim() || !phone.trim()) {
+        setMsg("مطلوب لاسم العميل ورقم الهاتف قبل إرسال طلب الدليفري.");
+        return;
+      }
+    }
     setLoading(true);
     try {
       let agentGuide = agent?.CardGuide || "";
@@ -283,7 +334,9 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
         agentGuide: agentGuide || undefined,
         paymentMethod: payment,
         orderFinalized: orderType === "table" ? orderFinalized : false,
-        items: cart.map((l) => {
+        items: cart
+          .filter((l) => l.id !== SHIPPING_LINE_ID)
+          .map((l) => {
           const det = totals.lineDetails.find((d) => d.id === l.id);
           return {
             productGuide: l.productGuide,
@@ -316,9 +369,24 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
                 courierName: courierName.trim() || undefined,
                 shippingCompany: shippingCompany.trim() || undefined,
                 shippingFee,
+                shippingMode,
                 noVat,
+                paymentMode,
+                prepaidAmount: prepaidAmount > 0 ? prepaidAmount : undefined,
+                prepaidMethod: prepaidAmount > 0 ? prepaidMethod : undefined,
                 deliveryTicketId: deliveryTicketId || undefined,
               }
+            : undefined,
+        paymentBreakdown:
+          orderType === "delivery" && prepaidAmount > 0
+            ? (() => {
+                const parts: Record<string, number> = {};
+                const paid = Math.min(prepaidAmount, total);
+                parts[prepaidMethod || payment] = paid;
+                const rem = Math.max(0, Math.round((total - paid) * 100) / 100);
+                if (rem > 0) parts[payment] = (parts[payment] || 0) + rem;
+                return parts;
+              })()
             : undefined,
       };
 
@@ -340,7 +408,7 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   }
 
   return (
-    <div>
+    <div className={deliveryOnly ? "pos-delivery-only" : undefined}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 0 }}>
         {backTo ? (
           <button type="button" className="btn" onClick={() => navigate(backTo)} aria-label="رجوع">
@@ -349,27 +417,142 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
         ) : null}
         <h2 style={{ margin: 0 }}>{pageTitle}</h2>
       </div>
+
+      {deliveryOnly ? (
+        <div
+          className="card"
+          style={{
+            marginBottom: "1rem",
+            border: "1px solid rgba(251, 191, 36, 0.45)",
+            background: "linear-gradient(135deg, rgba(251,191,36,0.12), rgba(16,185,129,0.08))",
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>عميل التوصيل (يظهر في الفاتورة والطباعة)</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 8 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              الاسم
+              <input value={deliveryName} onChange={(e) => setDeliveryName(e.target.value)} placeholder="اسم العميل" />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              الهاتف
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="رقم الهاتف" style={{ flex: 1 }} />
+                <button type="button" className="btn" onClick={() => void lookupPhone()}>
+                  بحث
+                </button>
+              </div>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              العنوان
+              <input value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} placeholder="العنوان الكامل" />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              مصروف الشحن
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={shippingFee}
+                onChange={(e) => setShippingFee(Number(e.target.value) || 0)}
+                style={{ fontWeight: 800, borderColor: "rgba(251,191,36,0.6)" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              الشحن كـ
+              <select value={shippingMode} onChange={(e) => setShippingMode(e.target.value as "service_item" | "fee")}>
+                <option value="service_item">صنف خدمة توصيل</option>
+                <option value="fee">رسوم على الإجمالي فقط</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              وقت التسليم
+              <input value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)} placeholder="فوري / اليوم 8 م" />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              الطيار
+              <input value={courierName} onChange={(e) => setCourierName(e.target.value)} placeholder="اسم الطيار" />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              مدفوع مسبقاً
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={prepaidAmount}
+                onChange={(e) => {
+                  const n = Number(e.target.value) || 0;
+                  setPrepaidAmount(n);
+                  setPaymentMode(n <= 0 ? "cod" : n >= total && total > 0 ? "prepaid" : "partial");
+                }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              وسيلة المسبق
+              <select value={prepaidMethod} onChange={(e) => setPrepaidMethod(e.target.value)} disabled={!(prepaidAmount > 0)}>
+                <option value="cash">نقدي</option>
+                <option value="card">بطاقة</option>
+                <option value="digital">تحويل / محفظة</option>
+                <option value="transfer">تحويل بنكي</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18 }}>
+              <input type="checkbox" checked={noVat} onChange={(e) => setNoVat(e.target.checked)} />
+              بدون ضريبة
+            </label>
+          </div>
+          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: "0.75rem", fontSize: "0.9rem" }}>
+            <span>
+              الإجمالي: <strong>{total.toFixed(2)}</strong>
+            </span>
+            <span style={{ color: prepaidAmount > 0 ? "#34d399" : "var(--muted)" }}>
+              مسبق: <strong>{prepaidAmount.toFixed(2)}</strong>
+            </span>
+            <span style={{ color: "#fbbf24", fontWeight: 800 }}>
+              المتبقي عند التسليم: {balanceDue.toFixed(2)}
+            </span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--muted)" }}>
+            لا توجد طاولات في هذا المسار — الطلب يُسجَّل كدليفري. الشحن كصنف خدمة يظهر في بنود الفاتورة (ممارسة POS الحديثة).
+          </div>
+        </div>
+      ) : null}
+
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="btn" onClick={() => void loadProducts()}>
             تحديث البيانات
           </button>
-          <select
-            value={orderType}
-            onChange={(e) => {
-              setOrderType(
-                e.target.value as "table" | "takeaway" | "delivery" | "bar_quick" | "catering",
-              );
-              setOrderFinalized(false);
-            }}
-          >
-            <option value="table">طاولة (داخلي — خدمة بعد «اكتمل»)</option>
-            <option value="takeaway">سفري</option>
-            <option value="delivery">دليفري</option>
-            <option value="bar_quick">بار / طلب سريع</option>
-            <option value="catering">مناسبات / كاترينج</option>
-          </select>
-          {orderType === "table" && cart.length > 0 && (
+          {deliveryOnly ? (
+            <span
+              style={{
+                padding: "0.35rem 0.75rem",
+                borderRadius: 999,
+                background: "linear-gradient(135deg,#fb7185,#e11d48)",
+                color: "#fff",
+                fontWeight: 800,
+                fontSize: "0.82rem",
+              }}
+            >
+              دليفري فقط
+            </span>
+          ) : (
+            <select
+              value={orderType}
+              onChange={(e) => {
+                setOrderType(
+                  e.target.value as "table" | "takeaway" | "delivery" | "bar_quick" | "catering",
+                );
+                setOrderFinalized(false);
+              }}
+            >
+              <option value="table">طاولة (داخلي — خدمة بعد «اكتمل»)</option>
+              <option value="takeaway">سفري</option>
+              <option value="delivery">دليفري</option>
+              <option value="bar_quick">بار / طلب سريع</option>
+              <option value="catering">مناسبات / كاترينج</option>
+            </select>
+          )}
+          {!deliveryOnly && orderType === "table" && cart.length > 0 && (
             <>
               {!orderFinalized ? (
                 <button type="button" className="btn btn-primary" onClick={() => setOrderFinalized(true)}>
@@ -389,6 +572,8 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
           </select>
           <input value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="كوبون (اختياري)" style={{ maxWidth: 180 }} />
         </div>
+        {!deliveryOnly ? (
+          <>
         <div
           style={{
             marginTop: 10,
@@ -430,9 +615,11 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
           فقط). VAT {policy.vatPercent}% {policy.serviceBeforeVat ? "على (صافي الأسطر + الخدمة)." : "على الصافي فقط."} خصم يدوي
           واستثناء سطر من الخدمة أدناه.
         </div>
+          </>
+        ) : null}
       </div>
 
-      {orderType === "delivery" && (
+      {!deliveryOnly && orderType === "delivery" && (
         <div className="card" style={{ marginBottom: "1rem" }}>
           <h3 style={{ marginTop: 0 }}>بيانات الدليفري</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 8 }}>
@@ -560,6 +747,19 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
               <div style={{ color: "var(--muted)" }}>خدمة ({effectiveServicePercent}%): {serviceCharge.toFixed(2)}</div>
             )}
             <div>VAT ({policy.vatPercent}%): {vatValue.toFixed(2)}</div>
+            {orderType === "delivery" && shippingFee > 0 ? (
+              <div style={{ marginTop: 4, color: "#fbbf24", fontWeight: 800 }}>
+                {shippingMode === "service_item" ? "خدمة توصيل (بند فاتورة)" : "مصروف الشحن"}: {shippingFee.toFixed(2)}
+              </div>
+            ) : null}
+            {orderType === "delivery" && prepaidAmount > 0 ? (
+              <div style={{ marginTop: 4, color: "#34d399", fontWeight: 700 }}>مدفوع مسبقاً: {prepaidAmount.toFixed(2)}</div>
+            ) : null}
+            {orderType === "delivery" ? (
+              <div style={{ marginTop: 4, fontWeight: 800, color: balanceDue > 0 ? "#fbbf24" : "#34d399" }}>
+                المتبقي: {balanceDue.toFixed(2)}
+              </div>
+            ) : null}
             <div style={{ fontWeight: 800, marginTop: 6 }}>الإجمالي النهائي: {total.toFixed(2)}</div>
           </div>
 

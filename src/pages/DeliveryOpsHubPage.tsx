@@ -35,7 +35,13 @@ type DeliveryTicket = {
   specialNotes?: string;
   agentGuid?: string;
   shippingFee?: number;
+  shippingMode?: "service_item" | "fee" | string;
   noVat?: boolean;
+  paymentMode?: "cod" | "prepaid" | "partial" | string;
+  prepaidAmount?: number;
+  prepaidMethod?: string;
+  prepaidNote?: string;
+  prepaidAt?: string;
   driverName?: string;
   platformName?: string;
   platformOrderId?: string;
@@ -83,10 +89,12 @@ function rolePosPath(role?: string) {
   return "/app/cashier/pos";
 }
 
-function roleCallCenterPath(role?: string) {
+/** نقطة طلب الدليفري المستقلة (منيو + شحن + بيانات العميل) — ليست شاشة جرسون الطاولات. */
+function roleDeliveryOrderPath(role?: string) {
   const r = String(role || "cashier");
-  if (r === "manager" || r === "operation_manager" || r === "developer") return `/app/${r}/call-center`;
-  return "/app/cashier/call-center";
+  if (r === "manager" || r === "operation_manager" || r === "developer") return `/app/${r}/delivery-order`;
+  if (r === "accountant") return `/app/accountant/delivery-order`;
+  return "/app/cashier/delivery-order";
 }
 
 export default function DeliveryOpsHubPage() {
@@ -114,6 +122,11 @@ export default function DeliveryOpsHubPage() {
   const [requestedItems, setRequestedItems] = useState("");
   const [specialNotes, setSpecialNotes] = useState("");
   const [shippingFee, setShippingFee] = useState("0");
+  const [shippingMode, setShippingMode] = useState<"service_item" | "fee">("service_item");
+  const [paymentMode, setPaymentMode] = useState<"cod" | "prepaid" | "partial">("cod");
+  const [prepaidAmount, setPrepaidAmount] = useState("0");
+  const [prepaidMethod, setPrepaidMethod] = useState<"cash" | "card" | "digital" | "transfer">("cash");
+  const [prepaidNote, setPrepaidNote] = useState("");
   const [noVat, setNoVat] = useState(true);
   const [driverName, setDriverName] = useState("");
   const [platformName, setPlatformName] = useState("");
@@ -123,8 +136,8 @@ export default function DeliveryOpsHubPage() {
   const [mapsFlash, setMapsFlash] = useState(false);
   const [agentGuid, setAgentGuid] = useState("");
   const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
-  const [shotFile, setShotFile] = useState<File | null>(null);
-  const [shotPreview, setShotPreview] = useState<string | null>(null);
+  const [shotFiles, setShotFiles] = useState<File[]>([]);
+  const [shotPreviews, setShotPreviews] = useState<string[]>([]);
   const [pasteFlash, setPasteFlash] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -136,19 +149,32 @@ export default function DeliveryOpsHubPage() {
   const pasteZoneRef = useRef<HTMLDivElement | null>(null);
   const mapsInputRef = useRef<HTMLInputElement | null>(null);
 
-  const applyShotFile = useCallback((file: File | null, source: "file" | "paste" | "drop" = "file") => {
-    setShotFile(file);
-    setShotPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return file ? URL.createObjectURL(file) : null;
+  const clearShotFiles = useCallback(() => {
+    setShotPreviews((prev) => {
+      for (const u of prev) URL.revokeObjectURL(u);
+      return [];
     });
-    if (file) {
-      const label =
-        source === "paste" ? "تم لصق صورة الواتساب ✓" : source === "drop" ? "تم إسقاط الصورة ✓" : `تم اختيار الصورة: ${file.name}`;
-      setMsg(label);
-      setPasteFlash(true);
-      window.setTimeout(() => setPasteFlash(false), 900);
-    }
+    setShotFiles([]);
+    if (fileRef.current) fileRef.current.value = "";
+  }, []);
+
+  const addShotFiles = useCallback((incoming: File[], source: "file" | "paste" | "drop" = "file") => {
+    const images = incoming.filter((f) => String(f.type || "").startsWith("image/"));
+    if (!images.length) return;
+    setShotFiles((prev) => [...prev, ...images].slice(0, 8));
+    setShotPreviews((prev) => {
+      const urls = images.map((f) => URL.createObjectURL(f));
+      return [...prev, ...urls].slice(0, 8);
+    });
+    const label =
+      source === "paste"
+        ? `تم لصق ${images.length} صورة ✓`
+        : source === "drop"
+          ? `تم إسقاط ${images.length} صورة ✓`
+          : `تم إرفاق ${images.length} صورة ✓`;
+    setMsg(label);
+    setPasteFlash(true);
+    window.setTimeout(() => setPasteFlash(false), 900);
   }, []);
 
   const applyMapsUrl = useCallback(
@@ -208,29 +234,35 @@ export default function DeliveryOpsHubPage() {
 
   useEffect(() => {
     return () => {
-      if (shotPreview) URL.revokeObjectURL(shotPreview);
+      for (const u of shotPreviews) URL.revokeObjectURL(u);
     };
-  }, [shotPreview]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- revoke only on unmount
+  }, []);
 
-  /** Ctrl+V: صورة واتساب أو رابط خرائط جوجل أثناء تبويب الاستقبال. */
+  /** Ctrl+V: صور واتساب (واحدة أو أكثر) أو رابط خرائط أثناء تبويب الاستقبال. */
   useEffect(() => {
     if (tab !== "intake") return;
     const onPaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
+      const imageFiles: File[] = [];
       if (items?.length) {
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           if (!item || !String(item.type || "").startsWith("image/")) continue;
           const blob = item.getAsFile();
           if (!blob) continue;
-          e.preventDefault();
           const ext = item.type.includes("jpeg") || item.type.includes("jpg") ? "jpg" : "png";
-          const file = new File([blob], `whatsapp-paste-${Date.now()}.${ext}`, {
-            type: blob.type || "image/png",
-          });
-          applyShotFile(file, "paste");
-          return;
+          imageFiles.push(
+            new File([blob], `whatsapp-paste-${Date.now()}-${i}.${ext}`, {
+              type: blob.type || "image/png",
+            }),
+          );
         }
+      }
+      if (imageFiles.length) {
+        e.preventDefault();
+        addShotFiles(imageFiles, "paste");
+        return;
       }
       const text = e.clipboardData?.getData("text/plain") || e.clipboardData?.getData("text") || "";
       const maps = extractMapsUrl(text);
@@ -242,7 +274,7 @@ export default function DeliveryOpsHubPage() {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [tab, applyShotFile, applyMapsUrl]);
+  }, [tab, addShotFiles, applyMapsUrl]);
 
   const loadTickets = useCallback(async () => {
     try {
@@ -355,12 +387,17 @@ export default function DeliveryOpsHubPage() {
     if (ticket.agentGuid) qs.set("agentGuid", ticket.agentGuid);
     if (ticket.id) qs.set("deliveryTicketId", ticket.id);
     if (ticket.shippingFee != null) qs.set("shippingFee", String(ticket.shippingFee));
+    if (ticket.shippingMode) qs.set("shippingMode", String(ticket.shippingMode));
     if (ticket.noVat) qs.set("noVat", "1");
+    if (ticket.paymentMode) qs.set("paymentMode", String(ticket.paymentMode));
+    if (ticket.prepaidAmount != null && Number(ticket.prepaidAmount) > 0) qs.set("prepaidAmount", String(ticket.prepaidAmount));
+    if (ticket.prepaidMethod) qs.set("prepaidMethod", String(ticket.prepaidMethod));
+    if (ticket.prepaidNote) qs.set("prepaidNote", String(ticket.prepaidNote));
     if (ticket.driverName) qs.set("driverName", ticket.driverName);
     if (ticket.phone) qs.set("phone", ticket.phone);
     if (ticket.customerName) qs.set("name", ticket.customerName);
     if (ticket.fullAddress || ticket.address) qs.set("address", ticket.fullAddress || ticket.address || "");
-    navigate(`${rolePosPath(user?.role)}?${qs.toString()}`);
+    navigate(`${roleDeliveryOrderPath(user?.role)}?${qs.toString()}`);
   }
 
   async function submitIntake(openPosAfter: boolean) {
@@ -385,7 +422,12 @@ export default function DeliveryOpsHubPage() {
           requestedItems: requestedItems.trim() || undefined,
           specialNotes: specialNotes.trim() || undefined,
           shippingFee: Number(shippingFee) || 0,
+          shippingMode,
           noVat,
+          paymentMode,
+          prepaidAmount: Number(prepaidAmount) || 0,
+          prepaidMethod: Number(prepaidAmount) > 0 ? prepaidMethod : undefined,
+          prepaidNote: prepaidNote.trim() || undefined,
           driverName: driverName.trim() || undefined,
           platformName: channel === "platform" ? platformName.trim() : undefined,
           platformOrderId: channel === "platform" ? platformOrderId.trim() : undefined,
@@ -404,19 +446,20 @@ export default function DeliveryOpsHubPage() {
       if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : t);
 
       const ticket = j.ticket;
-      if (ticket?.id && shotFile) {
-        const fd = new FormData();
-        fd.append("file", shotFile);
-        await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(ticket.id)}/attachment`, {
-          method: "POST",
-          body: fd,
-        });
+      if (ticket?.id && shotFiles.length) {
+        for (const file of shotFiles) {
+          const fd = new FormData();
+          fd.append("file", file);
+          await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(ticket.id)}/attachment`, {
+            method: "POST",
+            body: fd,
+          });
+        }
       }
 
       setMsg("تم تسجيل الاستقبال بنجاح");
-      applyShotFile(null);
+      clearShotFiles();
       setMapsUrl("");
-      if (fileRef.current) fileRef.current.value = "";
       await loadTickets();
       if (openPosAfter && ticket) openOrdering(ticket);
     } catch (e) {
@@ -476,7 +519,7 @@ export default function DeliveryOpsHubPage() {
       <header className="deliv-hub__hero">
         <div>
           <p className="deliv-hub__eyebrow">مركز عمليات التوصيل</p>
-          <h1>الدليفري والكول سنتر — مكان واحد</h1>
+          <h1>الدليفري والكول سنتر</h1>
           <p className="deliv-hub__sub">
             واتساب · منصات · تحويل من طاولة · طابور التسليم · بحث ذكي للعملاء
           </p>
@@ -500,20 +543,25 @@ export default function DeliveryOpsHubPage() {
       <nav className="deliv-hub__tabs">
         {(
           [
-            ["intake", "استقبال سريع"],
-            ["tickets", "التذاكر"],
-            ["convert", "من طاولة → دليفري"],
-            ["queue", "طابور التسليم"],
+            ["intake", "استقبال سريع", "tone-intake"],
+            ["tickets", "التذاكر", "tone-tickets"],
+            ["convert", "من طاولة → دليفري", "tone-convert"],
+            ["queue", "طابور التسليم", "tone-queue"],
           ] as const
-        ).map(([k, label]) => (
-          <button key={k} type="button" className={tab === k ? "is-on" : ""} onClick={() => setTab(k)}>
+        ).map(([k, label, tone]) => (
+          <button
+            key={k}
+            type="button"
+            className={`deliv-hub__tab ${tone}${tab === k ? " is-on" : ""}`}
+            onClick={() => setTab(k)}
+          >
             {label}
           </button>
         ))}
-        <Link className="deliv-hub__side-link" to={roleCallCenterPath(user?.role)}>
+        <Link className="deliv-hub__side-link tone-order" to={roleDeliveryOrderPath(user?.role)}>
           شاشة الطلب الكاملة
         </Link>
-        <Link className="deliv-hub__side-link" to={rolePosPath(user?.role)}>
+        <Link className="deliv-hub__side-link tone-pos" to={rolePosPath(user?.role)}>
           نقطة البيع
         </Link>
       </nav>
@@ -525,12 +573,17 @@ export default function DeliveryOpsHubPage() {
           <div className="deliv-hub__channel-row">
             {(
               [
-                ["whatsapp", "واتساب"],
-                ["phone", "مكالمة / كول سنتر"],
-                ["platform", "منصة (طلباتي/مرسول…)"],
+                ["whatsapp", "واتساب", "tone-wa"],
+                ["phone", "مكالمة / كول سنتر", "tone-phone"],
+                ["platform", "منصة (طلباتي/مرسول…)", "tone-platform"],
               ] as const
-            ).map(([k, label]) => (
-              <button key={k} type="button" className={channel === k ? "is-on" : ""} onClick={() => setChannel(k)}>
+            ).map(([k, label, tone]) => (
+              <button
+                key={k}
+                type="button"
+                className={`deliv-hub__channel ${tone}${channel === k ? " is-on" : ""}`}
+                onClick={() => setChannel(k)}
+              >
                 {label}
               </button>
             ))}
@@ -598,12 +651,74 @@ export default function DeliveryOpsHubPage() {
               <input type="number" min={0} step={0.5} value={shippingFee} onChange={(e) => setShippingFee(e.target.value)} />
             </label>
             <label>
+              الشحن كـ
+              <select value={shippingMode} onChange={(e) => setShippingMode(e.target.value as "service_item" | "fee")}>
+                <option value="service_item">صنف خدمة توصيل (يظهر في الفاتورة)</option>
+                <option value="fee">رسوم فقط على الإجمالي</option>
+              </select>
+            </label>
+            <label>
               السائق / الطيار
               <input value={driverName} onChange={(e) => setDriverName(e.target.value)} />
             </label>
             <label className="deliv-hub__check">
               <input type="checkbox" checked={noVat} onChange={(e) => setNoVat(e.target.checked)} />
               بدون ضريبة (طبق ضريبة لا يُطبَّق)
+            </label>
+          </div>
+
+          <div className="deliv-hub__grid deliv-hub__prepaid">
+            <label>
+              التحصيل
+              <select
+                value={paymentMode}
+                onChange={(e) => {
+                  const v = e.target.value as "cod" | "prepaid" | "partial";
+                  setPaymentMode(v);
+                  if (v === "cod") setPrepaidAmount("0");
+                }}
+              >
+                <option value="cod">تحصيل عند التسليم (COD)</option>
+                <option value="prepaid">مدفوع مسبقاً بالكامل</option>
+                <option value="partial">عهدة / دفعة جزئية مسبقاً</option>
+              </select>
+            </label>
+            <label>
+              مبلغ مسبق
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={prepaidAmount}
+                disabled={paymentMode === "cod"}
+                onChange={(e) => {
+                  setPrepaidAmount(e.target.value);
+                  const n = Number(e.target.value) || 0;
+                  if (n > 0 && paymentMode === "cod") setPaymentMode("partial");
+                }}
+              />
+            </label>
+            <label>
+              وسيلة المسبق
+              <select
+                value={prepaidMethod}
+                disabled={paymentMode === "cod" || !(Number(prepaidAmount) > 0)}
+                onChange={(e) => setPrepaidMethod(e.target.value as typeof prepaidMethod)}
+              >
+                <option value="cash">نقدي</option>
+                <option value="card">بطاقة</option>
+                <option value="digital">تحويل / محفظة</option>
+                <option value="transfer">تحويل بنكي</option>
+              </select>
+            </label>
+            <label className="deliv-hub__span2">
+              ملاحظة الدفع المسبق
+              <input
+                value={prepaidNote}
+                disabled={paymentMode === "cod"}
+                onChange={(e) => setPrepaidNote(e.target.value)}
+                placeholder="مثال: فودافون كاش · تحويل · كارت …"
+              />
             </label>
           </div>
 
@@ -638,56 +753,65 @@ export default function DeliveryOpsHubPage() {
           <div className="deliv-hub__attach-row">
             <div
               ref={pasteZoneRef}
-              className={`deliv-hub__paste-zone${pasteFlash ? " is-flash" : ""}${shotFile ? " has-shot" : ""}`}
+              className={`deliv-hub__paste-zone${pasteFlash ? " is-flash" : ""}${shotFiles.length ? " has-shot" : ""}`}
               tabIndex={0}
-              role="button"
-              onClick={() => fileRef.current?.click()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  fileRef.current?.click();
-                }
-              }}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "copy";
               }}
               onDrop={(e) => {
                 e.preventDefault();
-                const f = e.dataTransfer.files?.[0];
-                if (f && f.type.startsWith("image/")) applyShotFile(f, "drop");
+                const list = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
+                if (list.length) addShotFiles(list, "drop");
               }}
             >
               <div className="deliv-hub__paste-copy">
                 <strong>صورة محادثة واتساب / سكرين المنصة</strong>
                 <span>
-                  سكرين من الديسكتوب ثم <kbd>Ctrl</kbd>+<kbd>V</kbd> للصق هنا — أو اسحب الصورة — أو انقر لاختيار ملف
+                  الصق هنا بـ <kbd>Ctrl</kbd>+<kbd>V</kbd> (صورة أو أكثر) أو اسحب الصور إلى هذه المساحة
                 </span>
-                {shotFile ? (
-                  <span className="deliv-hub__hint">✓ {shotFile.name}</span>
+                {shotFiles.length ? (
+                  <span className="deliv-hub__hint">✓ {shotFiles.length} صورة جاهزة للإرفاق</span>
                 ) : (
                   <span className="deliv-hub__hint">مُفضَّل للواتساب والمنصات · يمكن الحفظ بدون صورة</span>
                 )}
+                <button
+                  type="button"
+                  className="btn deliv-hub__attach-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileRef.current?.click();
+                  }}
+                >
+                  📎 أرفق من الجهاز
+                </button>
               </div>
-              {shotPreview ? (
-                <img src={shotPreview} alt="معاينة سكرين" className="deliv-hub__shot-preview" />
-              ) : (
-                <div className="deliv-hub__shot-placeholder" aria-hidden>
-                  📋
-                </div>
-              )}
+              <div className="deliv-hub__shot-thumbs">
+                {shotPreviews.length ? (
+                  shotPreviews.map((src, i) => <img key={`${src}-${i}`} src={src} alt={`معاينة ${i + 1}`} className="deliv-hub__shot-preview" />)
+                ) : (
+                  <div className="deliv-hub__shot-placeholder" aria-hidden>
+                    📋
+                  </div>
+                )}
+              </div>
               <input
                 ref={fileRef}
                 type="file"
                 accept="image/*"
+                multiple
                 capture="environment"
                 className="deliv-hub__file-hidden"
-                onChange={(e) => applyShotFile(e.target.files?.[0] || null, "file")}
+                onChange={(e) => {
+                  const list = Array.from(e.target.files || []);
+                  if (list.length) addShotFiles(list, "file");
+                  e.target.value = "";
+                }}
               />
             </div>
-            {shotFile ? (
-              <button type="button" className="btn btn-ghost" onClick={() => applyShotFile(null)}>
-                إزالة الصورة
+            {shotFiles.length ? (
+              <button type="button" className="btn btn-ghost" onClick={() => clearShotFiles()}>
+                إزالة الصور
               </button>
             ) : null}
             <button type="button" className="btn btn-ghost" onClick={captureGps}>
@@ -786,6 +910,11 @@ export default function DeliveryOpsHubPage() {
                     {t.noVat ? " · بدون ضريبة" : ""}
                     {t.platformName ? ` · ${t.platformName} #${t.platformOrderId || ""}` : ""}
                     {t.mapsUrl ? " · خرائط ✓" : ""}
+                    {Number(t.prepaidAmount || 0) > 0
+                      ? ` · مسبق ${Number(t.prepaidAmount).toFixed(0)} (${t.paymentMode || "prepaid"})`
+                      : t.paymentMode === "cod"
+                        ? " · COD"
+                        : ""}
                     {t.gps?.lat != null && t.gps?.lng != null ? ` · GPS ${Number(t.gps.lat).toFixed(4)},${Number(t.gps.lng).toFixed(4)}` : ""}
                   </div>
                   {t.requestedItemsText ? <p>{t.requestedItemsText}</p> : null}
@@ -860,6 +989,11 @@ export default function DeliveryOpsHubPage() {
                   <div className="deliv-hub__ticket-meta">
                     {o.deliveryTicket?.phone || ""} {o.deliveryTicket?.area ? `· ${o.deliveryTicket.area}` : ""}
                     {o.deliveryTicket?.driverName ? `· طيار: ${o.deliveryTicket.driverName}` : ""}
+                    {Number(o.deliveryTicket?.prepaidAmount || 0) > 0
+                      ? ` · مسبق ${Number(o.deliveryTicket?.prepaidAmount).toFixed(0)}`
+                      : o.deliveryTicket?.paymentMode === "cod"
+                        ? " · COD"
+                        : ""}
                   </div>
                   <div className="deliv-hub__ticket-actions">
                     {o.deliveryTicket?.mapsUrl ? (

@@ -70,39 +70,76 @@
 .deliv-hub__tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.45rem;
   margin-bottom: 0.85rem;
   align-items: center;
 }
 
 .deliv-hub__tabs > button,
-.deliv-hub__channel-row > button {
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.12);
-  color: inherit;
+.deliv-hub__channel-row > button,
+.deliv-hub__side-link {
+  border: 1px solid transparent;
   border-radius: 999px;
-  padding: 0.35rem 0.85rem;
+  padding: 0.42rem 0.95rem;
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
+  text-decoration: none;
+  color: #0f172a;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+
+.deliv-hub__tabs > button:hover,
+.deliv-hub__channel-row > button:hover,
+.deliv-hub__side-link:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
 
 .deliv-hub__tabs > button.is-on,
 .deliv-hub__channel-row > button.is-on {
-  border-color: rgba(34, 211, 238, 0.55);
-  background: rgba(34, 211, 238, 0.16);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35), 0 6px 16px rgba(0, 0, 0, 0.22);
+  filter: brightness(1.08);
 }
 
-.deliv-hub__side-link {
-  font-size: 0.8rem;
-  color: var(--muted);
-  text-decoration: none;
-  margin-inline-start: 0.35rem;
+.deliv-hub__tab.tone-intake,
+.deliv-hub__channel.tone-wa {
+  background: linear-gradient(135deg, #34d399, #10b981);
 }
 
-.deliv-hub__side-link:hover {
-  color: #67e8f9;
+.deliv-hub__tab.tone-tickets {
+  background: linear-gradient(135deg, #60a5fa, #2563eb);
+  color: #eff6ff;
+}
+
+.deliv-hub__tab.tone-convert {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+}
+
+.deliv-hub__tab.tone-queue {
+  background: linear-gradient(135deg, #a78bfa, #7c3aed);
+  color: #f5f3ff;
+}
+
+.deliv-hub__side-link.tone-order {
+  background: linear-gradient(135deg, #fb7185, #e11d48);
+  color: #fff1f2;
+}
+
+.deliv-hub__side-link.tone-pos {
+  background: linear-gradient(135deg, #22d3ee, #0891b2);
+  color: #083344;
+}
+
+.deliv-hub__channel.tone-phone {
+  background: linear-gradient(135deg, #38bdf8, #0284c7);
+  color: #f0f9ff;
+}
+
+.deliv-hub__channel.tone-platform {
+  background: linear-gradient(135deg, #f472b6, #db2777);
+  color: #fdf2f8;
 }
 
 .deliv-hub__msg {
@@ -245,7 +282,7 @@
   border-radius: 14px;
   border: 1.5px dashed rgba(103, 232, 249, 0.45);
   background: rgba(34, 211, 238, 0.06);
-  cursor: pointer;
+  cursor: default;
   outline: none;
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
@@ -264,6 +301,24 @@
 
 .deliv-hub__paste-zone.is-flash {
   box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.35);
+}
+
+.deliv-hub__attach-btn {
+  align-self: flex-start;
+  margin-top: 0.35rem;
+  background: linear-gradient(135deg, #67e8f9, #22d3ee) !important;
+  color: #083344 !important;
+  border: none !important;
+  font-weight: 800 !important;
+}
+
+.deliv-hub__shot-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  max-width: 168px;
+  justify-content: flex-end;
 }
 
 .deliv-hub__paste-copy {
@@ -357,6 +412,25 @@
 .deliv-hub__maps-row input {
   flex: 1;
   min-width: min(100%, 220px);
+}
+
+.deliv-hub__prepaid {
+  margin-top: 0.35rem;
+  margin-bottom: 0.85rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.07);
+}
+
+.deliv-hub__prepaid select {
+  font: inherit;
+  font-weight: 500;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.35);
+  color: inherit;
 }
 
 .deliv-hub__hint {

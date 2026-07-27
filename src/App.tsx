@@ -68,6 +68,7 @@ import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
 import DeliveryManagementPage from "./pages/DeliveryManagementPage";
 import DeliveryOpsHubPage from "./pages/DeliveryOpsHubPage";
+import DeliveryOrderPage from "./pages/DeliveryOrderPage";
 import TableSessionsReportPage from "./pages/TableSessionsReportPage";
 import WaiterUiPreviewPage from "./lab/waiterUiPreview/WaiterUiPreviewPage";
 
@@ -98,6 +99,7 @@ export default function App() {
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="delivery-hub" element={<DeliveryOpsHubPage />} />
+        <Route path="delivery-order" element={<DeliveryOrderPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -130,6 +132,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-hub" element={<DeliveryOpsHubPage />} />
+        <Route path="delivery-order" element={<DeliveryOrderPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="reports" element={<ReportsPage />} />
@@ -155,6 +158,7 @@ export default function App() {
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="delivery-hub" element={<DeliveryOpsHubPage />} />
+        <Route path="delivery-order" element={<DeliveryOrderPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -233,6 +237,7 @@ export default function App() {
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="delivery-hub" element={<DeliveryOpsHubPage />} />
+        <Route path="delivery-order" element={<DeliveryOrderPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
@@ -373,6 +378,7 @@ export default function App() {
         <Route path="call-center" element={<CallCenterPage />} />
         <Route path="delivery-management" element={<DeliveryManagementPage />} />
         <Route path="delivery-hub" element={<DeliveryOpsHubPage />} />
+        <Route path="delivery-order" element={<DeliveryOrderPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />

@@ -1,12 +1,6 @@
-import WaiterOrderPage from "./WaiterOrderPage";
+import { Navigate } from "react-router-dom";
 
-/** شاشة كول سنتر: واجهة الجرسون على قناة الدليفري مع ربط العميل ومركز التكلفة (TBL016↔TBL005). */
+/** كول سنتر منفصل أُخفي — المسار يوجّه لمركز إدارة الدليفري. */
 export default function CallCenterPage() {
-  return (
-    <WaiterOrderPage
-      embeddedChannel="delivery"
-      pageTitle="Call Center — استقبال طلبات الدليفري"
-      backTo="/app/cashier/dashboard"
-    />
-  );
+  return <Navigate to="../delivery-hub" replace />;
 }

@@ -60,7 +60,7 @@ function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
       { title: "1. الصالة والتحصيل", items: mark(pickNavItems(items, ["dashboard", "table-sessions", "invoices-local"])) },
       {
         title: "2. الطلبات والخدمات",
-        items: mark(pickNavItems(items, ["call-center", "delivery-management", "kids-area", "pos"])),
+        items: mark(pickNavItems(items, ["delivery-management", "kids-area", "pos"])),
       },
       { title: "3. المالية اليومية", items: mark(pickNavItems(items, ["purchases", "cash-expense"])) },
     );
@@ -120,7 +120,6 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "dashboard", label: "لوحة الصالة" },
     { to: "table-sessions", label: "جلسات الطاولات" },
     { to: "invoices-local", label: "تسديد فواتير الطاولات" },
-    { to: "call-center", label: "كول سنتر (طلب دليفري)" },
     { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "kids-area", label: "منطقة الأطفال" },
     { to: "pos", label: "نقطة البيع (بار / سفري)" },

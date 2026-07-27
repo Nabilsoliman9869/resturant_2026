@@ -1,0 +1,42 @@
+.delivery-order-page {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.delivery-order-page__banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background:
+    radial-gradient(ellipse at 90% 0%, rgba(244, 114, 182, 0.18), transparent 45%),
+    linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(16, 185, 129, 0.12));
+}
+
+.delivery-order-page__eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #fbbf24;
+  letter-spacing: 0.04em;
+}
+
+.delivery-order-page__banner h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.delivery-order-page__banner p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.pos-delivery-only .grid-2 {
+  align-items: start;
+}

@@ -53,7 +53,7 @@ const ALL_ITEMS: SearchResult[] = [
   { title: "موافقات المدير", path: "@/manager-approvals", subtitle: "مراكز إدارية", keywords: "approvals manager approvals موافقات مدير" },
   { title: "مرتجعات الضيوف", path: "@/guest-returns", subtitle: "مراكز إدارية", keywords: "guest returns مرتجعات" },
   { title: "مركز الدليفري", path: "@/delivery-hub", subtitle: "استقبال واتساب/منصات + طابور", keywords: "delivery call center دليفري واتساب كول" },
-  { title: "Call Center (طلب كامل)", path: "@/call-center", subtitle: "شاشة طلب الدليفري الكاملة", keywords: "call center طلب" },
+  { title: "طلب أصناف الدليفري", path: "@/delivery-order", subtitle: "منيو + شحن + بيانات العميل", keywords: "delivery order طلب شحن" },
   { title: "نقطة البيع", path: "@/pos", subtitle: "مراكز إدارية", keywords: "pos point of sale" },
   { title: "المشتريات", path: "@/purchases", subtitle: "مراكز إدارية", keywords: "purchases مشتريات" },
   { title: "صرف مصروفات", path: "@/cash-expense", subtitle: "مراكز إدارية", keywords: "expense cash صرف" },
