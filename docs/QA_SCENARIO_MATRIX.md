@@ -166,8 +166,8 @@
 | و1 | لوحة الصالة | `dashboard` | | | |
 | و2 | جلسات الطاولات | `table-sessions` | | | |
 | و3 | تسديد فواتير الطاولات | `invoices-local` | | | |
-| و4 | Call Center | `call-center` | | | |
-| و5 | إدارة الدليفري | `delivery-management` | | | |
+| و4 | كول سنتر (طلب دليفري) | `call-center` | منيو كامل بقناة delivery | | |
+| و5 | إدارة الدليفري | `delivery-management` → `delivery-hub?tab=queue` | طابور التسليم | | |
 | و6 | نقطة البيع | `pos` | | | |
 | و7 | مشتريات | `purchases` | | | |
 | و8 | صرف مصروفات | `cash-expense` | | | |

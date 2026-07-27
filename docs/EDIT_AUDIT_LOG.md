@@ -792,6 +792,12 @@ eserved + active.
 - **`src/components/AppShell.tsx`**: إعادة عنصري القائمة للكاشير: «كول سنتر (طلب دليفري)» و«إدارة الدليفري».
 - **`src/App.tsx`**: مسار `delivery-management` تحت `/app/cashier` (يوجّه لمركز الدليفري / طابور التسليم)؛ الإبقاء على `call-center` و`delivery-hub`.
 
+### 111 — دليل دورة عمل الدليفري والكول سنتر — `UTC 2026-07-27T19:05:00Z` — ID `delivpb-c4e82a91f0b3`
+
+- **`docs/DELIVERY_CALL_CENTER_PLAYBOOK.md`**: دورة كاملة من الاستقبال حتى طابور التسليم (واتساب/هاتف/منصة/تحويل طاولة + كول سنتر + POS).
+- **`docs/MAT3AM_WORKFLOW_AND_SETTINGS_GUIDE.md`**: قسم ملخص يربط بالدليل.
+- **`docs/QA_SCENARIO_MATRIX.md`**: توضيح مسارات الكاشير لكول سنتر وإدارة الدليفري.
+
 
 
 
