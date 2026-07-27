@@ -16,6 +16,7 @@ import {
 import { applyPromotions, type Promotion } from "../lib/posPromotions";
 import { buildSegmentedTablesFromFloorPlan, normalizeTableDisplayLabel } from "../lib/restaurantTableView";
 import "../styles/operationalRoles.css";
+import "../styles/deliveryOrderPage.css";
 import SmartProductSearch from "../components/SmartProductSearch";
 import GuestReturnRequestModal, { type GuestReturnOrderLine } from "../components/GuestReturnRequestModal";
 import { CashierPayInvoiceModal, type CashierInvoiceRow } from "../components/CashierPayInvoiceModal";
@@ -122,6 +123,33 @@ type RestTable = {
   number?: number;
   /** حدّ أدنى للطاولة من الخادم — 0 يعني استخدام الافتراضي العام من ops-settings */
   minimumCharge?: number;
+};
+
+/** طاولة اصطناعية لمسار الدليفري داخل شاشة جرسون الطلبات */
+const DELIVERY_SYNTH_TABLE_ID = "DELIVERY";
+const DELIVERY_SYNTH_TABLE: RestTable = {
+  id: DELIVERY_SYNTH_TABLE_ID,
+  name: "توصيل",
+  status: "occupied",
+  seats: 1,
+  number: 0,
+  minimumCharge: 0,
+};
+
+type DeliveryAgentHit = {
+  CardGuide: string;
+  AgentName: string;
+  Phone?: string;
+  Mobile?: string;
+  Address?: string;
+  FullAdress?: string;
+};
+type DeliveryFavItem = {
+  CardGuide: string;
+  ProductName: string;
+  Price?: number;
+  invoiceCount?: number;
+  qtyOrdered?: number;
 };
 
 function matchesTablePickQuery(t: RestTable, rawQuery: string): boolean {
@@ -479,6 +507,22 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [cart, setCart] = useState<CartLine[]>([]);
   const [msg, setMsg] = useState("");
+  /** بيانات عميل التوصيل — فقط عند embeddedChannel=delivery */
+  const [deliverySearchQ, setDeliverySearchQ] = useState("");
+  const [deliveryHits, setDeliveryHits] = useState<DeliveryAgentHit[]>([]);
+  const [deliverySearching, setDeliverySearching] = useState(false);
+  const [deliveryName, setDeliveryName] = useState("");
+  const [deliveryPhone, setDeliveryPhone] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryTicketId, setDeliveryTicketId] = useState("");
+  const [deliveryNoVat, setDeliveryNoVat] = useState(true);
+  const [deliveryShippingFee, setDeliveryShippingFee] = useState(0);
+  const [deliveryShippingProductGuide, setDeliveryShippingProductGuide] = useState("");
+  const [deliveryShippingProductName, setDeliveryShippingProductName] = useState("");
+  const [deliveryFavorites, setDeliveryFavorites] = useState<DeliveryFavItem[]>([]);
+  const [deliveryFavHint, setDeliveryFavHint] = useState<string | null>(null);
+  const [deliveryCatalogTab, setDeliveryCatalogTab] = useState<"menu" | "favorites">("menu");
+  const deliverySearchTimer = useRef<number | null>(null);
   const [unauthorizedAccessTable, setUnauthorizedAccessTable] = useState<string>("");
   const [unauthorizedAccessKind, setUnauthorizedAccessKind] = useState<"" | "captain" | "assignment">("");
   const [loading, setLoading] = useState(false);
@@ -612,11 +656,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     return m;
   }, [normalizedGroups]);
 
-  const selectedTable = useMemo(
-    () => tables.find((t) => t.id === selectedTableId) || null,
-    [tables, selectedTableId]
-  );
-
   const transferPickBase = useMemo(() => {
     return tablesMoveCatalog.filter((t) => {
       if (String(t.id) === String(selectedTableId)) return false;
@@ -675,20 +714,132 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }, [mergePickBase, mergePickQuery]);
 
   const isDeliveryEmbedded = String(embeddedChannel || "").trim().toLowerCase() === "delivery";
+  const selectedTable = useMemo(() => {
+    if (isDeliveryEmbedded) {
+      return tables.find((t) => t.id === DELIVERY_SYNTH_TABLE_ID) || DELIVERY_SYNTH_TABLE;
+    }
+    return tables.find((t) => t.id === selectedTableId) || null;
+  }, [tables, selectedTableId, isDeliveryEmbedded]);
   const selectedTableStatus = normalizeTableStatus(String((selectedTable as any)?.status || ""));
-  const selectedTableBlocked = selectedTableStatus === "dirty" || selectedTableStatus === "cleaning";
+  const selectedTableBlocked = !isDeliveryEmbedded && (selectedTableStatus === "dirty" || selectedTableStatus === "cleaning");
 
   /** عودة واضحة من «طلب للطاولة» إلى شاشة اختيار الطاولة (أو مسار التضمين) */
   const orderTakerExitPath = useMemo(() => {
     const b = String(backTo || "").trim();
     if (b) return b;
-    if (isDeliveryEmbedded) return "/app/cashier/dashboard";
+    if (isDeliveryEmbedded) return "/app/cashier/delivery-hub";
     const r = String(user?.role || "").trim().toLowerCase();
     if (r === "manager") return "/app/manager/captain-tables";
     if (r === "operation_manager") return "/app/operation_manager/captain-tables";
     if (r === "developer") return "/app/developer/captain-tables";
     return "/app/waiter/tables";
   }, [backTo, isDeliveryEmbedded, user?.role]);
+
+  // تهيئة مسار الدليفري داخل جرسون الطلبات
+  useEffect(() => {
+    if (!isDeliveryEmbedded) return;
+    setSelectedTableId(DELIVERY_SYNTH_TABLE_ID);
+    setAssignmentMode("general");
+    const n = String(searchParams.get("name") || "").trim();
+    const ph = String(searchParams.get("phone") || "").trim();
+    const ad = String(searchParams.get("address") || "").trim();
+    const ag = String(searchParams.get("agentGuid") || "").trim();
+    if (n) {
+      setDeliveryName(n);
+      setDeliverySearchQ(n);
+    }
+    if (ph) setDeliveryPhone(ph);
+    if (ad) setDeliveryAddress(ad);
+    if (ag) setSelectedAgentGuid(ag);
+    if (searchParams.get("deliveryTicketId")) setDeliveryTicketId(String(searchParams.get("deliveryTicketId")));
+    if (searchParams.get("shippingFee")) setDeliveryShippingFee(Number(searchParams.get("shippingFee")) || 0);
+    if (searchParams.get("shippingProductGuide")) setDeliveryShippingProductGuide(String(searchParams.get("shippingProductGuide")));
+    if (searchParams.get("shippingProductName")) setDeliveryShippingProductName(String(searchParams.get("shippingProductName")));
+    if (searchParams.get("noVat") === "0") setDeliveryNoVat(false);
+  }, [isDeliveryEmbedded, searchParams]);
+
+  useEffect(() => {
+    if (!isDeliveryEmbedded) return;
+    if (deliverySearchTimer.current) window.clearTimeout(deliverySearchTimer.current);
+    const text = deliverySearchQ.trim();
+    if (text.length < 2) {
+      setDeliveryHits([]);
+      return;
+    }
+    deliverySearchTimer.current = window.setTimeout(() => {
+      void (async () => {
+        setDeliverySearching(true);
+        try {
+          const r = await fetch(`${base}/api/agents/search?search_text=${encodeURIComponent(text)}`);
+          const j = tryParseJson<{ agents?: DeliveryAgentHit[] }>(await r.text()) ?? {};
+          setDeliveryHits(Array.isArray(j.agents) ? j.agents.slice(0, 14) : []);
+        } catch {
+          setDeliveryHits([]);
+        } finally {
+          setDeliverySearching(false);
+        }
+      })();
+    }, 200);
+    return () => {
+      if (deliverySearchTimer.current) window.clearTimeout(deliverySearchTimer.current);
+    };
+  }, [deliverySearchQ, base, isDeliveryEmbedded]);
+
+  useEffect(() => {
+    if (!isDeliveryEmbedded) return;
+    const guid = String(selectedAgentGuid || "").trim();
+    if (!guid) {
+      setDeliveryFavorites([]);
+      setDeliveryFavHint("اختر عميلاً لعرض الأصناف المحببة من فواتيره السابقة");
+      return;
+    }
+    void (async () => {
+      try {
+        const r = await fetch(
+          `${base}/api/restaurant/delivery/customer-favorites?agent_guide=${encodeURIComponent(guid)}&limit=40`,
+        );
+        const j = tryParseJson<{ favorites?: DeliveryFavItem[]; hint?: string }>(await r.text()) ?? {};
+        setDeliveryFavorites(Array.isArray(j.favorites) ? j.favorites : []);
+        setDeliveryFavHint(j.hint || null);
+      } catch {
+        setDeliveryFavorites([]);
+        setDeliveryFavHint("تعذر جلب الأصناف المحببة");
+      }
+    })();
+  }, [isDeliveryEmbedded, selectedAgentGuid, base]);
+
+  function pickDeliveryAgent(a: DeliveryAgentHit) {
+    setSelectedAgentGuid(a.CardGuide);
+    setDeliveryName(String(a.AgentName || ""));
+    setDeliveryPhone(String(a.Phone || a.Mobile || ""));
+    setDeliveryAddress(String(a.FullAdress || a.Address || ""));
+    setDeliverySearchQ(String(a.AgentName || ""));
+    setDeliveryHits([]);
+    setDeliveryCatalogTab("favorites");
+    setMsg(`تم تحميل العميل: ${a.AgentName}`);
+  }
+
+  async function ensureDeliveryCustomerSaved(): Promise<string> {
+    if (!deliveryName.trim() || !deliveryPhone.trim()) {
+      throw new Error("مطلوب اسم العميل ورقم الهاتف للتوصيل");
+    }
+    const upsert = await fetch(`${base}/api/agents/delivery-upsert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        AgentName: deliveryName.trim(),
+        Phone: deliveryPhone.trim(),
+        Mobile: deliveryPhone.trim(),
+        FullAdress: deliveryAddress.trim(),
+      }),
+    });
+    const ujText = await upsert.text();
+    const uj = tryParseJson<{ success?: boolean; detail?: string; CardGuide?: string }>(ujText);
+    if (!upsert.ok || !uj?.success) throw new Error(uj?.detail || ujText || "تعذر حفظ عميل الدليفري");
+    const g = String(uj.CardGuide || "").trim();
+    setSelectedAgentGuid(g);
+    return g;
+  }
 
   function seatGuestDisplay(seatIndex: number): string {
     const t = String(seatGuestLabels[seatIndex] ?? "").trim();
@@ -980,17 +1131,23 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
       setUnauthorizedAccessTable(unauthorizedTableName);
       setUnauthorizedAccessKind(unauthorizedKind);
-      setTables(outFiltered);
+      if (isDeliveryEmbedded) {
+        const withDeliv = outFiltered.some((t: any) => String(t.id) === DELIVERY_SYNTH_TABLE_ID)
+          ? outFiltered
+          : [DELIVERY_SYNTH_TABLE, ...outFiltered];
+        setTables(withDeliv);
+        setSelectedTableId(DELIVERY_SYNTH_TABLE_ID);
+      } else {
+        setTables(outFiltered);
+        setSelectedTableId((prev) => {
+          const arr = outFiltered;
+          if (fromUrl && arr.some((x: any) => x.id === fromUrl)) return fromUrl;
+          if (prev && arr.some((x: any) => x.id === prev)) return prev;
+          return arr.length ? arr[0].id : "";
+        });
+      }
 
-      setSelectedTableId((prev) => {
-        const arr = outFiltered;
-        // إذا كانت الطاولة المطلوبة من الرابط المباشر ملكاً للكابتن، نختارها
-        if (fromUrl && arr.some((x: any) => x.id === fromUrl)) return fromUrl;
-        if (prev && arr.some((x: any) => x.id === prev)) return prev;
-        return arr.length ? arr[0].id : "";
-      });
-
-      if (outFiltered.length === 0) {
+      if (!isDeliveryEmbedded && outFiltered.length === 0) {
         if (outList.length === 0) {
           setMsg(
             "لا توجد طاولات في المخطط — من المطوّر: تهيئة TBL005 + floor_plan.json أو افتح الطاولة من «لوحة الطاولات» أولاً.",
@@ -1025,6 +1182,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setTableMinDefaultOps(Number.isFinite(mcRaw) ? Math.max(0, mcRaw) : 0);
       setCaptainItemSelectionMode(opJson.captainItemSelectionMode === "wizard" ? "wizard" : "classic");
       setSelectedAgentGuid((prev) => {
+        const fromUrlAgent = String(searchParams.get("agentGuid") || "").trim();
+        if (isDeliveryEmbedded && fromUrlAgent) return fromUrlAgent;
+        if (isDeliveryEmbedded && prev) return prev;
         if (prev && alist.some((a) => a.CardGuide === prev)) return prev;
         const pick = alist.find((a) => {
           const n = String(a?.AgentName || "").toLowerCase();
@@ -1046,7 +1206,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     } finally {
       setLoading(false);
     }
-  }, [base, searchParams, user?.id, user?.role]);
+  }, [base, searchParams, user?.id, user?.role, isDeliveryEmbedded]);
 
   useEffect(() => {
     void loadAll();
@@ -1241,7 +1401,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   );
 
   const showCaptainGuestDock =
-    useCaptainMobileUi && captainShowsGuestDock(captainTab, assignmentMode === "per_seat", captainDockSeats);
+    !isDeliveryEmbedded &&
+    useCaptainMobileUi &&
+    captainShowsGuestDock(captainTab, assignmentMode === "per_seat", captainDockSeats);
 
   const desktopSeatPills = useMemo(
     () => (assignmentMode === "per_seat" ? [...visibleSeatNumbers, SHARED_SEAT_NO] : []),
@@ -1256,6 +1418,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }, [captainDockSeats, selectedSeat, useCaptainMobileUi, assignmentMode]);
 
   async function requireSeatFlowBeforeOrder(): Promise<boolean> {
+    if (isDeliveryEmbedded) return true;
     if (!useDesktopOrderWorkspace) return true;
     if (selectedTableBlocked) {
       setMsg("الطاولة غير جاهزة للطلبات (متسخة/قيد التنظيف).");
@@ -2467,6 +2630,76 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الطلب فارغ.");
       return;
     }
+    if (isDeliveryEmbedded) {
+      setLoading(true);
+      try {
+        const agentGuide = await ensureDeliveryCustomerSaved();
+        const items = cart.map((l) => {
+          const kn = String(l.kitchenNotes || "").trim();
+          let nm = l.name;
+          if (kn) nm += ` — ${kn.slice(0, 160)}`;
+          return {
+            productGuide: l.productGuide,
+            menuItemId: l.productGuide,
+            name: nm,
+            quantity: l.qty,
+            unitPrice: l.unitPrice,
+            excludeServiceCharge: true,
+          };
+        });
+        const body = {
+          orderType: "delivery",
+          agentGuide,
+          paymentMethod: "cash",
+          orderFinalized: false,
+          postToSqlInvoice: true,
+          items,
+          subtotal: billingTotals.netPortion,
+          discountValue,
+          serviceCharge: 0,
+          tax: deliveryNoVat ? 0 : vatValue,
+          tipAmount: 0,
+          total: deliveryNoVat ? billingTotals.netPortion + Math.max(0, deliveryShippingFee || 0) : total,
+          delivery: {
+            phone: deliveryPhone,
+            name: deliveryName,
+            address: deliveryAddress,
+            shippingFee: deliveryShippingFee,
+            shippingMode: deliveryShippingProductGuide ? "service_item" : deliveryShippingFee > 0 ? "service_item" : "fee",
+            shippingProductGuide: deliveryShippingProductGuide || undefined,
+            shippingProductName: deliveryShippingProductName || undefined,
+            noVat: deliveryNoVat,
+            deliveryTicketId: deliveryTicketId || undefined,
+          },
+          mat3amActor: buildMat3amActor(user),
+        };
+        const r = await safeFetch(`${base}/api/restaurant/invoices`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          timeoutMs: 20000,
+        });
+        const t = await r.text();
+        if (!r.ok) {
+          const detail = String(t || "").trim();
+          if (r.status === 0) throw new Error(briefNetworkHint("failed to fetch"));
+          throw new Error(detail || `HTTP ${r.status}`);
+        }
+        setCart([]);
+        setCouponCode("");
+        setMsg("تم إرسال طلب الدليفري للمطبخ وتسجيل الفاتورة.");
+        try {
+          terminalLock.triggerLock("send");
+        } catch {
+          /* صامت */
+        }
+      } catch (e) {
+        setMsg(`فشل الإرسال: ${briefNetworkHint(e)}`);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (!selectedTable) {
       setMsg("اختر طاولة.");
       return;
@@ -3237,15 +3470,27 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   const showBootstrapOverlay = loading && products.length === 0 && groups.length === 0;
   const useDesktopOrderWorkspace = !useCaptainMobileUi;
-  const desktopTableLabel = selectedTable ? tableDisplayName(selectedTable) : selectedTableId || "بدون طاولة";
-  const desktopSessionLabel = activeSessionId ? `#${activeSessionId.slice(0, 8)}` : "لا توجد جلسة";
-  const desktopBillingLabel = billingLocked
-    ? "قيد طلب الحساب"
-    : mergedIntoSessionId
-      ? "الحساب من الطاولة الهدف"
-      : mergedSourceSessionIds.length > 0
-        ? "الحساب المشترك هنا"
-        : "جلسة مفتوحة";
+  const desktopTableLabel = isDeliveryEmbedded
+    ? "توصيل"
+    : selectedTable
+      ? tableDisplayName(selectedTable)
+      : selectedTableId || "بدون طاولة";
+  const desktopSessionLabel = isDeliveryEmbedded
+    ? deliveryName || deliveryPhone || "عميل توصيل"
+    : activeSessionId
+      ? `#${activeSessionId.slice(0, 8)}`
+      : "لا توجد جلسة";
+  const desktopBillingLabel = isDeliveryEmbedded
+    ? deliveryNoVat
+      ? "دليفري · بدون ضريبة"
+      : "دليفري"
+    : billingLocked
+      ? "قيد طلب الحساب"
+      : mergedIntoSessionId
+        ? "الحساب من الطاولة الهدف"
+        : mergedSourceSessionIds.length > 0
+          ? "الحساب المشترك هنا"
+          : "جلسة مفتوحة";
   const operationalSidebarContent = useMemo(
     () => (
       <div className="app-shell__op-section">
@@ -3376,18 +3621,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
   useEffect(() => {
     if (!appMenu?.setAsideSupplement) return;
-    if (!useDesktopOrderWorkspace) {
+    if (!useDesktopOrderWorkspace || isDeliveryEmbedded) {
       appMenu.setAsideSupplement(null);
       return;
     }
     appMenu.setAsideSupplement(operationalSidebarContent);
     return () => appMenu.setAsideSupplement(null);
-  }, [appMenu, operationalSidebarContent, useDesktopOrderWorkspace]);
+  }, [appMenu, operationalSidebarContent, useDesktopOrderWorkspace, isDeliveryEmbedded]);
 
   return (
     <div
       className={`role-op waiter-pos waiter-pos--order-taker${narrowOtViewport && assignmentMode === "per_seat" ? " waiter-pos--ot-rail-guests" : ""}${useCaptainMobileUi ? " waiter-pos--ot-ui-captain" : ""
-        }${showCaptainGuestDock ? " waiter-pos--captain-guest-dock-on" : ""}`}
+        }${showCaptainGuestDock ? " waiter-pos--captain-guest-dock-on" : ""}${isDeliveryEmbedded ? " waiter-pos--delivery" : ""}`}
       {...(useCaptainMobileUi ? { "data-ot-captain-tab": captainTab } : {})}
     >
       {showBootstrapOverlay ? (
@@ -3396,11 +3641,137 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           <div className="waiter-pos__bootstrap-label">جاري تحميل بيانات الطلب…</div>
         </div>
       ) : null}
+
+      {isDeliveryEmbedded ? (
+        <div className="dop-customer-search" style={{ margin: "0.5rem 0.65rem 0.35rem" }}>
+          <div className="dop-customer-search__bar">
+            <span className="dop-customer-search__icon" aria-hidden>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2.2" />
+                <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+              </svg>
+            </span>
+            <input
+              className="dop-customer-search__input"
+              value={deliverySearchQ}
+              onChange={(e) => setDeliverySearchQ(e.target.value)}
+              placeholder="بحث عميل التوصيل: الاسم · الهاتف · العنوان"
+              autoFocus
+              aria-label="بحث عملاء التوصيل"
+            />
+            {deliverySearching ? <span className="dop-customer-search__busy">بحث…</span> : null}
+          </div>
+          {deliveryHits.length > 0 ? (
+            <ul className="dop-customer-search__hits">
+              {deliveryHits.map((a) => (
+                <li key={a.CardGuide}>
+                  <button type="button" onClick={() => pickDeliveryAgent(a)}>
+                    <strong>{a.AgentName}</strong>
+                    <span>
+                      {a.Phone || a.Mobile || "—"} · {(a.FullAdress || a.Address || "").slice(0, 70)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))",
+              gap: "0.4rem",
+              marginTop: "0.55rem",
+            }}
+          >
+            <input value={deliveryName} onChange={(e) => setDeliveryName(e.target.value)} placeholder="الاسم *" />
+            <input value={deliveryPhone} onChange={(e) => setDeliveryPhone(e.target.value)} placeholder="الهاتف *" inputMode="tel" />
+            <input
+              value={deliveryAddress}
+              onChange={(e) => setDeliveryAddress(e.target.value)}
+              placeholder="العنوان"
+              style={{ gridColumn: "span 2" }}
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", fontWeight: 700 }}>
+              <input type="checkbox" checked={deliveryNoVat} onChange={(e) => setDeliveryNoVat(e.target.checked)} />
+              بدون ضريبة
+            </label>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={deliveryShippingFee}
+              onChange={(e) => setDeliveryShippingFee(Number(e.target.value) || 0)}
+              placeholder="مصروف الشحن"
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              className={`waiter-pos__btn${deliveryCatalogTab === "menu" ? " waiter-pos__btn--primary" : ""}`}
+              onClick={() => setDeliveryCatalogTab("menu")}
+            >
+              الأصناف
+            </button>
+            <button
+              type="button"
+              className={`waiter-pos__btn${deliveryCatalogTab === "favorites" ? " waiter-pos__btn--primary" : ""}`}
+              onClick={() => setDeliveryCatalogTab("favorites")}
+            >
+              الأصناف المحببة
+            </button>
+            <button
+              type="button"
+              className="waiter-pos__btn"
+              onClick={() => void ensureDeliveryCustomerSaved().then(() => setMsg("تم حفظ العميل")).catch((e) => setMsg(String(e)))}
+            >
+              حفظ العميل
+            </button>
+          </div>
+          {deliveryCatalogTab === "favorites" ? (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 120, overflow: "auto" }}>
+              {!selectedAgentGuid ? (
+                <span className="dop-customer-search__hint">اختر عميلاً أولاً</span>
+              ) : deliveryFavorites.length === 0 ? (
+                <span className="dop-customer-search__hint">{deliveryFavHint || "لا محببات بعد"}</span>
+              ) : (
+                deliveryFavorites.map((f) => (
+                  <button
+                    key={f.CardGuide}
+                    type="button"
+                    className="waiter-pos__btn"
+                    style={{ fontSize: "0.78rem" }}
+                    onClick={() =>
+                      pushCartLineForProduct(
+                        {
+                          CardGuide: f.CardGuide,
+                          ProductName: f.ProductName,
+                          Price: Number(f.Price) || 0,
+                        } as Product,
+                        [],
+                        "",
+                        1,
+                      )
+                    }
+                  >
+                    {f.ProductName}
+                    {f.invoiceCount ? ` ·×${f.invoiceCount}` : ""}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <OperationalRoleHeader
         roleTitle={pageTitle?.trim() ? pageTitle : "SIR RESTO"}
         backTo={orderTakerExitPath}
         hideUser
-        titleSub={<span className="waiter-pos__title-subtle">مطاعم XTRA · شاشة الطلب الحالية للجرسون</span>}
+        titleSub={
+          <span className="waiter-pos__title-subtle">
+            {isDeliveryEmbedded ? "مطاعم XTRA · جرسون التوصيل (بدون طاولات)" : "مطاعم XTRA · شاشة الطلب الحالية للجرسون"}
+          </span>
+        }
         titleStyle={{
           fontSize: "1.02rem",
           fontWeight: 900,
@@ -3425,13 +3796,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div className="waiter-pos__hdr-status">
               <span className="waiter-pos__hdr-status-chip">{desktopTableLabel}</span>
               <span className="waiter-pos__hdr-status-chip">{desktopSessionLabel}</span>
-              {sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 ? (
+              {!isDeliveryEmbedded && sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 ? (
                 <span className="waiter-pos__hdr-status-chip" style={{ color: "#fbbf24", fontWeight: 800 }}>
                   حد: {sessionMaxInvoiceLimit.toFixed(2)}
                 </span>
               ) : null}
               <span className="waiter-pos__hdr-status-chip">{desktopBillingLabel}</span>
             </div>
+            {!isDeliveryEmbedded ? (
             <div className="waiter-pos__hdr-primary-actions">
               <button type="button" className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--report" onClick={() => setShowSummary((prev) => !prev)}>
                 {showSummary ? "إخفاء التقرير" : "تقرير الطاولة"}
@@ -3448,6 +3820,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 {requestBillBusy ? "…" : mergedIntoSessionId ? "الحساب من الهدف" : "طلب الحساب"}
               </button>
             </div>
+            ) : null}
             <div className="waiter-pos__hdr-fields">
               <select
                 className="waiter-pos__select"
@@ -3481,6 +3854,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 aria-label="التاريخ"
                 style={{ width: "100%", fontSize: "0.78rem", fontWeight: 700, padding: "0.32rem 0.45rem", borderRadius: 8, border: "1px solid #1e40af", background: "#fff", color: "#0f172a", height: 34 }}
               />
+              {!isDeliveryEmbedded ? (
               <select
                 className="waiter-pos__select"
                 value={selectedTableId}
@@ -3498,13 +3872,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   ))
                 )}
               </select>
+              ) : (
+                <span className="waiter-pos__hdr-status-chip" style={{ height: 34, display: "grid", placeItems: "center" }}>
+                  بدون طاولة — توصيل
+                </span>
+              )}
               <input className="waiter-pos__coupon waiter-pos__hdr-coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="قيمة الكوبون" disabled={billingLocked} />
             </div>
             <div className="waiter-pos__hdr-close-wrap">
               <button
                 type="button"
                 className="waiter-pos__close"
-                onClick={() => navigate("/app/waiter/tables")}
+                onClick={() => navigate(orderTakerExitPath)}
                 aria-label="إغلاق"
                 style={{ background: "#dc2626", color: "#fff", border: "1px solid #b91c1c", height: 36, width: 36, fontSize: "1.2rem", borderRadius: 10 }}
               >
