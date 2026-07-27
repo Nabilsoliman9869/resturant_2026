@@ -138,8 +138,8 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
         items: [
           { to: `${roleBase}/manager-approvals`, label: "موافقات المدير", absolute: true, hint: "يؤثر على: الموافقات الحساسة كتحويل الجلسات وحدود الفواتير" },
           { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true, hint: "يؤثر على: المرتجعات وربطها بالحسابات والجلسات" },
-          { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true, hint: "يؤثر على: أوامر التوصيل وحركة المكالمات" },
-          { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true, hint: "يؤثر على: متابعة المناديب والرحلات" },
+          { to: `${roleBase}/delivery-hub`, label: "مركز الدليفري", absolute: true, hint: "واتساب/منصات/تحويل طاولة + طابور التسليم" },
+          { to: `${roleBase}/call-center`, label: "شاشة طلب الدليفري", absolute: true, hint: "منيو كامل لإرسال الطلب للمطبخ" },
           { to: `${roleBase}/reports`, label: "تقارير", absolute: true, hint: "يؤثر على: تحليل الأداء والقرارات التشغيلية" },
           { to: `${roleBase}/flash-report`, label: "تقرير سريع", absolute: true, hint: "يؤثر على: لقطة فورية للوضع الحالي" },
           { to: `${roleBase}/table-sessions-report`, label: "تقرير جلسات الطاولات", absolute: true, hint: "يؤثر على: تحليل الجلسات، الطلبات، وقياسات الزمن" },
@@ -168,8 +168,8 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
       title: "9. المراكز الإدارية المرتبطة",
       items: [
         { to: `${roleBase}/guest-returns`, label: "مرتجعات الضيوف", absolute: true, hint: "يؤثر على: مرتجعات الضيوف والتسويات" },
-        { to: `${roleBase}/call-center`, label: "Call Center (دليفري)", absolute: true, hint: "يؤثر على: استقبال أوامر الدليفري" },
-        { to: `${roleBase}/delivery-management`, label: "إدارة الدليفري", absolute: true, hint: "يؤثر على: توزيع المناديب وحالة التسليم" },
+        { to: `${roleBase}/delivery-hub`, label: "مركز الدليفري", absolute: true, hint: "واتساب/منصات/تحويل طاولة + طابور التسليم" },
+        { to: `${roleBase}/call-center`, label: "شاشة طلب الدليفري", absolute: true, hint: "منيو كامل لإرسال الطلب للمطبخ" },
         { to: `${roleBase}/purchases`, label: "المشتريات", absolute: true, hint: "يؤثر على: أوامر الشراء والمخزون" },
         { to: `${roleBase}/cash-expense`, label: "صرف مصروفات", absolute: true, hint: "يؤثر على: المصروفات النقدية اليومية" },
         { to: `${roleBase}/reports`, label: "تقارير الحسابات", absolute: true, hint: "يؤثر على: قراءة الأداء المالي والتشغيلي" },

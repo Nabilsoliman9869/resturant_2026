@@ -781,6 +781,12 @@ eserved + active.
 - **`src/components/CashierTableStripBoard.tsx`** + **`src/styles/hallLiveBoard.css`**: شريط KPIs، فلاتر، عرض جدول/بطاقات، وميض للطاولات العاجلة، ودرج تفاصيل سريع مع تسديد.
 - **`src/pages/DashboardPage.tsx`**: إظهار اللوحة للمدير/المطوّر أيضاً (وليس الكاشير فقط).
 
+### 109 — مركز الدليفري الموحّد (واتساب/منصات/تحويل طاولة) — `UTC 2026-07-27T18:00:00Z` — ID `delivhub-f3a91c82e7b4`
+
+- **`backend/api_server.py`**: بحث عملاء ذكي؛ `delivery/intake` + مرفقات صور + `convert-to-delivery`؛ طابور دليفري مُثرى بالتذاكر.
+- **`src/pages/DeliveryOpsHubPage.tsx`** + **`deliveryOpsHub.css`**: مركز عمليات موحّد (استقبال / تذاكر / تحويل / طابور).
+- **`PosPlaceholder`**: استقبال query (agent/شحن/بدون ضريبة/تذكرة)؛ **`AppShell`/`App`**: مسار `delivery-hub` بدل تشتيت call-center + إدارة.
+
 
 
 

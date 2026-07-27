@@ -373,25 +373,36 @@ export function CashierTableStripBoard() {
                       <span className={`hall-live-board__status ${st.cls}`}>{st.label}</span>
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      {s.awaitingPayment && s.awaitingInvoiceId ? (
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }}
-                          onClick={() => openPay(String(s.awaitingInvoiceId))}
-                        >
-                          تسديد
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }}
-                          onClick={() => setInspect(s)}
-                        >
-                          تفاصيل
-                        </button>
-                      )}
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {s.awaitingPayment && s.awaitingInvoiceId ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }}
+                            onClick={() => openPay(String(s.awaitingInvoiceId))}
+                          >
+                            تسديد
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }}
+                            onClick={() => setInspect(s)}
+                          >
+                            تفاصيل
+                          </button>
+                        )}
+                        {!s.awaitingPayment ? (
+                          <NavLink
+                            to="../delivery-hub?tab=convert"
+                            className="btn btn-ghost"
+                            style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem", textDecoration: "none" }}
+                          >
+                            → دليفري
+                          </NavLink>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -622,27 +633,45 @@ function TableStrip({
         {` · ${fmtMins(Number(s.sessionAgeMinutes || 0))}`}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: "0.75rem" }}>
-        {pay && s.awaitingInvoiceId ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenPay(String(s.awaitingInvoiceId));
-            }}
-            style={{
-              padding: "2px 10px",
-              borderRadius: 999,
-              background: "rgba(234,179,8,0.28)",
-              fontWeight: 700,
-              border: "1px solid rgba(234,179,8,0.45)",
-              color: "inherit",
-              cursor: "pointer",
-              font: "inherit",
-            }}
-          >
-            تسديد
-          </button>
-        ) : null}
+          {s.awaitingPayment && s.awaitingInvoiceId ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPay(String(s.awaitingInvoiceId));
+              }}
+              style={{
+                padding: "2px 10px",
+                borderRadius: 999,
+                background: "rgba(234,179,8,0.28)",
+                fontWeight: 700,
+                border: "1px solid rgba(234,179,8,0.45)",
+                color: "inherit",
+                cursor: "pointer",
+                font: "inherit",
+              }}
+            >
+              تسديد
+            </button>
+          ) : null}
+          {!pay ? (
+            <NavLink
+              to="../delivery-hub?tab=convert"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                padding: "2px 10px",
+                borderRadius: 999,
+                background: "rgba(34,211,238,0.18)",
+                fontWeight: 700,
+                border: "1px solid rgba(34,211,238,0.35)",
+                color: "inherit",
+                textDecoration: "none",
+                fontSize: "0.75rem",
+              }}
+            >
+              → دليفري
+            </NavLink>
+          ) : null}
         {minGap > 0 ? (
           <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(239,68,68,0.15)", fontWeight: 700 }}>
             ناقص حد أدنى {minGap.toFixed(0)} ج

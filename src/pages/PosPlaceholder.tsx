@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 import { applyPromotions, type Promotion } from "../lib/posPromotions";
@@ -51,6 +51,7 @@ function initialOrderTypeFromSaleChannel(saleChannel: string | undefined) {
 export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const { saleChannel, pageTitle = "نقطة البيع — احترافي", backTo } = props;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { venueType, ready } = useVenue();
   const base = getApiBase();
   const [products, setProducts] = useState<Product[]>([]);
@@ -76,6 +77,9 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const [studentPhone, setStudentPhone] = useState("");
   const [courierName, setCourierName] = useState("");
   const [shippingCompany, setShippingCompany] = useState("");
+  const [shippingFee, setShippingFee] = useState(0);
+  const [noVat, setNoVat] = useState(false);
+  const [deliveryTicketId, setDeliveryTicketId] = useState("");
 
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -109,6 +113,29 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   useEffect(() => {
     void loadProducts();
   }, []);
+
+  useEffect(() => {
+    const ot = String(searchParams.get("orderType") || "").trim().toLowerCase();
+    if (ot === "delivery") setOrderType("delivery");
+    const ag = String(searchParams.get("agentGuid") || "").trim();
+    const nm = String(searchParams.get("name") || "").trim();
+    const ph = String(searchParams.get("phone") || "").trim();
+    const addr = String(searchParams.get("address") || "").trim();
+    const fee = Number(searchParams.get("shippingFee") || 0);
+    const nv = searchParams.get("noVat") === "1" || searchParams.get("noVat") === "true";
+    const driver = String(searchParams.get("driverName") || "").trim();
+    const tid = String(searchParams.get("deliveryTicketId") || "").trim();
+    if (ph) setPhone(ph);
+    if (nm) setDeliveryName(nm);
+    if (addr) setDeliveryAddress(addr);
+    if (Number.isFinite(fee) && fee > 0) setShippingFee(fee);
+    if (nv) setNoVat(true);
+    if (driver) setCourierName(driver);
+    if (tid) setDeliveryTicketId(tid);
+    if (ag) {
+      setAgent({ CardGuide: ag, AgentName: nm || "عميل دليفري", Phone: ph, Mobile: ph, Address: addr });
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!ready || saleChannel) return;
@@ -194,8 +221,8 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const discountValue = totals.sumPromoDiscount + totals.sumManualDiscount;
   const netBeforeTax = totals.sumNet;
   const serviceCharge = totals.serviceCharge;
-  const vatValue = totals.vatValue;
-  const total = totals.total;
+  const vatValue = orderType === "delivery" && noVat ? 0 : totals.vatValue;
+  const total = (orderType === "delivery" && noVat ? totals.sumNet + serviceCharge : totals.total) + (orderType === "delivery" ? shippingFee : 0);
 
   function addProduct(p: Product) {
     setCart((prev) => {
@@ -288,6 +315,9 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
                 studentPhone: studentPhone.trim() || undefined,
                 courierName: courierName.trim() || undefined,
                 shippingCompany: shippingCompany.trim() || undefined,
+                shippingFee,
+                noVat,
+                deliveryTicketId: deliveryTicketId || undefined,
               }
             : undefined,
       };
@@ -416,6 +446,18 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
             <input value={studentPhone} onChange={(e) => setStudentPhone(e.target.value)} placeholder="رقم الطالب (اختياري)" />
             <input value={courierName} onChange={(e) => setCourierName(e.target.value)} placeholder="اسم الشاحن / الطيار" />
             <input value={shippingCompany} onChange={(e) => setShippingCompany(e.target.value)} placeholder="شركة الشحن (اختياري)" />
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={shippingFee}
+              onChange={(e) => setShippingFee(Number(e.target.value) || 0)}
+              placeholder="قيمة الشحن"
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={noVat} onChange={(e) => setNoVat(e.target.checked)} />
+              بدون ضريبة
+            </label>
           </div>
         </div>
       )}

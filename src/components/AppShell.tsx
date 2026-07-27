@@ -58,25 +58,25 @@ function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
   if (role === "cashier") {
     sections.push(
       { title: "1. الصالة والتحصيل", items: mark(pickNavItems(items, ["dashboard", "table-sessions", "invoices-local"])) },
-      { title: "2. الطلبات والخدمات", items: mark(pickNavItems(items, ["call-center", "kids-area", "pos"])) },
+      { title: "2. الطلبات والخدمات", items: mark(pickNavItems(items, ["delivery-hub", "kids-area", "pos"])) },
       { title: "3. المالية اليومية", items: mark(pickNavItems(items, ["purchases", "cash-expense"])) },
     );
   } else if (role === "accountant") {
     sections.push(
       { title: "1. المتابعة والحسابات", items: mark(pickNavItems(items, ["dashboard", "reports", "costing", "master-data"])) },
-      { title: "2. التشغيل المساند", items: mark(pickNavItems(items, ["call-center", "pos", "purchases"])) },
+      { title: "2. التشغيل المساند", items: mark(pickNavItems(items, ["delivery-hub", "pos", "purchases"])) },
     );
   } else if (role === "manager") {
     sections.push(
       { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
-      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "delivery-hub"])) },
       { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
       { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
     );
   } else if (role === "operation_manager") {
     sections.push(
       { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
-      { title: "2. الموافقات والخدمة", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
+      { title: "2. الموافقات والخدمة", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "delivery-hub"])) },
       { title: "3. الإعدادات اليومية", items: mark(pickNavItems(items, ["settings"])) },
       { title: "4. التشغيل المالي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "cashflow"])) },
       { title: "5. التقارير التشغيلية", items: mark(pickNavItems(items, ["reports", "flash-report", "table-sessions-report"])) },
@@ -84,7 +84,7 @@ function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
   } else if (role === "developer") {
     sections.push(
       { title: "1. الصالة والتشغيل الأمامي", items: mark(pickNavItems(items, ["dashboard", "captain-tables", "order-taker"])) },
-      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "call-center", "delivery-management"])) },
+      { title: "2. خدمة العميل والدليفري", items: mark(pickNavItems(items, ["manager-approvals", "guest-returns", "delivery-hub"])) },
       { title: "3. مركز الإعدادات", items: mark(pickNavItems(items, ["settings"])) },
       { title: "4. المالية والتشغيل الخلفي", items: mark(pickNavItems(items, ["pos", "purchases", "cash-expense", "reports", "cashflow"])) },
     );
@@ -117,7 +117,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "dashboard", label: "لوحة الصالة" },
     { to: "table-sessions", label: "جلسات الطاولات" },
     { to: "invoices-local", label: "تسديد فواتير الطاولات" },
-    { to: "call-center", label: "Call Center (دليفري)" },
+    { to: "delivery-hub", label: "مركز الدليفري" },
     { to: "kids-area", label: "منطقة الأطفال" },
     { to: "pos", label: "نقطة البيع (بار / سفري)" },
     { to: "purchases", label: "مشتريات" },
@@ -125,6 +125,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
   ],
   accountant: [
     { to: "dashboard", label: "لوحة" },
+    { to: "delivery-hub", label: "مركز الدليفري" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
     { to: "reports", label: "تقارير حسابات" },
@@ -137,8 +138,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "order-taker", label: "طلب للطاولة" },
     { to: "manager-approvals", label: "موافقات المدير" },
     { to: "guest-returns", label: "مرتجعات الضيوف" },
-    { to: "call-center", label: "Call Center (دليفري)" },
-    { to: "delivery-management", label: "إدارة الدليفري" },
+    { to: "delivery-hub", label: "مركز الدليفري" },
     { to: "settings", label: "إعدادات التشغيل" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
@@ -153,8 +153,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "order-taker", label: "طلب للطاولة" },
     { to: "manager-approvals", label: "موافقات المدير" },
     { to: "guest-returns", label: "مرتجعات الضيوف" },
-    { to: "call-center", label: "Call Center (دليفري)" },
-    { to: "delivery-management", label: "إدارة الدليفري" },
+    { to: "delivery-hub", label: "مركز الدليفري" },
     { to: "settings", label: "إعدادات التشغيل اليومية" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },
@@ -170,8 +169,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "order-taker", label: "طلب للطاولة" },
     { to: "manager-approvals", label: "موافقات المدير" },
     { to: "guest-returns", label: "مرتجعات الضيوف" },
-    { to: "call-center", label: "Call Center (دليفري)" },
-    { to: "delivery-management", label: "إدارة الدليفري" },
+    { to: "delivery-hub", label: "مركز الدليفري" },
     { to: "settings", label: "إعدادات" },
     { to: "pos", label: "نقطة البيع" },
     { to: "purchases", label: "مشتريات" },

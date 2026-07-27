@@ -4897,40 +4897,88 @@ def get_agents(group_guide: Optional[str] = None):
 
 @app.get("/api/agents/search")
 def search_agents(search_text: str):
-    """البحث عن العملاء/المشتركين (ماعدا الموردين)"""
+    """البحث عن العملاء/المشتركين (ماعدا الموردين) — ذكي: أجزاء الاسم + هاتف + عنوان."""
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
-    
+
     try:
         cursor = conn.cursor()
-        supplier_guide = '26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500'
-        search_pattern = f"%{search_text}%"
-        query = """
-        SELECT TOP 50 CardGuide, AgentName, CardNumber, AccountID, Phone, Mobile, FullAdress, TaxCode
+        supplier_guide = "26CBD95C-98CB-48F3-8EEA-EE5D2B0D0500"
+        raw = str(search_text or "").strip()
+        if not raw:
+            return {"agents": []}
+        tokens = [t for t in re.split(r"\s+", raw) if t]
+        digits = re.sub(r"\D+", "", raw)
+        clauses: list[str] = []
+        params: list = []
+        for tok in tokens[:6]:
+            clauses.append("AgentName LIKE ?")
+            params.append(f"%{tok}%")
+        or_parts = []
+        if digits and len(digits) >= 2:
+            or_parts.extend(["Phone LIKE ?", "Mobile LIKE ?", "ISNULL(Phone2,'') LIKE ?"])
+            dig = f"%{digits}%"
+            params.extend([dig, dig, dig])
+        or_parts.extend(
+            [
+                "ISNULL(FullAdress,'') LIKE ?",
+                "ISNULL(CAST(CardNumber AS NVARCHAR(80)),'') LIKE ?",
+                "ISNULL(TaxCode,'') LIKE ?",
+            ]
+        )
+        params.extend([f"%{raw}%", f"%{raw}%", f"%{raw}%"])
+        if clauses and or_parts:
+            where_smart = f"(({' AND '.join(clauses)}) OR ({' OR '.join(or_parts)}))"
+        elif clauses:
+            where_smart = f"({' AND '.join(clauses)})"
+        else:
+            where_smart = f"({' OR '.join(or_parts)})"
+        query = f"""
+        SELECT TOP 50 CardGuide, AgentName, CardNumber, AccountID, Phone, Mobile, FullAdress, TaxCode,
+               ISNULL(Phone2, '') AS Phone2
         FROM TBL016
-        WHERE (AgentName LIKE ? OR 
-               CAST(CardNumber AS NVARCHAR) LIKE ? OR 
-               Phone LIKE ? OR 
-               Mobile LIKE ? OR
-               TaxCode LIKE ?)
+        WHERE {where_smart}
           AND AgentName IS NOT NULL
           AND CardGuide <> CAST(? AS uniqueidentifier)
-        ORDER BY AgentName
+          AND (NotActive IS NULL OR NotActive = 0)
+        ORDER BY
+          CASE WHEN Phone = ? OR Mobile = ? THEN 0
+               WHEN Phone LIKE ? OR Mobile LIKE ? THEN 1
+               ELSE 2 END,
+          AgentName
         """
-        cursor.execute(query, (search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, supplier_guide))
-        
+        exact = raw
+        like_raw = f"%{raw}%"
+        params.extend([supplier_guide, exact, exact, like_raw, like_raw])
+        try:
+            cursor.execute(query, tuple(params))
+        except Exception:
+            query2 = f"""
+            SELECT TOP 50 CardGuide, AgentName, CardNumber, AccountID, Phone, Mobile, FullAdress, TaxCode
+            FROM TBL016
+            WHERE (AgentName LIKE ? OR Phone LIKE ? OR Mobile LIKE ? OR ISNULL(FullAdress,'') LIKE ?)
+              AND AgentName IS NOT NULL
+              AND CardGuide <> CAST(? AS uniqueidentifier)
+            ORDER BY AgentName
+            """
+            cursor.execute(query2, (f"%{raw}%", f"%{raw}%", f"%{raw}%", f"%{raw}%", supplier_guide))
         agents = []
         for row in cursor.fetchall():
-            agents.append({
-                "CardGuide": str(row[0]),
-                "AgentName": row[1],
-                "CardNumber": str(row[2]) if row[2] else "",
-                "AccountID": str(row[3]) if row[3] else "",
-                "Phone": str(row[4]) if row[4] else "",
-                "Mobile": str(row[5]) if row[5] else "",
-                "TaxCode": str(row[7]) if row[7] else ""
-            })
+            agents.append(
+                {
+                    "CardGuide": str(row[0]),
+                    "AgentName": row[1],
+                    "CardNumber": str(row[2]) if row[2] else "",
+                    "AccountID": str(row[3]) if row[3] else "",
+                    "Phone": str(row[4]) if row[4] else "",
+                    "Mobile": str(row[5]) if row[5] else "",
+                    "Address": str(row[6]) if row[6] else "",
+                    "FullAdress": str(row[6]) if row[6] else "",
+                    "TaxCode": str(row[7]) if row[7] else "",
+                    "Phone2": str(row[8]) if len(row) > 8 and row[8] else "",
+                }
+            )
         return {"agents": agents}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ: {str(e)}")
@@ -27661,11 +27709,367 @@ def restaurant_delivery_queue(role: Optional[str] = None):
         return {"orders": [], "expectedRole": expected, "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen")}
     payload = restaurant_get_orders(status="ready")
     rows = payload.get("orders") if isinstance(payload, dict) else []
+    # إثراء اختياري ببيانات تذاكر الدليفري المرتبطة
+    tickets_by_session: dict = {}
+    try:
+        for t in _delivery_tickets_load():
+            if not isinstance(t, dict):
+                continue
+            sid = str(t.get("sessionId") or "").strip()
+            if sid:
+                tickets_by_session[sid] = t
+    except Exception:
+        tickets_by_session = {}
+    enriched = []
+    for o in rows if isinstance(rows, list) else []:
+        if not isinstance(o, dict):
+            continue
+        row = dict(o)
+        sid = str(row.get("sessionId") or "").strip()
+        tick = tickets_by_session.get(sid)
+        if tick:
+            row["deliveryTicket"] = {
+                "id": tick.get("id"),
+                "channel": tick.get("channel"),
+                "customerName": tick.get("customerName"),
+                "phone": tick.get("phone"),
+                "area": tick.get("area"),
+                "address": tick.get("address"),
+                "shippingFee": tick.get("shippingFee"),
+                "driverName": tick.get("driverName"),
+                "noVat": tick.get("noVat"),
+                "platformName": tick.get("platformName"),
+                "platformOrderId": tick.get("platformOrderId"),
+            }
+        enriched.append(row)
     return {
-        "orders": rows if isinstance(rows, list) else [],
+        "orders": enriched,
         "expectedRole": expected,
         "deliverFromKitchenBy": _workflow_role_for("pickup_kitchen"),
     }
+
+
+def _delivery_tickets_path() -> str:
+    return os.path.join(_restaurant_dir, "delivery_tickets.json")
+
+
+def _delivery_attachments_dir() -> str:
+    d = os.path.join(_restaurant_dir, "delivery_attachments")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _delivery_tickets_load() -> list:
+    raw = _restaurant_load("delivery_tickets", [])
+    return raw if isinstance(raw, list) else []
+
+
+def _delivery_tickets_save(rows: list) -> None:
+    _restaurant_save("delivery_tickets", rows[:800] if isinstance(rows, list) else [])
+
+
+@app.get("/api/restaurant/delivery/tickets")
+def restaurant_delivery_tickets_list(status: Optional[str] = None, limit: int = 80):
+    rows = _delivery_tickets_load()
+    if status:
+        st = str(status).strip().lower()
+        rows = [x for x in rows if str(x.get("status") or "").lower() == st]
+    rows = sorted(rows, key=lambda x: str(x.get("createdAt") or ""), reverse=True)
+    lim = max(1, min(200, int(limit or 80)))
+    return {"tickets": rows[:lim], "count": len(rows)}
+
+
+@app.post("/api/restaurant/delivery/intake")
+def restaurant_delivery_intake(body: dict):
+    """
+    استقبال طلب دليفري سريع (واتساب / هاتف / منصة / تحويل من طاولة).
+    يُنشئ/يحدّث عميل TBL016 + تذكرة تشغيلية، ويفتح لاحقاً نقطة البيع.
+    إلزامي: الاسم + الهاتف + المنطقة.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    name = str(body.get("name") or body.get("AgentName") or "").strip()
+    phone = str(body.get("phone") or body.get("Phone") or "").strip()
+    phone2 = str(body.get("phone2") or body.get("Phone2") or body.get("Mobile") or "").strip()
+    area = str(body.get("area") or body.get("zone") or "").strip()
+    address = str(body.get("address") or body.get("FullAdress") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="الاسم مطلوب")
+    if not phone:
+        raise HTTPException(status_code=400, detail="الهاتف مطلوب")
+    if not area:
+        raise HTTPException(status_code=400, detail="المنطقة مطلوبة")
+
+    channel = str(body.get("channel") or "whatsapp").strip().lower()
+    if channel not in ("whatsapp", "phone", "platform", "table_convert", "pos"):
+        channel = "whatsapp"
+
+    full_address = address
+    if area and area not in address:
+        full_address = f"[{area}] {address}".strip() if address else f"[{area}]"
+
+    # upsert عميل عبر المسار الحالي
+    upsert_body = {
+        "AgentName": name,
+        "Phone": phone,
+        "Mobile": phone2 or phone,
+        "FullAdress": full_address,
+        "ownersVipGroup": False,
+    }
+    upsert = delivery_upsert_agent(upsert_body)
+    agent_guid = str(upsert.get("CardGuide") or "").strip()
+
+    # محاولة تحديث Phone2 إن وُجد العمود
+    if agent_guid and phone2:
+        conn = get_connection()
+        if conn:
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        "UPDATE dbo.TBL016 SET Phone2 = ? WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                        (phone2[:40], agent_guid),
+                    )
+                    conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    try:
+        shipping_fee = float(body.get("shippingFee") or body.get("shipping") or 0)
+    except (TypeError, ValueError):
+        shipping_fee = 0.0
+    shipping_fee = max(0.0, round(shipping_fee, 2))
+    no_vat = bool(body.get("noVat") or body.get("skipVat") or True)  # دليفري: بدون ضريبة افتراضياً حسب طلب التشغيل
+
+    gps = body.get("gps") if isinstance(body.get("gps"), dict) else None
+    gps_out = None
+    if gps:
+        try:
+            lat = float(gps.get("lat") or gps.get("latitude"))
+            lng = float(gps.get("lng") or gps.get("longitude") or gps.get("lon"))
+            gps_out = {"lat": lat, "lng": lng, "accuracy": gps.get("accuracy"), "at": datetime.now().isoformat()}
+        except (TypeError, ValueError):
+            gps_out = None
+
+    now_iso = datetime.now().isoformat()
+    ticket = {
+        "id": str(uuid.uuid4()),
+        "status": "intake",  # intake → ordering → kitchen → out_for_delivery → delivered | cancelled
+        "channel": channel,
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+        "customerName": name[:200],
+        "phone": phone[:40],
+        "phone2": phone2[:40] if phone2 else None,
+        "area": area[:120],
+        "address": address[:500],
+        "fullAddress": full_address[:600],
+        "deliveryTime": str(body.get("deliveryTime") or "")[:80] or None,
+        "requestedItemsText": str(body.get("requestedItems") or body.get("itemsText") or "")[:2000] or None,
+        "specialNotes": str(body.get("specialNotes") or body.get("notes") or "")[:2000] or None,
+        "agentGuid": agent_guid or None,
+        "shippingFee": shipping_fee,
+        "noVat": no_vat,
+        "driverName": str(body.get("driverName") or body.get("courierName") or "")[:120] or None,
+        "platformName": str(body.get("platformName") or "")[:120] or None,
+        "platformOrderId": str(body.get("platformOrderId") or "")[:120] or None,
+        "platformUrl": str(body.get("platformUrl") or "")[:500] or None,
+        "sessionId": str(body.get("sessionId") or "").strip() or None,
+        "sourceTableId": str(body.get("sourceTableId") or "").strip() or None,
+        "gps": gps_out,
+        "attachments": [],
+        "createdBy": body.get("createdBy") if isinstance(body.get("createdBy"), dict) else None,
+    }
+    rows = _delivery_tickets_load()
+    rows.append(ticket)
+    _delivery_tickets_save(rows)
+    return {"ok": True, "ticket": ticket, "agent": upsert}
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/attachment")
+async def restaurant_delivery_ticket_attachment(ticket_id: str, file: UploadFile = File(...)):
+    """حفظ صورة محادثة واتساب / سكرين موقع مع التذكرة."""
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticket_id مطلوب")
+    rows = _delivery_tickets_load()
+    target = None
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("id") or "") == tid:
+            target = r
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="الملف فارغ")
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الصورة أكبر من 8MB")
+    ctype = str(file.content_type or "").lower()
+    ext = ".jpg"
+    if "png" in ctype:
+        ext = ".png"
+    elif "webp" in ctype:
+        ext = ".webp"
+    elif "jpeg" in ctype or "jpg" in ctype:
+        ext = ".jpg"
+    elif str(file.filename or "").lower().endswith(".png"):
+        ext = ".png"
+    fname = f"{tid[:8]}_{uuid.uuid4().hex[:10]}{ext}"
+    path = os.path.join(_delivery_attachments_dir(), fname)
+    with open(path, "wb") as f:
+        f.write(content)
+    att = {
+        "fileName": fname,
+        "url": f"/api/restaurant/delivery/attachments/{fname}",
+        "contentType": ctype or "image/jpeg",
+        "size": len(content),
+        "uploadedAt": datetime.now().isoformat(),
+        "originalName": str(file.filename or "")[:200] or None,
+    }
+    atts = target.get("attachments")
+    if not isinstance(atts, list):
+        atts = []
+    atts.append(att)
+    target["attachments"] = atts[:12]
+    target["updatedAt"] = datetime.now().isoformat()
+    _delivery_tickets_save(rows)
+    return {"ok": True, "attachment": att, "ticket": target}
+
+
+@app.get("/api/restaurant/delivery/attachments/{file_name}")
+def restaurant_delivery_attachment_get(file_name: str):
+    safe = os.path.basename(str(file_name or "").strip())
+    if not safe or ".." in safe:
+        raise HTTPException(status_code=400, detail="اسم ملف غير صالح")
+    path = os.path.join(_delivery_attachments_dir(), safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="الملف غير موجود")
+    media = "image/jpeg"
+    if safe.lower().endswith(".png"):
+        media = "image/png"
+    elif safe.lower().endswith(".webp"):
+        media = "image/webp"
+    return FileResponse(path, media_type=media)
+
+
+@app.patch("/api/restaurant/delivery/tickets/{ticket_id}")
+def restaurant_delivery_ticket_patch(ticket_id: str, body: dict):
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    rows = _delivery_tickets_load()
+    target = None
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("id") or "") == str(ticket_id):
+            target = r
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    for key in (
+        "status",
+        "driverName",
+        "shippingFee",
+        "noVat",
+        "deliveryTime",
+        "specialNotes",
+        "requestedItemsText",
+        "sessionId",
+        "platformName",
+        "platformOrderId",
+        "platformUrl",
+    ):
+        if key in body:
+            target[key] = body.get(key)
+    if "gps" in body and isinstance(body.get("gps"), dict):
+        g = body["gps"]
+        try:
+            target["gps"] = {
+                "lat": float(g.get("lat")),
+                "lng": float(g.get("lng") or g.get("lon")),
+                "accuracy": g.get("accuracy"),
+                "at": datetime.now().isoformat(),
+            }
+        except (TypeError, ValueError):
+            pass
+    target["updatedAt"] = datetime.now().isoformat()
+    _delivery_tickets_save(rows)
+    return {"ok": True, "ticket": target}
+
+
+@app.post("/api/restaurant/table-sessions/{session_id}/convert-to-delivery")
+def restaurant_session_convert_to_delivery(session_id: str, body: dict = None):
+    """سيناريو أ: طاولة مسكّنة → تحويل طلب/جلسة لدليفري مع تذكرة استقبال."""
+    body = body if isinstance(body, dict) else {}
+    sid = str(session_id or "").strip()
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    sess = None
+    for s in sessions:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == sid:
+            sess = s
+            break
+    if not sess:
+        raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
+    if str(sess.get("status") or "").lower() != "active":
+        raise HTTPException(status_code=409, detail="الجلسة ليست نشطة")
+
+    name = str(body.get("name") or sess.get("agentName") or sess.get("guestName") or "").strip()
+    phone = str(body.get("phone") or "").strip()
+    area = str(body.get("area") or "").strip()
+    if not name:
+        name = f"طاولة {sess.get('tableDisplayName') or sess.get('tableId') or sid[:6]}"
+    if not phone:
+        phone = str(body.get("Phone") or "0000000000").strip() or "0000000000"
+    if not area:
+        area = str(body.get("zone") or "تحويل من الصالة").strip() or "تحويل من الصالة"
+
+    intake = restaurant_delivery_intake(
+        {
+            "name": name,
+            "phone": phone,
+            "phone2": body.get("phone2"),
+            "area": area,
+            "address": body.get("address") or "",
+            "channel": "table_convert",
+            "sessionId": sid,
+            "sourceTableId": str(sess.get("tableId") or ""),
+            "specialNotes": body.get("specialNotes") or "محوّل من طاولة صالة إلى دليفري",
+            "shippingFee": body.get("shippingFee") or 0,
+            "noVat": body.get("noVat", True),
+            "driverName": body.get("driverName"),
+            "deliveryTime": body.get("deliveryTime"),
+            "createdBy": body.get("createdBy"),
+        }
+    )
+    ticket = intake.get("ticket") if isinstance(intake, dict) else {}
+    agent_guid = str((ticket or {}).get("agentGuid") or "").strip()
+
+    sess["channel"] = "delivery"
+    sess["deliveryConvertedAt"] = datetime.now().isoformat()
+    sess["deliveryTicketId"] = str((ticket or {}).get("id") or "") or None
+    if agent_guid:
+        sess["agentGuid"] = agent_guid
+        sess["agentName"] = str((ticket or {}).get("customerName") or name)[:200]
+    sess["deliveryMeta"] = {
+        "shippingFee": (ticket or {}).get("shippingFee"),
+        "noVat": (ticket or {}).get("noVat"),
+        "driverName": (ticket or {}).get("driverName"),
+        "area": (ticket or {}).get("area"),
+        "address": (ticket or {}).get("fullAddress"),
+    }
+    _restaurant_save("table_sessions", sessions)
+    cache_invalidate_restaurant()
+    return {"ok": True, "session": sess, "ticket": ticket, "agent": intake.get("agent")}
 
 
 def _kds_line_key(it: dict) -> str:
