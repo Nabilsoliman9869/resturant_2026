@@ -787,6 +787,11 @@ eserved + active.
 - **`src/pages/DeliveryOpsHubPage.tsx`** + **`deliveryOpsHub.css`**: مركز عمليات موحّد (استقبال / تذاكر / تحويل / طابور).
 - **`PosPlaceholder`**: استقبال query (agent/شحن/بدون ضريبة/تذكرة)؛ **`AppShell`/`App`**: مسار `delivery-hub` بدل تشتيت call-center + إدارة.
 
+### 110 — إظهار كول سنتر وإدارة الدليفري للكاشير — `UTC 2026-07-27T18:30:00Z` — ID `cashdeliv-a81f3c09e2b7`
+
+- **`src/components/AppShell.tsx`**: إعادة عنصري القائمة للكاشير: «كول سنتر (طلب دليفري)» و«إدارة الدليفري».
+- **`src/App.tsx`**: مسار `delivery-management` تحت `/app/cashier` (يوجّه لمركز الدليفري / طابور التسليم)؛ الإبقاء على `call-center` و`delivery-hub`.
+
 
 
 
