@@ -798,6 +798,12 @@ eserved + active.
 - **`docs/MAT3AM_WORKFLOW_AND_SETTINGS_GUIDE.md`**: قسم ملخص يربط بالدليل.
 - **`docs/QA_SCENARIO_MATRIX.md`**: توضيح مسارات الكاشير لكول سنتر وإدارة الدليفري.
 
+### 112 — لصق سكرين واتساب في استقبال الدليفري — `UTC 2026-07-27T19:30:00Z` — ID `wspaste-9d2e4b71a6c0`
+
+- **`src/pages/DeliveryOpsHubPage.tsx`**: دعم `Ctrl+V` للصورة من الحافظة + سحب وإفلات + معاينة مصغّرة في تبويب الاستقبال.
+- **`src/styles/deliveryOpsHub.css`**: منطقة لصق واضحة مع تلميح اختصار لوحة المفاتيح.
+- **`docs/DELIVERY_CALL_CENTER_PLAYBOOK.md`**: تحديث سطر صورة المحادثة.
+
 
 
 

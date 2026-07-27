@@ -120,6 +120,8 @@ export default function DeliveryOpsHubPage() {
   const [agentGuid, setAgentGuid] = useState("");
   const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const [shotFile, setShotFile] = useState<File | null>(null);
+  const [shotPreview, setShotPreview] = useState<string | null>(null);
+  const [pasteFlash, setPasteFlash] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [tickets, setTickets] = useState<DeliveryTicket[]>([]);
@@ -127,6 +129,52 @@ export default function DeliveryOpsHubPage() {
   const [openTables, setOpenTables] = useState<OpenTable[]>([]);
   const searchTimer = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const pasteZoneRef = useRef<HTMLDivElement | null>(null);
+
+  const applyShotFile = useCallback((file: File | null, source: "file" | "paste" | "drop" = "file") => {
+    setShotFile(file);
+    setShotPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file ? URL.createObjectURL(file) : null;
+    });
+    if (file) {
+      const label =
+        source === "paste" ? "تم لصق صورة الواتساب ✓" : source === "drop" ? "تم إسقاط الصورة ✓" : `تم اختيار الصورة: ${file.name}`;
+      setMsg(label);
+      setPasteFlash(true);
+      window.setTimeout(() => setPasteFlash(false), 900);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (shotPreview) URL.revokeObjectURL(shotPreview);
+    };
+  }, [shotPreview]);
+
+  /** Ctrl+V / Cmd+V لصورة من الحافظة أثناء تبويب الاستقبال (سكرين واتساب من الديسكتوب). */
+  useEffect(() => {
+    if (tab !== "intake") return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items?.length) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item || !String(item.type || "").startsWith("image/")) continue;
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        e.preventDefault();
+        const ext = item.type.includes("jpeg") || item.type.includes("jpg") ? "jpg" : "png";
+        const file = new File([blob], `whatsapp-paste-${Date.now()}.${ext}`, {
+          type: blob.type || "image/png",
+        });
+        applyShotFile(file, "paste");
+        return;
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [tab, applyShotFile]);
 
   const loadTickets = useCallback(async () => {
     try {
@@ -297,7 +345,7 @@ export default function DeliveryOpsHubPage() {
       }
 
       setMsg("تم تسجيل الاستقبال بنجاح");
-      setShotFile(null);
+      applyShotFile(null);
       if (fileRef.current) fileRef.current.value = "";
       await loadTickets();
       if (openPosAfter && ticket) openOrdering(ticket);
@@ -518,17 +566,60 @@ export default function DeliveryOpsHubPage() {
           </div>
 
           <div className="deliv-hub__attach-row">
-            <label className="deliv-hub__shot">
-              صورة المحادثة / سكرين الموقع (مهمة)
+            <div
+              ref={pasteZoneRef}
+              className={`deliv-hub__paste-zone${pasteFlash ? " is-flash" : ""}${shotFile ? " has-shot" : ""}`}
+              tabIndex={0}
+              role="button"
+              onClick={() => fileRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileRef.current?.click();
+                }
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f && f.type.startsWith("image/")) applyShotFile(f, "drop");
+              }}
+            >
+              <div className="deliv-hub__paste-copy">
+                <strong>صورة محادثة واتساب / سكرين المنصة</strong>
+                <span>
+                  سكرين من الديسكتوب ثم <kbd>Ctrl</kbd>+<kbd>V</kbd> للصق هنا — أو اسحب الصورة — أو انقر لاختيار ملف
+                </span>
+                {shotFile ? (
+                  <span className="deliv-hub__hint">✓ {shotFile.name}</span>
+                ) : (
+                  <span className="deliv-hub__hint">مُفضَّل للواتساب والمنصات · يمكن الحفظ بدون صورة</span>
+                )}
+              </div>
+              {shotPreview ? (
+                <img src={shotPreview} alt="معاينة سكرين" className="deliv-hub__shot-preview" />
+              ) : (
+                <div className="deliv-hub__shot-placeholder" aria-hidden>
+                  📋
+                </div>
+              )}
               <input
                 ref={fileRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
-                onChange={(e) => setShotFile(e.target.files?.[0] || null)}
+                className="deliv-hub__file-hidden"
+                onChange={(e) => applyShotFile(e.target.files?.[0] || null, "file")}
               />
-              {shotFile ? <span className="deliv-hub__hint">✓ {shotFile.name}</span> : <span className="deliv-hub__hint">اختياري لكن مُفضَّل للواتساب والمنصات</span>}
-            </label>
+            </div>
+            {shotFile ? (
+              <button type="button" className="btn btn-ghost" onClick={() => applyShotFile(null)}>
+                إزالة الصورة
+              </button>
+            ) : null}
             <button type="button" className="btn btn-ghost" onClick={captureGps}>
               {gps ? `GPS ✓ ${gps.lat.toFixed(4)},${gps.lng.toFixed(4)}` : "حفظ موقع GPS"}
             </button>
