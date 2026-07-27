@@ -170,6 +170,43 @@
   margin-bottom: 0.85rem;
 }
 
+.deliv-hub__search--hero {
+  padding: 0.75rem 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background:
+    radial-gradient(ellipse at 10% 0%, rgba(56, 189, 248, 0.22), transparent 50%),
+    linear-gradient(135deg, rgba(8, 47, 73, 0.9), rgba(15, 23, 42, 0.85));
+}
+
+.deliv-hub__search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(125, 211, 252, 0.3);
+}
+
+.deliv-hub__search-icon {
+  display: grid;
+  place-items: center;
+  color: #7dd3fc;
+  flex: 0 0 auto;
+}
+
+.deliv-hub__search--hero input {
+  flex: 1;
+  min-width: 0;
+  border: 0 !important;
+  outline: none;
+  background: transparent !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  padding: 0.5rem 0.2rem !important;
+}
+
 .deliv-hub__search label,
 .deliv-hub__grid label {
   display: flex;

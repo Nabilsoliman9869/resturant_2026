@@ -835,6 +835,14 @@ eserved + active.
 - **`_ensure_delivery_shipping_group`**: إدراج TBL006 يتضمن **`CardCode`** (+ Security/MainGuide) لأن `oya_Mohandessin.TBL006.CardCode` لا يقبل NULL.
 - التحقق: المجموعة «خدمات الشحن» تُنشأ وتُرجع عبر `/api/restaurant/delivery/shipping-services`.
 
+### 118 — شاشة طلب التوصيل (جرسون-لايك) + بحث عميل + محببات TBL022/023 — `UTC 2026-07-27T22:30:00Z` — ID `delivord-a4f91c72e8b0`
+
+- **`DeliveryOrderPage`**: إعادة بناء كاملة بدون إطار PosPlaceholder/«نقطة بيع» — منيو + سلة + شحن.
+- بحث عميل **أعلى الشاشة** بأيقونة وخلفية مميزة؛ اختيار عميل يملأ الخانات.
+- تبويب **الأصناف المحببة** عبر `GET /api/restaurant/delivery/customer-favorites` من TBL022+TBL023.
+- بحث العملاء: تطابق OR لأجزاء الاسم + ترتيب بالدرجة؛ حفظ أوثق في `delivery-upsert`.
+- مركز الدليفري: إزالة رابط «نقطة البيع»؛ أزرار «شاشة الطلب»؛ شريط بحث بارز.
+
 
 
 

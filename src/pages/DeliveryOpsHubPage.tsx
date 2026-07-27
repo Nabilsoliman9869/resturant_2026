@@ -88,15 +88,8 @@ const CHANNEL_LABEL: Record<string, string> = {
   phone: "هاتف",
   platform: "منصة",
   table_convert: "من طاولة",
-  pos: "نقطة بيع",
+  pos: "طلب توصيل",
 };
-
-function rolePosPath(role?: string) {
-  const r = String(role || "cashier");
-  if (r === "manager" || r === "operation_manager" || r === "developer") return `/app/${r}/pos`;
-  if (r === "accountant") return `/app/accountant/pos`;
-  return "/app/cashier/pos";
-}
 
 /** نقطة طلب الدليفري المستقلة (منيو + شحن + بيانات العميل) — ليست شاشة جرسون الطاولات. */
 function roleDeliveryOrderPath(role?: string) {
@@ -596,10 +589,7 @@ export default function DeliveryOpsHubPage() {
           </button>
         ))}
         <Link className="deliv-hub__side-link tone-order" to={roleDeliveryOrderPath(user?.role)}>
-          شاشة الطلب الكاملة
-        </Link>
-        <Link className="deliv-hub__side-link tone-pos" to={rolePosPath(user?.role)}>
-          نقطة البيع
+          شاشة طلب التوصيل
         </Link>
       </nav>
 
@@ -626,17 +616,23 @@ export default function DeliveryOpsHubPage() {
             ))}
           </div>
 
-          <div className="deliv-hub__search">
-            <label>
-              بحث ذكي (اسم بأي جزء · هاتف · عنوان · منطقة)
+          <div className="deliv-hub__search deliv-hub__search--hero">
+            <div className="deliv-hub__search-bar">
+              <span className="deliv-hub__search-icon" aria-hidden>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2.2" />
+                  <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+              </span>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="مثال: أحمد 010 · أو: المعادي · أو: a+2"
+                placeholder="بحث عميل: الاسم · الهاتف · العنوان — مثال: مازن محمد يسري"
                 autoFocus
+                aria-label="بحث العملاء"
               />
-            </label>
-            {searching ? <span className="deliv-hub__hint">بحث…</span> : null}
+              {searching ? <span className="deliv-hub__hint">بحث…</span> : null}
+            </div>
             {hits.length > 0 ? (
               <ul className="deliv-hub__hits">
                 {hits.map((a) => (
@@ -958,7 +954,7 @@ export default function DeliveryOpsHubPage() {
 
           <div className="deliv-hub__actions">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submitIntake(true)}>
-              حفظ وافتح نقطة البيع
+              حفظ وافتح شاشة الطلب
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => void submitIntake(false)}>
               حفظ التذكرة فقط
@@ -1001,7 +997,7 @@ export default function DeliveryOpsHubPage() {
                   {t.requestedItemsText ? <p>{t.requestedItemsText}</p> : null}
                   <div className="deliv-hub__ticket-actions">
                     <button type="button" className="btn btn-primary" onClick={() => openOrdering(t)}>
-                      فتح نقطة البيع
+                      فتح شاشة الطلب
                     </button>
                     {t.mapsUrl ? (
                       <a href={t.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">

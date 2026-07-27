@@ -1851,6 +1851,8 @@ def get_connection():
             _db_conn_fail_until = _time.time() + 60.0  # cool down 60s
 
     if conn:
+        with _db_conn_fail_lock:
+            _db_conn_fail_until = 0.0
         try:
             # ضبط الترميز لضمان قراءة وكتابة اللغة العربية بشكل صحيح عبر pyodbc
             conn.setencoding(encoding='utf-16le')
@@ -4897,7 +4899,7 @@ def get_agents(group_guide: Optional[str] = None):
 
 @app.get("/api/agents/search")
 def search_agents(search_text: str):
-    """البحث عن العملاء/المشتركين (ماعدا الموردين) — ذكي: أجزاء الاسم + هاتف + عنوان."""
+    """البحث عن العملاء/المشتركين (ماعدا الموردين) — ذكي: أجزاء الاسم (OR) + هاتف + عنوان."""
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
@@ -4908,61 +4910,86 @@ def search_agents(search_text: str):
         raw = str(search_text or "").strip()
         if not raw:
             return {"agents": []}
-        tokens = [t for t in re.split(r"\s+", raw) if t]
+        tokens = [t for t in re.split(r"\s+", raw) if t][:6]
         digits = re.sub(r"\D+", "", raw)
-        clauses: list[str] = []
+        has_phone2 = False
+        try:
+            cursor.execute("SELECT CASE WHEN COL_LENGTH('dbo.TBL016','Phone2') IS NULL THEN 0 ELSE 1 END")
+            fr = cursor.fetchone()
+            has_phone2 = bool(fr and fr[0])
+        except Exception:
+            has_phone2 = False
+
+        name_ors: list[str] = []
+        score_parts: list[str] = []
         params: list = []
-        for tok in tokens[:6]:
-            clauses.append("AgentName LIKE ?")
+        for tok in tokens:
+            name_ors.append("AgentName LIKE ?")
             params.append(f"%{tok}%")
-        or_parts = []
+            score_parts.append("CASE WHEN AgentName LIKE ? THEN 1 ELSE 0 END")
+            params.append(f"%{tok}%")
+        # تطابق الاسم الكامل ككل
+        name_ors.append("AgentName LIKE ?")
+        params.append(f"%{raw}%")
+        score_parts.append("CASE WHEN AgentName LIKE ? THEN 3 ELSE 0 END")
+        params.append(f"%{raw}%")
+
+        phone_ors: list[str] = []
         if digits and len(digits) >= 2:
-            or_parts.extend(["Phone LIKE ?", "Mobile LIKE ?", "ISNULL(Phone2,'') LIKE ?"])
             dig = f"%{digits}%"
-            params.extend([dig, dig, dig])
-        or_parts.extend(
-            [
-                "ISNULL(FullAdress,'') LIKE ?",
-                "ISNULL(CAST(CardNumber AS NVARCHAR(80)),'') LIKE ?",
-                "ISNULL(TaxCode,'') LIKE ?",
-            ]
-        )
+            phone_ors.extend(["ISNULL(Phone,'') LIKE ?", "ISNULL(Mobile,'') LIKE ?"])
+            params.extend([dig, dig])
+            if has_phone2:
+                phone_ors.append("ISNULL(Phone2,'') LIKE ?")
+                params.append(dig)
+            score_parts.append(
+                "CASE WHEN Phone = ? OR Mobile = ? THEN 8 WHEN Phone LIKE ? OR Mobile LIKE ? THEN 4 ELSE 0 END"
+            )
+            params.extend([digits, digits, dig, dig])
+
+        extra_ors = [
+            "ISNULL(FullAdress,'') LIKE ?",
+            "ISNULL(CAST(CardNumber AS NVARCHAR(80)),'') LIKE ?",
+            "ISNULL(TaxCode,'') LIKE ?",
+        ]
         params.extend([f"%{raw}%", f"%{raw}%", f"%{raw}%"])
-        if clauses and or_parts:
-            where_smart = f"(({' AND '.join(clauses)}) OR ({' OR '.join(or_parts)}))"
-        elif clauses:
-            where_smart = f"({' AND '.join(clauses)})"
-        else:
-            where_smart = f"({' OR '.join(or_parts)})"
+
+        where_bits = []
+        if name_ors:
+            where_bits.append(f"({' OR '.join(name_ors)})")
+        if phone_ors:
+            where_bits.append(f"({' OR '.join(phone_ors)})")
+        where_bits.append(f"({' OR '.join(extra_ors)})")
+        where_smart = " OR ".join(where_bits)
+        score_expr = " + ".join(score_parts) if score_parts else "0"
+
+        phone2_select = "ISNULL(Phone2, N'') AS Phone2" if has_phone2 else "N'' AS Phone2"
         query = f"""
         SELECT TOP 50 CardGuide, AgentName, CardNumber, AccountID, Phone, Mobile, FullAdress, TaxCode,
-               ISNULL(Phone2, '') AS Phone2
+               {phone2_select},
+               ({score_expr}) AS MatchScore
         FROM TBL016
-        WHERE {where_smart}
+        WHERE ({where_smart})
           AND AgentName IS NOT NULL
           AND CardGuide <> CAST(? AS uniqueidentifier)
           AND (NotActive IS NULL OR NotActive = 0)
-        ORDER BY
-          CASE WHEN Phone = ? OR Mobile = ? THEN 0
-               WHEN Phone LIKE ? OR Mobile LIKE ? THEN 1
-               ELSE 2 END,
-          AgentName
+        ORDER BY MatchScore DESC, AgentName
         """
-        exact = raw
-        like_raw = f"%{raw}%"
-        params.extend([supplier_guide, exact, exact, like_raw, like_raw])
+        params.append(supplier_guide)
         try:
             cursor.execute(query, tuple(params))
         except Exception:
-            query2 = f"""
-            SELECT TOP 50 CardGuide, AgentName, CardNumber, AccountID, Phone, Mobile, FullAdress, TaxCode
-            FROM TBL016
-            WHERE (AgentName LIKE ? OR Phone LIKE ? OR Mobile LIKE ? OR ISNULL(FullAdress,'') LIKE ?)
-              AND AgentName IS NOT NULL
-              AND CardGuide <> CAST(? AS uniqueidentifier)
-            ORDER BY AgentName
-            """
-            cursor.execute(query2, (f"%{raw}%", f"%{raw}%", f"%{raw}%", f"%{raw}%", supplier_guide))
+            cursor.execute(
+                """
+                SELECT TOP 50 CardGuide, AgentName, CardNumber, AccountID, Phone, Mobile, FullAdress, TaxCode
+                FROM TBL016
+                WHERE (AgentName LIKE ? OR Phone LIKE ? OR Mobile LIKE ? OR ISNULL(FullAdress,'') LIKE ?)
+                  AND AgentName IS NOT NULL
+                  AND CardGuide <> CAST(? AS uniqueidentifier)
+                ORDER BY AgentName
+                """,
+                (f"%{raw}%", f"%{raw}%", f"%{raw}%", f"%{raw}%", supplier_guide),
+            )
         agents = []
         for row in cursor.fetchall():
             agents.append(
@@ -5190,28 +5217,42 @@ def delivery_upsert_agent(body: dict):
             (key_phone, key_phone),
         )
         row = cursor.fetchone()
-        if row:
-            card_guide = str(row[0])
-            if name or address:
+        if not row and name:
+            # احتياط: عميل بنفس الاسم إن لم يُطابق الهاتف (تجنّب تكرار «مازن…» بهاتف مختلف بالخطأ)
+            try:
                 cursor.execute(
                     """
-                    UPDATE TBL016
-                    SET AgentName = ISNULL(?, AgentName),
-                        FullAdress = ISNULL(?, FullAdress),
-                        Phone = ISNULL(?, Phone),
-                        Mobile = ISNULL(?, Mobile)
-                    WHERE CardGuide = CAST(? AS uniqueidentifier)
+                    SELECT TOP 1 CardGuide, AgentName, Phone, Mobile, FullAdress
+                    FROM TBL016
+                    WHERE AgentName = ?
+                      AND AgentName IS NOT NULL
+                      AND (NotActive IS NULL OR NotActive = 0)
+                    ORDER BY ID DESC
                     """,
-                    (
-                        name or None,
-                        address or None,
-                        phone or None,
-                        mobile or None,
-                        card_guide,
-                    ),
+                    (name,),
                 )
-                conn.commit()
-            return {"success": True, "CardGuide": card_guide, "AgentName": name or (row[1] or "")}
+                row = cursor.fetchone()
+            except Exception:
+                row = None
+        if row:
+            card_guide = str(row[0])
+            new_name = name or (row[1] or "")
+            new_addr = address if address else (row[4] or None)
+            new_phone = phone or (row[2] or None)
+            new_mobile = mobile or phone or (row[3] or None)
+            cursor.execute(
+                """
+                UPDATE TBL016
+                SET AgentName = ?,
+                    FullAdress = ISNULL(?, FullAdress),
+                    Phone = ISNULL(?, Phone),
+                    Mobile = ISNULL(?, Mobile)
+                WHERE CardGuide = CAST(? AS uniqueidentifier)
+                """,
+                (new_name, new_addr, new_phone, new_mobile, card_guide),
+            )
+            conn.commit()
+            return {"success": True, "CardGuide": card_guide, "AgentName": new_name}
 
         card_guide = str(uuid.uuid4()).upper()
         if not name:
@@ -28135,6 +28176,78 @@ def restaurant_delivery_shipping_services(ensure_group: bool = True):
             pass
 
 
+@app.get("/api/restaurant/delivery/customer-favorites")
+def restaurant_delivery_customer_favorites(agent_guide: str = "", limit: int = 40):
+    """
+    الأصناف المحببة للعميل من فواتيره السابقة:
+    TBL022.AgentGuide (أو TBL023.RelatedAgent) → بنود TBL023 → أصناف TBL007.
+    """
+    guid = str(agent_guide or "").strip().upper()
+    if not guid:
+        return {"ok": True, "agentGuide": None, "favorites": [], "hint": "اختر عميلاً أولاً لعرض أصنافه السابقة"}
+    try:
+        uuid.UUID(guid)
+    except Exception:
+        raise HTTPException(status_code=400, detail="معرّف العميل غير صالح")
+    lim = max(1, min(80, int(limit or 40)))
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        favorites = []
+        try:
+            cursor.execute(
+                f"""
+                SELECT TOP {lim}
+                  CAST(p.CardGuide AS NVARCHAR(36)) AS ProductGuide,
+                  p.ProductName,
+                  CAST(ISNULL(p.EndUserPrice, ISNULL(p.AgentPrice, 0)) AS FLOAT) AS Price,
+                  CAST(SUM(ABS(ISNULL(l.Quantity, 0))) AS FLOAT) AS QtyOrdered,
+                  COUNT(DISTINCT h.CardGuide) AS InvoiceCount,
+                  MAX(h.BillDate) AS LastOrderedAt
+                FROM dbo.TBL023 l
+                INNER JOIN dbo.TBL022 h ON h.CardGuide = l.MainGuide
+                INNER JOIN dbo.TBL007 p ON p.CardGuide = l.ProductGuide
+                WHERE (
+                    h.AgentGuide = CAST(? AS uniqueidentifier)
+                    OR l.RelatedAgent = CAST(? AS uniqueidentifier)
+                  )
+                  AND (p.NotActive IS NULL OR p.NotActive = 0)
+                  AND ISNULL(p.LatinName, N'') <> N'MAT3AM_DELIVERY_SHIPPING'
+                  AND ISNULL(p.ProductName, N'') NOT IN (N'خدمة توصيل / شحن', N'خدمة توصيل')
+                GROUP BY p.CardGuide, p.ProductName, ISNULL(p.EndUserPrice, ISNULL(p.AgentPrice, 0))
+                ORDER BY InvoiceCount DESC, QtyOrdered DESC, MAX(h.BillDate) DESC
+                """,
+                (guid, guid),
+            )
+            for r in cursor.fetchall() or []:
+                favorites.append(
+                    {
+                        "CardGuide": str(r[0] or "").strip().upper(),
+                        "ProductName": str(r[1] or "").strip(),
+                        "Price": float(r[2] or 0),
+                        "qtyOrdered": float(r[3] or 0),
+                        "invoiceCount": int(r[4] or 0),
+                        "lastOrderedAt": r[5].isoformat() if hasattr(r[5], "isoformat") else (str(r[5]) if r[5] else None),
+                    }
+                )
+        except Exception as e:
+            print("[mat3am] customer-favorites:", e)
+            raise HTTPException(status_code=500, detail=f"تعذر جلب الأصناف المحببة: {e}")
+        return {
+            "ok": True,
+            "agentGuide": guid,
+            "favorites": favorites,
+            "hint": None if favorites else "لا توجد فواتير سابقة لهذا العميل في TBL022/TBL023 بعد",
+        }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _parse_delivery_prepaid(body_or_delivery: dict) -> dict:
     """استخراج دفعة مسبقة من جسم الاستقبال أو كائن delivery."""
     src = body_or_delivery if isinstance(body_or_delivery, dict) else {}
@@ -28175,7 +28288,7 @@ def restaurant_delivery_tickets_list(status: Optional[str] = None, limit: int = 
 def restaurant_delivery_intake(body: dict):
     """
     استقبال طلب دليفري سريع (واتساب / هاتف / منصة / تحويل من طاولة).
-    يُنشئ/يحدّث عميل TBL016 + تذكرة تشغيلية، ويفتح لاحقاً نقطة البيع.
+    يُنشئ/يحدّث عميل TBL016 + تذكرة تشغيلية، ثم تُفتح شاشة طلب التوصيل.
     إلزامي: الاسم + الهاتف + المنطقة.
     """
     if not isinstance(body, dict):
