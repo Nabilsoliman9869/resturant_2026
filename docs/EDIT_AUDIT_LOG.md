@@ -804,6 +804,12 @@ eserved + active.
 - **`src/styles/deliveryOpsHub.css`**: منطقة لصق واضحة مع تلميح اختصار لوحة المفاتيح.
 - **`docs/DELIVERY_CALL_CENTER_PLAYBOOK.md`**: تحديث سطر صورة المحادثة.
 
+### 113 — لصق رابط خرائط جوجل لموقع التوصيل — `UTC 2026-07-27T19:40:00Z` — ID `mapspaste-e7c1a52b90d4`
+
+- **`src/lib/mapsLink.ts`**: استخراج روابط `maps.app.goo.gl` / Google Maps من النص الملصوق.
+- **`backend/api_server.py`**: حقل `mapsUrl` على التذكرة + `POST /api/restaurant/delivery/resolve-maps-url` لتوسيع الرابط واستخراج الإحداثيات.
+- **`DeliveryOpsHubPage`**: منطقة لصق/ربط الموقع + زر فتح الخرائط على التذاكر.
+
 
 
 

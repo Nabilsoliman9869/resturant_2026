@@ -27740,6 +27740,7 @@ def restaurant_delivery_queue(role: Optional[str] = None):
                 "noVat": tick.get("noVat"),
                 "platformName": tick.get("platformName"),
                 "platformOrderId": tick.get("platformOrderId"),
+                "mapsUrl": tick.get("mapsUrl"),
             }
         enriched.append(row)
     return {
@@ -27766,6 +27767,131 @@ def _delivery_tickets_load() -> list:
 
 def _delivery_tickets_save(rows: list) -> None:
     _restaurant_save("delivery_tickets", rows[:800] if isinstance(rows, list) else [])
+
+
+def _parse_coords_from_maps_url(url: str):
+    """استخراج lat/lng من رابط خرائط جوجل مكتمل إن وُجد."""
+    import re
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    s = str(url or "").strip()
+    if not s:
+        return None
+    try:
+        m = re.search(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)", s)
+        if m:
+            return {"lat": float(m.group(1)), "lng": float(m.group(2))}
+        parsed = urlparse(s)
+        qs = parse_qs(parsed.query or "")
+        for key in ("q", "query", "ll"):
+            vals = qs.get(key) or []
+            if not vals:
+                continue
+            raw = unquote(str(vals[0]))
+            mm = re.search(r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)", raw)
+            if mm:
+                return {"lat": float(mm.group(1)), "lng": float(mm.group(2))}
+        bang = re.search(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)", s)
+        if bang:
+            return {"lat": float(bang.group(1)), "lng": float(bang.group(2))}
+    except Exception:
+        return None
+    return None
+
+
+def _is_allowed_maps_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    try:
+        p = urlparse(str(url or "").strip())
+        host = (p.hostname or "").lower()
+        if not host:
+            return False
+        if host in ("maps.app.goo.gl", "goo.gl"):
+            return True
+        if host.startswith("maps.google."):
+            return True
+        if host == "google.com" or host.endswith(".google.com") or host.startswith("www.google."):
+            return "/maps" in (p.path or "").lower()
+        return False
+    except Exception:
+        return False
+
+
+@app.post("/api/restaurant/delivery/resolve-maps-url")
+def restaurant_delivery_resolve_maps_url(body: dict):
+    """
+    لصق رابط مشاركة الموقع من خرائط جوجل (مثل maps.app.goo.gl/…).
+    يتبع التحويلات ويستخرج الإحداثيات إن أمكن.
+    """
+    import urllib.request
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    raw = str(body.get("url") or body.get("mapsUrl") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="الرابط مطلوب")
+    if not raw.lower().startswith(("http://", "https://")):
+        raw = "https://" + raw
+    if not _is_allowed_maps_url(raw):
+        raise HTTPException(status_code=400, detail="رابط خرائط غير مدعوم")
+
+    final_url = raw
+    try:
+        req = urllib.request.Request(
+            raw,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; Mat3amDelivery/1.0)",
+                "Accept": "text/html,application/xhtml+xml",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            final_url = str(getattr(resp, "geturl", lambda: raw)() or raw)
+            # بعض الاختصارات تضع الإحداثيات في الهيدر/الـ HTML؛ نقرأ جزءاً صغيراً
+            try:
+                chunk = resp.read(65536).decode("utf-8", errors="ignore")
+            except Exception:
+                chunk = ""
+    except Exception as e:
+        # حتى لو فشل التوسيع، نُرجع الرابط الأصلي ليُحفظ للطيار
+        coords = _parse_coords_from_maps_url(raw)
+        return {
+            "ok": True,
+            "mapsUrl": raw,
+            "resolvedUrl": raw,
+            "gps": coords,
+            "warning": f"تعذر توسيع الرابط: {e}",
+        }
+
+    coords = _parse_coords_from_maps_url(final_url) or _parse_coords_from_maps_url(raw)
+    if not coords and chunk:
+        coords = _parse_coords_from_maps_url(chunk) or _parse_coords_from_maps_url(
+            "https://maps.google.com/?" + chunk[:4000]
+        )
+        if not coords:
+            import re
+
+            m = re.search(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)", chunk)
+            if m:
+                try:
+                    coords = {"lat": float(m.group(1)), "lng": float(m.group(2))}
+                except (TypeError, ValueError):
+                    coords = None
+            if not coords:
+                m2 = re.search(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)", chunk)
+                if m2:
+                    try:
+                        coords = {"lat": float(m2.group(1)), "lng": float(m2.group(2))}
+                    except (TypeError, ValueError):
+                        coords = None
+
+    return {
+        "ok": True,
+        "mapsUrl": raw,
+        "resolvedUrl": final_url,
+        "gps": coords,
+    }
 
 
 @app.get("/api/restaurant/delivery/tickets")
@@ -27858,6 +27984,11 @@ def restaurant_delivery_intake(body: dict):
             gps_out = {"lat": lat, "lng": lng, "accuracy": gps.get("accuracy"), "at": datetime.now().isoformat()}
         except (TypeError, ValueError):
             gps_out = None
+    maps_url = str(body.get("mapsUrl") or body.get("mapUrl") or body.get("locationUrl") or "").strip()[:500] or None
+    if not gps_out and maps_url:
+        parsed = _parse_coords_from_maps_url(maps_url)
+        if parsed:
+            gps_out = {**parsed, "at": datetime.now().isoformat(), "from": "mapsUrl"}
 
     now_iso = datetime.now().isoformat()
     ticket = {
@@ -27882,6 +28013,7 @@ def restaurant_delivery_intake(body: dict):
         "platformName": str(body.get("platformName") or "")[:120] or None,
         "platformOrderId": str(body.get("platformOrderId") or "")[:120] or None,
         "platformUrl": str(body.get("platformUrl") or "")[:500] or None,
+        "mapsUrl": maps_url,
         "sessionId": str(body.get("sessionId") or "").strip() or None,
         "sourceTableId": str(body.get("sourceTableId") or "").strip() or None,
         "gps": gps_out,
@@ -27986,6 +28118,7 @@ def restaurant_delivery_ticket_patch(ticket_id: str, body: dict):
         "platformName",
         "platformOrderId",
         "platformUrl",
+        "mapsUrl",
     ):
         if key in body:
             target[key] = body.get(key)
@@ -28000,6 +28133,10 @@ def restaurant_delivery_ticket_patch(ticket_id: str, body: dict):
             }
         except (TypeError, ValueError):
             pass
+    if "mapsUrl" in body and body.get("mapsUrl") and not target.get("gps"):
+        parsed = _parse_coords_from_maps_url(str(body.get("mapsUrl") or ""))
+        if parsed:
+            target["gps"] = {**parsed, "at": datetime.now().isoformat(), "from": "mapsUrl"}
     target["updatedAt"] = datetime.now().isoformat()
     _delivery_tickets_save(rows)
     return {"ok": True, "ticket": target}

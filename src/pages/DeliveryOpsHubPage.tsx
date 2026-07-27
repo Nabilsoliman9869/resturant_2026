@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
+import { extractMapsUrl, parseCoordsFromMapsUrl } from "../lib/mapsLink";
 import { useAuth } from "../auth/AuthContext";
 import { sessionDisplayName } from "../auth/displayUser";
 import "../styles/deliveryOpsHub.css";
@@ -39,6 +40,7 @@ type DeliveryTicket = {
   platformName?: string;
   platformOrderId?: string;
   platformUrl?: string;
+  mapsUrl?: string;
   sessionId?: string;
   sourceTableId?: string;
   gps?: { lat?: number; lng?: number } | null;
@@ -117,6 +119,8 @@ export default function DeliveryOpsHubPage() {
   const [platformName, setPlatformName] = useState("");
   const [platformOrderId, setPlatformOrderId] = useState("");
   const [platformUrl, setPlatformUrl] = useState("");
+  const [mapsUrl, setMapsUrl] = useState("");
+  const [mapsFlash, setMapsFlash] = useState(false);
   const [agentGuid, setAgentGuid] = useState("");
   const [gps, setGps] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const [shotFile, setShotFile] = useState<File | null>(null);
@@ -130,6 +134,7 @@ export default function DeliveryOpsHubPage() {
   const searchTimer = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const pasteZoneRef = useRef<HTMLDivElement | null>(null);
+  const mapsInputRef = useRef<HTMLInputElement | null>(null);
 
   const applyShotFile = useCallback((file: File | null, source: "file" | "paste" | "drop" = "file") => {
     setShotFile(file);
@@ -146,35 +151,98 @@ export default function DeliveryOpsHubPage() {
     }
   }, []);
 
+  const applyMapsUrl = useCallback(
+    async (raw: string, source: "paste" | "input" = "input") => {
+      const found = extractMapsUrl(raw) || (raw.trim().startsWith("http") ? extractMapsUrl(raw.trim()) : null);
+      if (!found) {
+        if (source === "paste") setMsg("لم يُعثر على رابط خرائط صالح في النص الملصوق");
+        return false;
+      }
+      setMapsUrl(found);
+      setMapsFlash(true);
+      window.setTimeout(() => setMapsFlash(false), 900);
+
+      const local = parseCoordsFromMapsUrl(found);
+      if (local) {
+        setGps({ lat: local.lat, lng: local.lng });
+        setMsg(
+          source === "paste"
+            ? `تم لصق رابط الخرائط ✓ (${local.lat.toFixed(5)}, ${local.lng.toFixed(5)})`
+            : `رابط الخرائط + إحداثيات ✓`,
+        );
+        return true;
+      }
+
+      setMsg(source === "paste" ? "تم لصق رابط الخرائط… جاري استخراج الموقع" : "جاري استخراج الموقع من الرابط…");
+      try {
+        const r = await fetch(`${base}/api/restaurant/delivery/resolve-maps-url`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: found }),
+        });
+        const t = await r.text();
+        const j =
+          tryParseJson<{
+            ok?: boolean;
+            mapsUrl?: string;
+            resolvedUrl?: string;
+            gps?: { lat?: number; lng?: number } | null;
+            detail?: string;
+            warning?: string;
+          }>(t) ?? {};
+        if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : t);
+        if (j.mapsUrl) setMapsUrl(j.mapsUrl);
+        if (j.gps && j.gps.lat != null && j.gps.lng != null) {
+          setGps({ lat: Number(j.gps.lat), lng: Number(j.gps.lng) });
+          setMsg(`تم ربط الموقع من الخرائط ✓ (${Number(j.gps.lat).toFixed(5)}, ${Number(j.gps.lng).toFixed(5)})`);
+        } else {
+          setMsg(j.warning ? `رابط الخرائط محفوظ — ${j.warning}` : "رابط الخرائط محفوظ (افتحه للطيار)");
+        }
+      } catch (e) {
+        setMsg(`رابط الخرائط محفوظ — تعذر استخراج الإحداثيات (${String(e)})`);
+      }
+      return true;
+    },
+    [base],
+  );
+
   useEffect(() => {
     return () => {
       if (shotPreview) URL.revokeObjectURL(shotPreview);
     };
   }, [shotPreview]);
 
-  /** Ctrl+V / Cmd+V لصورة من الحافظة أثناء تبويب الاستقبال (سكرين واتساب من الديسكتوب). */
+  /** Ctrl+V: صورة واتساب أو رابط خرائط جوجل أثناء تبويب الاستقبال. */
   useEffect(() => {
     if (tab !== "intake") return;
     const onPaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
-      if (!items?.length) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (!item || !String(item.type || "").startsWith("image/")) continue;
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        e.preventDefault();
-        const ext = item.type.includes("jpeg") || item.type.includes("jpg") ? "jpg" : "png";
-        const file = new File([blob], `whatsapp-paste-${Date.now()}.${ext}`, {
-          type: blob.type || "image/png",
-        });
-        applyShotFile(file, "paste");
-        return;
+      if (items?.length) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (!item || !String(item.type || "").startsWith("image/")) continue;
+          const blob = item.getAsFile();
+          if (!blob) continue;
+          e.preventDefault();
+          const ext = item.type.includes("jpeg") || item.type.includes("jpg") ? "jpg" : "png";
+          const file = new File([blob], `whatsapp-paste-${Date.now()}.${ext}`, {
+            type: blob.type || "image/png",
+          });
+          applyShotFile(file, "paste");
+          return;
+        }
       }
+      const text = e.clipboardData?.getData("text/plain") || e.clipboardData?.getData("text") || "";
+      const maps = extractMapsUrl(text);
+      if (!maps) return;
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      const inField = tag === "input" || tag === "textarea";
+      if (!inField) e.preventDefault();
+      void applyMapsUrl(maps, "paste");
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [tab, applyShotFile]);
+  }, [tab, applyShotFile, applyMapsUrl]);
 
   const loadTickets = useCallback(async () => {
     try {
@@ -322,6 +390,7 @@ export default function DeliveryOpsHubPage() {
           platformName: channel === "platform" ? platformName.trim() : undefined,
           platformOrderId: channel === "platform" ? platformOrderId.trim() : undefined,
           platformUrl: channel === "platform" ? platformUrl.trim() : undefined,
+          mapsUrl: mapsUrl.trim() || undefined,
           gps: gps || undefined,
           createdBy: {
             userId: user?.id != null ? String(user.id) : "",
@@ -346,6 +415,7 @@ export default function DeliveryOpsHubPage() {
 
       setMsg("تم تسجيل الاستقبال بنجاح");
       applyShotFile(null);
+      setMapsUrl("");
       if (fileRef.current) fileRef.current.value = "";
       await loadTickets();
       if (openPosAfter && ticket) openOrdering(ticket);
@@ -621,8 +691,69 @@ export default function DeliveryOpsHubPage() {
               </button>
             ) : null}
             <button type="button" className="btn btn-ghost" onClick={captureGps}>
-              {gps ? `GPS ✓ ${gps.lat.toFixed(4)},${gps.lng.toFixed(4)}` : "حفظ موقع GPS"}
+              {gps ? `GPS ✓ ${gps.lat.toFixed(4)},${gps.lng.toFixed(4)}` : "حفظ موقع GPS للجهاز"}
             </button>
+          </div>
+
+          <div className={`deliv-hub__maps-zone${mapsFlash ? " is-flash" : ""}${mapsUrl ? " has-maps" : ""}`}>
+            <div className="deliv-hub__paste-copy">
+              <strong>موقع التوصيل — رابط خرائط جوجل</strong>
+              <span>
+                من نفس جهاز الكاشير: افتح الخرائط → مشاركة → انسخ الرابط ثم <kbd>Ctrl</kbd>+<kbd>V</kbd>
+                {" "}(مثال: maps.app.goo.gl/…)
+              </span>
+            </div>
+            <div className="deliv-hub__maps-row">
+              <input
+                ref={mapsInputRef}
+                value={mapsUrl}
+                onChange={(e) => setMapsUrl(e.target.value)}
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData("text/plain") || "";
+                  if (extractMapsUrl(text)) {
+                    e.preventDefault();
+                    void applyMapsUrl(text, "paste");
+                  }
+                }}
+                onBlur={() => {
+                  if (mapsUrl.trim()) void applyMapsUrl(mapsUrl, "input");
+                }}
+                placeholder="https://maps.app.goo.gl/…"
+                inputMode="url"
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!mapsUrl.trim() || busy}
+                onClick={() => void applyMapsUrl(mapsUrl, "input")}
+              >
+                ربط الموقع
+              </button>
+              {mapsUrl ? (
+                <a className="btn btn-ghost" href={mapsUrl} target="_blank" rel="noreferrer">
+                  فتح
+                </a>
+              ) : null}
+              {mapsUrl ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setMapsUrl("");
+                    setMsg("أُزيل رابط الخرائط");
+                  }}
+                >
+                  إزالة
+                </button>
+              ) : null}
+            </div>
+            {gps ? (
+              <span className="deliv-hub__hint">
+                إحداثيات محفوظة: {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
+              </span>
+            ) : (
+              <span className="deliv-hub__hint">الصق الرابط المختصر أو الكامل — يُحفظ مع التذكرة للطيار</span>
+            )}
           </div>
 
           <div className="deliv-hub__actions">
@@ -654,12 +785,19 @@ export default function DeliveryOpsHubPage() {
                     {t.phone} {t.area ? `· ${t.area}` : ""} {t.shippingFee ? `· شحن ${t.shippingFee}` : ""}
                     {t.noVat ? " · بدون ضريبة" : ""}
                     {t.platformName ? ` · ${t.platformName} #${t.platformOrderId || ""}` : ""}
+                    {t.mapsUrl ? " · خرائط ✓" : ""}
+                    {t.gps?.lat != null && t.gps?.lng != null ? ` · GPS ${Number(t.gps.lat).toFixed(4)},${Number(t.gps.lng).toFixed(4)}` : ""}
                   </div>
                   {t.requestedItemsText ? <p>{t.requestedItemsText}</p> : null}
                   <div className="deliv-hub__ticket-actions">
                     <button type="button" className="btn btn-primary" onClick={() => openOrdering(t)}>
                       فتح نقطة البيع
                     </button>
+                    {t.mapsUrl ? (
+                      <a href={t.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">
+                        خرائط
+                      </a>
+                    ) : null}
                     {(t.attachments || []).slice(0, 2).map((a) =>
                       a.url ? (
                         <a key={a.fileName || a.url} href={`${base}${a.url}`} target="_blank" rel="noreferrer" className="btn btn-ghost">
@@ -722,6 +860,13 @@ export default function DeliveryOpsHubPage() {
                   <div className="deliv-hub__ticket-meta">
                     {o.deliveryTicket?.phone || ""} {o.deliveryTicket?.area ? `· ${o.deliveryTicket.area}` : ""}
                     {o.deliveryTicket?.driverName ? `· طيار: ${o.deliveryTicket.driverName}` : ""}
+                  </div>
+                  <div className="deliv-hub__ticket-actions">
+                    {o.deliveryTicket?.mapsUrl ? (
+                      <a href={o.deliveryTicket.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">
+                        خرائط
+                      </a>
+                    ) : null}
                   </div>
                   <div>
                     {(o.items || []).slice(0, 5).map((it, i) => (

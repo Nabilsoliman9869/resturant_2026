@@ -325,6 +325,40 @@
   pointer-events: none;
 }
 
+.deliv-hub__maps-zone {
+  margin-bottom: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1.5px dashed rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.deliv-hub__maps-zone.has-maps {
+  border-style: solid;
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.deliv-hub__maps-zone.is-flash {
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35);
+}
+
+.deliv-hub__maps-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.deliv-hub__maps-row input {
+  flex: 1;
+  min-width: min(100%, 220px);
+}
+
 .deliv-hub__hint {
   font-size: 0.75rem;
   color: var(--muted);
