@@ -27737,6 +27737,8 @@ def restaurant_delivery_queue(role: Optional[str] = None):
                 "address": tick.get("address"),
                 "shippingFee": tick.get("shippingFee"),
                 "shippingMode": tick.get("shippingMode"),
+                "shippingProductGuide": tick.get("shippingProductGuide"),
+                "shippingProductName": tick.get("shippingProductName"),
                 "driverName": tick.get("driverName"),
                 "noVat": tick.get("noVat"),
                 "platformName": tick.get("platformName"),
@@ -27898,9 +27900,162 @@ def restaurant_delivery_resolve_maps_url(body: dict):
     }
 
 
+DELIVERY_SHIPPING_GROUP_NAMES = (
+    "خدمات الشحن",
+    "خدمات الدليفري",
+    "خدمات الدليفيري",
+    "الدليفري",
+    "الدليفيري",
+)
+DELIVERY_SHIPPING_GROUP_PRIMARY = "خدمات الشحن"
+DELIVERY_SHIPPING_GROUP_LATIN = "MAT3AM_DELIVERY_SHIPPING_GROUP"
+
+
+def _ensure_delivery_shipping_group(cursor) -> Optional[str]:
+    """مجموعة رئيسية TBL006 لخدمات الشحن/الدليفري — تُنشأ إن لم تُوجد."""
+    _ensure_menu_tables(cursor)
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide, GroupName FROM dbo.TBL006
+            WHERE LatinName = ?
+               OR RTRIM(LTRIM(ISNULL(GroupName, N''))) IN (?, ?, ?, ?, ?)
+            ORDER BY CASE
+                WHEN RTRIM(LTRIM(ISNULL(GroupName, N''))) = ? THEN 0
+                WHEN LatinName = ? THEN 1
+                ELSE 2
+            END
+            """,
+            (
+                DELIVERY_SHIPPING_GROUP_LATIN,
+                *DELIVERY_SHIPPING_GROUP_NAMES,
+                DELIVERY_SHIPPING_GROUP_PRIMARY,
+                DELIVERY_SHIPPING_GROUP_LATIN,
+            ),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip().upper()
+    except Exception as e:
+        print("[mat3am] find delivery shipping group:", e)
+
+    try:
+        gid = str(uuid.uuid4()).upper()
+        card_code = _kids_next_root_card_code(cursor)
+        # CardCode إلزامي في oya_Mohandessin.TBL006 (NOT NULL) — نفس نمط مجموعات الكيدز
+        has_tv = False
+        has_latin = False
+        has_security = False
+        try:
+            cursor.execute(
+                """
+                SELECT
+                  CASE WHEN COL_LENGTH('dbo.TBL006','TextValue01') IS NULL THEN 0 ELSE 1 END,
+                  CASE WHEN COL_LENGTH('dbo.TBL006','LatinName') IS NULL THEN 0 ELSE 1 END,
+                  CASE WHEN COL_LENGTH('dbo.TBL006','Security') IS NULL THEN 0 ELSE 1 END
+                """
+            )
+            flags = cursor.fetchone()
+            has_tv = bool(flags and flags[0])
+            has_latin = bool(flags and flags[1])
+            has_security = bool(flags and len(flags) > 2 and flags[2])
+        except Exception:
+            has_tv, has_latin, has_security = False, True, True
+
+        cols = ["CardGuide", "GroupName", "CardCode"]
+        vals = ["CAST(? AS uniqueidentifier)", "?", "?"]
+        params: list = [gid, DELIVERY_SHIPPING_GROUP_PRIMARY, card_code]
+        if has_latin:
+            cols.append("LatinName")
+            vals.append("?")
+            params.append(DELIVERY_SHIPPING_GROUP_LATIN)
+        if has_security:
+            cols.append("Security")
+            vals.append("1")
+        if has_tv:
+            cols.append("TextValue01")
+            vals.append("N'4444'")
+        cols.append("MainGuide")
+        vals.append("NULL")
+        cursor.execute(
+            f"INSERT INTO dbo.TBL006 ({', '.join(cols)}) VALUES ({', '.join(vals)})",
+            tuple(params),
+        )
+        return gid
+    except Exception as e:
+        print("[mat3am] create delivery shipping group:", e)
+        return None
+
+
+def _list_delivery_shipping_services(cursor) -> dict:
+    """أصناف TBL007 التابعة لمجموعة خدمات الشحن/الدليفري."""
+    group_guid = _ensure_delivery_shipping_group(cursor)
+    if not group_guid:
+        return {"groupGuide": None, "groupName": None, "services": [], "hint": "تعذر إنشاء/العثور على مجموعة خدمات الشحن في TBL006"}
+    group_name = DELIVERY_SHIPPING_GROUP_PRIMARY
+    try:
+        cursor.execute(
+            "SELECT TOP 1 GroupName FROM dbo.TBL006 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            (group_guid,),
+        )
+        gr = cursor.fetchone()
+        if gr and gr[0]:
+            group_name = str(gr[0])
+    except Exception:
+        pass
+
+    services = []
+    try:
+        cursor.execute(
+            """
+            SELECT CardGuide, ProductName, EndUserPrice, AgentPrice, NotActive
+            FROM dbo.TBL007
+            WHERE GroupGuid = CAST(? AS uniqueidentifier)
+            ORDER BY ProductName
+            """,
+            (group_guid,),
+        )
+        for r in cursor.fetchall() or []:
+            inactive = False
+            try:
+                inactive = bool(r[4]) if len(r) > 4 and r[4] is not None else False
+            except Exception:
+                inactive = False
+            if inactive:
+                continue
+            try:
+                price = float(r[2] if r[2] is not None else (r[3] or 0))
+            except (TypeError, ValueError):
+                price = 0.0
+            services.append(
+                {
+                    "CardGuide": str(r[0]).strip().upper() if r[0] else "",
+                    "ProductName": str(r[1] or ""),
+                    "Price": max(0.0, round(price, 2)),
+                    "GroupGuid": group_guid,
+                }
+            )
+    except Exception as e:
+        return {
+            "groupGuide": group_guid,
+            "groupName": group_name,
+            "services": [],
+            "hint": f"تعذر قراءة أصناف المجموعة: {e}",
+        }
+
+    hint = None
+    if not services:
+        hint = (
+            f"المجموعة «{group_name}» جاهزة في TBL006 — أضف أصناف شحن في TBL007 "
+            f"(مثل: شحن الهرم 100 · شحن المقطم 120) واربط GroupGuid بهذه المجموعة."
+        )
+    return {"groupGuide": group_guid, "groupName": group_name, "services": services, "hint": hint}
+
+
 def _ensure_mat3am_delivery_shipping_product(cursor) -> Optional[str]:
-    """صنف خدمة توصيل/شحن لفاتورة الدليفري (يُنشأ مرة واحدة في TBL007 إن لم يوجد)."""
+    """صنف شحن عام احتياطي داخل مجموعة خدمات الشحن (إن لم يُختر صنف منطقة)."""
     name = "خدمة توصيل / شحن"
+    group_guid = _ensure_delivery_shipping_group(cursor)
     try:
         cursor.execute(
             """
@@ -27911,19 +28066,24 @@ def _ensure_mat3am_delivery_shipping_product(cursor) -> Optional[str]:
         )
         row = cursor.fetchone()
         if row and row[0]:
-            return str(row[0]).strip().upper()
+            pg = str(row[0]).strip().upper()
+            if group_guid:
+                try:
+                    cursor.execute(
+                        """
+                        UPDATE dbo.TBL007 SET GroupGuid = CAST(? AS uniqueidentifier)
+                        WHERE CardGuide = CAST(? AS uniqueidentifier)
+                          AND (GroupGuid IS NULL OR GroupGuid <> CAST(? AS uniqueidentifier))
+                        """,
+                        (group_guid, pg, group_guid),
+                    )
+                except Exception:
+                    pass
+            return pg
     except Exception:
         pass
     try:
         gid = str(uuid.uuid4()).upper()
-        group_guid = None
-        try:
-            cursor.execute("SELECT TOP 1 CardGuide FROM dbo.TBL006 ORDER BY CardCode")
-            g = cursor.fetchone()
-            if g and g[0]:
-                group_guid = str(g[0]).strip().upper()
-        except Exception:
-            group_guid = None
         if group_guid:
             cursor.execute(
                 """
@@ -27944,6 +28104,35 @@ def _ensure_mat3am_delivery_shipping_product(cursor) -> Optional[str]:
     except Exception as e:
         print("[mat3am] ensure delivery shipping product:", e)
         return None
+
+
+@app.get("/api/restaurant/delivery/shipping-services")
+def restaurant_delivery_shipping_services(ensure_group: bool = True):
+    """
+    خدمات الشحن من TBL007 التابعة لمجموعة TBL006:
+    «خدمات الشحن» / «الدليفري» (تُنشأ المجموعة تلقائياً إن لزم).
+    """
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cursor = conn.cursor()
+        payload = _list_delivery_shipping_services(cursor)
+        if ensure_group:
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        return {"ok": True, **payload}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _parse_delivery_prepaid(body_or_delivery: dict) -> dict:
@@ -28055,6 +28244,10 @@ def restaurant_delivery_intake(body: dict):
     shipping_mode = str(body.get("shippingMode") or body.get("shippingAs") or "service_item").strip().lower()
     if shipping_mode not in ("service_item", "fee"):
         shipping_mode = "service_item"
+    shipping_product_guide = str(body.get("shippingProductGuide") or body.get("shippingProductId") or "").strip().upper() or None
+    shipping_product_name = str(body.get("shippingProductName") or body.get("shippingName") or "").strip()[:200] or None
+    if shipping_product_guide:
+        shipping_mode = "service_item"
 
     gps = body.get("gps") if isinstance(body.get("gps"), dict) else None
     gps_out = None
@@ -28090,6 +28283,8 @@ def restaurant_delivery_intake(body: dict):
         "agentGuid": agent_guid or None,
         "shippingFee": shipping_fee,
         "shippingMode": shipping_mode,
+        "shippingProductGuide": shipping_product_guide,
+        "shippingProductName": shipping_product_name,
         "noVat": no_vat,
         "paymentMode": prepaid["paymentMode"],
         "prepaidAmount": prepaid["prepaidAmount"],
@@ -28198,6 +28393,8 @@ def restaurant_delivery_ticket_patch(ticket_id: str, body: dict):
         "driverName",
         "shippingFee",
         "shippingMode",
+        "shippingProductGuide",
+        "shippingProductName",
         "noVat",
         "paymentMode",
         "prepaidAmount",
@@ -31332,24 +31529,22 @@ def restaurant_create_invoice(body: dict):
                 for x in items_body
             )
             if ship_fee > 0 and ship_mode != "fee" and not already_ship:
-                ship_pg = _ensure_mat3am_delivery_shipping_product(cursor)
+                ship_pg = str(delivery.get("shippingProductGuide") or body.get("shippingProductGuide") or "").strip().upper()
+                ship_name = str(delivery.get("shippingProductName") or delivery.get("shippingName") or "").strip() or "خدمة توصيل / شحن"
+                if not ship_pg:
+                    ship_pg = _ensure_mat3am_delivery_shipping_product(cursor) or ""
                 if ship_pg:
                     items_body.append(
                         {
                             "ProductGuide": ship_pg,
-                            "ProductName": "خدمة توصيل / شحن",
+                            "ProductName": ship_name,
                             "Quantity": 1.0,
                             "Unit": "1",
                             "UnitPrice": ship_fee,
                             "TotalValue": ship_fee,
+                            "isShippingService": True,
                         }
                     )
-                    # الشحن أصبح بنداً — لا تُضاعفه على total إن كان الواجهة أضافته للإجمالي كرسوم فقط
-                    try:
-                        if float(total) + 0.001 < (sum(float(x.get("TotalValue") or 0) for x in items_body) - 0.001):
-                            pass
-                    except (TypeError, ValueError):
-                        pass
         if not items_body:
             raise HTTPException(status_code=400, detail="لا توجد بنود للفاتورة")
 

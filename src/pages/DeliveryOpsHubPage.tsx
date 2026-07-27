@@ -7,6 +7,13 @@ import { useAuth } from "../auth/AuthContext";
 import { sessionDisplayName } from "../auth/displayUser";
 import "../styles/deliveryOpsHub.css";
 
+type ShippingService = {
+  CardGuide: string;
+  ProductName: string;
+  Price: number;
+  GroupGuid?: string;
+};
+
 type HubTab = "intake" | "queue" | "convert" | "tickets";
 
 type AgentHit = {
@@ -36,6 +43,8 @@ type DeliveryTicket = {
   agentGuid?: string;
   shippingFee?: number;
   shippingMode?: "service_item" | "fee" | string;
+  shippingProductGuide?: string;
+  shippingProductName?: string;
   noVat?: boolean;
   paymentMode?: "cod" | "prepaid" | "partial" | string;
   prepaidAmount?: number;
@@ -123,6 +132,11 @@ export default function DeliveryOpsHubPage() {
   const [specialNotes, setSpecialNotes] = useState("");
   const [shippingFee, setShippingFee] = useState("0");
   const [shippingMode, setShippingMode] = useState<"service_item" | "fee">("service_item");
+  const [shippingProductGuide, setShippingProductGuide] = useState("");
+  const [shippingProductName, setShippingProductName] = useState("");
+  const [shippingServices, setShippingServices] = useState<ShippingService[]>([]);
+  const [shippingGroupName, setShippingGroupName] = useState("خدمات الشحن");
+  const [shippingHint, setShippingHint] = useState("");
   const [paymentMode, setPaymentMode] = useState<"cod" | "prepaid" | "partial">("cod");
   const [prepaidAmount, setPrepaidAmount] = useState("0");
   const [prepaidMethod, setPrepaidMethod] = useState<"cash" | "card" | "digital" | "transfer">("cash");
@@ -276,6 +290,24 @@ export default function DeliveryOpsHubPage() {
     return () => window.removeEventListener("paste", onPaste);
   }, [tab, addShotFiles, applyMapsUrl]);
 
+  const loadShippingServices = useCallback(async () => {
+    try {
+      const r = await fetch(`${base}/api/restaurant/delivery/shipping-services`, { cache: "no-store" });
+      const j =
+        tryParseJson<{
+          services?: ShippingService[];
+          groupName?: string;
+          hint?: string | null;
+        }>(await r.text()) ?? {};
+      setShippingServices(Array.isArray(j.services) ? j.services : []);
+      if (j.groupName) setShippingGroupName(String(j.groupName));
+      setShippingHint(String(j.hint || ""));
+    } catch {
+      setShippingServices([]);
+      setShippingHint("تعذر تحميل خدمات الشحن من القاعدة");
+    }
+  }, [base]);
+
   const loadTickets = useCallback(async () => {
     try {
       const r = await fetch(`${base}/api/restaurant/delivery/tickets?limit=60`, { cache: "no-store" });
@@ -310,13 +342,14 @@ export default function DeliveryOpsHubPage() {
     void loadTickets();
     void loadQueue();
     void loadOpenTables();
+    void loadShippingServices();
     const id = window.setInterval(() => {
       void loadTickets();
       void loadQueue();
       void loadOpenTables();
     }, 20000);
     return () => window.clearInterval(id);
-  }, [loadTickets, loadQueue, loadOpenTables]);
+  }, [loadTickets, loadQueue, loadOpenTables, loadShippingServices]);
 
   useEffect(() => {
     if (searchTimer.current) window.clearTimeout(searchTimer.current);
@@ -388,6 +421,8 @@ export default function DeliveryOpsHubPage() {
     if (ticket.id) qs.set("deliveryTicketId", ticket.id);
     if (ticket.shippingFee != null) qs.set("shippingFee", String(ticket.shippingFee));
     if (ticket.shippingMode) qs.set("shippingMode", String(ticket.shippingMode));
+    if (ticket.shippingProductGuide) qs.set("shippingProductGuide", String(ticket.shippingProductGuide));
+    if (ticket.shippingProductName) qs.set("shippingProductName", String(ticket.shippingProductName));
     if (ticket.noVat) qs.set("noVat", "1");
     if (ticket.paymentMode) qs.set("paymentMode", String(ticket.paymentMode));
     if (ticket.prepaidAmount != null && Number(ticket.prepaidAmount) > 0) qs.set("prepaidAmount", String(ticket.prepaidAmount));
@@ -422,7 +457,9 @@ export default function DeliveryOpsHubPage() {
           requestedItems: requestedItems.trim() || undefined,
           specialNotes: specialNotes.trim() || undefined,
           shippingFee: Number(shippingFee) || 0,
-          shippingMode,
+          shippingMode: shippingProductGuide ? "service_item" : shippingMode,
+          shippingProductGuide: shippingProductGuide || undefined,
+          shippingProductName: shippingProductName || undefined,
           noVat,
           paymentMode,
           prepaidAmount: Number(prepaidAmount) || 0,
@@ -646,13 +683,52 @@ export default function DeliveryOpsHubPage() {
               موعد التسليم
               <input value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)} placeholder="اليوم 8 م · أو فوري" />
             </label>
+            <label className="deliv-hub__span2">
+              خدمة الشحن (من مجموعة «{shippingGroupName}» — TBL006/007)
+              <select
+                value={shippingProductGuide}
+                onChange={(e) => {
+                  const gid = e.target.value;
+                  setShippingProductGuide(gid);
+                  const hit = shippingServices.find((s) => s.CardGuide === gid);
+                  if (hit) {
+                    setShippingProductName(hit.ProductName);
+                    setShippingFee(String(hit.Price));
+                    setShippingMode("service_item");
+                  } else {
+                    setShippingProductName("");
+                  }
+                }}
+              >
+                <option value="">— اختر منطقة/خدمة شحن —</option>
+                {shippingServices.map((s) => (
+                  <option key={s.CardGuide} value={s.CardGuide}>
+                    {s.ProductName} — {Number(s.Price || 0).toFixed(2)}
+                  </option>
+                ))}
+              </select>
+              {shippingHint ? <span className="deliv-hub__hint">{shippingHint}</span> : null}
+            </label>
             <label>
               قيمة الشحن
-              <input type="number" min={0} step={0.5} value={shippingFee} onChange={(e) => setShippingFee(e.target.value)} />
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={shippingFee}
+                onChange={(e) => {
+                  setShippingFee(e.target.value);
+                  // تعديل يدوي للسعر مع الإبقاء على الصنف المختار
+                }}
+              />
             </label>
             <label>
               الشحن كـ
-              <select value={shippingMode} onChange={(e) => setShippingMode(e.target.value as "service_item" | "fee")}>
+              <select
+                value={shippingProductGuide ? "service_item" : shippingMode}
+                disabled={Boolean(shippingProductGuide)}
+                onChange={(e) => setShippingMode(e.target.value as "service_item" | "fee")}
+              >
                 <option value="service_item">صنف خدمة توصيل (يظهر في الفاتورة)</option>
                 <option value="fee">رسوم فقط على الإجمالي</option>
               </select>
@@ -906,7 +982,12 @@ export default function DeliveryOpsHubPage() {
                     <span className="deliv-hub__pill">{t.status}</span>
                   </div>
                   <div className="deliv-hub__ticket-meta">
-                    {t.phone} {t.area ? `· ${t.area}` : ""} {t.shippingFee ? `· شحن ${t.shippingFee}` : ""}
+                    {t.phone} {t.area ? `· ${t.area}` : ""}{" "}
+                    {t.shippingProductName
+                      ? `· ${t.shippingProductName} ${t.shippingFee != null ? `(${t.shippingFee})` : ""}`
+                      : t.shippingFee
+                        ? `· شحن ${t.shippingFee}`
+                        : ""}
                     {t.noVat ? " · بدون ضريبة" : ""}
                     {t.platformName ? ` · ${t.platformName} #${t.platformOrderId || ""}` : ""}
                     {t.mapsUrl ? " · خرائط ✓" : ""}

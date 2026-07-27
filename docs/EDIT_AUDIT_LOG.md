@@ -824,6 +824,17 @@ eserved + active.
 - **`api_server`**: إنشاء صنف شحن عند الحاجة؛ ملاحظات فاتورة بالمسبق/المتبقي؛ توزيع دفعات المسبق على `paymentBreakdown`.
 - **طلب الدليفري**: عرض المسبق والمتبقي؛ مزامنة بند الشحن في السلة للعرض.
 
+### 116 — خدمات الشحن من TBL006/TBL007 — `UTC 2026-07-27T20:55:00Z` — ID `shipgrp-8f2c1a90d4e7`
+
+- مجموعة رئيسية «خدمات الشحن» (أو الدليفري) في **TBL006** تُنشأ تلقائياً إن لزم.
+- **`GET /api/restaurant/delivery/shipping-services`**: أصناف **TBL007** المرتبطة بـ GroupGuid للمجموعة.
+- خانة الشحن في الاستقبال وطلب الدليفري قائمة اختيار من هذه الأصناف (سعر المنطقة).
+
+### 117 — إصلاح إنشاء مجموعة الشحن (CardCode NOT NULL) — `UTC 2026-07-27T21:50:00Z` — ID `shipfix-c7e4b91a2d08`
+
+- **`_ensure_delivery_shipping_group`**: إدراج TBL006 يتضمن **`CardCode`** (+ Security/MainGuide) لأن `oya_Mohandessin.TBL006.CardCode` لا يقبل NULL.
+- التحقق: المجموعة «خدمات الشحن» تُنشأ وتُرجع عبر `/api/restaurant/delivery/shipping-services`.
+
 
 
 

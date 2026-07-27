@@ -81,6 +81,12 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
   const [shippingCompany, setShippingCompany] = useState("");
   const [shippingFee, setShippingFee] = useState(0);
   const [shippingMode, setShippingMode] = useState<"service_item" | "fee">("service_item");
+  const [shippingProductGuide, setShippingProductGuide] = useState("");
+  const [shippingProductName, setShippingProductName] = useState("");
+  const [shippingServices, setShippingServices] = useState<
+    Array<{ CardGuide: string; ProductName: string; Price: number }>
+  >([]);
+  const [shippingGroupName, setShippingGroupName] = useState("خدمات الشحن");
   const [prepaidAmount, setPrepaidAmount] = useState(0);
   const [prepaidMethod, setPrepaidMethod] = useState("cash");
   const [paymentMode, setPaymentMode] = useState<"cod" | "prepaid" | "partial">("cod");
@@ -119,6 +125,22 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
 
   useEffect(() => {
     void loadProducts();
+    if (deliveryOnly || saleChannel === "delivery") {
+      void (async () => {
+        try {
+          const r = await fetch(`${base}/api/restaurant/delivery/shipping-services`, { cache: "no-store" });
+          const j =
+            tryParseJson<{
+              services?: Array<{ CardGuide: string; ProductName: string; Price: number }>;
+              groupName?: string;
+            }>(await r.text()) ?? {};
+          setShippingServices(Array.isArray(j.services) ? j.services : []);
+          if (j.groupName) setShippingGroupName(String(j.groupName));
+        } catch {
+          setShippingServices([]);
+        }
+      })();
+    }
   }, []);
 
   useEffect(() => {
@@ -136,11 +158,18 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
     const pm = String(searchParams.get("paymentMode") || "").trim().toLowerCase();
     const prepaid = Number(searchParams.get("prepaidAmount") || 0);
     const prepaidM = String(searchParams.get("prepaidMethod") || "").trim().toLowerCase();
+    const spg = String(searchParams.get("shippingProductGuide") || "").trim().toUpperCase();
+    const spn = String(searchParams.get("shippingProductName") || "").trim();
     if (ph) setPhone(ph);
     if (nm) setDeliveryName(nm);
     if (addr) setDeliveryAddress(addr);
     if (Number.isFinite(fee) && fee > 0) setShippingFee(fee);
     if (sm === "fee" || sm === "service_item") setShippingMode(sm);
+    if (spg) {
+      setShippingProductGuide(spg);
+      setShippingMode("service_item");
+    }
+    if (spn) setShippingProductName(spn);
     if (pm === "cod" || pm === "prepaid" || pm === "partial") setPaymentMode(pm);
     if (Number.isFinite(prepaid) && prepaid > 0) setPrepaidAmount(prepaid);
     if (prepaidM) setPrepaidMethod(prepaidM);
@@ -259,15 +288,15 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
         ...rest,
         {
           id: SHIPPING_LINE_ID,
-          productGuide: "MAT3AM_DELIVERY_SHIPPING",
-          name: "خدمة توصيل / شحن",
+          productGuide: shippingProductGuide || "MAT3AM_DELIVERY_SHIPPING",
+          name: shippingProductName || "خدمة توصيل / شحن",
           qty: 1,
           unitPrice: shippingFee,
           excludeServiceCharge: true,
         },
       ];
     });
-  }, [orderType, shippingMode, shippingFee]);
+  }, [orderType, shippingMode, shippingFee, shippingProductGuide, shippingProductName]);
 
   function addProduct(p: Product) {
     setCart((prev) => {
@@ -369,7 +398,9 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
                 courierName: courierName.trim() || undefined,
                 shippingCompany: shippingCompany.trim() || undefined,
                 shippingFee,
-                shippingMode,
+                shippingMode: shippingProductGuide ? "service_item" : shippingMode,
+                shippingProductGuide: shippingProductGuide || undefined,
+                shippingProductName: shippingProductName || undefined,
                 noVat,
                 paymentMode,
                 prepaidAmount: prepaidAmount > 0 ? prepaidAmount : undefined,
@@ -447,6 +478,31 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
               <input value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} placeholder="العنوان الكامل" />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
+              خدمة الشحن ({shippingGroupName})
+              <select
+                value={shippingProductGuide}
+                onChange={(e) => {
+                  const gid = e.target.value;
+                  setShippingProductGuide(gid);
+                  const hit = shippingServices.find((s) => s.CardGuide === gid);
+                  if (hit) {
+                    setShippingProductName(hit.ProductName);
+                    setShippingFee(Number(hit.Price) || 0);
+                    setShippingMode("service_item");
+                  } else {
+                    setShippingProductName("");
+                  }
+                }}
+              >
+                <option value="">— اختر منطقة/خدمة —</option>
+                {shippingServices.map((s) => (
+                  <option key={s.CardGuide} value={s.CardGuide}>
+                    {s.ProductName} — {Number(s.Price || 0).toFixed(2)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
               مصروف الشحن
               <input
                 type="number"
@@ -459,7 +515,11 @@ export default function PosPlaceholder(props: PosPlaceholderProps = {}) {
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.82rem", fontWeight: 700 }}>
               الشحن كـ
-              <select value={shippingMode} onChange={(e) => setShippingMode(e.target.value as "service_item" | "fee")}>
+              <select
+                value={shippingProductGuide ? "service_item" : shippingMode}
+                disabled={Boolean(shippingProductGuide)}
+                onChange={(e) => setShippingMode(e.target.value as "service_item" | "fee")}
+              >
                 <option value="service_item">صنف خدمة توصيل</option>
                 <option value="fee">رسوم على الإجمالي فقط</option>
               </select>
