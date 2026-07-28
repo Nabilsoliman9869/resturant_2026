@@ -1823,7 +1823,7 @@ def get_connection():
             if s and db and uid:
                 from odbc_driver import pyodbc_connect_compat
 
-                conn = pyodbc_connect_compat(s, port, db, uid, pwd, timeout=3)
+                conn = pyodbc_connect_compat(s, port, db, uid, pwd, timeout=10)
         except Exception as e:
             print(f"[DB] فشل الاتصال من settings.json: {e}")
 
@@ -1831,24 +1831,24 @@ def get_connection():
         conn_str = _get_connection_string_from_settings()
         if conn_str:
             try:
-                conn = pyodbc.connect(conn_str, timeout=3)
+                conn = pyodbc.connect(conn_str, timeout=10)
             except Exception as e:
                 print(f"[DB] فشل الاتصال من settings.json: {e}")
 
     if not conn:
         try:
             conn_str = get_connection_string()
-            conn = pyodbc.connect(conn_str, timeout=3)
+            conn = pyodbc.connect(conn_str, timeout=10)
         except Exception:
             try:
                 conn_str = get_connection_string_driver13()
-                conn = pyodbc.connect(conn_str, timeout=3)
+                conn = pyodbc.connect(conn_str, timeout=10)
             except Exception as e:
                 print(f"خطأ الاتصال: {e}")
 
     if not conn:
         with _db_conn_fail_lock:
-            _db_conn_fail_until = _time.time() + 60.0  # cool down 60s
+            _db_conn_fail_until = _time.time() + 15.0  # cool down قصير — تجنّب حظر طويل عند تذبذب البروكسي
 
     if conn:
         with _db_conn_fail_lock:
@@ -4686,7 +4686,7 @@ def _mat3am_db_probe_for_ready() -> dict:
             "serverLabel": srv,
         }
     try:
-        conn = pyodbc.connect(conn_str, timeout=4)
+        conn = pyodbc.connect(conn_str, timeout=10)
         try:
             cur = conn.cursor()
             cur.execute("SELECT 1")

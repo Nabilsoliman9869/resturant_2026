@@ -849,6 +849,11 @@ eserved + active.
 - `DeliveryOrderPage` غلاف رفيع → `embeddedChannel="delivery"`.
 - مسار الدليفري: طاولة اصطناعية `DELIVERY`، بدون مقاعد/منيموم/عمليات طاولة، بحث عميل أعلى الواجهة، أصناف محببة، إرسال فاتورة دليفري.
 
+### 120 — استقرار اتصال Railway SQL — `UTC 2026-07-28T08:05:00Z` — ID `railsql-b2e8d41f90a3`
+
+- إعداد إنتاج: التحويل من `tokaido.proxy.rlwy.net` (بروكسي عام بطيء) إلى **`sqlserver2022docker.railway.internal:1433`** (شبكة Railway الخاصة).
+- رفع مهلة `get_connection` إلى 10ث وتقصير cool-down بعد الفشل إلى 15ث لتقليل انقطاعات الواجهة.
+
 
 
 
