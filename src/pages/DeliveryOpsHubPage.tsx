@@ -144,6 +144,21 @@ function matchShippingService(services: ShippingService[], areaText: string): Sh
   return contains || null;
 }
 
+
+function DeliveryQueueActions({ ticket, busy, assignDriver, markDelivered, settleTicket, base }: {
+  ticket: DeliveryTicket; busy: boolean; assignDriver: (ticket: DeliveryTicket) => Promise<void>;
+  markDelivered: (ticket: DeliveryTicket) => Promise<void>; settleTicket: (ticket: DeliveryTicket) => Promise<void>; base: string;
+}) {
+  const status = String(ticket.status || "").toLowerCase();
+  return <div className="deliv-hub__ticket-actions">
+    {status === "ready" ? <button type="button" className="btn" disabled={busy} onClick={() => void assignDriver(ticket)}>تكليف طيار</button> : null}
+    {status === "out_for_delivery" ? <button type="button" className="btn" disabled={busy} onClick={() => void markDelivered(ticket)}>تم التسليم</button> : null}
+    {["out_for_delivery", "delivered"].includes(status) ? <button type="button" className="btn" disabled={busy} onClick={() => void settleTicket(ticket)}>تسوية نقد/فيزا</button> : null}
+    {ticket.mapsUrl ? <a href={ticket.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">خرائط</a> : null}
+    {(ticket.attachments || []).slice(0, 1).map((attachment) => attachment.url ? <a key={attachment.fileName || attachment.url} href={`${base}${attachment.url}`} target="_blank" rel="noreferrer" className="btn btn-ghost">صورة</a> : null)}
+  </div>;
+}
+
 export default function DeliveryOpsHubPage() {
   const base = getApiBase();
   const { user } = useAuth();
@@ -730,6 +745,16 @@ export default function DeliveryOpsHubPage() {
     [tickets, queue, openTables],
   );
 
+  const ticketQueue = useMemo(
+    () => tickets.filter((ticket) => ["ready", "out_for_delivery"].includes(String(ticket.status || "").toLowerCase())),
+    [tickets],
+  );
+
+  const queueTicketIds = useMemo(
+    () => new Set(queue.map((order) => String(order.deliveryTicket?.id || "")).filter(Boolean)),
+    [queue],
+  );
+
   return (
     <div className="deliv-hub" dir="rtl">
       <header className="deliv-hub__hero">
@@ -1291,42 +1316,27 @@ export default function DeliveryOpsHubPage() {
       {tab === "queue" ? (
         <section className="deliv-hub__panel">
           <div className="deliv-hub__ticket-list">
-            {queue.length === 0 ? (
+            {queue.length === 0 && ticketQueue.length === 0 ? (
               <p className="deliv-hub__empty">لا طلبات جاهزة للتسليم الآن.</p>
-            ) : (
-              queue.map((o) => (
-                <article key={o.id} className="deliv-hub__ticket">
-                  <div className="deliv-hub__ticket-top">
-                    <strong>{o.ticketNo != null ? `تذكرة #${o.ticketNo}` : o.id.slice(0, 8)}</strong>
-                    <span>{o.status}</span>
-                    {o.deliveryTicket?.customerName ? <span>{o.deliveryTicket.customerName}</span> : null}
-                  </div>
-                  <div className="deliv-hub__ticket-meta">
-                    {o.deliveryTicket?.phone || ""} {o.deliveryTicket?.area ? `· ${o.deliveryTicket.area}` : ""}
-                    {o.deliveryTicket?.driverName ? `· طيار: ${o.deliveryTicket.driverName}` : ""}
-                    {Number(o.deliveryTicket?.prepaidAmount || 0) > 0
-                      ? ` · مسبق ${Number(o.deliveryTicket?.prepaidAmount).toFixed(0)}`
-                      : o.deliveryTicket?.paymentMode === "cod"
-                        ? " · COD"
-                        : ""}
-                  </div>
-                  <div className="deliv-hub__ticket-actions">
-                    {o.deliveryTicket?.mapsUrl ? (
-                      <a href={o.deliveryTicket.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">
-                        خرائط
-                      </a>
-                    ) : null}
-                  </div>
-                  <div>
-                    {(o.items || []).slice(0, 5).map((it, i) => (
-                      <div key={i}>
-                        {it.name} ×{it.quantity || 1}
-                      </div>
-                    ))}
-                  </div>
+            ) : null}
+            {ticketQueue.filter((ticket) => !queueTicketIds.has(ticket.id)).map((ticket) => (
+              <article key={ticket.id} className="deliv-hub__ticket">
+                <div className="deliv-hub__ticket-top"><strong>{ticket.ticketNo ? `أوردر #${ticket.ticketNo}` : ticket.id.slice(0, 8)}</strong><span>{STATUS_LABEL[String(ticket.status || "")] || ticket.status}</span><span>{ticket.customerName}</span></div>
+                <div className="deliv-hub__ticket-meta">{ticket.phone || ""} {ticket.area ? `· ${ticket.area}` : ""} {ticket.driverName ? `· طيار: ${ticket.driverName}` : ""}</div>
+                <DeliveryQueueActions ticket={ticket} busy={busy} assignDriver={assignDriver} markDelivered={markDelivered} settleTicket={settleTicket} base={base} />
+              </article>
+            ))}
+            {queue.map((order) => {
+              const deliveryTicket = order.deliveryTicket;
+              return (
+                <article key={order.id} className="deliv-hub__ticket">
+                  <div className="deliv-hub__ticket-top"><strong>{order.ticketNo != null ? `أوردر #${order.ticketNo}` : order.id.slice(0, 8)}</strong><span>{order.status}</span>{deliveryTicket?.customerName ? <span>{deliveryTicket.customerName}</span> : null}</div>
+                  <div className="deliv-hub__ticket-meta">{deliveryTicket?.phone || ""} {deliveryTicket?.area ? `· ${deliveryTicket.area}` : ""} {deliveryTicket?.driverName ? `· طيار: ${deliveryTicket.driverName}` : ""}</div>
+                  {deliveryTicket ? <DeliveryQueueActions ticket={deliveryTicket as DeliveryTicket} busy={busy} assignDriver={assignDriver} markDelivered={markDelivered} settleTicket={settleTicket} base={base} /> : null}
+                  <div>{(order.items || []).slice(0, 5).map((item, index) => <div key={index}>{item.name} ×{item.quantity || 1}</div>)}</div>
                 </article>
-              ))
-            )}
+              );
+            })}
           </div>
         </section>
       ) : null}

@@ -877,3 +877,16 @@ eserved + active.
 - **DeliveryOrderPage**: شاشة جلسة خفيفة (بدون WaiterOrderPage) — بحث عميل · محببات · فاتورة مبدئية · نسخ واتساب · تفعيل للمطبخ.
 - **DeliveryOpsHubPage**: تسميات حالات · تكليف طيار · تسليم · تسوية نقد/فيزا · فتح جلسة الطلب.
 - **deliveryOrderPage.css**: أنماط المبدئية والحالات والأزرار.
+
+
+### 124 ? Delivery Arabic encoding repair ? `UTC 2026-07-28T19:37:35Z` ? ID `delivutf8-4e7c91a2`
+
+- **src/pages/DeliveryOrderPage.tsx**: regenerated the complete delivery session page as UTF-8, restoring Arabic labels while retaining ticket hydration, customer lookup, modifiers, quote, activation, and locked states.
+- **docs/DELIVERY_CALL_CENTER_PLAYBOOK.md**: restored Arabic sections 1?4 and clarified the quote-to-kitchen and delivery-queue workflow without Waiter POS.
+- **scripts/repair_delivery_encoding.py**: ASCII-only Unicode-escape generator for repeatable safe rewrites.
+
+### 124 — إكمال جلسة الدليفري (إضافات + طابور تتبع) — UTC 2026-07-28T20:10:00Z — ID delivcomp-c91e4a70b2f8
+
+- **DeliveryOrderPage**: hydrate من query/تذكرة · بحث عميل · محببات · إضافات بروفايل الصنف · مبدئية/نسخ واتساب · تفعيل للمطبخ · قفل بعد التفعيل.
+- **DeliveryOpsHubPage**: طابور جاهز/خرج للتسليم من التذاكر + KDS · تكليف طيار · تسليم · تسوية · إصلاح تسميات عربية.
+- **DELIVERY_CALL_CENTER_PLAYBOOK**: دورة واتساب/كول سنتر/منصة/طاولة بدون Waiter POS.

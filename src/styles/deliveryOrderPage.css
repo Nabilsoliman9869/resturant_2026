@@ -490,3 +490,10 @@
   font-size: 0.78rem;
   padding: 0.2rem 0.3rem;
 }
+
+.dop-modifier-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 1rem; background: rgba(2, 6, 23, .68); }
+.dop-modifier-panel { width: min(540px, 100%); max-height: 80vh; overflow: auto; padding: 1rem; border: 1px solid var(--border); border-radius: 14px; background: #0f172a; box-shadow: 0 24px 60px rgba(0,0,0,.45); }
+.dop-modifier-panel h2 { margin-top: 0; }
+.dop-modifier-panel fieldset { margin: .7rem 0; border: 1px solid var(--border); border-radius: 10px; }
+.dop-modifier-panel label { display: block; padding: .35rem 0; }
+.dop-modifier-panel input { margin-inline-end: .5rem; }
