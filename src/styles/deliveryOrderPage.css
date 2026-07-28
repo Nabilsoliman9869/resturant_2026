@@ -1,14 +1,38 @@
-.delivery-order-page--waiter {
-  max-width: none;
+﻿.delivery-order-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-bottom: 2rem;
+}
+
+.dop-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 0.85rem;
+}
+
+.dop-eyebrow {
+  margin: 0 0 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #f59e0b;
+}
+
+.dop-top h1 {
   margin: 0;
-  padding: 0;
+  font-size: 1.4rem;
 }
 
-.delivery-order-page--waiter .waiter-pos--delivery {
-  min-height: 100%;
+.dop-sub {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
 }
 
-/* بحث عميل التوصيل داخل شاشة الجرسون */
+/* —— بحث العميل: أعلى الشاشة، خلفية مختلفة، أيقونة —— */
 .dop-customer-search {
   position: sticky;
   top: 0.35rem;
@@ -72,7 +96,7 @@
   overflow: hidden;
   border: 1px solid rgba(125, 211, 252, 0.25);
   background: rgba(2, 12, 27, 0.88);
-  max-height: 220px;
+  max-height: 260px;
   overflow-y: auto;
 }
 
@@ -105,20 +129,364 @@
 }
 
 .dop-customer-search__hint {
-  margin: 0.35rem 0 0;
+  margin: 0.55rem 0 0;
   font-size: 0.78rem;
   color: rgba(186, 230, 253, 0.75);
 }
 
-.dop-customer-search input[type="text"],
-.dop-customer-search input:not([type]),
-.dop-customer-search input[type="number"],
-.dop-customer-search input[type="tel"] {
+.dop-msg {
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  font-size: 0.88rem;
+}
+
+.dop-customer-card {
+  margin-bottom: 1rem;
+  padding: 0.85rem;
+  border-radius: 14px;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.55), rgba(16, 185, 129, 0.06));
+}
+
+.dop-customer-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem 0.7rem;
+}
+
+.dop-customer-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.dop-customer-card input,
+.dop-customer-card select,
+.dop-pay select,
+.dop-filter {
   font: inherit;
   font-weight: 500;
-  padding: 0.4rem 0.5rem;
+  padding: 0.42rem 0.5rem;
   border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.45);
+  color: inherit;
+}
+
+.dop-span2 {
+  grid-column: span 2;
+}
+
+@media (max-width: 720px) {
+  .dop-span2 {
+    grid-column: span 1;
+  }
+}
+
+.dop-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.45rem !important;
+  margin-top: 1.35rem;
+}
+
+.dop-customer-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.dop-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.dop-totals-inline {
+  margin-inline-start: auto;
+  font-size: 0.88rem;
+}
+
+.dop-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.75fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .dop-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dop-catalog,
+.dop-cart {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.4);
+  padding: 0.75rem;
+}
+
+.dop-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.dop-tab {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  padding: 0.55rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.dop-tab.is-on {
+  background: linear-gradient(135deg, #0ea5e9, #0369a1);
+  border-color: transparent;
+  color: #fff;
+}
+
+.dop-tab--fav.is-on {
+  background: linear-gradient(135deg, #f59e0b, #b45309);
+}
+
+.dop-product-search {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.dop-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.45rem;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.dop-product {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: right;
+  border: 1px solid var(--border);
+  background: rgba(2, 6, 23, 0.35);
+  color: inherit;
+  border-radius: 10px;
+  padding: 0.55rem 0.6rem;
+  cursor: pointer;
+  font: inherit;
+  min-height: 72px;
+}
+
+.dop-product:hover {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.dop-product--fav {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.dop-product em {
+  font-style: normal;
+  font-weight: 800;
+  color: #7dd3fc;
+}
+
+.dop-product small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.dop-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.dop-cart h2 {
+  margin: 0 0 0.55rem;
+  font-size: 1.05rem;
+}
+
+.dop-pay {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.55rem;
+}
+
+.dop-cart-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 36vh;
+  overflow: auto;
+}
+
+.dop-cart-list li {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dop-cart-list li > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.dop-qty {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.dop-qty button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.6);
+  color: inherit;
+  cursor: pointer;
+}
+
+.dop-cart-sum {
+  margin-top: 0.65rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+}
+
+.dop-cart-sum > div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.dop-cart-sum__due {
+  color: #fbbf24;
+  font-weight: 800;
+  margin-top: 0.2rem;
+}
+
+.dop-submit {
+  width: 100%;
+  margin-top: 0.75rem;
+  font-weight: 800;
+}
+
+
+.dop-status {
+  display: inline-block;
+  margin-inline-start: 0.55rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  vertical-align: middle;
+  background: rgba(56, 189, 248, 0.18);
+  color: #7dd3fc;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+}
+.dop-status--quoted, .dop-status--draft_quote { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); }
+.dop-status--kitchen { background: rgba(168, 85, 247, 0.18); color: #c4b5fd; border-color: rgba(168, 85, 247, 0.4); }
+.dop-status--ready { background: rgba(34, 197, 94, 0.2); color: #86efac; border-color: rgba(34, 197, 94, 0.45); }
+.dop-status--out_for_delivery { background: rgba(59, 130, 246, 0.2); color: #93c5fd; border-color: rgba(59, 130, 246, 0.45); }
+.dop-status--settled, .dop-status--delivered { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+
+.dop-request-box {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(251, 191, 36, 0.45);
+  background: rgba(120, 53, 15, 0.25);
+}
+.dop-request-box strong { display: block; margin-bottom: 0.25rem; font-size: 0.82rem; color: #fbbf24; }
+.dop-request-box p { margin: 0; white-space: pre-wrap; font-size: 0.92rem; }
+
+.dop-atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+}
+.dop-atts a {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+}
+.dop-atts img { width: 100%; height: 100%; object-fit: cover; }
+
+.dop-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+.btn-activate {
+  background: linear-gradient(135deg, #059669, #047857) !important;
+  border-color: #10b981 !important;
+  color: #fff !important;
+  font-weight: 800;
+}
+.dop-locked-hint {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.dop-quote-text {
+  width: 100%;
+  margin-top: 0.65rem;
+  border-radius: 10px;
   border: 1px solid rgba(125, 211, 252, 0.25);
+  background: rgba(2, 12, 27, 0.75);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.55rem;
+  resize: vertical;
+}
+.dop-line-note {
+  width: 100%;
+  margin-top: 0.3rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
   background: rgba(15, 23, 42, 0.55);
   color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.45rem;
+}
+.dop-price-edit {
+  width: 4.2rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(15, 23, 42, 0.55);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.3rem;
 }

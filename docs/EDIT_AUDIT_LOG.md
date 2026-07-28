@@ -870,3 +870,10 @@ eserved + active.
 - التسديد يحفظ `paidBy` لربط الفاتورة بنفس اليوزر.
 
 
+
+### 123 — جلسة دليفري بمبدئية + إلغاء جرسون من المسار — `UTC 2026-07-28T12:45:00Z` — ID `delivquote-f8c21a90e4b7`
+
+- **ackend/api_server.py**: رقم تذكرة · حالات `draft_quote/quoted/kitchen/ready/out_for_delivery/delivered/settled` · `GET ticket` · `POST quote/activate/assign-driver/mark-delivered/settle` · تنبيه كاشير `delivery_ready` عند جاهزية المطبخ.
+- **DeliveryOrderPage**: شاشة جلسة خفيفة (بدون WaiterOrderPage) — بحث عميل · محببات · فاتورة مبدئية · نسخ واتساب · تفعيل للمطبخ.
+- **DeliveryOpsHubPage**: تسميات حالات · تكليف طيار · تسليم · تسوية نقد/فيزا · فتح جلسة الطلب.
+- **deliveryOrderPage.css**: أنماط المبدئية والحالات والأزرار.

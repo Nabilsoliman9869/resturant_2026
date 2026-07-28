@@ -30,6 +30,7 @@ type AgentHit = {
 
 type DeliveryTicket = {
   id: string;
+  ticketNo?: number;
   status?: string;
   channel?: string;
   createdAt?: string;
@@ -62,6 +63,7 @@ type DeliveryTicket = {
   sourceTableId?: string;
   gps?: { lat?: number; lng?: number } | null;
   attachments?: Array<{ url?: string; fileName?: string }>;
+  quoteTotals?: { total?: number };
 };
 
 type OpenTable = {
@@ -87,10 +89,24 @@ type QueueOrder = {
 
 const CHANNEL_LABEL: Record<string, string> = {
   whatsapp: "واتساب",
-  phone: "هاتف",
-  platform: "منصة",
+  phone: "هاتف / كول سنتر",
+  platform: "موقع / منصة",
   table_convert: "من طاولة",
   pos: "طلب توصيل",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  intake: "استقبال",
+  draft_quote: "مسودة مبدئية",
+  quoted: "مبدئية مُرسلة",
+  confirmed: "مؤكّد",
+  ordering: "طلب",
+  kitchen: "في المطبخ",
+  ready: "جاهز",
+  out_for_delivery: "خرج للتسليم",
+  delivered: "تم التسليم",
+  settled: "مُسوّى",
+  cancelled: "ملغى",
 };
 
 /** نقطة طلب الدليفري المستقلة (منيو + شحن + بيانات العميل) — ليست شاشة جرسون الطاولات. */
@@ -441,6 +457,7 @@ export default function DeliveryOpsHubPage() {
     qs.set("orderType", "delivery");
     if (ticket.agentGuid) qs.set("agentGuid", ticket.agentGuid);
     if (ticket.id) qs.set("deliveryTicketId", ticket.id);
+    if (ticket.channel) qs.set("channel", String(ticket.channel));
     if (ticket.shippingFee != null) qs.set("shippingFee", String(ticket.shippingFee));
     if (ticket.shippingMode) qs.set("shippingMode", String(ticket.shippingMode));
     if (ticket.shippingProductGuide) qs.set("shippingProductGuide", String(ticket.shippingProductGuide));
@@ -454,7 +471,71 @@ export default function DeliveryOpsHubPage() {
     if (ticket.phone) qs.set("phone", ticket.phone);
     if (ticket.customerName) qs.set("name", ticket.customerName);
     if (ticket.fullAddress || ticket.address) qs.set("address", ticket.fullAddress || ticket.address || "");
+    if (ticket.area) qs.set("area", ticket.area);
+    if (ticket.requestedItemsText) qs.set("requestedItems", ticket.requestedItemsText);
     navigate(`${roleDeliveryOrderPath(user?.role)}?${qs.toString()}`);
+  }
+
+  async function assignDriver(t: DeliveryTicket) {
+    const name =
+      window.prompt("اسم الطيار", t.driverName || "")?.trim() || "";
+    if (!name) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(t.id)}/assign-driver`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driverName: name }),
+      });
+      const j = tryParseJson<{ detail?: string }>(await r.text()) ?? {};
+      if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "فشل تكليف الطيار");
+      setMsg(`تم تكليف الطيار «${name}» لأوردر #${t.ticketNo || ""}`);
+      await loadTickets();
+      await loadQueue();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markDelivered(t: DeliveryTicket) {
+    setBusy(true);
+    try {
+      const r = await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(t.id)}/mark-delivered`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      setMsg(`تم تسجيل التسليم لأوردر #${t.ticketNo || ""}`);
+      await loadTickets();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function settleTicket(t: DeliveryTicket) {
+    const methodRaw = window.prompt("وسيلة التحصيل عند الرجوع: cash أو card", "cash")?.trim().toLowerCase() || "cash";
+    const method = methodRaw === "visa" || methodRaw === "card" ? "card" : methodRaw === "digital" ? "digital" : "cash";
+    setBusy(true);
+    try {
+      const r = await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(t.id)}/settle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method }),
+      });
+      const j = tryParseJson<{ detail?: string }>(await r.text()) ?? {};
+      if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "فشل التسوية");
+      setMsg(`تم تسوية أوردر #${t.ticketNo || ""} (${method === "card" ? "فيزا" : "نقد"})`);
+      await loadTickets();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function applyShippingService(hit: ShippingService | null) {
@@ -642,7 +723,7 @@ export default function DeliveryOpsHubPage() {
 
   const intakeKpis = useMemo(
     () => ({
-      open: tickets.filter((t) => !["delivered", "cancelled"].includes(String(t.status || ""))).length,
+      open: tickets.filter((t) => !["delivered", "cancelled", "settled"].includes(String(t.status || ""))).length,
       queue: queue.length,
       tables: openTables.length,
     }),
@@ -1110,9 +1191,12 @@ export default function DeliveryOpsHubPage() {
               tickets.map((t) => (
                 <article key={t.id} className="deliv-hub__ticket">
                   <div className="deliv-hub__ticket-top">
-                    <strong>{t.customerName}</strong>
+                    <strong>
+                      {t.ticketNo ? `#${t.ticketNo} · ` : ""}
+                      {t.customerName}
+                    </strong>
                     <span>{CHANNEL_LABEL[String(t.channel || "")] || t.channel}</span>
-                    <span className="deliv-hub__pill">{t.status}</span>
+                    <span className="deliv-hub__pill">{STATUS_LABEL[String(t.status || "")] || t.status}</span>
                   </div>
                   <div className="deliv-hub__ticket-meta">
                     {t.phone} {t.area ? `· ${t.area}` : ""}{" "}
@@ -1121,6 +1205,7 @@ export default function DeliveryOpsHubPage() {
                       : t.shippingFee
                         ? `· شحن ${t.shippingFee}`
                         : ""}
+                    {t.quoteTotals?.total != null ? ` · مبدئية ${Number(t.quoteTotals.total).toFixed(0)}` : ""}
                     {t.noVat ? " · بدون ضريبة" : ""}
                     {t.platformName ? ` · ${t.platformName} #${t.platformOrderId || ""}` : ""}
                     {t.mapsUrl ? " · خرائط ✓" : ""}
@@ -1129,13 +1214,29 @@ export default function DeliveryOpsHubPage() {
                       : t.paymentMode === "cod"
                         ? " · COD"
                         : ""}
+                    {t.driverName ? ` · طيار: ${t.driverName}` : ""}
                     {t.gps?.lat != null && t.gps?.lng != null ? ` · GPS ${Number(t.gps.lat).toFixed(4)},${Number(t.gps.lng).toFixed(4)}` : ""}
                   </div>
                   {t.requestedItemsText ? <p>{t.requestedItemsText}</p> : null}
                   <div className="deliv-hub__ticket-actions">
                     <button type="button" className="btn btn-primary" onClick={() => openOrdering(t)}>
-                      فتح شاشة الطلب
+                      فتح جلسة الطلب
                     </button>
+                    {["ready", "kitchen"].includes(String(t.status || "")) ? (
+                      <button type="button" className="btn" disabled={busy} onClick={() => void assignDriver(t)}>
+                        تكليف طيار
+                      </button>
+                    ) : null}
+                    {String(t.status || "") === "out_for_delivery" ? (
+                      <button type="button" className="btn" disabled={busy} onClick={() => void markDelivered(t)}>
+                        تم التسليم
+                      </button>
+                    ) : null}
+                    {["delivered", "out_for_delivery"].includes(String(t.status || "")) ? (
+                      <button type="button" className="btn" disabled={busy} onClick={() => void settleTicket(t)}>
+                        تسوية نقد/فيزا
+                      </button>
+                    ) : null}
                     {t.mapsUrl ? (
                       <a href={t.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">
                         خرائط

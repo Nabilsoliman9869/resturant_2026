@@ -15678,6 +15678,7 @@ _CASHIER_ALERT_TYPES = frozenset(
         "no_order_overdue",
         "request_bill_help",
         "service_issue",
+        "delivery_ready",
     },
 )
 
@@ -15690,7 +15691,25 @@ _CASHIER_ALERT_DEFAULT_TITLES = {
     "no_order_overdue": "تنبيه: تأخر أخذ الطلب",
     "request_bill_help": "تنبيه: مساعدة لطلب الحساب",
     "service_issue": "تنبيه: ملاحظة خدمة",
+    "delivery_ready": "أوردر دليفري جاهز",
 }
+
+_DELIVERY_TICKET_STATUSES = frozenset(
+    {
+        "intake",
+        "draft_quote",
+        "quoted",
+        "confirmed",
+        "kitchen",
+        "ready",
+        "out_for_delivery",
+        "delivered",
+        "settled",
+        "cancelled",
+        # توافق مع التذاكر القديمة
+        "ordering",
+    }
+)
 
 
 def _default_table_cashier_alert_presets_json() -> str:
@@ -28620,9 +28639,18 @@ def restaurant_delivery_queue(role: Optional[str] = None):
         row = dict(o)
         sid = str(row.get("sessionId") or "").strip()
         tick = tickets_by_session.get(sid)
+        if not tick:
+            tid = str(row.get("deliveryTicketId") or "").strip()
+            if tid:
+                for t in _delivery_tickets_load():
+                    if isinstance(t, dict) and str(t.get("id") or "") == tid:
+                        tick = t
+                        break
         if tick:
             row["deliveryTicket"] = {
                 "id": tick.get("id"),
+                "ticketNo": tick.get("ticketNo"),
+                "status": tick.get("status"),
                 "channel": tick.get("channel"),
                 "customerName": tick.get("customerName"),
                 "phone": tick.get("phone"),
@@ -28666,6 +28694,164 @@ def _delivery_tickets_load() -> list:
 
 def _delivery_tickets_save(rows: list) -> None:
     _restaurant_save("delivery_tickets", rows[:800] if isinstance(rows, list) else [])
+
+
+def _delivery_find_ticket(ticket_id: str) -> tuple[Optional[dict], list]:
+    rows = _delivery_tickets_load()
+    tid = str(ticket_id or "").strip()
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("id") or "") == tid:
+            return r, rows
+    return None, rows
+
+
+def _delivery_next_ticket_no(rows: Optional[list] = None) -> int:
+    data = rows if isinstance(rows, list) else _delivery_tickets_load()
+    best = 5000
+    for r in data if isinstance(data, list) else []:
+        if not isinstance(r, dict):
+            continue
+        try:
+            n = int(r.get("ticketNo") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n > best:
+            best = n
+    return best + 1
+
+
+def _delivery_normalize_quote_line(raw: Any) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    name = str(raw.get("name") or raw.get("ProductName") or "").strip()
+    pg = str(raw.get("productGuide") or raw.get("ProductGuide") or raw.get("menuItemId") or "").strip()
+    try:
+        qty = float(raw.get("qty") or raw.get("quantity") or raw.get("Quantity") or 0)
+    except (TypeError, ValueError):
+        qty = 0.0
+    try:
+        unit = float(raw.get("unitPrice") or raw.get("UnitPrice") or raw.get("price") or 0)
+    except (TypeError, ValueError):
+        unit = 0.0
+    if qty <= 0 or (not name and not pg):
+        return None
+    note = str(raw.get("note") or raw.get("extrasNote") or "").strip()[:300] or None
+    extras = raw.get("extras") if isinstance(raw.get("extras"), list) else []
+    clean_extras = []
+    for ex in extras[:12]:
+        if not isinstance(ex, dict):
+            continue
+        en = str(ex.get("name") or "").strip()
+        if not en:
+            continue
+        try:
+            ep = float(ex.get("price") or 0)
+        except (TypeError, ValueError):
+            ep = 0.0
+        clean_extras.append({"name": en[:120], "price": round(ep, 2)})
+    line_id = str(raw.get("id") or raw.get("lineId") or uuid.uuid4())[:64]
+    return {
+        "id": line_id,
+        "productGuide": pg.upper() if pg else "",
+        "name": name[:200] or "صنف",
+        "qty": round(qty, 3),
+        "unitPrice": round(unit, 2),
+        "note": note,
+        "extras": clean_extras,
+        "lineTotal": round(qty * unit + sum(float(x.get("price") or 0) * qty for x in clean_extras), 2),
+    }
+
+
+def _delivery_quote_totals(lines: list, shipping_fee: float = 0.0, no_vat: bool = True, vat_percent: float = 14.0) -> dict:
+    food = 0.0
+    for ln in lines or []:
+        if not isinstance(ln, dict):
+            continue
+        try:
+            food += float(ln.get("lineTotal") or (float(ln.get("qty") or 0) * float(ln.get("unitPrice") or 0)))
+        except (TypeError, ValueError):
+            pass
+    food = round(food, 2)
+    ship = max(0.0, round(float(shipping_fee or 0), 2))
+    vat = 0.0 if no_vat else round((food + ship) * (float(vat_percent or 0) / 100.0), 2)
+    total = round(food + ship + vat, 2)
+    return {"itemsSubtotal": food, "shippingFee": ship, "vat": vat, "total": total}
+
+
+def _delivery_build_quote_text(ticket: dict) -> str:
+    name = str(ticket.get("customerName") or "").strip() or "عميل"
+    phone = str(ticket.get("phone") or "").strip()
+    area = str(ticket.get("area") or "").strip()
+    tno = ticket.get("ticketNo")
+    lines = ticket.get("quoteLines") if isinstance(ticket.get("quoteLines"), list) else []
+    parts = [f"فاتورة مبدئية دليفري" + (f" #{tno}" if tno else ""), f"العميل: {name}" + (f" — {phone}" if phone else "")]
+    if area:
+        parts.append(f"المنطقة: {area}")
+    parts.append("———")
+    for ln in lines:
+        if not isinstance(ln, dict):
+            continue
+        qty = ln.get("qty") or 0
+        nm = ln.get("name") or "صنف"
+        lt = ln.get("lineTotal")
+        if lt is None:
+            try:
+                lt = float(qty or 0) * float(ln.get("unitPrice") or 0)
+            except (TypeError, ValueError):
+                lt = 0
+        parts.append(f"• {qty} × {nm} = {float(lt):.0f}")
+        if ln.get("note"):
+            parts.append(f"   ({ln.get('note')})")
+    ship = float(ticket.get("shippingFee") or 0)
+    totals = ticket.get("quoteTotals") if isinstance(ticket.get("quoteTotals"), dict) else {}
+    total = float(totals.get("total") or 0)
+    if ship > 0:
+        ship_name = str(ticket.get("shippingProductName") or "شحن").strip()
+        parts.append(f"• شحن ({ship_name}): {ship:.0f}")
+    parts.append("———")
+    parts.append(f"الإجمالي: {total:.0f} ج.م")
+    prepaid = float(ticket.get("prepaidAmount") or 0)
+    if prepaid > 0:
+        parts.append(f"مدفوع مسبقاً: {prepaid:.0f}")
+        parts.append(f"المتبقي: {max(0.0, total - prepaid):.0f}")
+    parts.append("بانتظار تأكيدكم ✓")
+    return "\n".join(parts)
+
+
+def _delivery_notify_ready(order: dict, ticket: Optional[dict]) -> None:
+    """تنبيه كاشير عند جاهزية أوردر دليفري من المطبخ."""
+    if not isinstance(order, dict):
+        return
+    tno = None
+    cust = ""
+    if isinstance(ticket, dict):
+        tno = ticket.get("ticketNo")
+        cust = str(ticket.get("customerName") or "").strip()
+        ticket["status"] = "ready"
+        ticket["readyAt"] = datetime.now().isoformat()
+        ticket["updatedAt"] = ticket["readyAt"]
+        ticket["orderId"] = str(order.get("id") or ticket.get("orderId") or "") or None
+        if order.get("ticketNo") and not tno:
+            ticket["ticketNo"] = order.get("ticketNo")
+            tno = order.get("ticketNo")
+    display_no = tno or order.get("ticketNo") or str(order.get("billNumber") or "") or str(order.get("id") or "")[:8]
+    title = f"الأوردر الدليفري رقم {display_no} خلص"
+    body = f"جاهز من المطبخ" + (f" — {cust}" if cust else "") + " · كلّف الطيار"
+    try:
+        restaurant_cashier_alerts_create(
+            {
+                "type": "delivery_ready",
+                "title": title,
+                "body": body,
+                "orderId": str(order.get("id") or "") or None,
+                "sessionId": str(order.get("sessionId") or "") or None,
+                "tableId": "DELIVERY",
+                "sourceKey": f"delivery_ready:{order.get('id')}",
+                "tableDisplayName": f"دليفري #{display_no}",
+            }
+        )
+    except Exception as e:
+        print("[mat3am] delivery ready alert:", e)
 
 
 def _parse_coords_from_maps_url(url: str):
@@ -29445,6 +29631,10 @@ def restaurant_delivery_intake(body: dict):
         raise HTTPException(status_code=400, detail="المنطقة مطلوبة")
 
     channel = str(body.get("channel") or "whatsapp").strip().lower()
+    if channel in ("website", "web", "site"):
+        channel = "platform"
+    if channel in ("call", "call_center", "callcentre"):
+        channel = "phone"
     if channel not in ("whatsapp", "phone", "platform", "table_convert", "pos"):
         channel = "whatsapp"
 
@@ -29517,9 +29707,14 @@ def restaurant_delivery_intake(body: dict):
             gps_out = {**parsed, "at": datetime.now().isoformat(), "from": "mapsUrl"}
 
     now_iso = datetime.now().isoformat()
+    rows = _delivery_tickets_load()
+    ticket_no = _delivery_next_ticket_no(rows)
+    # واتساب يبدأ بمسودة تسعير؛ كول سنتر/منصة يمكنهم فتح السلة مباشرة
+    initial_status = "draft_quote" if channel == "whatsapp" else "intake"
     ticket = {
         "id": str(uuid.uuid4()),
-        "status": "intake",  # intake → ordering → kitchen → out_for_delivery → delivered | cancelled
+        "ticketNo": ticket_no,
+        "status": initial_status,
         "channel": channel,
         "createdAt": now_iso,
         "updatedAt": now_iso,
@@ -29552,9 +29747,24 @@ def restaurant_delivery_intake(body: dict):
         "sourceTableId": str(body.get("sourceTableId") or "").strip() or None,
         "gps": gps_out,
         "attachments": [],
+        "quoteLines": [],
+        "quoteVersion": 0,
+        "quoteTotals": {"itemsSubtotal": 0, "shippingFee": shipping_fee, "vat": 0, "total": shipping_fee},
+        "quoteText": None,
+        "quoteSentAt": None,
+        "confirmedAt": None,
+        "activatedAt": None,
+        "readyAt": None,
+        "outForDeliveryAt": None,
+        "deliveredAt": None,
+        "settledAt": None,
+        "invoiceId": None,
+        "orderId": None,
+        "settlementMethod": None,
+        "settlementAmount": None,
+        "settlementNote": None,
         "createdBy": body.get("createdBy") if isinstance(body.get("createdBy"), dict) else None,
     }
-    rows = _delivery_tickets_load()
     rows.append(ticket)
     _delivery_tickets_save(rows)
     return {"ok": True, "ticket": ticket, "agent": upsert}
@@ -32290,6 +32500,30 @@ def restaurant_update_order_status(order_id: str, body: dict):
                     if not str(it.get("preparedAt") or "").strip():
                         it["preparedAt"] = now_iso
                 o["items"] = items
+                # دليفري: حدّث التذكرة + تنبيه الكاشير
+                try:
+                    sid = str(o.get("sessionId") or "")
+                    tid = str(o.get("deliveryTicketId") or "").strip()
+                    tickets = _delivery_tickets_load()
+                    linked = None
+                    for t in tickets:
+                        if not isinstance(t, dict):
+                            continue
+                        if tid and str(t.get("id") or "") == tid:
+                            linked = t
+                            break
+                        if sid and str(t.get("sessionId") or "") == sid:
+                            linked = t
+                            break
+                        if str(t.get("orderId") or "") == str(o.get("id") or ""):
+                            linked = t
+                            break
+                    if linked or sid.startswith("delivery:") or str(o.get("tableId") or "").upper() == "DELIVERY":
+                        _delivery_notify_ready(o, linked)
+                        if linked:
+                            _delivery_tickets_save(tickets)
+                except Exception as _deliv_ready_err:
+                    print("[mat3am] delivery ready hook:", _deliv_ready_err)
             elif status in ("served", "paid"):
                 # تثبيت "تم التسليم": نعلّم كل البنود sent حتى لا يعيد
                 # _kds_refresh_order_status الطلب إلى ready في القراءات اللاحقة.
