@@ -42,6 +42,24 @@ type ApprovalRequest = {
     readyCount?: number;
     totalValue?: number;
   };
+  shiftClose?: {
+    closeId?: string;
+    invoiceCount?: number;
+    invoiceTotal?: number;
+    cashAmount?: number;
+    visaAmount?: number;
+    walletAmount?: number;
+    instapayAmount?: number;
+    expensesAmount?: number;
+    purchasesAmount?: number;
+    expectedCash?: number;
+    declaredCash?: number;
+    variance?: number;
+    netHandover?: number;
+    denominations?: Record<string, number>;
+    visaReceiptsCount?: number;
+    transferNoticesCount?: number;
+  };
   decisionOptions?: DecisionOption[];
   decisionFlags?: DecisionFlag[];
   managerNote?: string;
@@ -269,6 +287,41 @@ export default function ManagerApprovalsPage() {
                     {String(req.type || "").trim() === "guest_session_request" ? (
                       <div style={{ marginTop: 8, fontSize: "0.82rem", color: "#92400e", fontWeight: 800 }}>
                         حالة الجلسة: ضيف مؤقت — ممنوع الإرسال/الحساب حتى يحسم المدير
+                      </div>
+                    ) : null}
+                    {String(req.type || "").trim() === "cashier_shift_close" && req.shiftClose ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: "0.75rem 0.85rem",
+                          borderRadius: 12,
+                          background: "#0f172a",
+                          color: "#f8fafc",
+                          display: "grid",
+                          gap: 6,
+                          fontSize: "0.88rem",
+                        }}
+                      >
+                        <strong>ملخص إقفال الشيفت — للمراجعة قبل الاعتماد</strong>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          <span className="badge" style={{ background: "#14532d", color: "#ecfdf5" }}>{`نقدي ${Number(req.shiftClose.cashAmount || 0).toFixed(2)}`}</span>
+                          <span className="badge" style={{ background: "#1e3a8a", color: "#eff6ff" }}>{`فيزا ${Number(req.shiftClose.visaAmount || 0).toFixed(2)}`}</span>
+                          <span className="badge" style={{ background: "#5b21b6", color: "#f5f3ff" }}>{`إنستا ${Number(req.shiftClose.instapayAmount || 0).toFixed(2)}`}</span>
+                          <span className="badge" style={{ background: "#7c2d12", color: "#fff7ed" }}>{`فواتير ${Number(req.shiftClose.invoiceCount || 0)} · ${Number(req.shiftClose.invoiceTotal || 0).toFixed(2)}`}</span>
+                          <span className="badge" style={{ background: "#334155", color: "#f8fafc" }}>{`خصم ${Number((req.shiftClose.expensesAmount || 0) + (req.shiftClose.purchasesAmount || 0)).toFixed(2)}`}</span>
+                          <span className="badge" style={{ background: "#166534", color: "#ecfdf5" }}>{`صافي تسليم ${Number(req.shiftClose.netHandover || 0).toFixed(2)}`}</span>
+                          <span className="badge" style={{ background: "#854d0e", color: "#fefce8" }}>{`فرق العدّ ${Number(req.shiftClose.variance || 0).toFixed(2)}`}</span>
+                        </div>
+                        <div style={{ opacity: 0.85, fontSize: "0.8rem" }}>
+                          فئات:{" "}
+                          {Object.entries(req.shiftClose.denominations || {})
+                            .map(([k, v]) => `${k}×${v}`)
+                            .join(" · ") || "—"}
+                          {" · "}
+                          إيصالات فيزا: {Number(req.shiftClose.visaReceiptsCount || 0)}
+                          {" · "}
+                          إشعارات تحويل: {Number(req.shiftClose.transferNoticesCount || 0)}
+                        </div>
                       </div>
                     ) : null}
 

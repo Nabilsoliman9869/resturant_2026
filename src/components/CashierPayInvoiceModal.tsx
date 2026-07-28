@@ -1149,6 +1149,7 @@ export function CashierPayInvoiceModal({
       const body = {
         invoiceId: id,
         closeSession,
+        mat3amActor: buildMat3amActor(user),
         paymentBreakdown: {
           cash: pbCash,
           visa: pbVisa,

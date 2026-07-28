@@ -200,7 +200,7 @@ except ValueError:
     XTRA_API_PORT = 2288
 
 # يزيد عند تغيير قائمة فحوص GET /api/dev/seed-default-data/verify أو جداول التهيئة — للتمييز عن عمليات api_server قديمة
-MAT3AM_VERIFY_SCHEMA_REVISION = 11
+MAT3AM_VERIFY_SCHEMA_REVISION = 12
 
 # جداول MAT3AM التي يفترض أن تنشئها _ensure_mat3am_dev_schema — للتشخيص فقط (OBJECT_ID + COUNT)
 MAT3AM_DDL_TABLE_NAMES: Tuple[str, ...] = (
@@ -228,6 +228,9 @@ MAT3AM_DDL_TABLE_NAMES: Tuple[str, ...] = (
     "MAT3AM_DAILY_CLOSE",
     "MAT3AM_DAILY_RESULT",
     "MAT3AM_COSTING_MODE",
+    "MAT3AM_SHIFT_CLOSE",
+    "MAT3AM_SHIFT_CLOSE_LINE",
+    "MAT3AM_CASHIER_OUTFLOW",
 )
 
 # دخول تهيئة / مطوّر: لا يعتمد على MAT3AM_APP_USERS ولا يُعطّل أبداً بعد التهيئة (dev / dev@123 أو MAT3AM_INITIAL_DEV_*).
@@ -12205,6 +12208,91 @@ def _ensure_daily_engine_schema(cursor):
     )
 
 
+def _ensure_shift_close_schema(cursor) -> None:
+    """جداول تسويات / إقفال شيفت الكاشير + مصروفات الصندوق المرتبطة."""
+    cursor.execute(
+        """
+        IF OBJECT_ID(N'dbo.MAT3AM_SHIFT_CLOSE', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_SHIFT_CLOSE (
+                CloseId UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                UserId NVARCHAR(64) NOT NULL,
+                UserLogin NVARCHAR(120) NULL,
+                UserName NVARCHAR(120) NULL,
+                UserRole NVARCHAR(40) NULL,
+                Status NVARCHAR(30) NOT NULL DEFAULT N'draft',
+                SubmittedAt DATETIME2 NULL,
+                ApprovedAt DATETIME2 NULL,
+                ApprovedByUserId NVARCHAR(64) NULL,
+                ApprovedByName NVARCHAR(120) NULL,
+                ManagerNote NVARCHAR(2000) NULL,
+                ApprovalRequestId NVARCHAR(64) NULL,
+                InvoiceCount INT NOT NULL DEFAULT 0,
+                InvoiceTotal FLOAT NOT NULL DEFAULT 0,
+                CashAmount FLOAT NOT NULL DEFAULT 0,
+                VisaAmount FLOAT NOT NULL DEFAULT 0,
+                WalletAmount FLOAT NOT NULL DEFAULT 0,
+                InstapayAmount FLOAT NOT NULL DEFAULT 0,
+                ExpensesAmount FLOAT NOT NULL DEFAULT 0,
+                PurchasesAmount FLOAT NOT NULL DEFAULT 0,
+                DeductionsTotal FLOAT NOT NULL DEFAULT 0,
+                ExpectedCash FLOAT NOT NULL DEFAULT 0,
+                DeclaredCash FLOAT NOT NULL DEFAULT 0,
+                Denom1 INT NOT NULL DEFAULT 0,
+                Denom5 INT NOT NULL DEFAULT 0,
+                Denom10 INT NOT NULL DEFAULT 0,
+                Denom50 INT NOT NULL DEFAULT 0,
+                Denom100 INT NOT NULL DEFAULT 0,
+                Denom200 INT NOT NULL DEFAULT 0,
+                VisaReceiptsCount INT NOT NULL DEFAULT 0,
+                TransferNoticesCount INT NOT NULL DEFAULT 0,
+                Variance FLOAT NOT NULL DEFAULT 0,
+                NetHandover FLOAT NOT NULL DEFAULT 0,
+                Notes NVARCHAR(2000) NULL,
+                PayloadJson NVARCHAR(MAX) NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+            CREATE INDEX IX_MAT3AM_SHIFT_CLOSE_User ON dbo.MAT3AM_SHIFT_CLOSE(UserId, Status, SubmittedAt DESC);
+        END
+        IF OBJECT_ID(N'dbo.MAT3AM_SHIFT_CLOSE_LINE', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_SHIFT_CLOSE_LINE (
+                Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+                CloseId UNIQUEIDENTIFIER NOT NULL,
+                LineKind NVARCHAR(30) NOT NULL,
+                RefId NVARCHAR(80) NULL,
+                RefLabel NVARCHAR(255) NULL,
+                Amount FLOAT NOT NULL DEFAULT 0,
+                RouteCash FLOAT NOT NULL DEFAULT 0,
+                RouteVisa FLOAT NOT NULL DEFAULT 0,
+                RouteWallet FLOAT NOT NULL DEFAULT 0,
+                RouteInstapay FLOAT NOT NULL DEFAULT 0,
+                PaidAt DATETIME2 NULL
+            );
+            CREATE INDEX IX_MAT3AM_SHIFT_CLOSE_LINE_Close ON dbo.MAT3AM_SHIFT_CLOSE_LINE(CloseId);
+        END
+        IF OBJECT_ID(N'dbo.MAT3AM_CASHIER_OUTFLOW', N'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.MAT3AM_CASHIER_OUTFLOW (
+                OutflowId UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                UserId NVARCHAR(64) NOT NULL,
+                UserName NVARCHAR(120) NULL,
+                UserRole NVARCHAR(40) NULL,
+                Kind NVARCHAR(30) NOT NULL,
+                Amount FLOAT NOT NULL DEFAULT 0,
+                Category NVARCHAR(120) NULL,
+                Note NVARCHAR(500) NULL,
+                ShiftCloseId UNIQUEIDENTIFIER NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+            CREATE INDEX IX_MAT3AM_CASHIER_OUTFLOW_User ON dbo.MAT3AM_CASHIER_OUTFLOW(UserId, CreatedAt DESC);
+            CREATE INDEX IX_MAT3AM_CASHIER_OUTFLOW_Shift ON dbo.MAT3AM_CASHIER_OUTFLOW(ShiftCloseId);
+        END
+        """
+    )
+
+
 def _to_bill_date_ddmmyyyy(date_key: str) -> str:
     try:
         dt = datetime.strptime(date_key[:10], "%Y-%m-%d")
@@ -17129,6 +17217,7 @@ _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS = "reset_table_with_open_ord
 _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER = "captain_handover_request"
 _MANAGER_APPROVAL_TYPE_GUEST_SESSION = "guest_session_request"
 _MANAGER_APPROVAL_TYPE_INVOICE_PAYMENT = "invoice_payment_approval"
+_MANAGER_APPROVAL_TYPE_SHIFT_CLOSE = "cashier_shift_close"
 _MANAGER_APPROVAL_STATUS_PENDING = "pending_manager"
 
 
@@ -17455,6 +17544,17 @@ def _manager_approval_enqueue_inbox(req: dict) -> None:
         label = "ترحيل على حساب العميل (CL)" if approval_type == "on_account_credit" else "تصفير الفاتورة كضيف"
         title_text = f"طلب موافقة مدير: {label}"
         body_text = f"{table_label} · فاتورة {req.get('billNumber') or req.get('invoiceId') or ''} · {float(req.get('invoiceTotal') or 0):.2f} ج.م"
+    elif req_type == _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE:
+        sc = req.get("shiftClose") if isinstance(req.get("shiftClose"), dict) else {}
+        title_text = "طلب موافقة مدير: إقفال شيفت كاشير"
+        body_text = (
+            f"{str(req.get('requestedBy', {}).get('name') or 'كاشير')}"
+            f" · فواتير {int(sc.get('invoiceCount') or 0)}"
+            f" · نقدي {float(sc.get('cashAmount') or 0):.2f}"
+            f" · فيزا {float(sc.get('visaAmount') or 0):.2f}"
+            f" · إنستا {float(sc.get('instapayAmount') or 0):.2f}"
+            f" · صافي تسليم {float(sc.get('netHandover') or 0):.2f} ج.م"
+        )
     else:
         title_text = "طلب موافقة مدير: إلغاء تسكين بعد المطبخ"
         body_text = (
@@ -19049,6 +19149,9 @@ def restaurant_manager_approvals_post(body: dict):
         if not table_id:
             raise HTTPException(status_code=400, detail="tableId مطلوب")
         req = _manager_approval_create_reset_table_request(table_id, requester, str(body.get("reason") or ""))
+    elif req_type == _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE:
+        # الإقفال يُنشأ من POST /api/restaurant/cashier/shift-close/submit — لا يُنشأ من هنا مباشرة.
+        raise HTTPException(status_code=400, detail="أنشئ إقفال الشيفت من شاشة الكاشير ثم يصل للمدير تلقائياً.")
     else:
         raise HTTPException(status_code=400, detail="type غير مدعوم حالياً.")
     return {"ok": True, "request": req}
@@ -19092,6 +19195,7 @@ def restaurant_manager_approvals_patch(request_id: str, body: dict):
             or ("رفض المدير اعتماد جلسة ضيف." if req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION else "")
             or ("رفض المدير تنفيذ تسليم الكابتن." if req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER else "")
             or ("رفض المدير تنفيذ Reset للطاولة." if req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS else "")
+            or ("رفض المدير اعتماد إقفال الشيفت." if req_type == _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE else "")
             or "رفض المدير تنفيذ الإلغاء."
         )
         target["managerReview"] = {
@@ -19104,6 +19208,8 @@ def restaurant_manager_approvals_patch(request_id: str, body: dict):
         target["executionResult"] = (
             _manager_approval_reject_guest_session(target)
             if req_type == _MANAGER_APPROVAL_TYPE_GUEST_SESSION
+            else _manager_approval_reject_shift_close(target, reviewer, manager_note)
+            if req_type == _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE
             else {"action": "keep_session_open"}
         )
         _manager_approval_requests_save(data)
@@ -19131,6 +19237,8 @@ def restaurant_manager_approvals_patch(request_id: str, body: dict):
                 if req_type == _MANAGER_APPROVAL_TYPE_CAPTAIN_HANDOVER
                 else "رفض طلب Reset للطاولة"
                 if req_type == _MANAGER_APPROVAL_TYPE_RESET_TABLE_WITH_OPEN_ORDERS
+                else "رفض إقفال الشيفت"
+                if req_type == _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE
                 else "رفض طلب الإلغاء",
                 manager_note,
             )
@@ -19165,6 +19273,10 @@ def restaurant_manager_approvals_patch(request_id: str, body: dict):
             "approvalType": str(target.get("approvalType") or ""),
             "decisionLabel": "تم اعتماد طريقة تسوية الفاتورة",
         }
+    elif req_type == _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE:
+        if decision_id != "approve_shift_close":
+            raise HTTPException(status_code=400, detail="قرار اعتماد إقفال الشيفت غير صالح.")
+        execution_result = _manager_approval_execute_shift_close(target, reviewer, manager_note)
     else:
         raise HTTPException(status_code=400, detail="نوع الطلب غير مدعوم في التنفيذ الحالي.")
     target["status"] = "approved"
@@ -27278,12 +27390,20 @@ def restaurant_invoices_local_mark_paid(body: dict):
     now_iso = datetime.now().isoformat()
     check_id01 = _mat3am_invoice_check_id01_value(body)
     posting_result: dict = {}
+    actor = _mat3am_actor_from_body(body)
 
     def _apply_found_payment_state() -> None:
         found["awaitingPayment"] = False
         found["paidAt"] = now_iso
         found["paymentMethod"] = pm[:40]
         found["checkID01"] = check_id01
+        if actor.get("id"):
+            found["paidBy"] = {
+                "userId": str(actor.get("id") or "")[:64],
+                "login": str(actor.get("login") or "")[:120],
+                "name": str(actor.get("name") or "")[:120],
+                "role": str(actor.get("role") or "")[:40],
+            }
         if payment_status_mark:
             found["paymentStatus"] = payment_status_mark
         if merged_totals:
@@ -27363,6 +27483,739 @@ def restaurant_invoices_local_mark_paid(body: dict):
             except Exception:
                 pass
     return {"ok": True, "invoiceId": invoice_id, "paidAt": now_iso, "checkID01": check_id01, "posting": posting_result}
+
+
+# ---------------------------------------------------------------------------
+# إقفال شيفت الكاشير + تسويات SQL (مع اعتماد المدير — دون المساس بأنواع الاعتماد الأخرى)
+# ---------------------------------------------------------------------------
+
+_SHIFT_CLOSE_LOCKED = frozenset({"pending_manager", "approved", "closed"})
+
+
+def _shift_inv_breakdown(inv: dict) -> dict:
+    parts = inv.get("paymentBreakdown") if isinstance(inv.get("paymentBreakdown"), dict) else None
+    out = {"cash": 0.0, "visa": 0.0, "wallet": 0.0, "instapay": 0.0}
+    if parts:
+        for k in out:
+            out[k] = _money2_round(parts.get(k))
+        return out
+    pm = _mat3am_normalize_payment_route_key(inv.get("paymentMethod") or "cash")
+    amt = _money2_round(inv.get("settledTotals", {}).get("paidNow") if isinstance(inv.get("settledTotals"), dict) else None)
+    if amt <= 0:
+        amt = _money2_round(inv.get("total"))
+    if pm in out:
+        out[pm] = amt
+    elif pm in ("mixed", "mixed_account", "mixed_guest"):
+        out["cash"] = amt
+    elif pm not in ("guest",):
+        out["cash"] = amt
+    return out
+
+
+def _shift_invoice_open_for_user(inv: dict, user_id: str) -> bool:
+    if not isinstance(inv, dict):
+        return False
+    if not str(inv.get("paidAt") or "").strip():
+        return False
+    st = str(inv.get("shiftCloseStatus") or "").strip().lower()
+    if st in _SHIFT_CLOSE_LOCKED:
+        return False
+    if str(inv.get("paymentStatus") or "").strip().lower() == "guest" and _money2_round(inv.get("total")) <= 0.02:
+        # تصفير ضيف كامل بلا تحصيل — لا يدخل شيفت الصندوق
+        bd = inv.get("paymentBreakdown")
+        if not (isinstance(bd, dict) and any(_money2_round(bd.get(k)) > 0 for k in ("cash", "visa", "wallet", "instapay"))):
+            return False
+    paid_by = inv.get("paidBy") if isinstance(inv.get("paidBy"), dict) else {}
+    pb_uid = str(paid_by.get("userId") or "").strip()
+    uid = str(user_id or "").strip()
+    if pb_uid:
+        return pb_uid == uid
+    # فواتير قديمة بلا منسوب: تظهر كغير منسوبة ويمكن ضمّها يدوياً
+    return False
+
+
+def _shift_invoice_unassigned(inv: dict) -> bool:
+    if not isinstance(inv, dict):
+        return False
+    if not str(inv.get("paidAt") or "").strip():
+        return False
+    st = str(inv.get("shiftCloseStatus") or "").strip().lower()
+    if st in _SHIFT_CLOSE_LOCKED:
+        return False
+    paid_by = inv.get("paidBy") if isinstance(inv.get("paidBy"), dict) else {}
+    return not str(paid_by.get("userId") or "").strip()
+
+
+def _shift_serialize_invoice(inv: dict) -> dict:
+    bd = _shift_inv_breakdown(inv)
+    return {
+        "invoiceId": str(inv.get("invoiceId") or ""),
+        "billNumber": inv.get("billNumber"),
+        "tableLabel": str(inv.get("tableLabel") or inv.get("tableName") or ""),
+        "paidAt": str(inv.get("paidAt") or ""),
+        "total": _money2_round(inv.get("total")),
+        "paymentMethod": str(inv.get("paymentMethod") or ""),
+        "paymentBreakdown": bd,
+        "paidBy": inv.get("paidBy") if isinstance(inv.get("paidBy"), dict) else None,
+        "routeCash": bd["cash"],
+        "routeVisa": bd["visa"],
+        "routeWallet": bd["wallet"],
+        "routeInstapay": bd["instapay"],
+    }
+
+
+def _shift_list_open_outflows(cursor, user_id: str) -> list:
+    rows = []
+    try:
+        cursor.execute(
+            """
+            SELECT OutflowId, Kind, Amount, Category, Note, CreatedAt
+            FROM dbo.MAT3AM_CASHIER_OUTFLOW
+            WHERE UserId = ? AND ShiftCloseId IS NULL
+            ORDER BY CreatedAt ASC
+            """,
+            (str(user_id),),
+        )
+        for r in cursor.fetchall() or []:
+            rows.append(
+                {
+                    "outflowId": str(r[0]).strip().upper() if r[0] else "",
+                    "kind": str(r[1] or ""),
+                    "amount": _money2_round(r[2]),
+                    "category": str(r[3] or ""),
+                    "note": str(r[4] or ""),
+                    "createdAt": r[5].isoformat() if hasattr(r[5], "isoformat") else str(r[5] or ""),
+                }
+            )
+    except Exception:
+        pass
+    return rows
+
+
+def _shift_stamp_invoices(invoice_ids: list, close_id: str, status: str) -> None:
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        return
+    wanted = {str(x).strip().upper() for x in invoice_ids if str(x).strip()}
+    changed = False
+    for inv in raw:
+        if not isinstance(inv, dict):
+            continue
+        iid = str(inv.get("invoiceId") or "").strip().upper()
+        if iid not in wanted:
+            continue
+        if status in ("", "rejected", "unlocked"):
+            inv.pop("shiftCloseId", None)
+            inv.pop("shiftCloseStatus", None)
+        else:
+            inv["shiftCloseId"] = close_id
+            inv["shiftCloseStatus"] = status
+        changed = True
+    if changed:
+        _restaurant_save("invoices", raw)
+
+
+def _manager_approval_execute_shift_close(target: dict, reviewer: dict, manager_note: str) -> dict:
+    close_id = str(target.get("shiftCloseId") or "").strip().upper()
+    if not close_id:
+        raise HTTPException(status_code=400, detail="shiftCloseId مفقود في طلب الاعتماد")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_shift_close_schema(cur)
+        now = datetime.now()
+        cur.execute(
+            """
+            UPDATE dbo.MAT3AM_SHIFT_CLOSE
+            SET Status = N'approved',
+                ApprovedAt = ?,
+                ApprovedByUserId = ?,
+                ApprovedByName = ?,
+                ManagerNote = ?,
+                UpdatedAt = SYSUTCDATETIME()
+            WHERE CloseId = CAST(? AS uniqueidentifier) AND Status = N'pending_manager'
+            """,
+            (
+                now,
+                str(reviewer.get("userId") or reviewer.get("id") or "")[:64],
+                str(reviewer.get("name") or "")[:120],
+                str(manager_note or "")[:2000],
+                close_id,
+            ),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=409, detail="إقفال الشيفت غير موجود أو ليس بانتظار الاعتماد")
+        # قفل نهائي للفواتير
+        inv_ids = []
+        sc = target.get("shiftClose") if isinstance(target.get("shiftClose"), dict) else {}
+        for x in sc.get("invoiceIds") or []:
+            inv_ids.append(str(x))
+        _shift_stamp_invoices(inv_ids, close_id, "closed")
+        conn.commit()
+        return {
+            "action": "approve_shift_close",
+            "shiftCloseId": close_id,
+            "decisionLabel": "تم اعتماد إقفال الشيفت وتصفير العمليات المدرجة",
+            "netHandover": sc.get("netHandover"),
+            "invoiceCount": sc.get("invoiceCount"),
+        }
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر اعتماد إقفال الشيفت: {e}") from e
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _manager_approval_reject_shift_close(target: dict, reviewer: dict, manager_note: str) -> dict:
+    close_id = str(target.get("shiftCloseId") or "").strip().upper()
+    if not close_id:
+        return {"action": "reject_shift_close", "note": "no close id"}
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            _ensure_shift_close_schema(cur)
+            cur.execute(
+                """
+                UPDATE dbo.MAT3AM_SHIFT_CLOSE
+                SET Status = N'rejected',
+                    ManagerNote = ?,
+                    ApprovedByUserId = ?,
+                    ApprovedByName = ?,
+                    UpdatedAt = SYSUTCDATETIME()
+                WHERE CloseId = CAST(? AS uniqueidentifier)
+                """,
+                (
+                    str(manager_note or "")[:2000],
+                    str(reviewer.get("userId") or reviewer.get("id") or "")[:64],
+                    str(reviewer.get("name") or "")[:120],
+                    close_id,
+                ),
+            )
+            # فك ربط المصروفات
+            try:
+                cur.execute(
+                    "UPDATE dbo.MAT3AM_CASHIER_OUTFLOW SET ShiftCloseId = NULL WHERE ShiftCloseId = CAST(? AS uniqueidentifier)",
+                    (close_id,),
+                )
+            except Exception:
+                pass
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    sc = target.get("shiftClose") if isinstance(target.get("shiftClose"), dict) else {}
+    inv_ids = [str(x) for x in (sc.get("invoiceIds") or [])]
+    _shift_stamp_invoices(inv_ids, close_id, "unlocked")
+    return {"action": "reject_shift_close", "shiftCloseId": close_id}
+
+
+@app.get("/api/restaurant/cashier/shift-close/open")
+def restaurant_cashier_shift_close_open(userId: str = ""):
+    """العمليات غير المقفلة لنفس الكاشير + مصروفات مفتوحة."""
+    uid = str(userId or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="userId مطلوب")
+    raw = _restaurant_load("invoices", [])
+    mine = []
+    unassigned = []
+    if isinstance(raw, list):
+        for inv in raw:
+            if _shift_invoice_open_for_user(inv, uid):
+                mine.append(_shift_serialize_invoice(inv))
+            elif _shift_invoice_unassigned(inv):
+                unassigned.append(_shift_serialize_invoice(inv))
+    mine.sort(key=lambda x: str(x.get("paidAt") or ""))
+    unassigned.sort(key=lambda x: str(x.get("paidAt") or ""))
+
+    totals = {"cash": 0.0, "visa": 0.0, "wallet": 0.0, "instapay": 0.0, "invoiceTotal": 0.0}
+    for row in mine:
+        bd = row.get("paymentBreakdown") or {}
+        for k in ("cash", "visa", "wallet", "instapay"):
+            totals[k] = _money2_round(totals[k] + float(bd.get(k) or 0))
+        totals["invoiceTotal"] = _money2_round(totals["invoiceTotal"] + float(row.get("total") or 0))
+
+    outflows = []
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            _ensure_shift_close_schema(cur)
+            outflows = _shift_list_open_outflows(cur, uid)
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    expenses = _money2_round(sum(x["amount"] for x in outflows if x.get("kind") == "expense"))
+    purchases = _money2_round(sum(x["amount"] for x in outflows if x.get("kind") == "purchase"))
+    expected_cash = _money2_round(totals["cash"] - expenses - purchases)
+    return {
+        "ok": True,
+        "userId": uid,
+        "invoices": mine,
+        "unassignedInvoices": unassigned,
+        "outflows": outflows,
+        "totals": {
+            **totals,
+            "invoiceCount": len(mine),
+            "expensesAmount": expenses,
+            "purchasesAmount": purchases,
+            "deductionsTotal": _money2_round(expenses + purchases),
+            "expectedCash": expected_cash,
+        },
+    }
+
+
+@app.post("/api/restaurant/cashier/outflows")
+def restaurant_cashier_outflow_create(body: dict):
+    """تسجيل صرف/مشتريات من نوافذ الكاشير لخصمها عند إقفال الشيفت."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    actor = _mat3am_actor_from_body(body)
+    uid = str(actor.get("id") or body.get("userId") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    kind = str(body.get("kind") or body.get("type") or "expense").strip().lower()
+    if kind not in ("expense", "purchase"):
+        raise HTTPException(status_code=400, detail="kind يجب أن يكون expense أو purchase")
+    amount = _money2_round(body.get("amount"))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    oid = str(uuid.uuid4()).upper()
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_shift_close_schema(cur)
+        cur.execute(
+            """
+            INSERT INTO dbo.MAT3AM_CASHIER_OUTFLOW
+                (OutflowId, UserId, UserName, UserRole, Kind, Amount, Category, Note)
+            VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                oid,
+                uid[:64],
+                str(actor.get("name") or "")[:120],
+                str(actor.get("role") or "")[:40],
+                kind,
+                amount,
+                str(body.get("category") or "")[:120],
+                str(body.get("note") or body.get("Notes") or "")[:500],
+            ),
+        )
+        conn.commit()
+        return {"ok": True, "outflowId": oid, "kind": kind, "amount": amount}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ المصروف: {e}") from e
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/restaurant/cashier/shift-close/submit")
+def restaurant_cashier_shift_close_submit(body: dict):
+    """
+    تقديم إقفال شيفت الكاشير → يُحفظ في SQL بحالة pending_manager
+    ويُنشأ طلب اعتماد مدير (نوع جديد دون حذف الأنواع السابقة).
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    actor = _mat3am_actor_from_body(body)
+    uid = str(actor.get("id") or body.get("userId") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    invoice_ids = body.get("invoiceIds")
+    if not isinstance(invoice_ids, list) or not invoice_ids:
+        raise HTTPException(status_code=400, detail="اختر فاتورة واحدة على الأقل للإقفال")
+    claim_unassigned = bool(body.get("claimUnassigned"))
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    selected = []
+    wanted = {str(x).strip().upper() for x in invoice_ids if str(x).strip()}
+    for inv in raw:
+        if not isinstance(inv, dict):
+            continue
+        iid = str(inv.get("invoiceId") or "").strip().upper()
+        if iid not in wanted:
+            continue
+        if _shift_invoice_open_for_user(inv, uid) or (claim_unassigned and _shift_invoice_unassigned(inv)):
+            selected.append(inv)
+        else:
+            raise HTTPException(status_code=409, detail=f"الفاتورة {iid[:8]}… غير متاحة لهذا الشيفت (مقفلة أو ليست لك)")
+    if not selected:
+        raise HTTPException(status_code=400, detail="لا توجد فواتير صالحة ضمن التحديد")
+
+    denoms = body.get("denominations") if isinstance(body.get("denominations"), dict) else {}
+    d1 = int(denoms.get("1") or denoms.get("d1") or 0)
+    d5 = int(denoms.get("5") or denoms.get("d5") or 0)
+    d10 = int(denoms.get("10") or denoms.get("d10") or 0)
+    d50 = int(denoms.get("50") or denoms.get("d50") or 0)
+    d100 = int(denoms.get("100") or denoms.get("d100") or 0)
+    d200 = int(denoms.get("200") or denoms.get("d200") or 0)
+    for n in (d1, d5, d10, d50, d100, d200):
+        if n < 0:
+            raise HTTPException(status_code=400, detail="فئات النقدية لا تقبل سالباً")
+    declared_cash = _money2_round(d1 * 1 + d5 * 5 + d10 * 10 + d50 * 50 + d100 * 100 + d200 * 200)
+
+    cash = visa = wallet = insta = inv_total = 0.0
+    lines_payload = []
+    for inv in selected:
+        bd = _shift_inv_breakdown(inv)
+        cash += bd["cash"]
+        visa += bd["visa"]
+        wallet += bd["wallet"]
+        insta += bd["instapay"]
+        inv_total += _money2_round(inv.get("total"))
+        lines_payload.append(
+            {
+                "kind": "invoice",
+                "refId": str(inv.get("invoiceId") or ""),
+                "refLabel": str(inv.get("tableLabel") or inv.get("billNumber") or ""),
+                "amount": _money2_round(inv.get("total")),
+                **{f"route{k.title()}": bd[k] for k in ()},
+                "routeCash": bd["cash"],
+                "routeVisa": bd["visa"],
+                "routeWallet": bd["wallet"],
+                "routeInstapay": bd["instapay"],
+                "paidAt": str(inv.get("paidAt") or "") or None,
+            }
+        )
+    cash, visa, wallet, insta, inv_total = map(_money2_round, (cash, visa, wallet, insta, inv_total))
+
+    outflow_ids = [str(x).strip().upper() for x in (body.get("outflowIds") or []) if str(x).strip()]
+    expenses_manual = _money2_round(body.get("expensesAmount"))
+    purchases_manual = _money2_round(body.get("purchasesAmount"))
+
+    close_id = str(uuid.uuid4()).upper()
+    approval_id = str(uuid.uuid4())
+    now = datetime.now()
+    now_iso = now.isoformat()
+
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_shift_close_schema(cur)
+        # اجمع المصروفات المحددة
+        expenses = expenses_manual
+        purchases = purchases_manual
+        if outflow_ids:
+            qmarks = ",".join(["?"] * len(outflow_ids))
+            cur.execute(
+                f"""
+                SELECT OutflowId, Kind, Amount, Category, Note, CreatedAt
+                FROM dbo.MAT3AM_CASHIER_OUTFLOW
+                WHERE UserId = ? AND ShiftCloseId IS NULL
+                  AND OutflowId IN ({qmarks})
+                """,
+                tuple([uid] + outflow_ids),
+            )
+            for r in cur.fetchall() or []:
+                kind = str(r[1] or "")
+                amt = _money2_round(r[2])
+                if kind == "expense":
+                    expenses = _money2_round(expenses + amt)
+                elif kind == "purchase":
+                    purchases = _money2_round(purchases + amt)
+                lines_payload.append(
+                    {
+                        "kind": kind or "expense",
+                        "refId": str(r[0]).strip().upper() if r[0] else "",
+                        "refLabel": str(r[3] or r[4] or kind),
+                        "amount": amt,
+                        "routeCash": amt,
+                        "routeVisa": 0.0,
+                        "routeWallet": 0.0,
+                        "routeInstapay": 0.0,
+                        "paidAt": r[5].isoformat() if hasattr(r[5], "isoformat") else str(r[5] or ""),
+                    }
+                )
+                cur.execute(
+                    "UPDATE dbo.MAT3AM_CASHIER_OUTFLOW SET ShiftCloseId = CAST(? AS uniqueidentifier) WHERE OutflowId = CAST(? AS uniqueidentifier)",
+                    (close_id, str(r[0])),
+                )
+        deductions = _money2_round(expenses + purchases)
+        expected_cash = _money2_round(cash - deductions)
+        net_handover = _money2_round(declared_cash)  # الصافي المسلم حسب الفئات المعدودة
+        variance = _money2_round(declared_cash - expected_cash)
+        visa_receipts = int(body.get("visaReceiptsCount") or 0)
+        transfer_notices = int(body.get("transferNoticesCount") or 0)
+        notes = str(body.get("notes") or "")[:2000]
+        payload = {
+            "invoiceIds": [str(x.get("invoiceId") or "") for x in selected],
+            "denominations": {"1": d1, "5": d5, "10": d10, "50": d50, "100": d100, "200": d200},
+            "totals": {
+                "cash": cash,
+                "visa": visa,
+                "wallet": wallet,
+                "instapay": insta,
+                "invoiceTotal": inv_total,
+                "invoiceCount": len(selected),
+                "expensesAmount": expenses,
+                "purchasesAmount": purchases,
+                "deductionsTotal": deductions,
+                "expectedCash": expected_cash,
+                "declaredCash": declared_cash,
+                "variance": variance,
+                "netHandover": net_handover,
+            },
+            "visaReceiptsCount": visa_receipts,
+            "transferNoticesCount": transfer_notices,
+            "notes": notes,
+            "lines": lines_payload,
+        }
+        cur.execute(
+            """
+            INSERT INTO dbo.MAT3AM_SHIFT_CLOSE (
+                CloseId, UserId, UserLogin, UserName, UserRole, Status, SubmittedAt,
+                ApprovalRequestId, InvoiceCount, InvoiceTotal,
+                CashAmount, VisaAmount, WalletAmount, InstapayAmount,
+                ExpensesAmount, PurchasesAmount, DeductionsTotal, ExpectedCash, DeclaredCash,
+                Denom1, Denom5, Denom10, Denom50, Denom100, Denom200,
+                VisaReceiptsCount, TransferNoticesCount, Variance, NetHandover, Notes, PayloadJson
+            ) VALUES (
+                CAST(? AS uniqueidentifier), ?, ?, ?, ?, N'pending_manager', ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                close_id,
+                uid[:64],
+                str(actor.get("login") or "")[:120],
+                str(actor.get("name") or "")[:120],
+                str(actor.get("role") or "cashier")[:40],
+                now,
+                approval_id,
+                len(selected),
+                inv_total,
+                cash,
+                visa,
+                wallet,
+                insta,
+                expenses,
+                purchases,
+                deductions,
+                expected_cash,
+                declared_cash,
+                d1,
+                d5,
+                d10,
+                d50,
+                d100,
+                d200,
+                visa_receipts,
+                transfer_notices,
+                variance,
+                net_handover,
+                notes,
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+        for ln in lines_payload:
+            cur.execute(
+                """
+                INSERT INTO dbo.MAT3AM_SHIFT_CLOSE_LINE
+                    (CloseId, LineKind, RefId, RefLabel, Amount, RouteCash, RouteVisa, RouteWallet, RouteInstapay, PaidAt)
+                VALUES (CAST(? AS uniqueidentifier), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    close_id,
+                    str(ln.get("kind") or "invoice")[:30],
+                    str(ln.get("refId") or "")[:80],
+                    str(ln.get("refLabel") or "")[:255],
+                    _money2_round(ln.get("amount")),
+                    _money2_round(ln.get("routeCash")),
+                    _money2_round(ln.get("routeVisa")),
+                    _money2_round(ln.get("routeWallet")),
+                    _money2_round(ln.get("routeInstapay")),
+                    None,
+                ),
+            )
+        conn.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ إقفال الشيفت: {e}") from e
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    # قفل مؤقت للفواتير حتى قرار المدير
+    _shift_stamp_invoices([str(x.get("invoiceId") or "") for x in selected], close_id, "pending_manager")
+
+    shift_summary = {
+        "closeId": close_id,
+        "invoiceCount": len(selected),
+        "invoiceTotal": inv_total,
+        "invoiceIds": [str(x.get("invoiceId") or "") for x in selected],
+        "cashAmount": cash,
+        "visaAmount": visa,
+        "walletAmount": wallet,
+        "instapayAmount": insta,
+        "expensesAmount": expenses,
+        "purchasesAmount": purchases,
+        "deductionsTotal": deductions,
+        "expectedCash": expected_cash,
+        "declaredCash": declared_cash,
+        "variance": variance,
+        "netHandover": net_handover,
+        "denominations": {"1": d1, "5": d5, "10": d10, "50": d50, "100": d100, "200": d200},
+        "visaReceiptsCount": visa_receipts,
+        "transferNoticesCount": transfer_notices,
+    }
+    req = {
+        "id": approval_id,
+        "type": _MANAGER_APPROVAL_TYPE_SHIFT_CLOSE,
+        "status": _MANAGER_APPROVAL_STATUS_PENDING,
+        "requestedAt": now_iso,
+        "shiftCloseId": close_id,
+        "shiftClose": shift_summary,
+        "tableId": "",
+        "tableLabel": f"إقفال شيفت · {str(actor.get('name') or 'كاشير')}",
+        "reason": (
+            f"طلب إقفال شيفت: نقدي {cash:.2f} · فيزا {visa:.2f} · إنستا {insta:.2f}"
+            f" · خصومات {deductions:.2f} · متوقع نقدي {expected_cash:.2f}"
+            f" · معدود {declared_cash:.2f} · صافي تسليم {net_handover:.2f}"
+        ),
+        "requestedBy": {
+            "userId": uid[:64],
+            "name": str(actor.get("name") or "")[:120],
+            "role": str(actor.get("role") or "cashier")[:40],
+            "login": str(actor.get("login") or "")[:120],
+        },
+        "openOrdersSummary": {
+            "orderCount": len(selected),
+            "itemCount": len(selected),
+            "pendingCount": 0,
+            "preparingCount": 0,
+            "readyCount": 0,
+            "totalValue": net_handover,
+        },
+        "decisionOptions": [
+            {
+                "id": "approve_shift_close",
+                "label": "اعتماد إقفال الشيفت وتصفير العمليات",
+                "description": "يثبت التقرير في SQL ويمنع ظهور هذه الفواتير/المدفوعات مرة أخرى في شيفت لاحق.",
+                "recommended": True,
+            }
+        ],
+        "decisionFlags": [
+            {
+                "id": "notifyRequester",
+                "label": "إشعار الكاشير بالقرار",
+                "description": "يرسل نتيجة الاعتماد أو الرفض للكاشير.",
+                "default": True,
+            }
+        ],
+    }
+    data = _manager_approval_requests_load()
+    _manager_approval_requests_save(data + [req])
+    _manager_approval_enqueue_inbox(req)
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return {"ok": True, "closeId": close_id, "status": "pending_manager", "approvalRequest": req, "summary": shift_summary}
+
+
+@app.get("/api/restaurant/cashier/shift-close/history")
+def restaurant_cashier_shift_close_history(userId: str = "", limit: int = 30):
+    uid = str(userId or "").strip()
+    lim = max(1, min(100, int(limit or 30)))
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        _ensure_shift_close_schema(cur)
+        if uid:
+            cur.execute(
+                f"""
+                SELECT TOP {lim} CloseId, UserName, Status, SubmittedAt, ApprovedAt, InvoiceCount, InvoiceTotal,
+                       CashAmount, VisaAmount, InstapayAmount, ExpectedCash, DeclaredCash, NetHandover, Variance
+                FROM dbo.MAT3AM_SHIFT_CLOSE
+                WHERE UserId = ?
+                ORDER BY ISNULL(SubmittedAt, CreatedAt) DESC
+                """,
+                (uid,),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT TOP {lim} CloseId, UserName, Status, SubmittedAt, ApprovedAt, InvoiceCount, InvoiceTotal,
+                       CashAmount, VisaAmount, InstapayAmount, ExpectedCash, DeclaredCash, NetHandover, Variance
+                FROM dbo.MAT3AM_SHIFT_CLOSE
+                ORDER BY ISNULL(SubmittedAt, CreatedAt) DESC
+                """
+            )
+        rows = []
+        for r in cur.fetchall() or []:
+            rows.append(
+                {
+                    "closeId": str(r[0]).strip().upper() if r[0] else "",
+                    "userName": str(r[1] or ""),
+                    "status": str(r[2] or ""),
+                    "submittedAt": r[3].isoformat() if hasattr(r[3], "isoformat") else str(r[3] or ""),
+                    "approvedAt": r[4].isoformat() if hasattr(r[4], "isoformat") else str(r[4] or ""),
+                    "invoiceCount": int(r[5] or 0),
+                    "invoiceTotal": _money2_round(r[6]),
+                    "cashAmount": _money2_round(r[7]),
+                    "visaAmount": _money2_round(r[8]),
+                    "instapayAmount": _money2_round(r[9]),
+                    "expectedCash": _money2_round(r[10]),
+                    "declaredCash": _money2_round(r[11]),
+                    "netHandover": _money2_round(r[12]),
+                    "variance": _money2_round(r[13]),
+                }
+            )
+        return {"ok": True, "closes": rows}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.post("/api/restaurant/invoices-local/mark-on-account")
@@ -27456,7 +28309,6 @@ def restaurant_invoices_local_mark_on_account(body: dict):
         "checkID01": check_id01,
         "posting": posting_result,
     }
-
 
 @app.post("/api/restaurant/invoices-local/mark-guest")
 def restaurant_invoices_local_mark_guest(body: dict):
@@ -33384,6 +34236,16 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
         except Exception:
             pass
         print(f"[MAT3AM] تحذير: تعذر إنشاء جداول المحرك اليومي MAT3AM_DAILY_* / COSTING_MODE: {e}")
+
+    try:
+        _ensure_shift_close_schema(cursor)
+        cursor.connection.commit()
+    except Exception as e:
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+        print(f"[MAT3AM] تحذير: تعذر إنشاء جداول إقفال الشيفت MAT3AM_SHIFT_CLOSE*: {e}")
 
     restaurant_invoice_seed: dict = {"ok": False, "note": "لم يُنفَّذ"}
     try:

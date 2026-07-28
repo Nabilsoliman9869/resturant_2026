@@ -42,6 +42,7 @@ import DailyResultPage from "./pages/settings/DailyResultPage";
 import KitchenItemStopPage from "./pages/settings/KitchenItemStopPage";
 import CashierTableSessionsPage from "./pages/CashierTableSessionsPage";
 import CashierInvoicesLocalPage from "./pages/CashierInvoicesLocalPage";
+import CashierShiftClosePage from "./pages/CashierShiftClosePage";
 import WorkflowRolesSettingsPage from "./pages/settings/WorkflowRolesSettingsPage";
 import RoleScheduleSettingsPage from "./pages/settings/RoleScheduleSettingsPage";
 import RestaurantOpsSettingsPage from "./pages/settings/RestaurantOpsSettingsPage";
@@ -106,6 +107,7 @@ export default function App() {
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="table-sessions" element={<CashierTableSessionsPage />} />
         <Route path="invoices-local" element={<CashierInvoicesLocalPage />} />
+        <Route path="shift-close" element={<CashierShiftClosePage />} />
         <Route path="kids-area" element={<KidsAreaPage />} />
       </Route>
 

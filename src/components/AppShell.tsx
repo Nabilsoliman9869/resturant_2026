@@ -60,9 +60,9 @@ function buildNavSections(role: RoleId, items: NavItem[]): NavSection[] {
       { title: "1. الصالة والتحصيل", items: mark(pickNavItems(items, ["dashboard", "table-sessions", "invoices-local"])) },
       {
         title: "2. الطلبات والخدمات",
-        items: mark(pickNavItems(items, ["delivery-management", "kids-area", "pos"])),
+        items: mark(pickNavItems(items, ["delivery-management", "kids-area"])),
       },
-      { title: "3. المالية اليومية", items: mark(pickNavItems(items, ["purchases", "cash-expense"])) },
+      { title: "3. المالية والشيفت", items: mark(pickNavItems(items, ["shift-close", "purchases", "cash-expense"])) },
     );
   } else if (role === "accountant") {
     sections.push(
@@ -122,7 +122,7 @@ const NAV_BY_ROLE: Record<RoleId, NavItem[]> = {
     { to: "invoices-local", label: "تسديد فواتير الطاولات" },
     { to: "delivery-management", label: "إدارة الدليفري" },
     { to: "kids-area", label: "منطقة الأطفال" },
-    { to: "pos", label: "نقطة البيع (بار / سفري)" },
+    { to: "shift-close", label: "اقفال الشيفت" },
     { to: "purchases", label: "مشتريات" },
     { to: "cash-expense", label: "صرف مصروفات" },
   ],
