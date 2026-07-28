@@ -246,6 +246,7 @@ export default function DeliveryOrderPage() {
 
   async function sendWhatsApp() {
     setBusy(true); setMessage("");
+    const popup = window.open("about:blank", "_blank");
     try {
       const text = await ensureQuoteText();
       if (!text) throw new Error("لا توجد مبدئية للإرسال");
@@ -253,10 +254,18 @@ export default function DeliveryOrderPage() {
       if (digits.length < 10) throw new Error("رقم الهاتف غير صالح لفتح واتساب");
       try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
       const url = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
-      window.open(url, "_blank", "noopener,noreferrer");
+      if (popup && !popup.closed) {
+        popup.location.href = url;
+      } else {
+        const a = document.createElement("a");
+        a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+        document.body.appendChild(a); a.click(); a.remove();
+      }
       setMessage("تم فتح واتساب بنص المبدئية — اضغط إرسال");
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setBusy(false); }
+    } catch (error) {
+      try { if (popup && !popup.closed) popup.close(); } catch { /* ignore */ }
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally { setBusy(false); }
   }
 
   async function activate() {

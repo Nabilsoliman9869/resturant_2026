@@ -28732,7 +28732,7 @@ def _delivery_norm_phone(phone: str) -> str:
 
 
 def _delivery_find_open_ticket_by_phone(rows: list, phone: str, channel: Optional[str] = None) -> Optional[dict]:
-    """إعادة استخدام تذكرة مفتوحة لنفس الرقم بدل تكرار #5001/#5002 بالخطأ."""
+    """إعادة استخدام تذكرة مفتوحة لنفس الرقم (كل القنوات) بدل تكرار #5001/#5002."""
     target = _delivery_norm_phone(phone)
     if len(target) < 8:
         return None
@@ -28743,15 +28743,14 @@ def _delivery_find_open_ticket_by_phone(rows: list, phone: str, channel: Optiona
         "confirmed",
         "ordering",
     }
-    ch = str(channel or "").strip().lower() or None
+    # channel يُستخدم فقط للترتيب التفضيلي، وليس لمنع الدمج — واتساب/هاتف لنفس الرقم = تذكرة واحدة
+    prefer_ch = str(channel or "").strip().lower() or None
     candidates = []
     for r in rows if isinstance(rows, list) else []:
         if not isinstance(r, dict):
             continue
         st = str(r.get("status") or "").lower()
         if st not in open_statuses:
-            continue
-        if ch and str(r.get("channel") or "").lower() != ch:
             continue
         phones = [
             _delivery_norm_phone(str(r.get("phone") or "")),
@@ -28762,7 +28761,12 @@ def _delivery_find_open_ticket_by_phone(rows: list, phone: str, channel: Optiona
         candidates.append(r)
     if not candidates:
         return None
-    candidates.sort(key=lambda x: str(x.get("updatedAt") or x.get("createdAt") or ""), reverse=True)
+
+    def _rank(x: dict):
+        same_ch = 1 if prefer_ch and str(x.get("channel") or "").lower() == prefer_ch else 0
+        return (same_ch, str(x.get("updatedAt") or x.get("createdAt") or ""))
+
+    candidates.sort(key=_rank, reverse=True)
     return candidates[0]
 
 
@@ -29768,8 +29772,6 @@ def restaurant_delivery_intake(body: dict):
             st = str(r.get("status") or "").lower()
             if st not in {"intake", "draft_quote", "quoted", "confirmed", "ordering"}:
                 continue
-            if str(r.get("channel") or "").lower() != str(reuse.get("channel") or "").lower():
-                continue
             phones = [
                 _delivery_norm_phone(str(r.get("phone") or "")),
                 _delivery_norm_phone(str(r.get("phone2") or "")),
@@ -29780,6 +29782,7 @@ def restaurant_delivery_intake(body: dict):
             r["updatedAt"] = now_iso
             r["cancelledReason"] = "duplicate_open_ticket_merged"
         reuse["updatedAt"] = now_iso
+        reuse["channel"] = channel
         reuse["customerName"] = name[:200]
         reuse["phone"] = phone[:40]
         if phone2:

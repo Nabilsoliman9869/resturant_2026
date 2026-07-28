@@ -63,6 +63,7 @@ type DeliveryTicket = {
   sourceTableId?: string;
   gps?: { lat?: number; lng?: number } | null;
   attachments?: Array<{ url?: string; fileName?: string }>;
+  quoteText?: string;
   quoteTotals?: { total?: number };
 };
 
@@ -157,6 +158,15 @@ function DeliveryQueueActions({ ticket, busy, assignDriver, markDelivered, settl
     {ticket.mapsUrl ? <a href={ticket.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">خرائط</a> : null}
     {(ticket.attachments || []).slice(0, 1).map((attachment) => attachment.url ? <a key={attachment.fileName || attachment.url} href={`${base}${attachment.url}`} target="_blank" rel="noreferrer" className="btn btn-ghost">صورة</a> : null)}
   </div>;
+}
+
+
+function toWhatsAppDigits(phone: string) {
+  let d = String(phone || "").replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  if (d.startsWith("0") && d.length >= 10) d = "20" + d.slice(1);
+  if (!d.startsWith("20") && d.length === 10) d = "20" + d;
+  return d;
 }
 
 export default function DeliveryOpsHubPage() {
@@ -492,6 +502,31 @@ export default function DeliveryOpsHubPage() {
     navigate(`${roleDeliveryOrderPath(user?.role)}?${qs.toString()}`);
   }
 
+
+  function sendWhatsAppFromHub(t: DeliveryTicket) {
+    const digits = toWhatsAppDigits(t.phone || "");
+    if (digits.length < 10) {
+      setMsg("رقم الهاتف غير صالح لواتساب");
+      return;
+    }
+    const text = String(t.quoteText || "").trim();
+    if (!text) {
+      setMsg("لا توجد فاتورة مبدئية بعد — افتح جلسة الطلب واحفظ المبدئية ثم أرسل.");
+      openOrdering(t);
+      return;
+    }
+    const popup = window.open("about:blank", "_blank");
+    const url = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+    try {
+      void navigator.clipboard.writeText(text);
+    } catch {
+      /* ignore */
+    }
+    if (popup && !popup.closed) popup.location.href = url;
+    else window.location.href = url;
+    setMsg(`تم فتح واتساب للمبدئية #${t.ticketNo || ""} — اضغط إرسال`);
+  }
+
   async function assignDriver(t: DeliveryTicket) {
     const name =
       window.prompt("اسم الطيار", t.driverName || "")?.trim() || "";
@@ -742,6 +777,11 @@ export default function DeliveryOpsHubPage() {
       setBusy(false);
     }
   }
+
+  const visibleTickets = useMemo(
+    () => tickets.filter((t) => !["cancelled", "settled"].includes(String(t.status || "").toLowerCase())),
+    [tickets],
+  );
 
   const intakeKpis = useMemo(
     () => ({
@@ -1221,10 +1261,10 @@ export default function DeliveryOpsHubPage() {
       {tab === "tickets" ? (
         <section className="deliv-hub__panel">
           <div className="deliv-hub__ticket-list">
-            {tickets.length === 0 ? (
+            {visibleTickets.length === 0 ? (
               <p className="deliv-hub__empty">لا تذاكر بعد — ابدأ من استقبال سريع.</p>
             ) : (
-              tickets.map((t) => (
+              visibleTickets.map((t) => (
                 <article key={t.id} className="deliv-hub__ticket">
                   <div className="deliv-hub__ticket-top">
                     <strong>
@@ -1257,6 +1297,9 @@ export default function DeliveryOpsHubPage() {
                   <div className="deliv-hub__ticket-actions">
                     <button type="button" className="btn btn-primary" onClick={() => openOrdering(t)}>
                       فتح جلسة الطلب
+                    </button>
+                    <button type="button" className="btn" onClick={() => sendWhatsAppFromHub(t)}>
+                      إرسال المبدئية واتساب
                     </button>
                     {["ready", "kitchen"].includes(String(t.status || "")) ? (
                       <button type="button" className="btn" disabled={busy} onClick={() => void assignDriver(t)}>
