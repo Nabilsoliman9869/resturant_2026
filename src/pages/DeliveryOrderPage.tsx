@@ -26,13 +26,6 @@ const n = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0
 const lineId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const lockedStatuses = new Set(["kitchen", "ready", "out_for_delivery", "delivered", "settled", "cancelled"]);
 
-function toWhatsAppDigits(phone: string) {
-  let d = String(phone || "").replace(/\D/g, "");
-  if (d.startsWith("00")) d = d.slice(2);
-  if (d.startsWith("0") && d.length >= 10) d = "20" + d.slice(1);
-  if (!d.startsWith("20") && d.length === 10) d = "20" + d;
-  return d;
-}
 
 const statusLabels: Record<string, string> = { intake: "استقبال", draft_quote: "مسودة مبدئية", quoted: "عرض مرسل", kitchen: "في المطبخ", ready: "جاهز", out_for_delivery: "في الطريق", delivered: "تم التسليم", settled: "مسدد", cancelled: "ملغي" };
 const channelLabels: Record<string, string> = { whatsapp: "واتساب", phone: "كول سنتر", platform: "منصة / تطبيق", table_convert: "تحويل طاولة" };
@@ -214,8 +207,8 @@ export default function DeliveryOrderPage() {
       const id = await ensureTicket();
       const response = await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(id)}/quote`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(quotePayload(markSent)) });
       const json = tryParseJson<{ ticket?: Ticket; quoteText?: string; detail?: string }>(await response.text());
-      if (!response.ok) throw new Error(json?.detail || "تعذر حفظ العرض");
-      if (json?.ticket) hydrate(json.ticket); setQuoteText(json?.quoteText || quoteText); setMessage(markSent ? "تم حفظ العرض وإرساله" : "تم حفظ المسودة");
+      if (!response.ok) throw new Error(typeof json?.detail === "string" ? json.detail : `تعذر حفظ المبدئية (${response.status})`);
+      if (json?.ticket) hydrate(json.ticket); setQuoteText(json?.quoteText || quoteText); setMessage(markSent ? "تم حفظ المبدئية — يمكنك نسخ الجدول الآن" : "تم الحفظ على التذكرة (لم تُرسل للعميل بعد)");
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); }
   }
 
@@ -226,7 +219,7 @@ export default function DeliveryOrderPage() {
     const id = await ensureTicket();
     const response = await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(id)}/quote`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(quotePayload(true)) });
     const json = tryParseJson<{ ticket?: Ticket; quoteText?: string; detail?: string }>(await response.text());
-    if (!response.ok) throw new Error(json?.detail || "تعذر حفظ المبدئية");
+    if (!response.ok) throw new Error(typeof json?.detail === "string" ? json.detail : `تعذر حفظ المبدئية (${response.status})`);
     if (json?.ticket) hydrate(json.ticket);
     text = json?.quoteText || "";
     setQuoteText(text);
@@ -256,29 +249,6 @@ export default function DeliveryOrderPage() {
     finally { setBusy(false); }
   }
 
-  async function sendWhatsApp() {
-    setBusy(true); setMessage("");
-    const popup = window.open("about:blank", "_blank");
-    try {
-      const text = await ensureQuoteText();
-      if (!text) throw new Error("لا توجد مبدئية للإرسال");
-      const digits = toWhatsAppDigits(phone);
-      if (digits.length < 10) throw new Error("رقم الهاتف غير صالح لفتح واتساب");
-      try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
-      const url = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
-      if (popup && !popup.closed) {
-        popup.location.href = url;
-      } else {
-        const a = document.createElement("a");
-        a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
-        document.body.appendChild(a); a.click(); a.remove();
-      }
-      setMessage("تم فتح واتساب بنص المبدئية — اضغط إرسال");
-    } catch (error) {
-      try { if (popup && !popup.closed) popup.close(); } catch { /* ignore */ }
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally { setBusy(false); }
-  }
 
   async function activate() {
     if (!window.confirm("هل تؤكد إرسال الطلب للمطبخ؟")) return;
@@ -289,7 +259,7 @@ export default function DeliveryOrderPage() {
       if (!quote.ok) throw new Error("تعذر حفظ العرض قبل التفعيل");
       const response = await fetch(`${base}/api/restaurant/delivery/tickets/${encodeURIComponent(id)}/activate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paymentMethod }) });
       const json = tryParseJson<{ ticket?: Ticket; detail?: string; message?: string }>(await response.text());
-      if (!response.ok) throw new Error(json?.detail || "تعذر تفعيل الطلب");
+      if (!response.ok) throw new Error(typeof json?.detail === "string" ? json.detail : `تعذر حفظ المبدئية (${response.status})`);
       if (json?.ticket) hydrate(json.ticket); setMessage(json?.message || "تم تفعيل الطلب للمطبخ");
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); }
   }
@@ -328,8 +298,8 @@ export default function DeliveryOrderPage() {
           <label className="dop-pay">طريقة الدفع<select value={prepaidMethod} onChange={(event) => setPrepaidMethod(event.target.value)} disabled={locked || prepaidAmount <= 0}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="digital">محفظة</option></select></label>
           <ul className="dop-cart-list">{cart.map((line) => <li key={line.id}><div><strong>{line.name}</strong><span>{(line.qty * line.unitPrice).toFixed(2)}</span></div><div className="dop-qty"><button type="button" onClick={() => changeQty(line.id, -1)} disabled={locked}>-</button><span>{line.qty}</span><button type="button" onClick={() => changeQty(line.id, 1)} disabled={locked}>+</button><input className="dop-price-edit" type="number" value={line.unitPrice} onChange={(event) => patchLine(line.id, { unitPrice: n(event.target.value) })} disabled={locked} /></div><input className="dop-line-note" value={line.note} onChange={(event) => patchLine(line.id, { note: event.target.value })} placeholder="ملاحظة على الصنف" disabled={locked} /></li>)}</ul>
           <div className="dop-cart-sum"><div><span>الأصناف</span><b>{subtotal.toFixed(2)}</b></div><div><span>الشحن</span><input className="dop-price-edit" type="number" value={shippingFee} onChange={(event) => setShippingFee(n(event.target.value))} disabled={locked} /></div><div className="dop-cart-sum__due"><span>الإجمالي</span><b>{total.toFixed(2)}</b></div></div>
-          {locked ? <p className="dop-locked-hint">الطلب مقفل بعد إرساله للمطبخ.</p> : <div className="dop-actions"><button type="button" disabled={busy} onClick={() => void saveQuote(false)}>حفظ مسودة</button><button type="button" disabled={busy} onClick={() => void saveQuote(true)}>حفظ المبدئية</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void copyWhatsApp()}>نسخ الجدول للصق في واتساب</button><button type="button" disabled={busy} onClick={() => void sendWhatsApp()}>فتح واتساب (اختياري)</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void activate()}>العميل وافق — تفعيل للمطبخ</button></div>}
-          {quoteText ? <div className="dop-quote-card" id="delivery-quote-card"><div className="dop-quote-card__head">فاتورة مبدئية{ticket?.ticketNo ? ` #${ticket.ticketNo}` : ""}</div><textarea className="dop-quote-text" value={quoteText} readOnly rows={8} /><p className="dop-quote-hint">اضغط «نسخ الجدول» ثم الصق في نافذة واتساب (Ctrl+V)</p></div> : null}
+          {locked ? <p className="dop-locked-hint">الطلب مقفل بعد إرساله للمطبخ.</p> : <div className="dop-actions"><button type="button" disabled={busy} onClick={() => void saveQuote(false)}>حفظ على التذكرة</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void saveQuote(true)}>حفظ المبدئية</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void copyWhatsApp()}>نسخ الجدول للصق في واتساب</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void activate()}>العميل وافق — تفعيل للمطبخ</button></div>}
+          {quoteText ? <div className="dop-quote-card" id="delivery-quote-card"><div className="dop-quote-card__head">فاتورة مبدئية{ticket?.ticketNo ? ` #${ticket.ticketNo}` : ""}</div><textarea className="dop-quote-text" value={quoteText} readOnly rows={8} /><p className="dop-quote-hint">1) احفظ المبدئية  2) انسخ الجدول  3) الصق في واتساب (Ctrl+V)</p></div> : null}
         </aside></section>
       {pendingModifiers ? <div className="dop-modifier-backdrop" role="dialog" aria-modal="true"><section className="dop-modifier-panel"><h2>إضافات {pendingModifiers.product.ProductName}</h2>{pendingModifiers.groups.map((group) => <fieldset key={group.groupId}><legend>{group.nameAr || group.name || group.title || "إضافات"}</legend>{(group.items || []).map((item) => { const itemId = item.itemId || item.nameAr || item.nameEn || ""; return <label key={itemId}><input type="checkbox" checked={(pendingModifiers.selected[group.groupId] || []).includes(itemId)} onChange={() => toggleModifier(group.groupId, itemId)} />{item.nameAr || item.nameEn || item.label} {n(item.priceDelta) ? `(+${n(item.priceDelta).toFixed(2)})` : ""}</label>; })}</fieldset>)}<div className="dop-actions"><button type="button" onClick={() => setPendingModifiers(null)}>إلغاء</button><button type="button" className="btn-activate" onClick={confirmModifiers}>إضافة للسلة</button></div></section></div> : null}
     </main>

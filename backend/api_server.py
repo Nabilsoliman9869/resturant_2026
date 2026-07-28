@@ -29989,6 +29989,332 @@ def restaurant_delivery_attachment_get(file_name: str):
     return FileResponse(path, media_type=media)
 
 
+@app.get("/api/restaurant/delivery/tickets/{ticket_id}")
+def restaurant_delivery_ticket_get(ticket_id: str):
+    target, _ = _delivery_find_ticket(ticket_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    return {"ok": True, "ticket": target}
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/quote")
+def restaurant_delivery_ticket_save_quote(ticket_id: str, body: dict):
+    """حفظ/تحديث فاتورة مبدئية (بنود + شحن) دون إرسال للمطبخ."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    target, rows = _delivery_find_ticket(ticket_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    cur_st = str(target.get("status") or "").lower()
+    if cur_st in ("kitchen", "ready", "out_for_delivery", "delivered", "settled", "cancelled"):
+        raise HTTPException(status_code=409, detail="لا يمكن تعديل المبدئية بعد التفعيل أو الإلغاء")
+
+    raw_lines = body.get("lines") if isinstance(body.get("lines"), list) else body.get("quoteLines")
+    if not isinstance(raw_lines, list):
+        raw_lines = []
+    lines = []
+    for raw in raw_lines:
+        ln = _delivery_normalize_quote_line(raw)
+        if ln:
+            lines.append(ln)
+    if "shippingFee" in body:
+        try:
+            target["shippingFee"] = max(0.0, round(float(body.get("shippingFee") or 0), 2))
+        except (TypeError, ValueError):
+            pass
+    for key in (
+        "shippingMode",
+        "shippingProductGuide",
+        "shippingProductName",
+        "noVat",
+        "paymentMode",
+        "prepaidAmount",
+        "prepaidMethod",
+        "prepaidNote",
+        "deliveryTime",
+        "driverName",
+        "specialNotes",
+        "requestedItemsText",
+        "customerName",
+        "phone",
+        "area",
+        "address",
+        "fullAddress",
+        "agentGuid",
+    ):
+        if key in body:
+            target[key] = body.get(key)
+
+    no_vat = bool(target.get("noVat", True)) if "noVat" not in body else bool(body.get("noVat"))
+    target["noVat"] = no_vat
+    totals = _delivery_quote_totals(lines, float(target.get("shippingFee") or 0), no_vat)
+    now_iso = datetime.now().isoformat()
+    target["quoteLines"] = lines
+    target["quoteTotals"] = totals
+    target["quoteVersion"] = int(target.get("quoteVersion") or 0) + 1
+    target["quoteText"] = _delivery_build_quote_text(target)
+    mark_sent = bool(body.get("markSent") or body.get("send"))
+    if mark_sent:
+        target["status"] = "quoted"
+        target["quoteSentAt"] = now_iso
+    else:
+        target["status"] = "draft_quote"
+    target["updatedAt"] = now_iso
+    _delivery_tickets_save(rows)
+    return {
+        "ok": True,
+        "ticket": target,
+        "quoteText": target.get("quoteText"),
+        "totals": totals,
+    }
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/activate")
+def restaurant_delivery_ticket_activate(ticket_id: str, body: dict = None):
+    """تفعيل الفاتورة المبدئية بعد موافقة العميل → إنشاء فاتورة + إرسال للمطبخ."""
+    body = body if isinstance(body, dict) else {}
+    target, rows = _delivery_find_ticket(ticket_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    cur_st = str(target.get("status") or "").lower()
+    if cur_st in ("kitchen", "ready", "out_for_delivery", "delivered", "settled"):
+        return {"ok": True, "alreadyActivated": True, "ticket": target}
+    if cur_st == "cancelled":
+        raise HTTPException(status_code=409, detail="التذكرة ملغاة")
+
+    if isinstance(body.get("lines"), list) or isinstance(body.get("quoteLines"), list):
+        restaurant_delivery_ticket_save_quote(ticket_id, {**body, "markSent": False})
+        target, rows = _delivery_find_ticket(ticket_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+    lines = target.get("quoteLines") if isinstance(target.get("quoteLines"), list) else []
+    food_lines = [ln for ln in lines if isinstance(ln, dict)]
+    if not food_lines and not float(target.get("shippingFee") or 0) > 0:
+        raise HTTPException(status_code=400, detail="لا توجد بنود لتفعيلها — احفظ المبدئية أولاً")
+
+    agent_guid = str(target.get("agentGuid") or body.get("agentGuid") or "").strip()
+    name = str(target.get("customerName") or body.get("name") or "").strip()
+    phone = str(target.get("phone") or body.get("phone") or "").strip()
+    address = str(target.get("fullAddress") or target.get("address") or "").strip()
+    if not agent_guid and name and phone:
+        upsert = delivery_upsert_agent(
+            {
+                "AgentName": name,
+                "Phone": phone,
+                "Mobile": phone,
+                "FullAdress": address,
+            }
+        )
+        agent_guid = str(upsert.get("CardGuide") or "").strip()
+        target["agentGuid"] = agent_guid or None
+
+    payment = str(body.get("paymentMethod") or body.get("payment") or "cash").strip().lower() or "cash"
+    totals = target.get("quoteTotals") if isinstance(target.get("quoteTotals"), dict) else {}
+    try:
+        total = float(totals.get("total") or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    try:
+        subtotal = float(totals.get("itemsSubtotal") or 0)
+    except (TypeError, ValueError):
+        subtotal = 0.0
+    try:
+        tax = float(totals.get("vat") or 0)
+    except (TypeError, ValueError):
+        tax = 0.0
+    try:
+        prepaid = float(target.get("prepaidAmount") or 0)
+    except (TypeError, ValueError):
+        prepaid = 0.0
+
+    inv_items = []
+    for ln in food_lines:
+        qty = float(ln.get("qty") or 0)
+        unit = float(ln.get("unitPrice") or 0)
+        extras = ln.get("extras") if isinstance(ln.get("extras"), list) else []
+        extras_sum = sum(float(x.get("price") or 0) for x in extras if isinstance(x, dict))
+        note = str(ln.get("note") or "").strip()
+        extras_names = " + ".join(str(x.get("name") or "") for x in extras if isinstance(x, dict) and x.get("name"))
+        display = str(ln.get("name") or "صنف")
+        if extras_names:
+            display = f"{display} ({extras_names})"
+        if note:
+            display = f"{display} — {note}"
+        inv_items.append(
+            {
+                "productGuide": ln.get("productGuide"),
+                "menuItemId": ln.get("productGuide"),
+                "name": display[:200],
+                "quantity": qty,
+                "unitPrice": unit + extras_sum,
+                "excludeServiceCharge": True,
+            }
+        )
+
+    inv_body = {
+        "orderType": "delivery",
+        "agentGuide": agent_guid or None,
+        "paymentMethod": payment,
+        "orderFinalized": False,
+        "items": inv_items,
+        "subtotal": subtotal,
+        "discountValue": 0,
+        "serviceCharge": 0,
+        "tax": tax,
+        "total": total,
+        "delivery": {
+            "phone": phone,
+            "name": name,
+            "address": address,
+            "deliveryTime": target.get("deliveryTime"),
+            "payment": payment,
+            "courierName": target.get("driverName"),
+            "shippingFee": float(target.get("shippingFee") or 0),
+            "shippingMode": target.get("shippingMode") or "service_item",
+            "shippingProductGuide": target.get("shippingProductGuide"),
+            "shippingProductName": target.get("shippingProductName"),
+            "noVat": bool(target.get("noVat", True)),
+            "paymentMode": target.get("paymentMode") or "cod",
+            "prepaidAmount": prepaid if prepaid > 0 else None,
+            "prepaidMethod": target.get("prepaidMethod") if prepaid > 0 else None,
+            "deliveryTicketId": target.get("id"),
+            "ticketNo": target.get("ticketNo"),
+        },
+        "mat3amActor": body.get("mat3amActor"),
+    }
+    result = restaurant_create_invoice(inv_body)
+    invoice_id = str((result or {}).get("id") or "").strip()
+    session_id_kds = f"delivery:{invoice_id}" if invoice_id else None
+
+    order_id = None
+    kds_ticket_no = None
+    if session_id_kds:
+        ord_data = _restaurant_load("orders", [])
+        changed = False
+        for o in ord_data if isinstance(ord_data, list) else []:
+            if isinstance(o, dict) and str(o.get("sessionId") or "") == session_id_kds:
+                order_id = str(o.get("id") or "") or None
+                kds_ticket_no = o.get("ticketNo")
+                o["deliveryTicketId"] = target.get("id")
+                o["deliveryTicketNo"] = target.get("ticketNo")
+                o["channel"] = "delivery"
+                o["tableLabel"] = f"دليفري #{target.get('ticketNo') or ''}".strip()
+                changed = True
+                break
+        if changed:
+            _restaurant_save("orders", ord_data)
+
+    now_iso = datetime.now().isoformat()
+    target["status"] = "kitchen"
+    target["confirmedAt"] = now_iso
+    target["activatedAt"] = now_iso
+    target["invoiceId"] = invoice_id or None
+    target["sessionId"] = session_id_kds
+    target["orderId"] = order_id
+    if kds_ticket_no and not target.get("kitchenTicketNo"):
+        target["kitchenTicketNo"] = kds_ticket_no
+    target["updatedAt"] = now_iso
+    _delivery_tickets_save(rows)
+    return {
+        "ok": True,
+        "ticket": target,
+        "invoice": result,
+        "orderId": order_id,
+        "message": f"تم تفعيل أوردر دليفري #{target.get('ticketNo')} وإرساله للمطبخ",
+    }
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/assign-driver")
+def restaurant_delivery_ticket_assign_driver(ticket_id: str, body: dict = None):
+    body = body if isinstance(body, dict) else {}
+    target, rows = _delivery_find_ticket(ticket_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    driver = str(body.get("driverName") or body.get("courierName") or "").strip()
+    if not driver:
+        raise HTTPException(status_code=400, detail="اسم الطيار مطلوب")
+    cur = str(target.get("status") or "").lower()
+    if cur in ("delivered", "settled", "cancelled"):
+        raise HTTPException(status_code=409, detail="لا يمكن تكليف طيار في هذه الحالة")
+    now_iso = datetime.now().isoformat()
+    target["driverName"] = driver[:120]
+    target["status"] = "out_for_delivery"
+    target["outForDeliveryAt"] = now_iso
+    target["updatedAt"] = now_iso
+    oid = str(target.get("orderId") or "").strip()
+    if oid:
+        ord_data = _restaurant_load("orders", [])
+        for o in ord_data if isinstance(ord_data, list) else []:
+            if isinstance(o, dict) and str(o.get("id") or "") == oid:
+                if str(o.get("status") or "").lower() == "ready":
+                    o["status"] = "served"
+                o["driverName"] = driver[:120]
+                o["outForDeliveryAt"] = now_iso
+        _restaurant_save("orders", ord_data)
+    _delivery_tickets_save(rows)
+    return {"ok": True, "ticket": target}
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/mark-delivered")
+def restaurant_delivery_ticket_mark_delivered(ticket_id: str, body: dict = None):
+    body = body if isinstance(body, dict) else {}
+    target, rows = _delivery_find_ticket(ticket_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    now_iso = datetime.now().isoformat()
+    target["status"] = "delivered"
+    target["deliveredAt"] = now_iso
+    target["updatedAt"] = now_iso
+    if body.get("driverName"):
+        target["driverName"] = str(body.get("driverName"))[:120]
+    _delivery_tickets_save(rows)
+    return {"ok": True, "ticket": target}
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/settle")
+def restaurant_delivery_ticket_settle(ticket_id: str, body: dict = None):
+    """تسوية عند رجوع الطيار: نقد أو إيصال فيزا."""
+    body = body if isinstance(body, dict) else {}
+    target, rows = _delivery_find_ticket(ticket_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    method = str(body.get("method") or body.get("settlementMethod") or "cash").strip().lower()
+    if method not in ("cash", "card", "visa", "digital", "transfer"):
+        method = "cash"
+    if method == "visa":
+        method = "card"
+    try:
+        amount = float(body.get("amount") or body.get("settlementAmount") or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if amount <= 0:
+        totals = target.get("quoteTotals") if isinstance(target.get("quoteTotals"), dict) else {}
+        try:
+            total = float(totals.get("total") or 0)
+        except (TypeError, ValueError):
+            total = 0.0
+        try:
+            prepaid = float(target.get("prepaidAmount") or 0)
+        except (TypeError, ValueError):
+            prepaid = 0.0
+        amount = max(0.0, round(total - prepaid, 2))
+    now_iso = datetime.now().isoformat()
+    if str(target.get("status") or "").lower() not in ("delivered", "settled", "out_for_delivery"):
+        target["status"] = "delivered"
+        target["deliveredAt"] = target.get("deliveredAt") or now_iso
+    target["settlementMethod"] = method
+    target["settlementAmount"] = round(amount, 2)
+    target["settlementNote"] = str(body.get("note") or body.get("settlementNote") or "")[:300] or None
+    target["settledAt"] = now_iso
+    target["status"] = "settled"
+    target["updatedAt"] = now_iso
+    _delivery_tickets_save(rows)
+    return {"ok": True, "ticket": target}
+
+
+
+
 @app.patch("/api/restaurant/delivery/tickets/{ticket_id}")
 def restaurant_delivery_ticket_patch(ticket_id: str, body: dict):
     if not isinstance(body, dict):

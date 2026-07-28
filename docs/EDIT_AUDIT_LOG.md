@@ -908,3 +908,9 @@ eserved + active.
 - **api_server _delivery_build_quote_text**: جدول نصي بسيط (صنف|كمية|قيمة) جاهز للصق في واتساب.
 - **DeliveryOrderPage**: الزر الأساسي «نسخ الجدول للصق في واتساب» + رسالة توجيهية؛ فتح wa.me اختياري.
 - **DeliveryOpsHubPage**: «نسخ المبدئية للصق» من قائمة التذاكر بدل الاعتماد على فتح نافذة.
+
+### 128 — استعادة مسارات المبدئية (quote/GET) — UTC 2026-07-28T22:05:00Z — ID delivquote-fix-9c4e2a81
+
+- **السبب**: واجهة الحفظ/النسخ كانت تستدعي /quote وGET ticket وهما غير موجودين (404) فالحفظ لا يكتب شيئاً والنسخ يبدو بلا أثر.
+- **api_server**: إضافة GET ticket + POST quote/activate/assign-driver/mark-delivered/settle.
+- **DeliveryOrderPage**: توضيح الأزرار — «حفظ على التذكرة» / «حفظ المبدئية» / «نسخ الجدول للصق في واتساب».
