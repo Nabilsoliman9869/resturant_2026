@@ -299,7 +299,12 @@ export default function CashierShiftClosePage() {
                   </thead>
                   <tbody>
                     {invoices.map((inv) => {
-                      const bd = inv.paymentBreakdown || {};
+                      const bd: Breakdown = inv.paymentBreakdown || {
+                        cash: Number(inv.routeCash) || 0,
+                        visa: Number(inv.routeVisa) || 0,
+                        wallet: Number(inv.routeWallet) || 0,
+                        instapay: Number(inv.routeInstapay) || 0,
+                      };
                       return (
                         <tr key={inv.invoiceId}>
                           <td>
