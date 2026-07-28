@@ -237,9 +237,21 @@ export default function DeliveryOrderPage() {
     setBusy(true); setMessage("");
     try {
       const text = await ensureQuoteText();
-      if (!text) return;
-      await navigator.clipboard.writeText(text);
-      setMessage("تم نسخ نص المبدئية — الصقه في واتساب");
+      if (!text) throw new Error("لا توجد مبدئية للنسخ — أضف أصنافاً أو شحن أولاً");
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // احتياطي لو المتصفح منع الحافظة
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setMessage("تم نسخ الجدول — افتح واتساب عند العميل والصق (Ctrl+V)");
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }
@@ -316,8 +328,8 @@ export default function DeliveryOrderPage() {
           <label className="dop-pay">طريقة الدفع<select value={prepaidMethod} onChange={(event) => setPrepaidMethod(event.target.value)} disabled={locked || prepaidAmount <= 0}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="digital">محفظة</option></select></label>
           <ul className="dop-cart-list">{cart.map((line) => <li key={line.id}><div><strong>{line.name}</strong><span>{(line.qty * line.unitPrice).toFixed(2)}</span></div><div className="dop-qty"><button type="button" onClick={() => changeQty(line.id, -1)} disabled={locked}>-</button><span>{line.qty}</span><button type="button" onClick={() => changeQty(line.id, 1)} disabled={locked}>+</button><input className="dop-price-edit" type="number" value={line.unitPrice} onChange={(event) => patchLine(line.id, { unitPrice: n(event.target.value) })} disabled={locked} /></div><input className="dop-line-note" value={line.note} onChange={(event) => patchLine(line.id, { note: event.target.value })} placeholder="ملاحظة على الصنف" disabled={locked} /></li>)}</ul>
           <div className="dop-cart-sum"><div><span>الأصناف</span><b>{subtotal.toFixed(2)}</b></div><div><span>الشحن</span><input className="dop-price-edit" type="number" value={shippingFee} onChange={(event) => setShippingFee(n(event.target.value))} disabled={locked} /></div><div className="dop-cart-sum__due"><span>الإجمالي</span><b>{total.toFixed(2)}</b></div></div>
-          {locked ? <p className="dop-locked-hint">الطلب مقفل بعد إرساله للمطبخ.</p> : <div className="dop-actions"><button type="button" disabled={busy} onClick={() => void saveQuote(false)}>حفظ مسودة</button><button type="button" disabled={busy} onClick={() => void saveQuote(true)}>حفظ المبدئية</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void sendWhatsApp()}>إرسال المبدئية واتساب</button><button type="button" disabled={busy} onClick={() => void copyWhatsApp()}>نسخ النص</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void activate()}>العميل وافق — تفعيل للمطبخ</button></div>}
-          {quoteText ? <div className="dop-quote-card" id="delivery-quote-card"><div className="dop-quote-card__head">فاتورة مبدئية{ticket?.ticketNo ? ` #${ticket.ticketNo}` : ""}</div><textarea className="dop-quote-text" value={quoteText} readOnly rows={8} /><p className="dop-quote-hint">الزر الأخضر يفتح واتساب بالنص جاهزاً — أو Win+Shift+S لصورة البطاقة</p></div> : null}
+          {locked ? <p className="dop-locked-hint">الطلب مقفل بعد إرساله للمطبخ.</p> : <div className="dop-actions"><button type="button" disabled={busy} onClick={() => void saveQuote(false)}>حفظ مسودة</button><button type="button" disabled={busy} onClick={() => void saveQuote(true)}>حفظ المبدئية</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void copyWhatsApp()}>نسخ الجدول للصق في واتساب</button><button type="button" disabled={busy} onClick={() => void sendWhatsApp()}>فتح واتساب (اختياري)</button><button type="button" className="btn-activate" disabled={busy} onClick={() => void activate()}>العميل وافق — تفعيل للمطبخ</button></div>}
+          {quoteText ? <div className="dop-quote-card" id="delivery-quote-card"><div className="dop-quote-card__head">فاتورة مبدئية{ticket?.ticketNo ? ` #${ticket.ticketNo}` : ""}</div><textarea className="dop-quote-text" value={quoteText} readOnly rows={8} /><p className="dop-quote-hint">اضغط «نسخ الجدول» ثم الصق في نافذة واتساب (Ctrl+V)</p></div> : null}
         </aside></section>
       {pendingModifiers ? <div className="dop-modifier-backdrop" role="dialog" aria-modal="true"><section className="dop-modifier-panel"><h2>إضافات {pendingModifiers.product.ProductName}</h2>{pendingModifiers.groups.map((group) => <fieldset key={group.groupId}><legend>{group.nameAr || group.name || group.title || "إضافات"}</legend>{(group.items || []).map((item) => { const itemId = item.itemId || item.nameAr || item.nameEn || ""; return <label key={itemId}><input type="checkbox" checked={(pendingModifiers.selected[group.groupId] || []).includes(itemId)} onChange={() => toggleModifier(group.groupId, itemId)} />{item.nameAr || item.nameEn || item.label} {n(item.priceDelta) ? `(+${n(item.priceDelta).toFixed(2)})` : ""}</label>; })}</fieldset>)}<div className="dop-actions"><button type="button" onClick={() => setPendingModifiers(null)}>إلغاء</button><button type="button" className="btn-activate" onClick={confirmModifiers}>إضافة للسلة</button></div></section></div> : null}
     </main>

@@ -28829,44 +28829,72 @@ def _delivery_quote_totals(lines: list, shipping_fee: float = 0.0, no_vat: bool 
 
 
 def _delivery_build_quote_text(ticket: dict) -> str:
+    """جدول نصي بسيط يُنسخ ويُلصق مباشرة في واتساب."""
     name = str(ticket.get("customerName") or "").strip() or "عميل"
     phone = str(ticket.get("phone") or "").strip()
     area = str(ticket.get("area") or "").strip()
+    addr = str(ticket.get("fullAddress") or ticket.get("address") or "").strip()
     tno = ticket.get("ticketNo")
     lines = ticket.get("quoteLines") if isinstance(ticket.get("quoteLines"), list) else []
-    parts = [f"فاتورة مبدئية دليفري" + (f" #{tno}" if tno else ""), f"العميل: {name}" + (f" — {phone}" if phone else "")]
+    totals = ticket.get("quoteTotals") if isinstance(ticket.get("quoteTotals"), dict) else {}
+    ship = float(ticket.get("shippingFee") or totals.get("shippingFee") or 0)
+    total = float(totals.get("total") or 0)
+    no_vat = bool(ticket.get("noVat"))
+    pay = str(ticket.get("paymentMode") or "cod").lower()
+    pay_ar = "عند الاستلام (COD)" if pay == "cod" else ("مدفوع مسبقاً" if pay == "prepaid" else "جزئي")
+
+    parts = [
+        "*فاتورة مبدئية دليفري*" + (f" #{tno}" if tno else ""),
+        "────────────────",
+        f"العميل: {name}",
+    ]
+    if phone:
+        parts.append(f"الهاتف: {phone}")
     if area:
         parts.append(f"المنطقة: {area}")
-    parts.append("———")
+    if addr and addr != f"[{area}]":
+        parts.append(f"العنوان: {addr}")
+    parts.append("────────────────")
+    parts.append("الصنف | كمية | قيمة")
+    parts.append("────────────────")
     for ln in lines:
         if not isinstance(ln, dict):
             continue
         qty = ln.get("qty") or 0
-        nm = ln.get("name") or "صنف"
+        nm = str(ln.get("name") or "صنف").strip()
         lt = ln.get("lineTotal")
         if lt is None:
             try:
                 lt = float(qty or 0) * float(ln.get("unitPrice") or 0)
             except (TypeError, ValueError):
                 lt = 0
-        parts.append(f"• {qty} × {nm} = {float(lt):.0f}")
+        try:
+            qty_s = str(int(qty)) if float(qty) == int(float(qty)) else str(qty)
+        except (TypeError, ValueError):
+            qty_s = str(qty)
+        parts.append(f"{nm} | {qty_s} | {float(lt):.0f}")
         if ln.get("note"):
-            parts.append(f"   ({ln.get('note')})")
-    ship = float(ticket.get("shippingFee") or 0)
-    totals = ticket.get("quoteTotals") if isinstance(ticket.get("quoteTotals"), dict) else {}
-    total = float(totals.get("total") or 0)
+            parts.append(f"  ملاحظة: {ln.get('note')}")
+        for ex in ln.get("extras") or []:
+            if isinstance(ex, dict) and ex.get("name"):
+                parts.append(f"  + {ex.get('name')} ({float(ex.get('price') or 0):.0f})")
     if ship > 0:
         ship_name = str(ticket.get("shippingProductName") or "شحن").strip()
-        parts.append(f"• شحن ({ship_name}): {ship:.0f}")
-    parts.append("———")
-    parts.append(f"الإجمالي: {total:.0f} ج.م")
+        parts.append(f"{ship_name} | 1 | {ship:.0f}")
+    parts.append("────────────────")
+    if not no_vat and float(totals.get("vat") or 0) > 0:
+        parts.append(f"ضريبة: {float(totals.get('vat') or 0):.0f}")
+    parts.append(f"*الإجمالي: {total:.0f} ج.م*")
     prepaid = float(ticket.get("prepaidAmount") or 0)
     if prepaid > 0:
         parts.append(f"مدفوع مسبقاً: {prepaid:.0f}")
         parts.append(f"المتبقي: {max(0.0, total - prepaid):.0f}")
-    parts.append("بانتظار تأكيدكم ✓")
+    parts.append(f"الدفع: {pay_ar}")
+    if no_vat:
+        parts.append("بدون ضريبة")
+    parts.append("────────────────")
+    parts.append("بانتظار تأكيدكم ✅")
     return "\n".join(parts)
-
 
 def _delivery_notify_ready(order: dict, ticket: Optional[dict]) -> None:
     """تنبيه كاشير عند جاهزية أوردر دليفري من المطبخ."""

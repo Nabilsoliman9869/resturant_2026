@@ -161,14 +161,6 @@ function DeliveryQueueActions({ ticket, busy, assignDriver, markDelivered, settl
 }
 
 
-function toWhatsAppDigits(phone: string) {
-  let d = String(phone || "").replace(/\D/g, "");
-  if (d.startsWith("00")) d = d.slice(2);
-  if (d.startsWith("0") && d.length >= 10) d = "20" + d.slice(1);
-  if (!d.startsWith("20") && d.length === 10) d = "20" + d;
-  return d;
-}
-
 export default function DeliveryOpsHubPage() {
   const base = getApiBase();
   const { user } = useAuth();
@@ -503,28 +495,20 @@ export default function DeliveryOpsHubPage() {
   }
 
 
-  function sendWhatsAppFromHub(t: DeliveryTicket) {
-    const digits = toWhatsAppDigits(t.phone || "");
-    if (digits.length < 10) {
-      setMsg("رقم الهاتف غير صالح لواتساب");
-      return;
-    }
+  async function sendWhatsAppFromHub(t: DeliveryTicket) {
     const text = String(t.quoteText || "").trim();
     if (!text) {
-      setMsg("لا توجد فاتورة مبدئية بعد — افتح جلسة الطلب واحفظ المبدئية ثم أرسل.");
+      setMsg("لا توجد فاتورة مبدئية بعد — افتح جلسة الطلب واحفظ المبدئية ثم انسخ الجدول.");
       openOrdering(t);
       return;
     }
-    const popup = window.open("about:blank", "_blank");
-    const url = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
     try {
-      void navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(text);
+      setMsg(`تم نسخ جدول المبدئية #${t.ticketNo || ""} — افتح واتساب عند العميل والصق (Ctrl+V)`);
     } catch {
-      /* ignore */
+      setMsg("تعذر النسخ تلقائياً — افتح جلسة الطلب وانسخ من هناك.");
+      openOrdering(t);
     }
-    if (popup && !popup.closed) popup.location.href = url;
-    else window.location.href = url;
-    setMsg(`تم فتح واتساب للمبدئية #${t.ticketNo || ""} — اضغط إرسال`);
   }
 
   async function assignDriver(t: DeliveryTicket) {
@@ -729,7 +713,7 @@ export default function DeliveryOpsHubPage() {
         ? (j.message || "تم فتح التذكرة الحالية لنفس الرقم (بدون تكرار)")
         : "تم تسجيل الاستقبال بنجاح";
       setMsg(
-        `${reuseNote} — افتح «جلسة الطلب» ثم «إرسال المبدئية واتساب» لإرسال الفاتورة المبدئية للعميل.`,
+        `${reuseNote} — افتح «جلسة الطلب» ثم «نسخ المبدئية للصق» لإرسال الفاتورة المبدئية للعميل.`,
       );
       clearShotFiles();
       setMapsUrl("");
@@ -1298,8 +1282,8 @@ export default function DeliveryOpsHubPage() {
                     <button type="button" className="btn btn-primary" onClick={() => openOrdering(t)}>
                       فتح جلسة الطلب
                     </button>
-                    <button type="button" className="btn" onClick={() => sendWhatsAppFromHub(t)}>
-                      إرسال المبدئية واتساب
+                    <button type="button" className="btn" onClick={() => void sendWhatsAppFromHub(t)}>
+                      نسخ المبدئية للصق
                     </button>
                     {["ready", "kitchen"].includes(String(t.status || "")) ? (
                       <button type="button" className="btn" disabled={busy} onClick={() => void assignDriver(t)}>
