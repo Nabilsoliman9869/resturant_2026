@@ -182,6 +182,7 @@ export default function DeliveryOpsHubPage() {
   const [address, setAddress] = useState("");
   const [deliveryTime, setDeliveryTime] = useState("");
   const [requestedItems, setRequestedItems] = useState("");
+  const [forceNewTicket, setForceNewTicket] = useState(false);
   const [specialNotes, setSpecialNotes] = useState("");
   const [shippingFee, setShippingFee] = useState("0");
   const [shippingMode, setShippingMode] = useState<"service_item" | "fee">("service_item");
@@ -642,6 +643,7 @@ export default function DeliveryOpsHubPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channel,
+          forceNew: forceNewTicket || undefined,
           name: name.trim(),
           phone: phone.trim(),
           phone2: phone2.trim() || undefined,
@@ -673,7 +675,7 @@ export default function DeliveryOpsHubPage() {
         }),
       });
       const t = await r.text();
-      const j = tryParseJson<{ ok?: boolean; ticket?: DeliveryTicket; detail?: string }>(t) ?? {};
+      const j = tryParseJson<{ ok?: boolean; reused?: boolean; message?: string; ticket?: DeliveryTicket; detail?: string }>(t) ?? {};
       if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : t);
 
       const ticket = j.ticket;
@@ -688,7 +690,12 @@ export default function DeliveryOpsHubPage() {
         }
       }
 
-      setMsg("تم تسجيل الاستقبال بنجاح");
+      const reuseNote = j.reused
+        ? (j.message || "تم فتح التذكرة الحالية لنفس الرقم (بدون تكرار)")
+        : "تم تسجيل الاستقبال بنجاح";
+      setMsg(
+        `${reuseNote} — افتح «جلسة الطلب» ثم «إرسال المبدئية واتساب» لإرسال الفاتورة المبدئية للعميل.`,
+      );
       clearShotFiles();
       setMapsUrl("");
       await loadTickets();
@@ -1057,7 +1064,7 @@ export default function DeliveryOpsHubPage() {
           <div className="deliv-hub__grid">
             <label className="deliv-hub__span2">
               المطلوب (نص حر)
-              <textarea value={requestedItems} onChange={(e) => setRequestedItems(e.target.value)} rows={3} placeholder="2 برجر + كولا…" />
+              <textarea value={requestedItems} onChange={(e) => setRequestedItems(e.target.value)} rows={3} placeholder="ملخص الطلب فقط (مثال: 2 برجر + كولا) — المحادثة تُرفع كصورة مرفق" />
             </label>
             <label className="deliv-hub__span2">
               مواصفات خاصة
@@ -1196,7 +1203,11 @@ export default function DeliveryOpsHubPage() {
           </div>
 
           <div className="deliv-hub__actions">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submitIntake(true)}>
+                        <label className="deliv-hub__check" style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginBottom: "0.5rem" }}>
+              <input type="checkbox" checked={forceNewTicket} onChange={(e) => setForceNewTicket(e.target.checked)} />
+              تذكرة جديدة إجبارياً (حتى لو فيه تذكرة مفتوحة لنفس الرقم)
+            </label>
+<button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submitIntake(true)}>
               حفظ وافتح شاشة الطلب
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => void submitIntake(false)}>
@@ -1242,7 +1253,7 @@ export default function DeliveryOpsHubPage() {
                     {t.driverName ? ` · طيار: ${t.driverName}` : ""}
                     {t.gps?.lat != null && t.gps?.lng != null ? ` · GPS ${Number(t.gps.lat).toFixed(4)},${Number(t.gps.lng).toFixed(4)}` : ""}
                   </div>
-                  {t.requestedItemsText ? <p>{t.requestedItemsText}</p> : null}
+                  {t.requestedItemsText ? <p className="deliv-hub__req-preview">{t.requestedItemsText.length > 120 ? `${t.requestedItemsText.slice(0, 120)}…` : t.requestedItemsText}</p> : null}
                   <div className="deliv-hub__ticket-actions">
                     <button type="button" className="btn btn-primary" onClick={() => openOrdering(t)}>
                       فتح جلسة الطلب

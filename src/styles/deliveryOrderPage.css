@@ -497,3 +497,26 @@
 .dop-modifier-panel fieldset { margin: .7rem 0; border: 1px solid var(--border); border-radius: 10px; }
 .dop-modifier-panel label { display: block; padding: .35rem 0; }
 .dop-modifier-panel input { margin-inline-end: .5rem; }
+
+.dop-quote-card {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem 0.55rem;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  background: linear-gradient(160deg, rgba(8, 28, 48, 0.95), rgba(2, 12, 27, 0.98));
+}
+.dop-quote-card__head {
+  font-weight: 800;
+  font-size: 0.95rem;
+  margin-bottom: 0.35rem;
+  color: #7dd3fc;
+}
+.dop-quote-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted, #94a3b8);
+  line-height: 1.35;
+}
+.dop-quote-card .dop-quote-text {
+  margin-top: 0.25rem;
+}

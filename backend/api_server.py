@@ -28720,6 +28720,52 @@ def _delivery_next_ticket_no(rows: Optional[list] = None) -> int:
     return best + 1
 
 
+def _delivery_norm_phone(phone: str) -> str:
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if digits.startswith("0020") and len(digits) > 4:
+        digits = digits[4:]
+    if digits.startswith("20") and len(digits) >= 11:
+        digits = digits[2:]
+    if digits.startswith("0") and len(digits) >= 10:
+        digits = digits[1:]
+    return digits
+
+
+def _delivery_find_open_ticket_by_phone(rows: list, phone: str, channel: Optional[str] = None) -> Optional[dict]:
+    """إعادة استخدام تذكرة مفتوحة لنفس الرقم بدل تكرار #5001/#5002 بالخطأ."""
+    target = _delivery_norm_phone(phone)
+    if len(target) < 8:
+        return None
+    open_statuses = {
+        "intake",
+        "draft_quote",
+        "quoted",
+        "confirmed",
+        "ordering",
+    }
+    ch = str(channel or "").strip().lower() or None
+    candidates = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        st = str(r.get("status") or "").lower()
+        if st not in open_statuses:
+            continue
+        if ch and str(r.get("channel") or "").lower() != ch:
+            continue
+        phones = [
+            _delivery_norm_phone(str(r.get("phone") or "")),
+            _delivery_norm_phone(str(r.get("phone2") or "")),
+        ]
+        if target not in phones:
+            continue
+        candidates.append(r)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: str(x.get("updatedAt") or x.get("createdAt") or ""), reverse=True)
+    return candidates[0]
+
+
 def _delivery_normalize_quote_line(raw: Any) -> Optional[dict]:
     if not isinstance(raw, dict):
         return None
@@ -29708,6 +29754,80 @@ def restaurant_delivery_intake(body: dict):
 
     now_iso = datetime.now().isoformat()
     rows = _delivery_tickets_load()
+    force_new = bool(body.get("forceNew") or body.get("newTicket"))
+    reuse = None if force_new else _delivery_find_open_ticket_by_phone(rows, phone, channel)
+    if reuse:
+        # حدّث بيانات الاستقبال على نفس التذكرة بدل إنشاء #تالية مكررة
+        # أغلق التذاكر المفتوحة الأقدم لنفس الرقم+القناة حتى لا تظهر #5001 و#5002 معاً
+        reuse_id = str(reuse.get("id") or "")
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("id") or "") == reuse_id:
+                continue
+            st = str(r.get("status") or "").lower()
+            if st not in {"intake", "draft_quote", "quoted", "confirmed", "ordering"}:
+                continue
+            if str(r.get("channel") or "").lower() != str(reuse.get("channel") or "").lower():
+                continue
+            phones = [
+                _delivery_norm_phone(str(r.get("phone") or "")),
+                _delivery_norm_phone(str(r.get("phone2") or "")),
+            ]
+            if _delivery_norm_phone(phone) not in phones:
+                continue
+            r["status"] = "cancelled"
+            r["updatedAt"] = now_iso
+            r["cancelledReason"] = "duplicate_open_ticket_merged"
+        reuse["updatedAt"] = now_iso
+        reuse["customerName"] = name[:200]
+        reuse["phone"] = phone[:40]
+        if phone2:
+            reuse["phone2"] = phone2[:40]
+        reuse["area"] = area[:120]
+        reuse["address"] = address[:500]
+        reuse["fullAddress"] = full_address[:600]
+        reuse["agentGuid"] = agent_guid or reuse.get("agentGuid")
+        reuse["shippingFee"] = shipping_fee
+        reuse["shippingMode"] = shipping_mode
+        reuse["shippingProductGuide"] = shipping_product_guide
+        reuse["shippingProductName"] = shipping_product_name
+        reuse["noVat"] = no_vat
+        reuse["paymentMode"] = prepaid["paymentMode"]
+        reuse["prepaidAmount"] = prepaid["prepaidAmount"]
+        reuse["prepaidMethod"] = prepaid["prepaidMethod"]
+        reuse["prepaidNote"] = prepaid["prepaidNote"]
+        reuse["prepaidAt"] = prepaid["prepaidAt"]
+        req_items = str(body.get("requestedItems") or body.get("itemsText") or "").strip()
+        if req_items:
+            reuse["requestedItemsText"] = req_items[:2000]
+        notes = str(body.get("specialNotes") or body.get("notes") or "").strip()
+        if notes:
+            reuse["specialNotes"] = notes[:2000]
+        if body.get("deliveryTime"):
+            reuse["deliveryTime"] = str(body.get("deliveryTime"))[:80]
+        if body.get("driverName") or body.get("courierName"):
+            reuse["driverName"] = str(body.get("driverName") or body.get("courierName"))[:120]
+        if maps_url:
+            reuse["mapsUrl"] = maps_url
+        if gps_out:
+            reuse["gps"] = gps_out
+        if channel == "platform":
+            if body.get("platformName"):
+                reuse["platformName"] = str(body.get("platformName"))[:120]
+            if body.get("platformOrderId"):
+                reuse["platformOrderId"] = str(body.get("platformOrderId"))[:120]
+            if body.get("platformUrl"):
+                reuse["platformUrl"] = str(body.get("platformUrl"))[:500]
+        _delivery_tickets_save(rows)
+        return {
+            "ok": True,
+            "reused": True,
+            "ticket": reuse,
+            "agent": upsert,
+            "message": f"تم فتح التذكرة الحالية #{reuse.get('ticketNo')} لنفس الرقم (بدون تكرار)",
+        }
+
     ticket_no = _delivery_next_ticket_no(rows)
     # واتساب يبدأ بمسودة تسعير؛ كول سنتر/منصة يمكنهم فتح السلة مباشرة
     initial_status = "draft_quote" if channel == "whatsapp" else "intake"
@@ -29767,7 +29887,7 @@ def restaurant_delivery_intake(body: dict):
     }
     rows.append(ticket)
     _delivery_tickets_save(rows)
-    return {"ok": True, "ticket": ticket, "agent": upsert}
+    return {"ok": True, "reused": False, "ticket": ticket, "agent": upsert}
 
 
 @app.post("/api/restaurant/delivery/tickets/{ticket_id}/attachment")
