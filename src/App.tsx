@@ -63,6 +63,7 @@ import ProductModifierLinksPage from "./pages/settings/ProductModifierLinksPage"
 import MinimumChargeSettingsPage from "./pages/settings/MinimumChargeSettingsPage";
 import KidsAreaPage from "./pages/KidsAreaPage";
 import KidsAreaPackagesSettingsPage from "./pages/settings/KidsAreaPackagesSettingsPage";
+import DeliveryShippingZonesSettingsPage from "./pages/settings/DeliveryShippingZonesSettingsPage";
 import SharedTerminalSettingsPage from "./pages/settings/SharedTerminalSettingsPage";
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
@@ -205,6 +206,7 @@ export default function App() {
           <Route path="customer-vip" element={<CustomerVipSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
+          <Route path="delivery-shipping-zones" element={<DeliveryShippingZonesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
@@ -262,6 +264,7 @@ export default function App() {
           <Route path="payment-routing" element={<PaymentRoutingSettingsPage />} />
           <Route path="customer-vip" element={<CustomerVipSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
+          <Route path="delivery-shipping-zones" element={<DeliveryShippingZonesSettingsPage />} />
           <Route path="daily-opening-custody" element={<DailyOpeningCustodyPage />} />
           <Route path="daily-return" element={<DailyReturnPage />} />
           <Route path="daily-overhead" element={<DailyOverheadPage />} />
@@ -425,6 +428,7 @@ export default function App() {
           <Route path="customer-vip" element={<CustomerVipSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
+          <Route path="delivery-shipping-zones" element={<DeliveryShippingZonesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />

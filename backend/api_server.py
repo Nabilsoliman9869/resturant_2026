@@ -28047,15 +28047,31 @@ def _list_delivery_shipping_services(cursor) -> dict:
 
     services = []
     try:
-        cursor.execute(
-            """
-            SELECT CardGuide, ProductName, EndUserPrice, AgentPrice, NotActive
-            FROM dbo.TBL007
-            WHERE GroupGuid = CAST(? AS uniqueidentifier)
-            ORDER BY ProductName
-            """,
-            (group_guid,),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT CardGuide, ProductName, EndUserPrice, AgentPrice, NotActive,
+                       ISNULL(CardCode, N'') AS CardCode,
+                       ISNULL(NotTaxable, 1) AS NotTaxable
+                FROM dbo.TBL007
+                WHERE GroupGuid = CAST(? AS uniqueidentifier)
+                ORDER BY TRY_CAST(CardCode AS BIGINT), ProductName
+                """,
+                (group_guid,),
+            )
+            has_tax_col = True
+        except Exception:
+            cursor.execute(
+                """
+                SELECT CardGuide, ProductName, EndUserPrice, AgentPrice, NotActive,
+                       ISNULL(CardCode, N'') AS CardCode
+                FROM dbo.TBL007
+                WHERE GroupGuid = CAST(? AS uniqueidentifier)
+                ORDER BY ProductName
+                """,
+                (group_guid,),
+            )
+            has_tax_col = False
         for r in cursor.fetchall() or []:
             inactive = False
             try:
@@ -28068,11 +28084,19 @@ def _list_delivery_shipping_services(cursor) -> dict:
                 price = float(r[2] if r[2] is not None else (r[3] or 0))
             except (TypeError, ValueError):
                 price = 0.0
+            not_taxable = True
+            if has_tax_col:
+                try:
+                    not_taxable = bool(r[6]) if len(r) > 6 and r[6] is not None else True
+                except Exception:
+                    not_taxable = True
             services.append(
                 {
                     "CardGuide": str(r[0]).strip().upper() if r[0] else "",
                     "ProductName": str(r[1] or ""),
                     "Price": max(0.0, round(price, 2)),
+                    "CardCode": str(r[5] or "").strip() if len(r) > 5 else "",
+                    "NotTaxable": not_taxable,
                     "GroupGuid": group_guid,
                 }
             )
@@ -28169,6 +28193,269 @@ def restaurant_delivery_shipping_services(ensure_group: bool = True):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _delivery_shipping_next_card_code(cursor) -> str:
+    """آخر CardCode رقمي في TBL007 + 1 (ترقيم منطقة شحن تلقائي)."""
+    try:
+        n = _tbl_next_card_code(cursor, "TBL007")
+        return str(n)
+    except Exception:
+        return datetime.now().strftime("%y%m%d%H%M")
+
+
+def _insert_delivery_shipping_zone(
+    cursor,
+    *,
+    name: str,
+    price: float,
+    not_taxable: bool = True,
+    card_code: Optional[str] = None,
+) -> dict:
+    group_guid = _ensure_delivery_shipping_group(cursor)
+    if not group_guid:
+        raise HTTPException(status_code=500, detail="تعذر تجهيز مجموعة خدمات الشحن في TBL006")
+    # منع التكرار بنفس الاسم داخل المجموعة
+    cursor.execute(
+        """
+        SELECT TOP 1 CardGuide, ProductName, EndUserPrice
+        FROM dbo.TBL007
+        WHERE GroupGuid = CAST(? AS uniqueidentifier)
+          AND RTRIM(LTRIM(ISNULL(ProductName, N''))) = ?
+          AND (NotActive IS NULL OR NotActive = 0)
+        """,
+        (group_guid, name),
+    )
+    exist = cursor.fetchone()
+    if exist and exist[0]:
+        return {
+            "ok": True,
+            "created": False,
+            "CardGuide": str(exist[0]).strip().upper(),
+            "ProductName": str(exist[1] or name),
+            "Price": float(exist[2] or price or 0),
+            "GroupGuid": group_guid,
+            "hint": "المنطقة موجودة مسبقاً",
+        }
+
+    code = (card_code or "").strip() or _delivery_shipping_next_card_code(cursor)
+    gid = str(uuid.uuid4()).upper()
+    price = max(0.0, round(float(price or 0), 2))
+    # أعمدة أساسية مطابقة لممارسة إكسترا (عينة خدمات الشحن)
+    cols = [
+        "CardGuide",
+        "CardCode",
+        "ProductName",
+        "GroupGuid",
+        "StockProduct",
+        "Security",
+        "ProductType",
+        "DefaultUnit",
+        "NotActive",
+        "EndUserPrice",
+        "AgentPrice",
+    ]
+    vals = [
+        "CAST(? AS uniqueidentifier)",
+        "?",
+        "?",
+        "CAST(? AS uniqueidentifier)",
+        "1",
+        "1",
+        "0",
+        "1",
+        "0",
+        "?",
+        "?",
+    ]
+    params: list = [gid, code, name, group_guid, price, price]
+    # NotTaxable — افتراضي بدون ضريبة لخدمات الشحن
+    try:
+        cursor.execute("SELECT CASE WHEN COL_LENGTH('dbo.TBL007','NotTaxable') IS NULL THEN 0 ELSE 1 END")
+        if cursor.fetchone()[0]:
+            cols.append("NotTaxable")
+            vals.append("?")
+            params.append(1 if not_taxable else 0)
+    except Exception:
+        pass
+    try:
+        cursor.execute("SELECT CASE WHEN COL_LENGTH('dbo.TBL007','ListAlternatives') IS NULL THEN 0 ELSE 1 END")
+        if cursor.fetchone()[0]:
+            cols.append("ListAlternatives")
+            vals.append("0")
+    except Exception:
+        pass
+
+    cursor.execute(
+        f"INSERT INTO dbo.TBL007 ({', '.join(cols)}) VALUES ({', '.join(vals)})",
+        tuple(params),
+    )
+    return {
+        "ok": True,
+        "created": True,
+        "CardGuide": gid,
+        "CardCode": code,
+        "ProductName": name,
+        "Price": price,
+        "NotTaxable": bool(not_taxable),
+        "GroupGuid": group_guid,
+    }
+
+
+@app.post("/api/restaurant/delivery/shipping-zones")
+def restaurant_delivery_shipping_zone_create(body: dict):
+    """
+    تعريف منطقة شحن سريعة في TBL007 تحت مجموعة «خدمات الشحن».
+    CardCode = آخر رقم في TBL007 + 1. NotTaxable=1 افتراضياً (بدون ضريبة).
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    name = str(body.get("ProductName") or body.get("name") or body.get("zone") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم المنطقة مطلوب")
+    if len(name) > 200:
+        name = name[:200]
+    try:
+        price = float(body.get("Price") or body.get("price") or body.get("EndUserPrice") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    # افتراضي: بدون ضريبة؛ يمكن تمرير applyTax=true أو NotTaxable=false
+    apply_tax = body.get("applyTax")
+    if apply_tax is None:
+        apply_tax = body.get("ApplyTax")
+    if apply_tax is not None:
+        not_taxable = not (
+            apply_tax is True
+            or str(apply_tax).strip().lower() in ("1", "true", "yes", "on")
+        )
+    else:
+        nt = body.get("NotTaxable")
+        if nt is None:
+            nt = body.get("notTaxable")
+        if nt is None:
+            not_taxable = True
+        else:
+            not_taxable = bool(nt) if isinstance(nt, bool) else str(nt).strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        out = _insert_delivery_shipping_zone(
+            cur,
+            name=name,
+            price=price,
+            not_taxable=not_taxable,
+            card_code=str(body.get("CardCode") or "").strip() or None,
+        )
+        conn.commit()
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ منطقة الشحن: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.put("/api/restaurant/delivery/shipping-zones/{card_guide}")
+def restaurant_delivery_shipping_zone_update(card_guide: str, body: dict):
+    """تعديل اسم/سعر/ضريبة/تفعيل منطقة شحن في TBL007."""
+    guid = str(card_guide or "").strip().upper()
+    try:
+        uuid.UUID(guid)
+    except Exception:
+        raise HTTPException(status_code=400, detail="معرّف المنطقة غير صالح")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    conn = get_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")
+    try:
+        cur = conn.cursor()
+        sets = []
+        params: list = []
+        name = body.get("ProductName") if "ProductName" in body else body.get("name")
+        if name is not None:
+            nm = str(name).strip()
+            if not nm:
+                raise HTTPException(status_code=400, detail="اسم المنطقة فارغ")
+            sets.append("ProductName = ?")
+            params.append(nm[:200])
+        if "Price" in body or "price" in body or "EndUserPrice" in body:
+            try:
+                price = float(body.get("Price") if body.get("Price") is not None else body.get("price") or body.get("EndUserPrice") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            price = max(0.0, round(price, 2))
+            sets.append("EndUserPrice = ?")
+            params.append(price)
+            sets.append("AgentPrice = ?")
+            params.append(price)
+        if "NotTaxable" in body or "notTaxable" in body or "applyTax" in body or "ApplyTax" in body:
+            if "applyTax" in body or "ApplyTax" in body:
+                apply_tax = body.get("applyTax", body.get("ApplyTax"))
+                not_taxable = not (
+                    apply_tax is True
+                    or str(apply_tax).strip().lower() in ("1", "true", "yes", "on")
+                )
+            else:
+                nt = body.get("NotTaxable", body.get("notTaxable"))
+                not_taxable = bool(nt) if isinstance(nt, bool) else str(nt).strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            try:
+                cur.execute("SELECT CASE WHEN COL_LENGTH('dbo.TBL007','NotTaxable') IS NULL THEN 0 ELSE 1 END")
+                if cur.fetchone()[0]:
+                    sets.append("NotTaxable = ?")
+                    params.append(1 if not_taxable else 0)
+            except Exception:
+                pass
+        if "NotActive" in body or "notActive" in body:
+            na = body.get("NotActive", body.get("notActive"))
+            inactive = bool(na) if isinstance(na, bool) else str(na).strip().lower() in ("1", "true", "yes", "on")
+            sets.append("NotActive = ?")
+            params.append(1 if inactive else 0)
+        if not sets:
+            raise HTTPException(status_code=400, detail="لا توجد حقول للتعديل")
+        params.append(guid)
+        cur.execute(
+            f"UPDATE dbo.TBL007 SET {', '.join(sets)} WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            tuple(params),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="المنطقة غير موجودة")
+        conn.commit()
+        return {"ok": True, "CardGuide": guid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"تعذر تعديل منطقة الشحن: {e}")
     finally:
         try:
             conn.close()

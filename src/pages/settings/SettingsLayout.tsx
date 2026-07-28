@@ -75,6 +75,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
       title: "7. العملاء والخدمات الإضافية",
       items: [
         { to: "customer-vip", label: "تعريف العملاء والمالكين", hint: "يؤثر على: مالك/VIP/عميل آجل وربطه بالجلسات والفواتير" },
+        { to: "delivery-shipping-zones", label: "تعريف مناطق الدليفري والشحن وأسعارها", hint: "مناطق TBL007 تحت خدمات الشحن — السعر والكود والترقيم التلقائي وخيار الضريبة" },
         { to: "kids-area-packages", label: "باقات منطقة الأطفال", hint: "يؤثر على: أسعار الدخول، الباقات، وربطها بالحساب" },
       ],
     },
@@ -130,6 +131,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
           { to: "pos-promos", label: "العروض والتخفيضات", hint: "يؤثر على: خصومات اليوم" },
           { to: "payment-routing", label: "ربط التحصيل (حسابات)", hint: "يؤثر على: توجيه التحصيل حسب وسيلة الدفع" },
           { to: "customer-vip", label: "تعريف العملاء والمالكين", hint: "يؤثر على: Owner/VIP خلال التشغيل" },
+          { to: "delivery-shipping-zones", label: "تعريف مناطق الدليفري والشحن وأسعارها", hint: "مناطق الشحن وأسعارها في TBL007" },
           { to: "kids-area-packages", label: "باقات منطقة الأطفال", hint: "يؤثر على: تسعير خدمات الأطفال" },
         ],
       },

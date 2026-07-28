@@ -11,6 +11,8 @@ type ShippingService = {
   CardGuide: string;
   ProductName: string;
   Price: number;
+  CardCode?: string;
+  NotTaxable?: boolean;
   GroupGuid?: string;
 };
 
@@ -97,6 +99,33 @@ function roleDeliveryOrderPath(role?: string) {
   if (r === "manager" || r === "operation_manager" || r === "developer") return `/app/${r}/delivery-order`;
   if (r === "accountant") return `/app/accountant/delivery-order`;
   return "/app/cashier/delivery-order";
+}
+
+function roleShippingZonesSettingsPath(role?: string) {
+  const r = String(role || "");
+  if (r === "manager" || r === "operation_manager" || r === "developer") {
+    return `/app/${r}/settings/delivery-shipping-zones`;
+  }
+  return "";
+}
+
+function normZoneText(s: string) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function matchShippingService(services: ShippingService[], areaText: string): ShippingService | null {
+  const t = normZoneText(areaText);
+  if (!t) return null;
+  const exact = services.find((s) => normZoneText(s.ProductName) === t);
+  if (exact) return exact;
+  const contains = services.find((s) => {
+    const n = normZoneText(s.ProductName);
+    return n.includes(t) || t.includes(n);
+  });
+  return contains || null;
 }
 
 export default function DeliveryOpsHubPage() {
@@ -428,6 +457,82 @@ export default function DeliveryOpsHubPage() {
     navigate(`${roleDeliveryOrderPath(user?.role)}?${qs.toString()}`);
   }
 
+  function applyShippingService(hit: ShippingService | null) {
+    if (!hit) {
+      setShippingProductGuide("");
+      setShippingProductName("");
+      return;
+    }
+    setShippingProductGuide(hit.CardGuide);
+    setShippingProductName(hit.ProductName);
+    setShippingFee(String(hit.Price));
+    setShippingMode("service_item");
+    if (hit.NotTaxable === false) setNoVat(false);
+    else setNoVat(true);
+  }
+
+  async function offerAddMissingZone(rawArea: string) {
+    const zone = rawArea.trim();
+    if (!zone) return;
+    const hit = matchShippingService(shippingServices, zone);
+    if (hit) {
+      applyShippingService(hit);
+      return;
+    }
+    const ok = window.confirm(`المنطقة «${zone}» غير موجودة في خدمات الشحن (TBL007).\nهل تود الإضافة؟`);
+    if (!ok) return;
+    const settingsPath = roleShippingZonesSettingsPath(user?.role);
+    if (settingsPath) {
+      navigate(`${settingsPath}?prefill=${encodeURIComponent(zone)}`);
+      return;
+    }
+    // أدوار بدون شاشة إعدادات: إضافة سريعة مباشرة (بدون ضريبة، سعر افتراضي 100)
+    const priceRaw = window.prompt(`سعر الشحن لمنطقة «${zone}»؟`, "100");
+    if (priceRaw == null) return;
+    const price = Number(priceRaw);
+    if (!Number.isFinite(price) || price < 0) {
+      setMsg("سعر غير صالح");
+      return;
+    }
+    setBusy(true);
+    try {
+      const productName =
+        zone.includes("شحن") || zone.startsWith("خدمات") ? zone : `خدمات شحن ${zone}`;
+      const r = await fetch(`${base}/api/restaurant/delivery/shipping-zones`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProductName: productName, Price: price, applyTax: false }),
+      });
+      const j =
+        tryParseJson<{
+          CardGuide?: string;
+          ProductName?: string;
+          Price?: number;
+          NotTaxable?: boolean;
+          detail?: string;
+        }>(await r.text()) ?? {};
+      if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "تعذر إضافة المنطقة");
+      await loadShippingServices();
+      if (j.CardGuide) {
+        const svc: ShippingService = {
+          CardGuide: String(j.CardGuide).toUpperCase(),
+          ProductName: String(j.ProductName || productName),
+          Price: Number(j.Price ?? price) || 0,
+          NotTaxable: j.NotTaxable !== false,
+        };
+        setArea(zone);
+        applyShippingService(svc);
+        setMsg(`تمت إضافة «${svc.ProductName}»`);
+      } else {
+        setMsg("تمت إضافة المنطقة — اخترها من قائمة خدمات الشحن");
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitIntake(openPosAfter: boolean) {
     setMsg("");
     if (!name.trim() || !phone.trim() || !area.trim()) {
@@ -664,10 +769,30 @@ export default function DeliveryOpsHubPage() {
             </label>
             <label>
               المنطقة *
-              <input value={area} onChange={(e) => setArea(e.target.value)} list="deliv-areas" required />
+              <input
+                value={area}
+                list="deliv-areas"
+                required
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setArea(v);
+                  const hit = matchShippingService(shippingServices, v);
+                  if (hit) applyShippingService(hit);
+                }}
+                onBlur={() => {
+                  const v = area.trim();
+                  if (!v) return;
+                  const hit = matchShippingService(shippingServices, v);
+                  if (hit) {
+                    applyShippingService(hit);
+                    return;
+                  }
+                  void offerAddMissingZone(v);
+                }}
+              />
               <datalist id="deliv-areas">
-                {["المعادي", "مدينة نصر", "الزمالك", "المهندسين", "التجمع", "6 أكتوبر", "شبرا", "مصر الجديدة"].map((a) => (
-                  <option key={a} value={a} />
+                {shippingServices.map((s) => (
+                  <option key={s.CardGuide} value={s.ProductName} />
                 ))}
               </datalist>
             </label>
@@ -685,25 +810,37 @@ export default function DeliveryOpsHubPage() {
                 value={shippingProductGuide}
                 onChange={(e) => {
                   const gid = e.target.value;
-                  setShippingProductGuide(gid);
-                  const hit = shippingServices.find((s) => s.CardGuide === gid);
-                  if (hit) {
-                    setShippingProductName(hit.ProductName);
-                    setShippingFee(String(hit.Price));
-                    setShippingMode("service_item");
-                  } else {
-                    setShippingProductName("");
-                  }
+                  const hit = shippingServices.find((s) => s.CardGuide === gid) || null;
+                  applyShippingService(hit);
                 }}
               >
                 <option value="">— اختر منطقة/خدمة شحن —</option>
                 {shippingServices.map((s) => (
                   <option key={s.CardGuide} value={s.CardGuide}>
                     {s.ProductName} — {Number(s.Price || 0).toFixed(2)}
+                    {s.NotTaxable === false ? " · خاضع للضريبة" : " · بدون ضريبة"}
                   </option>
                 ))}
               </select>
               {shippingHint ? <span className="deliv-hub__hint">{shippingHint}</span> : null}
+              {roleShippingZonesSettingsPath(user?.role) ? (
+                <Link
+                  className="deliv-hub__hint"
+                  to={`${roleShippingZonesSettingsPath(user?.role)}`}
+                  style={{ display: "inline-block", marginTop: 6 }}
+                >
+                  تعريف مناطق الدليفري والشحن وأسعارها ←
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  className="deliv-hub__hint"
+                  style={{ display: "inline-block", marginTop: 6, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                  onClick={() => void offerAddMissingZone(area.trim() || "منطقة جديدة")}
+                >
+                  إضافة منطقة شحن غير موجودة…
+                </button>
+              )}
             </label>
             <label>
               قيمة الشحن

@@ -38,6 +38,8 @@ const ALL_ITEMS: SearchResult[] = [
   { title: "مستخدمو التطبيق", path: "users", subtitle: "6. دورة العمل والأدوار", keywords: "users login accounts حسابات" },
   { title: "نقاط البيع المشتركة", path: "pos-shared-terminal", subtitle: "6. دورة العمل والأدوار", keywords: "printers terminals طابعات" },
   { title: "تعريف العملاء والمالكين", path: "customer-vip", subtitle: "7. العملاء والخدمات الإضافية", keywords: "agents customers owners vip عملاء مالكين" },
+  { title: "تعريف مناطق الدليفري والشحن وأسعارها", path: "delivery-shipping-zones", subtitle: "7. العملاء والخدمات الإضافية", keywords: "shipping delivery zones شحن مناطق توصيل أسعار TBL007" },
+  { title: "باقات منطقة الأطفال", path: "kids-area-packages", subtitle: "7. العملاء والخدمات الإضافية", keywords: "kids packages أطفال باقات" },
   { title: "باقات منطقة الأطفال", path: "kids-area-packages", subtitle: "7. العملاء والخدمات الإضافية", keywords: "kids children أطفال" },
   { title: "التدقيق والامتثال", path: "audit-compliance", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "audit compliance تدقيق" },
   { title: "التكاليف اليومية", path: "costing", subtitle: "8. التدقيق والتكاليف اليومية", keywords: "daily cost materials raw" },

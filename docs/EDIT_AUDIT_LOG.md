@@ -854,6 +854,11 @@ eserved + active.
 - إعداد إنتاج: التحويل من `tokaido.proxy.rlwy.net` (بروكسي عام بطيء) إلى **`sqlserver2022docker.railway.internal:1433`** (شبكة Railway الخاصة).
 - رفع مهلة `get_connection` إلى 10ث وتقصير cool-down بعد الفشل إلى 15ث لتقليل انقطاعات الواجهة.
 
+### 121 — تعريف مناطق الدليفري والشحن وأسعارها (TBL007) — `UTC 2026-07-28T08:30:58Z` — ID `shipzones-be12eb30a4dc`
 
+- **`backend/api_server.py`**: `POST/PUT /api/restaurant/delivery/shipping-zones` — إضافة/تعديل منطقة شحن تحت مجموعة «خدمات الشحن»، CardCode = آخر رقم TBL007+1، افتراضي `NotTaxable=1` مع خيار تطبيق الضريبة؛ قائمة الخدمات تُرجع CardCode وNotTaxable.
+- **`src/pages/settings/DeliveryShippingZonesSettingsPage.tsx`**: نافذة إعدادات سريعة (قائمة + إضافة/تعديل/إيقاف) مع دعم `?prefill=`.
+- **`SettingsLayout` + `App.tsx` + `GlobalSearchModal`**: بند «تعريف مناطق الدليفري والشحن وأسعارها» ومسارات المدير / مدير التشغيل / المطوّر.
+- **`DeliveryOpsHubPage`**: عند كتابة منطقة غير موجودة → تأكيد الإضافة → الانتقال للإعدادات (أو إضافة سريعة للكاشير).
 
 
