@@ -914,3 +914,9 @@ eserved + active.
 - **السبب**: واجهة الحفظ/النسخ كانت تستدعي /quote وGET ticket وهما غير موجودين (404) فالحفظ لا يكتب شيئاً والنسخ يبدو بلا أثر.
 - **api_server**: إضافة GET ticket + POST quote/activate/assign-driver/mark-delivered/settle.
 - **DeliveryOrderPage**: توضيح الأزرار — «حفظ على التذكرة» / «حفظ المبدئية» / «نسخ الجدول للصق في واتساب».
+
+### 129 — بوابة SMS للدفع (VF-Cash / ADIB) + ingest API — UTC 2026-07-28T22:25:00Z — ID smsgate-e7a1c92b4d08
+
+- **android/SmsPaymentGateway**: تطبيق Kotlin يستقبل SMS من مرسلين قابلين للتعديل، يمنع التكرار، يعيد المحاولة، ويرسل JSON للـ API.
+- **api_server**: POST /api/restaurant/payments/sms-ingest + GET .../sms-inbox + تنبيه كاشير payment_sms.
+- **APK**: ndroid/SmsPaymentGateway/SmsPaymentGateway-debug.apk

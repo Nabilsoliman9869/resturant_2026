@@ -15679,6 +15679,7 @@ _CASHIER_ALERT_TYPES = frozenset(
         "request_bill_help",
         "service_issue",
         "delivery_ready",
+        "payment_sms",
     },
 )
 
@@ -15692,6 +15693,7 @@ _CASHIER_ALERT_DEFAULT_TITLES = {
     "request_bill_help": "تنبيه: مساعدة لطلب الحساب",
     "service_issue": "تنبيه: ملاحظة خدمة",
     "delivery_ready": "أوردر دليفري جاهز",
+    "payment_sms": "تحويل وارد SMS",
 }
 
 _DELIVERY_TICKET_STATUSES = frozenset(
@@ -29674,6 +29676,104 @@ def _parse_delivery_prepaid(body_or_delivery: dict) -> dict:
         "prepaidNote": note,
         "prepaidAt": datetime.now().isoformat() if amount > 0 else None,
     }
+
+
+
+
+def _payment_sms_store_path() -> str:
+    return os.path.join(_restaurant_dir, "payment_sms_inbox.json")
+
+
+def _payment_sms_load() -> list:
+    rows = _restaurant_load("payment_sms_inbox", [])
+    return rows if isinstance(rows, list) else []
+
+
+def _payment_sms_save(rows: list) -> None:
+    _restaurant_save("payment_sms_inbox", rows[-500:] if isinstance(rows, list) else [])
+
+
+@app.post("/api/restaurant/payments/sms-ingest")
+def restaurant_payment_sms_ingest(body: dict, request: Request):
+    """استقبال SMS محفظة/بنك من تطبيق الموبايل (VF-Cash / ADIB EGYPT)."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    api_key = (
+        str(request.headers.get("x-api-key") or "").strip()
+        or str(request.headers.get("authorization") or "").replace("Bearer", "").strip()
+        or str(body.get("apiKey") or "").strip()
+    )
+    expected = str(os.environ.get("MAT3AM_SMS_API_KEY") or "mat3am-sms-local").strip()
+    if expected and api_key != expected:
+        raise HTTPException(status_code=401, detail="API Key غير صالح")
+
+    sender = str(body.get("sender") or "").strip()[:120]
+    raw_body = str(body.get("body") or "").strip()[:4000]
+    if not sender or not raw_body:
+        raise HTTPException(status_code=400, detail="sender و body مطلوبان")
+
+    dedupe = str(body.get("dedupeKey") or "").strip()[:128]
+    if not dedupe:
+        import hashlib
+        dedupe = hashlib.sha256(f"{sender}|{raw_body}".encode("utf-8")).hexdigest()
+
+    rows = _payment_sms_load()
+    for r in rows:
+        if isinstance(r, dict) and str(r.get("dedupeKey") or "") == dedupe:
+            return {"ok": True, "duplicate": True, "id": r.get("id")}
+
+    now_iso = datetime.now().isoformat()
+    amount = body.get("amount")
+    try:
+        amount_f = float(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        amount_f = None
+
+    item = {
+        "id": str(uuid.uuid4()),
+        "dedupeKey": dedupe,
+        "createdAt": now_iso,
+        "sender": sender,
+        "body": raw_body,
+        "provider": str(body.get("provider") or "")[:60] or None,
+        "amount": amount_f,
+        "fromPhone": str(body.get("fromPhone") or "")[:40] or None,
+        "fromName": str(body.get("fromName") or "")[:120] or None,
+        "walletOrAccount": str(body.get("walletOrAccount") or "")[:40] or None,
+        "balance": body.get("balance"),
+        "smsAt": str(body.get("smsAt") or "")[:80] or None,
+        "branchId": str(body.get("branchId") or "")[:80] or None,
+        "deviceId": str(body.get("deviceId") or "")[:80] or None,
+        "receivedAt": body.get("receivedAt"),
+        "matchedTicketId": None,
+        "status": "received",
+    }
+    rows.append(item)
+    _payment_sms_save(rows)
+
+    try:
+        amt_txt = f"{amount_f:.0f} ج" if isinstance(amount_f, float) else "مبلغ"
+        restaurant_cashier_alerts_create(
+            {
+                "type": "payment_sms",
+                "title": f"تحويل وارد ({item.get('provider') or sender})",
+                "body": f"{amt_txt} — {sender}",
+                "sourceKey": f"payment_sms:{dedupe}",
+                "tableDisplayName": "مدفوعات SMS",
+            }
+        )
+    except Exception as e:
+        print("[mat3am] payment sms alert:", e)
+
+    return {"ok": True, "duplicate": False, "item": item}
+
+
+@app.get("/api/restaurant/payments/sms-inbox")
+def restaurant_payment_sms_inbox(limit: int = 50):
+    rows = _payment_sms_load()
+    rows = [r for r in rows if isinstance(r, dict)]
+    rows.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
+    return {"ok": True, "items": rows[: max(1, min(int(limit or 50), 200))]}
 
 
 @app.get("/api/restaurant/delivery/tickets")

@@ -30,6 +30,8 @@ $StagePrefixes = @(
   "src/",
   "docs/",
   "scripts/",
+  "android/",
+  ".gitignore",
   "assets/",
   "sql/",
   "ui/restaurant/index.html",

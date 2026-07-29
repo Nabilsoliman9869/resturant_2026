@@ -44,6 +44,7 @@ tmp*.json
 __pycache__/
 *.py[cod]
 .venv/
+.venv312/
 venv/
 *.egg-info/
 
@@ -57,3 +58,10 @@ Thumbs.db
 .trae/
 *.swp
 *.swo
+
+# Android SMS gateway build tooling (local)
+tools/jdk17/
+tools/jdk17.zip
+android/**/.gradle/
+android/**/build/
+android/**/local.properties
