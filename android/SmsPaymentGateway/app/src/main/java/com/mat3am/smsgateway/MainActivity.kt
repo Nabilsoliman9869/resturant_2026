@@ -1,12 +1,16 @@
 package com.mat3am.smsgateway
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.mat3am.smsgateway.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
@@ -17,6 +21,18 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: Prefs
+
+    private val readSmsLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                runImport()
+            } else {
+                binding.statusText.text =
+                    "تعذّر منح إذن قراءة الرسائل. أندرويد يحجب هذا الإذن للتطبيقات المثبّتة خارج المتجر. " +
+                    "الاستقبال اللحظي عبر وصول الإشعارات يظل يعمل."
+                Toast.makeText(this, "إذن قراءة الرسائل مرفوض", Toast.LENGTH_LONG).show()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +68,14 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
 
+        binding.importBtn.setOnClickListener {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
+                runImport()
+            } else {
+                readSmsLauncher.launch(Manifest.permission.READ_SMS)
+            }
+        }
+
         binding.testBtn.setOnClickListener {
             lifecycleScope.launch {
                 SmsIngest.handleIncoming(
@@ -74,6 +98,19 @@ class MainActivity : AppCompatActivity() {
 
         updateStatus()
         refreshLog()
+    }
+
+    private fun runImport() {
+        binding.statusText.text = "جارٍ قراءة صندوق الرسائل…"
+        lifecycleScope.launch {
+            val res = SmsIngest.importInbox(this@MainActivity)
+            binding.statusText.text = when {
+                res.scanned < 0 -> "تعذّر فتح صندوق الرسائل على هذا الجهاز."
+                res.accepted == 0 -> "فُحصت ${res.scanned} رسالة ولم يُعثر على تحويلات مالية مطابقة."
+                else -> "فُحصت ${res.scanned} رسالة، واستُوردت ${res.accepted} عملية وأُرسلت للسيرفر."
+            }
+            refreshLog()
+        }
     }
 
     override fun onResume() {

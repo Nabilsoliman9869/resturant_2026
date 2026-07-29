@@ -1,6 +1,7 @@
 package com.mat3am.smsgateway
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -27,17 +28,27 @@ object SmsIngest {
         }
     }
 
-    suspend fun handleIncoming(ctx: Context, sender: String, body: String, receivedAt: Long = System.currentTimeMillis()) {
+    suspend fun handleIncoming(
+        ctx: Context,
+        sender: String,
+        body: String,
+        receivedAt: Long = System.currentTimeMillis(),
+        relaxSender: Boolean = false
+    ) {
         val prefs = Prefs(ctx)
         if (!prefs.enabled) {
             Log.i(TAG, "disabled, skip")
             return
         }
-        if (!isAllowed(prefs, sender)) {
+        if (!relaxSender && !isAllowed(prefs, sender)) {
             Log.i(TAG, "sender not allowed: $sender")
             return
         }
         val parsed = SmsParser.parse(sender, body)
+        if (parsed.kind == "promo") {
+            Log.i(TAG, "promotional message, skip")
+            return
+        }
         val key = dedupeKey(sender, body, receivedAt)
         val payload = JSONObject()
             .put("sender", sender)
@@ -77,6 +88,48 @@ object SmsIngest {
         flushPending(ctx)
     }
 
+
+    data class ImportResult(val scanned: Int, val accepted: Int)
+
+    /**
+     * يقرأ صندوق الرسائل المخزّن على الهاتف ويستورد ما يبدو تحويلاً مالياً.
+     * يُقبل الصف إن كان المرسل ضمن المسموحين، أو إن استنتج المحلل تحويلاً وارداً بثقة كافية.
+     */
+    suspend fun importInbox(ctx: Context, maxDays: Int = 120, maxRows: Int = 800): ImportResult {
+        val prefs = Prefs(ctx)
+        val cutoff = System.currentTimeMillis() - maxDays * 24L * 3600_000L
+        var scanned = 0
+        var accepted = 0
+        val cols = arrayOf("address", "body", "date")
+        ctx.contentResolver.query(
+            Uri.parse("content://sms/inbox"),
+            cols,
+            "date >= ?",
+            arrayOf(cutoff.toString()),
+            "date DESC"
+        )?.use { c ->
+            val iAddr = c.getColumnIndex("address")
+            val iBody = c.getColumnIndex("body")
+            val iDate = c.getColumnIndex("date")
+            while (c.moveToNext() && scanned < maxRows) {
+                scanned++
+                val addr = (if (iAddr >= 0) c.getString(iAddr) else null).orEmpty().trim()
+                val body = (if (iBody >= 0) c.getString(iBody) else null).orEmpty()
+                val ts = if (iDate >= 0) c.getLong(iDate) else System.currentTimeMillis()
+                if (body.isBlank()) continue
+
+                val parsed = SmsParser.parse(addr, body)
+                if (parsed.kind == "promo") continue
+                val looksFinancial = (parsed.kind == "incoming" || parsed.kind == "debit") &&
+                    parsed.amount != null && parsed.confidence >= 50
+                if (!isAllowed(prefs, addr) && !looksFinancial) continue
+
+                handleIncoming(ctx, addr.ifBlank { "unknown" }, body, ts, relaxSender = true)
+                accepted++
+            }
+        } ?: return ImportResult(-1, 0)
+        return ImportResult(scanned, accepted)
+    }
 
     fun looksLikePaymentSms(body: String): Boolean {
         val b = body

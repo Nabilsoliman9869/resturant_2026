@@ -29693,6 +29693,22 @@ def _payment_sms_save(rows: list) -> None:
     _restaurant_save("payment_sms_inbox", rows[-500:] if isinstance(rows, list) else [])
 
 
+def _payment_sms_parse(sender: str, raw_body: str) -> dict:
+    """يستنتج حقول العملية من نص الرسالة. يفشل بهدوء إن تعذّر تحميل الوحدة."""
+    try:
+        from sms_parse import parse_sms
+    except ImportError:
+        try:
+            from backend.sms_parse import parse_sms
+        except ImportError:
+            return {}
+    try:
+        return parse_sms(sender or "", raw_body or "")
+    except Exception as e:
+        print("[mat3am] sms parse:", e)
+        return {}
+
+
 @app.post("/api/restaurant/payments/sms-ingest")
 def restaurant_payment_sms_ingest(body: dict, request: Request):
     """استقبال SMS محفظة/بنك من تطبيق الموبايل (VF-Cash / ADIB EGYPT)."""
@@ -29717,7 +29733,18 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
         import hashlib
         dedupe = hashlib.sha256(f"{sender}|{raw_body}".encode("utf-8")).hexdigest()
 
-    ref_no = str(body.get("refNo") or "").strip()[:40]
+    # الخادم يعيد التحليل دائماً حتى تتوحّد النتائج مهما كان إصدار التطبيق.
+    parsed = _payment_sms_parse(sender, raw_body)
+    if parsed.get("kind") == "promo":
+        return {"ok": True, "skipped": "promo"}
+
+    def pick(key, fallback_key=None):
+        v = parsed.get(key)
+        if v is not None and v != "":
+            return v
+        return body.get(fallback_key or key)
+
+    ref_no = str(pick("refNo") or "").strip()[:40]
     rows = _payment_sms_load()
     for r in rows:
         if not isinstance(r, dict):
@@ -29728,14 +29755,15 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
             return {"ok": True, "duplicate": True, "id": r.get("id")}
 
     now_iso = datetime.now().isoformat()
-    amount = body.get("amount")
+    amount = pick("amount")
     try:
         amount_f = float(amount) if amount is not None else None
     except (TypeError, ValueError):
         amount_f = None
 
     try:
-        confidence_i = int(body.get("confidence")) if body.get("confidence") is not None else None
+        conf_raw = pick("confidence")
+        confidence_i = int(conf_raw) if conf_raw is not None else None
     except (TypeError, ValueError):
         confidence_i = None
 
@@ -29745,16 +29773,16 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
         "createdAt": now_iso,
         "sender": sender,
         "body": raw_body,
-        "provider": str(body.get("provider") or "")[:60] or None,
-        "kind": str(body.get("kind") or "")[:20] or ("incoming" if amount_f is not None else "info"),
+        "provider": str(pick("provider") or "")[:60] or None,
+        "kind": str(pick("kind") or "")[:20] or ("incoming" if amount_f is not None else "info"),
         "refNo": ref_no or None,
         "confidence": confidence_i,
         "amount": amount_f,
-        "fromPhone": str(body.get("fromPhone") or "")[:40] or None,
-        "fromName": str(body.get("fromName") or "")[:120] or None,
-        "walletOrAccount": str(body.get("walletOrAccount") or "")[:40] or None,
-        "balance": body.get("balance"),
-        "smsAt": str(body.get("smsAt") or "")[:80] or None,
+        "fromPhone": str(pick("fromPhone") or "")[:40] or None,
+        "fromName": str(pick("fromName") or "")[:120] or None,
+        "walletOrAccount": str(pick("walletOrAccount") or "")[:40] or None,
+        "balance": pick("balance"),
+        "smsAt": str(pick("smsAt") or "")[:80] or None,
         "branchId": str(body.get("branchId") or "")[:80] or None,
         "deviceId": str(body.get("deviceId") or "")[:80] or None,
         "receivedAt": body.get("receivedAt"),
@@ -29784,6 +29812,39 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
             print("[mat3am] payment sms alert:", e)
 
     return {"ok": True, "duplicate": False, "item": item}
+
+
+@app.post("/api/restaurant/payments/sms-reparse")
+def restaurant_payment_sms_reparse(drop_promo: bool = True):
+    """إعادة تحليل الرسائل المخزّنة بالمحرك الحالي — لإصلاح صفوف وصلت بإصدار قديم."""
+    rows = _payment_sms_load()
+    kept: list = []
+    updated = 0
+    dropped = 0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        parsed = _payment_sms_parse(str(r.get("sender") or ""), str(r.get("body") or ""))
+        if not parsed:
+            kept.append(r)
+            continue
+        if drop_promo and parsed.get("kind") == "promo":
+            dropped += 1
+            continue
+        changed = False
+        for key in ("provider", "kind", "amount", "fromPhone", "fromName",
+                    "walletOrAccount", "balance", "smsAt", "refNo", "confidence"):
+            new_val = parsed.get(key)
+            if new_val is None or new_val == "":
+                continue
+            if r.get(key) != new_val:
+                r[key] = new_val
+                changed = True
+        if changed:
+            updated += 1
+        kept.append(r)
+    _payment_sms_save(kept)
+    return {"ok": True, "total": len(rows), "updated": updated, "droppedPromo": dropped, "kept": len(kept)}
 
 
 @app.get("/api/restaurant/payments/sms-inbox")

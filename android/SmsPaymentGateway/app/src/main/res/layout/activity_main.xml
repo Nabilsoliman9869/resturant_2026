@@ -105,6 +105,12 @@
             android:text="فتح وصول قراءة الإشعارات (المطلوب)" />
 
         <Button
+            android:id="@+id/importBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="استيراد الرسائل الموجودة على الهاتف" />
+
+        <Button
             android:id="@+id/testBtn"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
