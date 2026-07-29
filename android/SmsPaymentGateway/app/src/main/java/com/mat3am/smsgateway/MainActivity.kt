@@ -45,7 +45,23 @@ class MainActivity : AppCompatActivity() {
 
         binding.notifBtn.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            Toast.makeText(this, "فعّل «بوابة SMS للدفع» من قائمة وصول الإشعارات", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                this,
+                "فعّل مفتاح «بوابة SMS للدفع» في شاشة وصول الإشعارات",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        binding.testBtn.setOnClickListener {
+            lifecycleScope.launch {
+                SmsIngest.handleIncoming(
+                    this@MainActivity,
+                    "VF-Cash",
+                    "تم استلام مبلغ 1.00 جنيه من 01000000000 المسجل بإسم TEST على رقم محفظتك 01000000000 بتاريخ 00:00 29-07-26. رصيدك الحالي 1.00 جنيه"
+                )
+                Toast.makeText(this@MainActivity, "تم إرسال اختبار للسيرفر — راجع السجل", Toast.LENGTH_LONG).show()
+                refreshLog()
+            }
         }
 
         binding.retryBtn.setOnClickListener {
@@ -70,17 +86,20 @@ class MainActivity : AppCompatActivity() {
         val cn = ComponentName(this, PaymentNotifListener::class.java)
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
         if (TextUtils.isEmpty(flat)) return false
-        return flat.split(":").any {
-            ComponentName.unflattenFromString(it)?.flattenToString() == cn.flattenToString()
-                || it.contains(packageName)
+        val want = cn.flattenToString()
+        return flat.split(":").any { raw ->
+            val parsed = ComponentName.unflattenFromString(raw)
+            parsed == cn ||
+                raw.equals(want, ignoreCase = true) ||
+                (raw.contains(packageName, ignoreCase = true) && raw.contains("PaymentNotifListener", ignoreCase = true))
         }
     }
 
     private fun updateStatus() {
         binding.statusText.text = if (isNotificationAccessEnabled()) {
-            "جاهز عبر الإشعارات — انتظر رسالة VF-Cash / ADIB EGYPT"
+            "جاهز: وصول قراءة الإشعارات مفعّل — انتظر إشعار رسالة VF-Cash / ADIB"
         } else {
-            "مطلوب: تفعيل وصول الإشعارات (الزر بالأسفل) — أندرويد يمنع صلاحية SMS لهذا النوع من التطبيقات"
+            "غير مفعّل. الشاشة المطلوبة اسمها وصول إلى الإشعارات / Notification access — وليس إشعارات التطبيق. اضغط الزر الأخضر وفعّل بوابة SMS للدفع."
         }
     }
 
@@ -89,7 +108,7 @@ class MainActivity : AppCompatActivity() {
             val rows = AppDb.get(this@MainActivity).sms().recent()
             val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.US)
             binding.logText.text = if (rows.isEmpty()) {
-                "لا رسائل بعد. فعّل وصول الإشعارات ثم أعد تجربة التحويل."
+                "لا رسائل بعد."
             } else {
                 rows.joinToString("\n\n") { r ->
                     val t = fmt.format(Date(r.receivedAt))
