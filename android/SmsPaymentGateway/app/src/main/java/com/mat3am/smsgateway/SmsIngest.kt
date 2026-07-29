@@ -74,6 +74,28 @@ object SmsIngest {
         flushPending(ctx)
     }
 
+
+    fun looksLikePaymentSms(body: String): Boolean {
+        val b = body
+        return b.contains("تم استلام مبلغ") ||
+            b.contains("تم إضافة") ||
+            b.contains("EGP") && b.contains("حسابك") ||
+            b.contains("الى حسابك") ||
+            b.contains("إلى حسابك")
+    }
+
+    fun guessSenderFromBody(prefs: Prefs, body: String): String? {
+        val b = body.lowercase()
+        val allowed = prefs.allowedSendersRaw.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        return when {
+            b.contains("فودافون") || b.contains("محفظتك") || b.contains("vf") ->
+                allowed.firstOrNull { it.contains("VF", ignoreCase = true) || it.contains("cash", ignoreCase = true) || it.contains("vodafone", ignoreCase = true) }
+            b.contains("adib") || b.contains("حسابك رقم") ->
+                allowed.firstOrNull { it.contains("ADIB", ignoreCase = true) }
+            else -> null
+        }
+    }
+
     fun enqueueRetry(ctx: Context) {
         val req = OneTimeWorkRequestBuilder<SmsRetryWorker>().build()
         WorkManager.getInstance(ctx).enqueueUniqueWork("sms_retry", ExistingWorkPolicy.KEEP, req)

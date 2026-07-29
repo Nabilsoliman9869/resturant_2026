@@ -17,6 +17,13 @@
             android:textSize="20sp"
             android:textStyle="bold" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="أندرويد يمنع صلاحية SMS لتطبيقات خارج المتجر. استخدم «وصول الإشعارات» لقراءة رسائل التحويل."
+            android:textSize="13sp" />
+
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -82,7 +89,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="تفعيل استقبال SMS" />
+            android:text="تفعيل الاستقبال" />
 
         <Button
             android:id="@+id/saveBtn"
@@ -90,6 +97,12 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="حفظ الإعدادات" />
+
+        <Button
+            android:id="@+id/notifBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="تفعيل وصول الإشعارات (مهم)" />
 
         <Button
             android:id="@+id/retryBtn"

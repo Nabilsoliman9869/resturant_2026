@@ -1,13 +1,12 @@
 package com.mat3am.smsgateway
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
+import android.text.TextUtils
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.mat3am.smsgateway.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
@@ -18,14 +17,6 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: Prefs
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val ok = result.entries.all { it.value }
-        binding.statusText.text = if (ok) "صلاحيات SMS ممنوحة" else "يلزم منح صلاحية قراءة/استقبال SMS"
-        refreshLog()
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,8 +39,13 @@ class MainActivity : AppCompatActivity() {
             prefs.allowedSendersRaw = binding.allowedSenders.text?.toString().orEmpty()
             prefs.enabled = binding.enabledSwitch.isChecked
             Toast.makeText(this, "تم الحفظ", Toast.LENGTH_SHORT).show()
-            requestSmsPermissions()
+            updateStatus()
             refreshLog()
+        }
+
+        binding.notifBtn.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            Toast.makeText(this, "فعّل «بوابة SMS للدفع» من قائمة وصول الإشعارات", Toast.LENGTH_LONG).show()
         }
 
         binding.retryBtn.setOnClickListener {
@@ -60,21 +56,32 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        requestSmsPermissions()
+        updateStatus()
         refreshLog()
     }
 
-    private fun requestSmsPermissions() {
-        val needed = mutableListOf(
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.READ_SMS
-        )
-        if (Build.VERSION.SDK_INT >= 33) needed.add(Manifest.permission.POST_NOTIFICATIONS)
-        val missing = needed.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    override fun onResume() {
+        super.onResume()
+        updateStatus()
+        refreshLog()
+    }
+
+    private fun isNotificationAccessEnabled(): Boolean {
+        val cn = ComponentName(this, PaymentNotifListener::class.java)
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
+        if (TextUtils.isEmpty(flat)) return false
+        return flat.split(":").any {
+            ComponentName.unflattenFromString(it)?.flattenToString() == cn.flattenToString()
+                || it.contains(packageName)
         }
-        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
-        else binding.statusText.text = "جاهز — المرسلون: VF-Cash / ADIB EGYPT"
+    }
+
+    private fun updateStatus() {
+        binding.statusText.text = if (isNotificationAccessEnabled()) {
+            "جاهز عبر الإشعارات — انتظر رسالة VF-Cash / ADIB EGYPT"
+        } else {
+            "مطلوب: تفعيل وصول الإشعارات (الزر بالأسفل) — أندرويد يمنع صلاحية SMS لهذا النوع من التطبيقات"
+        }
     }
 
     private fun refreshLog() {
@@ -82,7 +89,7 @@ class MainActivity : AppCompatActivity() {
             val rows = AppDb.get(this@MainActivity).sms().recent()
             val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.US)
             binding.logText.text = if (rows.isEmpty()) {
-                "لا رسائل بعد. انتظر SMS من VF-Cash أو ADIB EGYPT."
+                "لا رسائل بعد. فعّل وصول الإشعارات ثم أعد تجربة التحويل."
             } else {
                 rows.joinToString("\n\n") { r ->
                     val t = fmt.format(Date(r.receivedAt))
