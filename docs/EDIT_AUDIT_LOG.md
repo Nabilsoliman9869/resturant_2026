@@ -920,3 +920,11 @@ eserved + active.
 - **android/SmsPaymentGateway**: تطبيق Kotlin يستقبل SMS من مرسلين قابلين للتعديل، يمنع التكرار، يعيد المحاولة، ويرسل JSON للـ API.
 - **api_server**: POST /api/restaurant/payments/sms-ingest + GET .../sms-inbox + تنبيه كاشير payment_sms.
 - **APK**: ndroid/SmsPaymentGateway/SmsPaymentGateway-debug.apk
+
+### 130 — تحويل قراءة SMS الى محرك استدلال (heuristic) بدل مطابقة عبارات ثابتة — UTC 2026-07-29T21:30:00Z — ID smsinfer-4d90b7e1c236
+
+- السبب: اول تحويل حقيقي وصل (20.00 ج، محفظة 01026669108) لكن المحوّل/الرصيد/التاريخ/رقم العملية لم تُقرأ لان الصياغة الفعلية مختلفة عن العبارات المتوقعة. الحل: قراءة تستنتج الحقول من بنية الرسالة بدل الاعتماد على نص محدد.
+- SmsParser.kt (النسختان): اعادة كتابته كمحرك استدلال — تطبيع الارقام العربية، استخراج كل الارقام وتصنيفها حسب الشكل والسياق (مبلغ/رصيد/هاتف/رقم عملية)، استنتاج الاتجاه (incoming/debit/info) من كلمات دلالية، كشف مزوّد الخدمة، ودرجة ثقة confidence 0..100. يعمل حتى مع تغيّر صياغة الرسالة او مزوّد جديد.
+- SmsIngest.kt (النسختان): ارسال kind وrefNo وconfidence ضمن الحمولة.
+- api_server: تخزين kind/refNo/confidence، منع التكرار عبر refNo ايضاً، وقصر تنبيه الكاشير على kind == incoming مع ذكر المحوّل ورقم العملية.
+- build.gradle.kts (النسختان): رفع الاصدار الى 1.3.0 (versionCode 4).

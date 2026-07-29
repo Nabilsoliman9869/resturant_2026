@@ -29717,9 +29717,14 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
         import hashlib
         dedupe = hashlib.sha256(f"{sender}|{raw_body}".encode("utf-8")).hexdigest()
 
+    ref_no = str(body.get("refNo") or "").strip()[:40]
     rows = _payment_sms_load()
     for r in rows:
-        if isinstance(r, dict) and str(r.get("dedupeKey") or "") == dedupe:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("dedupeKey") or "") == dedupe:
+            return {"ok": True, "duplicate": True, "id": r.get("id")}
+        if ref_no and str(r.get("refNo") or "") == ref_no:
             return {"ok": True, "duplicate": True, "id": r.get("id")}
 
     now_iso = datetime.now().isoformat()
@@ -29729,6 +29734,11 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
     except (TypeError, ValueError):
         amount_f = None
 
+    try:
+        confidence_i = int(body.get("confidence")) if body.get("confidence") is not None else None
+    except (TypeError, ValueError):
+        confidence_i = None
+
     item = {
         "id": str(uuid.uuid4()),
         "dedupeKey": dedupe,
@@ -29736,6 +29746,9 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
         "sender": sender,
         "body": raw_body,
         "provider": str(body.get("provider") or "")[:60] or None,
+        "kind": str(body.get("kind") or "")[:20] or ("incoming" if amount_f is not None else "info"),
+        "refNo": ref_no or None,
+        "confidence": confidence_i,
         "amount": amount_f,
         "fromPhone": str(body.get("fromPhone") or "")[:40] or None,
         "fromName": str(body.get("fromName") or "")[:120] or None,
@@ -29751,19 +29764,24 @@ def restaurant_payment_sms_ingest(body: dict, request: Request):
     rows.append(item)
     _payment_sms_save(rows)
 
-    try:
-        amt_txt = f"{amount_f:.0f} ج" if isinstance(amount_f, float) else "مبلغ"
-        restaurant_cashier_alerts_create(
-            {
-                "type": "payment_sms",
-                "title": f"تحويل وارد ({item.get('provider') or sender})",
-                "body": f"{amt_txt} — {sender}",
-                "sourceKey": f"payment_sms:{dedupe}",
-                "tableDisplayName": "مدفوعات SMS",
-            }
-        )
-    except Exception as e:
-        print("[mat3am] payment sms alert:", e)
+    if item.get("kind") == "incoming":
+        try:
+            amt_txt = f"{amount_f:.2f} ج" if isinstance(amount_f, float) else "مبلغ"
+            who = item.get("fromName") or item.get("fromPhone") or sender
+            parts = [amt_txt, f"من {who}"]
+            if item.get("refNo"):
+                parts.append(f"عملية {item['refNo']}")
+            restaurant_cashier_alerts_create(
+                {
+                    "type": "payment_sms",
+                    "title": f"تحويل وارد ({item.get('provider') or sender})",
+                    "body": " — ".join(parts),
+                    "sourceKey": f"payment_sms:{dedupe}",
+                    "tableDisplayName": "مدفوعات SMS",
+                }
+            )
+        except Exception as e:
+            print("[mat3am] payment sms alert:", e)
 
     return {"ok": True, "duplicate": False, "item": item}
 
