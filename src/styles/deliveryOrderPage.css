@@ -520,3 +520,129 @@
 .dop-quote-card .dop-quote-text {
   margin-top: 0.25rem;
 }
+
+.dop-payment-match {
+  margin-top: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(6, 78, 59, 0.18), rgba(15, 23, 42, 0.92));
+}
+
+.dop-payment-match__head {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dop-payment-match__head strong,
+.dop-payment-match__head span {
+  display: block;
+}
+
+.dop-payment-match__head span {
+  margin-top: 0.18rem;
+  color: var(--muted, #94a3b8);
+  font-size: 0.72rem;
+}
+
+.dop-payment-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+  margin: 0.7rem 0;
+}
+
+.dop-payment-summary > div {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.68);
+  text-align: center;
+}
+
+.dop-payment-summary span,
+.dop-payment-summary b {
+  display: block;
+}
+
+.dop-payment-summary span {
+  color: var(--muted, #94a3b8);
+  font-size: 0.7rem;
+}
+
+.dop-payment-summary b {
+  margin-top: 0.18rem;
+}
+
+.dop-payment-summary .is-paid { border-color: rgba(16, 185, 129, 0.65); color: #6ee7b7; }
+.dop-payment-summary .is-due { border-color: rgba(245, 158, 11, 0.6); color: #fbbf24; }
+
+.dop-payment-allocations h3 {
+  margin: 0.7rem 0 0.35rem;
+  font-size: 0.82rem;
+}
+
+.dop-payment-allocation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.35rem;
+  border-radius: 9px;
+  background: rgba(16, 185, 129, 0.11);
+}
+
+.dop-payment-allocation strong,
+.dop-payment-allocation span {
+  display: block;
+}
+
+.dop-payment-allocation span { color: var(--muted, #94a3b8); font-size: 0.7rem; }
+.dop-payment-allocation button { border: 0; background: transparent; color: #fca5a5; cursor: pointer; }
+
+.dop-payment-complete {
+  margin: 0.6rem 0;
+  padding: 0.5rem;
+  border-radius: 9px;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.dop-payment-table-wrap {
+  overflow-x: auto;
+}
+
+.dop-payment-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.dop-payment-table th,
+.dop-payment-table td {
+  padding: 0.42rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  text-align: right;
+  vertical-align: middle;
+}
+
+.dop-payment-table tr.is-phone-match { background: rgba(16, 185, 129, 0.1); }
+.dop-payment-table b,
+.dop-payment-table small { display: block; }
+.dop-payment-table small { margin-top: 0.12rem; color: var(--muted, #94a3b8); white-space: normal; }
+.dop-payment-table input { width: 90px; padding: 0.35rem; border: 1px solid var(--border); border-radius: 7px; background: rgba(15, 23, 42, 0.75); color: inherit; }
+.dop-payment-table button { padding: 0.38rem 0.55rem; border: 0; border-radius: 7px; background: #059669; color: #fff; cursor: pointer; }
+.dop-payment-table button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.dop-payment-empty { color: var(--muted, #94a3b8); font-size: 0.78rem; }
+.dop-payment-more { width: 100%; margin-top: 0.45rem; border: 0; background: transparent; color: #7dd3fc; cursor: pointer; }
+
+@media (max-width: 620px) {
+  .dop-payment-summary { grid-template-columns: 1fr; }
+}

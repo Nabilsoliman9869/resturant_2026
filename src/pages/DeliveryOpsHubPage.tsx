@@ -154,7 +154,7 @@ function DeliveryQueueActions({ ticket, busy, assignDriver, markDelivered, settl
   return <div className="deliv-hub__ticket-actions">
     {status === "ready" ? <button type="button" className="btn" disabled={busy} onClick={() => void assignDriver(ticket)}>تكليف طيار</button> : null}
     {status === "out_for_delivery" ? <button type="button" className="btn" disabled={busy} onClick={() => void markDelivered(ticket)}>تم التسليم</button> : null}
-    {["out_for_delivery", "delivered"].includes(status) ? <button type="button" className="btn" disabled={busy} onClick={() => void settleTicket(ticket)}>تسوية نقد/فيزا</button> : null}
+    {["out_for_delivery", "delivered"].includes(status) ? <button type="button" className="btn" disabled={busy} onClick={() => void settleTicket(ticket)}>تسوية نقد/فيزا/محفظة</button> : null}
     {ticket.mapsUrl ? <a href={ticket.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">خرائط</a> : null}
     {(ticket.attachments || []).slice(0, 1).map((attachment) => attachment.url ? <a key={attachment.fileName || attachment.url} href={`${base}${attachment.url}`} target="_blank" rel="noreferrer" className="btn btn-ghost">صورة</a> : null)}
   </div>;
@@ -553,7 +553,7 @@ export default function DeliveryOpsHubPage() {
   }
 
   async function settleTicket(t: DeliveryTicket) {
-    const methodRaw = window.prompt("وسيلة التحصيل عند الرجوع: cash أو card", "cash")?.trim().toLowerCase() || "cash";
+    const methodRaw = window.prompt("وسيلة التحصيل عند الرجوع: cash أو card أو digital", "cash")?.trim().toLowerCase() || "cash";
     const method = methodRaw === "visa" || methodRaw === "card" ? "card" : methodRaw === "digital" ? "digital" : "cash";
     setBusy(true);
     try {
@@ -564,7 +564,7 @@ export default function DeliveryOpsHubPage() {
       });
       const j = tryParseJson<{ detail?: string }>(await r.text()) ?? {};
       if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "فشل التسوية");
-      setMsg(`تم تسوية أوردر #${t.ticketNo || ""} (${method === "card" ? "فيزا" : "نقد"})`);
+      setMsg(`تم تسوية أوردر #${t.ticketNo || ""} (${method === "card" ? "فيزا" : method === "digital" ? "محفظة/تحويل" : "نقد"})`);
       await loadTickets();
     } catch (e) {
       setMsg(String(e));
@@ -1297,7 +1297,7 @@ export default function DeliveryOpsHubPage() {
                     ) : null}
                     {["delivered", "out_for_delivery"].includes(String(t.status || "")) ? (
                       <button type="button" className="btn" disabled={busy} onClick={() => void settleTicket(t)}>
-                        تسوية نقد/فيزا
+                        تسوية نقد/فيزا/محفظة
                       </button>
                     ) : null}
                     {t.mapsUrl ? (

@@ -29693,6 +29693,71 @@ def _payment_sms_save(rows: list) -> None:
     _restaurant_save("payment_sms_inbox", rows[-500:] if isinstance(rows, list) else [])
 
 
+_payment_sms_allocation_lock = threading.RLock()
+
+
+def _payment_money(value: Any) -> float:
+    try:
+        return round(max(0.0, float(value or 0)), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _payment_allocations_load() -> list:
+    rows = _restaurant_load("payment_sms_allocations", [])
+    return [x for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
+
+
+def _payment_allocations_save(rows: list) -> None:
+    _restaurant_save("payment_sms_allocations", rows[-2000:] if isinstance(rows, list) else [])
+
+
+def _payment_sms_allocated(sms_id: str, allocations: Optional[list] = None) -> float:
+    ledger = allocations if isinstance(allocations, list) else _payment_allocations_load()
+    return round(sum(
+        _payment_money(x.get("amount"))
+        for x in ledger
+        if str(x.get("smsId") or "") == str(sms_id)
+    ), 2)
+
+
+def _payment_sms_available(row: dict, allocations: Optional[list] = None) -> float:
+    return round(max(
+        0.0,
+        _payment_money(row.get("amount")) - _payment_sms_allocated(str(row.get("id") or ""), allocations),
+    ), 2)
+
+
+def _delivery_payment_allocations(ticket_id: str, allocations: Optional[list] = None) -> list:
+    ledger = allocations if isinstance(allocations, list) else _payment_allocations_load()
+    return [x for x in ledger if str(x.get("ticketId") or "") == str(ticket_id)]
+
+
+def _delivery_payment_allocated(ticket_id: str, allocations: Optional[list] = None) -> float:
+    return round(sum(
+        _payment_money(x.get("amount"))
+        for x in _delivery_payment_allocations(ticket_id, allocations)
+    ), 2)
+
+
+def _delivery_payment_total(ticket: dict) -> float:
+    totals = ticket.get("quoteTotals") if isinstance(ticket.get("quoteTotals"), dict) else {}
+    return _payment_money(totals.get("total"))
+
+
+def _delivery_payment_summary(ticket: dict, allocations: Optional[list] = None) -> dict:
+    total = _delivery_payment_total(ticket)
+    ticket_id = str(ticket.get("id") or "")
+    ticket_allocations = _delivery_payment_allocations(ticket_id, allocations)
+    allocated = _delivery_payment_allocated(ticket_id, allocations)
+    return {
+        "invoiceTotal": total,
+        "allocatedAmount": allocated,
+        "remainingDue": round(max(0.0, total - allocated), 2),
+        "allocations": ticket_allocations,
+    }
+
+
 def _payment_sms_parse(sender: str, raw_body: str) -> dict:
     """يستنتج حقول العملية من نص الرسالة. يفشل بهدوء إن تعذّر تحميل الوحدة."""
     try:
@@ -29852,7 +29917,182 @@ def restaurant_payment_sms_inbox(limit: int = 50):
     rows = _payment_sms_load()
     rows = [r for r in rows if isinstance(r, dict)]
     rows.sort(key=lambda x: str(x.get("createdAt") or ""), reverse=True)
-    return {"ok": True, "items": rows[: max(1, min(int(limit or 50), 200))]}
+    allocations = _payment_allocations_load()
+    items = []
+    for row in rows[: max(1, min(int(limit or 50), 200))]:
+        item = dict(row)
+        item["allocatedAmount"] = _payment_sms_allocated(str(row.get("id") or ""), allocations)
+        item["availableAmount"] = _payment_sms_available(row, allocations)
+        items.append(item)
+    return {"ok": True, "items": items}
+
+
+@app.get("/api/restaurant/delivery/tickets/{ticket_id}/payment-suggestions")
+def restaurant_delivery_ticket_payment_suggestions(ticket_id: str, limit: int = 80):
+    """
+    ترشيحات فقط — لا تُربط أي عملية آلياً.
+    الترتيب يعتمد على هاتف المُحوِّل، المبلغ المتبقي، الفرع، والثقة.
+    """
+    ticket, _ = _delivery_find_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+
+    allocations = _payment_allocations_load()
+    summary = _delivery_payment_summary(ticket, allocations)
+    remaining = _payment_money(summary.get("remainingDue"))
+    phones = {
+        _delivery_norm_phone(str(ticket.get("phone") or "")),
+        _delivery_norm_phone(str(ticket.get("phone2") or "")),
+    }
+    phones.discard("")
+    ticket_branch = str(ticket.get("branchId") or ticket.get("branch") or "").strip().lower()
+    candidates = []
+    for row in _payment_sms_load():
+        if not isinstance(row, dict) or str(row.get("kind") or "").lower() != "incoming":
+            continue
+        available = _payment_sms_available(row, allocations)
+        if available <= 0:
+            continue
+        confidence = int(_payment_money(row.get("confidence")))
+        from_phone = _delivery_norm_phone(str(row.get("fromPhone") or ""))
+        phone_match = bool(from_phone and from_phone in phones)
+        score = 0
+        reasons = []
+        if phone_match:
+            score += 60
+            reasons.append("نفس هاتف العميل")
+        if remaining > 0 and abs(available - remaining) < 0.01:
+            score += 30
+            reasons.append("يكمل المبلغ المطلوب")
+        elif remaining > 0 and available < remaining:
+            score += 12
+            reasons.append("جزء من المبلغ المطلوب")
+        elif remaining > 0 and available > remaining:
+            score += 8
+            reasons.append("يمكن استخدام جزء منه")
+        row_branch = str(row.get("branchId") or "").strip().lower()
+        if ticket_branch and row_branch and ticket_branch == row_branch:
+            score += 5
+            reasons.append("نفس الفرع")
+        if confidence >= 85:
+            score += 5
+            reasons.append(f"ثقة {confidence}%")
+        # لا نخفي التحويل غير المطابق؛ قد يكون العميل دفع من رقم شخص آخر.
+        item = dict(row)
+        item["allocatedAmount"] = _payment_sms_allocated(str(row.get("id") or ""), allocations)
+        item["availableAmount"] = available
+        item["suggestedAmount"] = round(min(available, remaining), 2) if remaining > 0 else 0.0
+        item["matchScore"] = score
+        item["matchReasons"] = reasons
+        item["phoneMatch"] = phone_match
+        candidates.append(item)
+
+    candidates.sort(
+        key=lambda x: (
+            int(x.get("matchScore") or 0),
+            str(x.get("smsAt") or x.get("createdAt") or ""),
+        ),
+        reverse=True,
+    )
+    return {
+        "ok": True,
+        "ticketId": str(ticket.get("id") or ""),
+        "ticketNo": ticket.get("ticketNo"),
+        "customerPhone": ticket.get("phone"),
+        **summary,
+        "suggestions": candidates[: max(1, min(int(limit or 80), 200))],
+    }
+
+
+@app.post("/api/restaurant/delivery/tickets/{ticket_id}/payment-allocations")
+def restaurant_delivery_ticket_allocate_payment(ticket_id: str, body: dict):
+    """الكاشير يؤكد تخصيص كل أو جزء من تحويل SMS لفاتورة دليفري."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="يتوقع JSON")
+    sms_id = str(body.get("smsId") or "").strip()
+    if not sms_id:
+        raise HTTPException(status_code=400, detail="smsId مطلوب")
+
+    with _payment_sms_allocation_lock:
+        ticket, _ = _delivery_find_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+        if str(ticket.get("status") or "").lower() in ("cancelled", "settled"):
+            raise HTTPException(status_code=409, detail="لا يمكن تعديل مدفوعات تذكرة مقفلة")
+
+        sms_rows = _payment_sms_load()
+        sms_row = next(
+            (x for x in sms_rows if isinstance(x, dict) and str(x.get("id") or "") == sms_id),
+            None,
+        )
+        if not sms_row:
+            raise HTTPException(status_code=404, detail="التحويل غير موجود")
+        if str(sms_row.get("kind") or "").lower() != "incoming":
+            raise HTTPException(status_code=409, detail="يمكن تخصيص التحويلات الواردة فقط")
+
+        allocations = _payment_allocations_load()
+        available = _payment_sms_available(sms_row, allocations)
+        summary = _delivery_payment_summary(ticket, allocations)
+        remaining = _payment_money(summary.get("remainingDue"))
+        requested = _payment_money(body.get("amount"))
+        amount = requested if requested > 0 else min(available, remaining)
+        if amount <= 0:
+            raise HTTPException(status_code=409, detail="لا يوجد مبلغ متاح للتخصيص")
+        if amount > available + 0.001:
+            raise HTTPException(status_code=409, detail=f"المتاح من التحويل {available:.2f}")
+        if amount > remaining + 0.001:
+            raise HTTPException(status_code=409, detail=f"المتبقي على الفاتورة {remaining:.2f}")
+
+        now_iso = datetime.now().isoformat()
+        allocation = {
+            "id": str(uuid.uuid4()),
+            "ticketId": str(ticket.get("id") or ""),
+            "ticketNo": ticket.get("ticketNo"),
+            "smsId": sms_id,
+            "amount": round(amount, 2),
+            "sender": sms_row.get("sender"),
+            "fromPhone": sms_row.get("fromPhone"),
+            "fromName": sms_row.get("fromName"),
+            "refNo": sms_row.get("refNo"),
+            "smsAt": sms_row.get("smsAt"),
+            "createdAt": now_iso,
+            "note": str(body.get("note") or "")[:200] or None,
+        }
+        allocations.append(allocation)
+        _payment_allocations_save(allocations)
+        return {
+            "ok": True,
+            "allocation": allocation,
+            "payment": {
+                **_delivery_payment_summary(ticket, allocations),
+                "smsAvailableAmount": _payment_sms_available(sms_row, allocations),
+            },
+        }
+
+
+@app.delete("/api/restaurant/delivery/tickets/{ticket_id}/payment-allocations/{allocation_id}")
+def restaurant_delivery_ticket_remove_payment_allocation(ticket_id: str, allocation_id: str):
+    """فك تخصيص خاطئ قبل إقفال الفاتورة."""
+    with _payment_sms_allocation_lock:
+        ticket, _ = _delivery_find_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+        if str(ticket.get("status") or "").lower() == "settled":
+            raise HTTPException(status_code=409, detail="لا يمكن فك تخصيص فاتورة مسددة")
+        allocations = _payment_allocations_load()
+        found = next(
+            (
+                x for x in allocations
+                if str(x.get("id") or "") == str(allocation_id)
+                and str(x.get("ticketId") or "") == str(ticket_id)
+            ),
+            None,
+        )
+        if not found:
+            raise HTTPException(status_code=404, detail="التخصيص غير موجود")
+        kept = [x for x in allocations if str(x.get("id") or "") != str(allocation_id)]
+        _payment_allocations_save(kept)
+        return {"ok": True, "payment": _delivery_payment_summary(ticket, kept)}
 
 
 @app.get("/api/restaurant/delivery/tickets")
@@ -30463,6 +30703,13 @@ def restaurant_delivery_ticket_settle(ticket_id: str, body: dict = None):
         method = "cash"
     if method == "visa":
         method = "card"
+    allocations = _payment_allocations_load()
+    payment_summary = _delivery_payment_summary(target, allocations)
+    if method in ("digital", "transfer") and _payment_money(payment_summary.get("remainingDue")) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"التحويلات المؤكدة لا تكفي؛ المتبقي {payment_summary.get('remainingDue'):.2f}",
+        )
     try:
         amount = float(body.get("amount") or body.get("settlementAmount") or 0)
     except (TypeError, ValueError):
@@ -30485,6 +30732,8 @@ def restaurant_delivery_ticket_settle(ticket_id: str, body: dict = None):
     target["settlementMethod"] = method
     target["settlementAmount"] = round(amount, 2)
     target["settlementNote"] = str(body.get("note") or body.get("settlementNote") or "")[:300] or None
+    target["paymentAllocations"] = payment_summary.get("allocations") or []
+    target["allocatedPaymentAmount"] = payment_summary.get("allocatedAmount") or 0
     target["settledAt"] = now_iso
     target["status"] = "settled"
     target["updatedAt"] = now_iso
