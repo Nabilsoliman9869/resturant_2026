@@ -29747,13 +29747,17 @@ def _delivery_payment_total(ticket: dict) -> float:
 
 def _delivery_payment_summary(ticket: dict, allocations: Optional[list] = None) -> dict:
     total = _delivery_payment_total(ticket)
+    prepaid = _payment_money(ticket.get("prepaidAmount"))
     ticket_id = str(ticket.get("id") or "")
     ticket_allocations = _delivery_payment_allocations(ticket_id, allocations)
     allocated = _delivery_payment_allocated(ticket_id, allocations)
+    covered = round(prepaid + allocated, 2)
     return {
         "invoiceTotal": total,
+        "prepaidAmount": prepaid,
         "allocatedAmount": allocated,
-        "remainingDue": round(max(0.0, total - allocated), 2),
+        "coveredAmount": covered,
+        "remainingDue": round(max(0.0, total - covered), 2),
         "allocations": ticket_allocations,
     }
 
@@ -30031,6 +30035,27 @@ def restaurant_delivery_ticket_allocate_payment(ticket_id: str, body: dict):
             raise HTTPException(status_code=409, detail="يمكن تخصيص التحويلات الواردة فقط")
 
         allocations = _payment_allocations_load()
+        client_req = str(body.get("clientRequestId") or body.get("idempotencyKey") or "").strip()[:80]
+        if client_req:
+            existing = next(
+                (
+                    x for x in allocations
+                    if str(x.get("clientRequestId") or "") == client_req
+                    and str(x.get("ticketId") or "") == str(ticket_id)
+                ),
+                None,
+            )
+            if existing:
+                return {
+                    "ok": True,
+                    "duplicate": True,
+                    "allocation": existing,
+                    "payment": {
+                        **_delivery_payment_summary(ticket, allocations),
+                        "smsAvailableAmount": _payment_sms_available(sms_row, allocations),
+                    },
+                }
+
         available = _payment_sms_available(sms_row, allocations)
         summary = _delivery_payment_summary(ticket, allocations)
         remaining = _payment_money(summary.get("remainingDue"))
@@ -30057,6 +30082,7 @@ def restaurant_delivery_ticket_allocate_payment(ticket_id: str, body: dict):
             "smsAt": sms_row.get("smsAt"),
             "createdAt": now_iso,
             "note": str(body.get("note") or "")[:200] or None,
+            "clientRequestId": client_req or None,
         }
         allocations.append(allocation)
         _payment_allocations_save(allocations)
@@ -30413,7 +30439,8 @@ def restaurant_delivery_ticket_get(ticket_id: str):
     target, _ = _delivery_find_ticket(ticket_id)
     if not target:
         raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
-    return {"ok": True, "ticket": target}
+    payment = _delivery_payment_summary(target)
+    return {"ok": True, "ticket": target, "payment": payment}
 
 
 @app.post("/api/restaurant/delivery/tickets/{ticket_id}/quote")
@@ -30715,16 +30742,12 @@ def restaurant_delivery_ticket_settle(ticket_id: str, body: dict = None):
     except (TypeError, ValueError):
         amount = 0.0
     if amount <= 0:
-        totals = target.get("quoteTotals") if isinstance(target.get("quoteTotals"), dict) else {}
-        try:
-            total = float(totals.get("total") or 0)
-        except (TypeError, ValueError):
-            total = 0.0
-        try:
-            prepaid = float(target.get("prepaidAmount") or 0)
-        except (TypeError, ValueError):
-            prepaid = 0.0
-        amount = max(0.0, round(total - prepaid, 2))
+        if method in ("digital", "transfer"):
+            # التسوية بالمحفظة تسجّل ما تم تأكيده من تحويلات SMS
+            amount = _payment_money(payment_summary.get("allocatedAmount"))
+        else:
+            # نقد/فيزا = ما تبقى بعد الدفع المسبق + التحويلات المربوطة
+            amount = _payment_money(payment_summary.get("remainingDue"))
     now_iso = datetime.now().isoformat()
     if str(target.get("status") or "").lower() not in ("delivered", "settled", "out_for_delivery"):
         target["status"] = "delivered"
@@ -30734,11 +30757,12 @@ def restaurant_delivery_ticket_settle(ticket_id: str, body: dict = None):
     target["settlementNote"] = str(body.get("note") or body.get("settlementNote") or "")[:300] or None
     target["paymentAllocations"] = payment_summary.get("allocations") or []
     target["allocatedPaymentAmount"] = payment_summary.get("allocatedAmount") or 0
+    target["prepaidAmountAtSettle"] = payment_summary.get("prepaidAmount") or 0
     target["settledAt"] = now_iso
     target["status"] = "settled"
     target["updatedAt"] = now_iso
     _delivery_tickets_save(rows)
-    return {"ok": True, "ticket": target}
+    return {"ok": True, "ticket": target, "payment": payment_summary}
 
 
 
