@@ -366,6 +366,7 @@ export default function DeliveryOrderPage() {
   }
 
   const catalog = tab === "favorites" ? favorites : products;
+  const paymentLocked = ["settled", "cancelled"].includes(String(ticket?.status || ""));
   const visiblePaymentSuggestions = (paymentMatch?.suggestions || []).filter((row) => n(row.availableAmount) > 0);
   const shownPaymentSuggestions = showAllPayments ? visiblePaymentSuggestions : visiblePaymentSuggestions.slice(0, 12);
   return (
@@ -405,7 +406,7 @@ export default function DeliveryOrderPage() {
           {quoteText ? <div className="dop-quote-card" id="delivery-quote-card"><div className="dop-quote-card__head">فاتورة مبدئية{ticket?.ticketNo ? ` #${ticket.ticketNo}` : ""}</div><textarea className="dop-quote-text" value={quoteText} readOnly rows={8} /><p className="dop-quote-hint">1) احفظ المبدئية  2) انسخ الجدول  3) الصق في واتساب (Ctrl+V)</p></div> : null}
           {ticket?.id && n(ticket.quoteTotals?.total) > 0 ? <section className="dop-payment-match">
             <div className="dop-payment-match__head">
-              <div><strong>ترشيح تحويلات الدفع</strong><span>النظام يرشّح فقط — الكاشير يراجع ويؤكد مبلغ الربط.</span></div>
+              <div><strong>ترشيح تحويلات الدفع</strong><span>{paymentLocked ? "التذكرة مقفلة — اربط التحويل قبل التسوية." : "النظام يرشّح فقط — الكاشير يراجع ويؤكد مبلغ الربط."}</span></div>
               <button type="button" className="btn" disabled={paymentBusy} onClick={() => void loadPaymentSuggestions(ticket.id)}>{paymentBusy ? "جارٍ التحديث…" : "تحديث"}</button>
             </div>
             <div className="dop-payment-summary">
@@ -418,7 +419,7 @@ export default function DeliveryOrderPage() {
               <h3>التحويلات المؤكدة</h3>
               {(paymentMatch?.allocations || []).map((row) => <div key={row.id} className="dop-payment-allocation">
                 <div><strong>{n(row.amount).toFixed(2)} ج</strong><span>{row.fromName || row.fromPhone || "محوّل غير معروف"}{row.refNo ? ` · عملية ${row.refNo}` : ""}</span></div>
-                <button type="button" disabled={paymentBusy || String(ticket.status || "") === "settled"} onClick={() => void removePaymentAllocation(row)}>فك الربط</button>
+                <button type="button" disabled={paymentBusy || paymentLocked} onClick={() => void removePaymentAllocation(row)}>فك الربط</button>
               </div>)}
             </div> : null}
             {n(paymentMatch?.remainingDue) <= 0 && n(paymentMatch?.invoiceTotal) > 0 ? <p className="dop-payment-complete">✓ المبلغ مكتمل. عند تسوية الدليفري اختر «محفظة/تحويل».</p> : null}
@@ -430,7 +431,7 @@ export default function DeliveryOrderPage() {
                   <td>{n(row.amount).toFixed(2)} ج<small>{row.smsAt || row.createdAt || ""}</small></td>
                   <td>{n(row.availableAmount).toFixed(2)}</td>
                   <td><input type="number" min="0.01" step="0.01" max={n(row.availableAmount)} value={paymentAmounts[row.id] ?? n(row.suggestedAmount)} onChange={(event) => setPaymentAmounts((old) => ({ ...old, [row.id]: n(event.target.value) }))} /></td>
-                  <td><button type="button" disabled={paymentBusy || n(paymentMatch?.remainingDue) <= 0} onClick={() => void allocatePayment(row)}>ربط</button></td>
+                  <td><button type="button" disabled={paymentBusy || paymentLocked || n(paymentMatch?.remainingDue) <= 0} onClick={() => void allocatePayment(row)}>ربط</button></td>
                 </tr>)}</tbody>
               </table>
               {!shownPaymentSuggestions.length ? <p className="dop-payment-empty">لا توجد تحويلات واردة متاحة حالياً.</p> : null}
