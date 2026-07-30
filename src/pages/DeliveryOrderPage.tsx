@@ -82,6 +82,7 @@ export default function DeliveryOrderPage() {
   const [paymentMatch, setPaymentMatch] = useState<PaymentMatch | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, number>>({});
+  const [selectedPaymentId, setSelectedPaymentId] = useState("");
   const [showAllPayments, setShowAllPayments] = useState(false);
   const locked = lockedStatuses.has(String(ticket?.status || "").toLowerCase());
   const paymentMode: "cod" | "prepaid" | "partial" = prepaidAmount <= 0 ? "cod" : "partial";
@@ -126,6 +127,15 @@ export default function DeliveryOrderPage() {
           if (next[row.id] == null) next[row.id] = n(row.suggestedAmount);
         }
         return next;
+      });
+      setSelectedPaymentId((current) => {
+        if ((json.suggestions || []).some((row) => row.id === current && n(row.availableAmount) > 0)) return current;
+        const exactMatches = (json.suggestions || []).filter(
+          (row) => row.phoneMatch
+            && n(row.confidence) >= 85
+            && Math.abs(n(row.availableAmount) - n(json.remainingDue)) < 0.01,
+        );
+        return exactMatches.length === 1 ? exactMatches[0].id : "";
       });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -365,10 +375,25 @@ export default function DeliveryOrderPage() {
     }
   }
 
+  async function confirmSelectedPayment() {
+    const row = visiblePaymentSuggestions.find((candidate) => candidate.id === selectedPaymentId);
+    if (!row) { setMessage("اختر التحويل المطلوب ربطه أولاً"); return; }
+    const amount = n(paymentAmounts[row.id] ?? row.suggestedAmount);
+    const owner = row.fromName || row.fromPhone || "محوّل غير معروف";
+    if (!window.confirm(`تأكيد ربط ${amount.toFixed(2)} ج من تحويل ${owner} بالفاتورة؟`)) return;
+    await allocatePayment(row);
+    setSelectedPaymentId("");
+  }
+
   const catalog = tab === "favorites" ? favorites : products;
   const paymentLocked = ["settled", "cancelled"].includes(String(ticket?.status || ""));
   const visiblePaymentSuggestions = (paymentMatch?.suggestions || []).filter((row) => n(row.availableAmount) > 0);
   const shownPaymentSuggestions = showAllPayments ? visiblePaymentSuggestions : visiblePaymentSuggestions.slice(0, 12);
+  const exactMatchCount = visiblePaymentSuggestions.filter(
+    (row) => row.phoneMatch
+      && n(row.confidence) >= 85
+      && Math.abs(n(row.availableAmount) - n(paymentMatch?.remainingDue)) < 0.01,
+  ).length;
   return (
     <main className="delivery-order-page" dir="rtl">
       <header className="dop-top">
@@ -423,16 +448,30 @@ export default function DeliveryOrderPage() {
               </div>)}
             </div> : null}
             {n(paymentMatch?.remainingDue) <= 0 && n(paymentMatch?.invoiceTotal) > 0 ? <p className="dop-payment-complete">✓ المبلغ مكتمل. عند تسوية الدليفري اختر «محفظة/تحويل».</p> : null}
+            {n(paymentMatch?.remainingDue) > 0 ? <div className="dop-payment-confirm">
+              <div>
+                <strong>{selectedPaymentId ? "تحويل محدد وجاهز للتأكيد" : exactMatchCount > 1 ? `${exactMatchCount} تحويلات متطابقة — اختر الصحيح حسب التاريخ` : "اختر التحويل المراد ربطه"}</strong>
+                <span>الأخضر: الهاتف والمبلغ متطابقان · الأزرق: الهاتف متطابق · الأصفر: ترشيح جزئي</span>
+              </div>
+              <button type="button" disabled={paymentBusy || paymentLocked || !selectedPaymentId} onClick={() => void confirmSelectedPayment()}>
+                تأكيد وربط المحدد
+              </button>
+            </div> : null}
             <div className="dop-payment-table-wrap">
               <table className="dop-payment-table">
-                <thead><tr><th>الترشيح</th><th>التحويل</th><th>المتاح</th><th>مبلغ الربط</th><th></th></tr></thead>
-                <tbody>{shownPaymentSuggestions.map((row) => <tr key={row.id} className={row.phoneMatch ? "is-phone-match" : ""}>
-                  <td><b>{row.fromName || row.fromPhone || "رقم مختلف/غير معروف"}</b><small>{(row.matchReasons || []).join(" · ") || "مطابقة يدوية"}{row.refNo ? ` · ${row.refNo}` : ""}</small></td>
+                <thead><tr><th>اختيار</th><th>الترشيح</th><th>التحويل</th><th>المتاح</th><th>مبلغ الربط</th></tr></thead>
+                <tbody>{shownPaymentSuggestions.map((row) => {
+                  const exact = Boolean(row.phoneMatch)
+                    && n(row.confidence) >= 85
+                    && Math.abs(n(row.availableAmount) - n(paymentMatch?.remainingDue)) < 0.01;
+                  const rowClass = exact ? "is-exact-match" : row.phoneMatch ? "is-phone-match" : n(row.matchScore) >= 15 ? "is-partial-match" : "";
+                  return <tr key={row.id} className={`${rowClass} ${selectedPaymentId === row.id ? "is-selected" : ""}`}>
+                  <td><input className="dop-payment-select" type="checkbox" aria-label={`اختيار تحويل ${n(row.amount).toFixed(2)}`} checked={selectedPaymentId === row.id} disabled={paymentBusy || paymentLocked} onChange={() => setSelectedPaymentId((current) => current === row.id ? "" : row.id)} /></td>
+                  <td><b>{row.fromName || row.fromPhone || "رقم مختلف/غير معروف"} <em className={`dop-match-badge ${exact ? "is-exact" : row.phoneMatch ? "is-phone" : "is-partial"}`}>{exact ? "تطابق كامل" : row.phoneMatch ? "نفس الهاتف" : "ترشيح"}</em></b><small>{(row.matchReasons || []).join(" · ") || "مطابقة يدوية"}{row.refNo ? ` · ${row.refNo}` : ""}</small></td>
                   <td>{n(row.amount).toFixed(2)} ج<small>{row.smsAt || row.createdAt || ""}</small></td>
                   <td>{n(row.availableAmount).toFixed(2)}</td>
                   <td><input type="number" min="0.01" step="0.01" max={n(row.availableAmount)} value={paymentAmounts[row.id] ?? n(row.suggestedAmount)} onChange={(event) => setPaymentAmounts((old) => ({ ...old, [row.id]: n(event.target.value) }))} /></td>
-                  <td><button type="button" disabled={paymentBusy || paymentLocked || n(paymentMatch?.remainingDue) <= 0} onClick={() => void allocatePayment(row)}>ربط</button></td>
-                </tr>)}</tbody>
+                </tr>})}</tbody>
               </table>
               {!shownPaymentSuggestions.length ? <p className="dop-payment-empty">لا توجد تحويلات واردة متاحة حالياً.</p> : null}
             </div>
