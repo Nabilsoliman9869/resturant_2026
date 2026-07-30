@@ -24,7 +24,8 @@ type PaymentAllocation = {
 type PaymentSuggestion = {
   id: string; sender?: string; amount?: number; allocatedAmount?: number; availableAmount?: number;
   suggestedAmount?: number; fromPhone?: string; fromName?: string; refNo?: string; smsAt?: string;
-  createdAt?: string; confidence?: number; matchScore?: number; matchReasons?: string[]; phoneMatch?: boolean;
+  createdAt?: string; confidence?: number; matchScore?: number; matchReasons?: string[];
+  phoneMatch?: boolean; nameMatch?: boolean;
 };
 type PaymentMatch = {
   invoiceTotal: number; prepaidAmount?: number; allocatedAmount: number;
@@ -135,6 +136,8 @@ export default function DeliveryOrderPage() {
             && n(row.confidence) >= 85
             && Math.abs(n(row.availableAmount) - n(json.remainingDue)) < 0.01,
         );
+        const namedExactMatches = exactMatches.filter((row) => row.nameMatch);
+        if (namedExactMatches.length === 1) return namedExactMatches[0].id;
         return exactMatches.length === 1 ? exactMatches[0].id : "";
       });
     } catch (error) {

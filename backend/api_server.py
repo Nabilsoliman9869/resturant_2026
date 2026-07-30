@@ -29949,6 +29949,11 @@ def restaurant_delivery_ticket_payment_suggestions(ticket_id: str, limit: int = 
         _delivery_norm_phone(str(ticket.get("phone2") or "")),
     }
     phones.discard("")
+    ticket_name_tokens = {
+        token
+        for token in re.findall(r"[\w\u0600-\u06ff]+", str(ticket.get("customerName") or "").lower())
+        if len(token) >= 4
+    }
     ticket_branch = str(ticket.get("branchId") or ticket.get("branch") or "").strip().lower()
     candidates = []
     for row in _payment_sms_load():
@@ -29960,11 +29965,20 @@ def restaurant_delivery_ticket_payment_suggestions(ticket_id: str, limit: int = 
         confidence = int(_payment_money(row.get("confidence")))
         from_phone = _delivery_norm_phone(str(row.get("fromPhone") or ""))
         phone_match = bool(from_phone and from_phone in phones)
+        sender_name_tokens = {
+            token
+            for token in re.findall(r"[\w\u0600-\u06ff]+", str(row.get("fromName") or "").lower())
+            if len(token) >= 4
+        }
+        name_match = bool(ticket_name_tokens and sender_name_tokens and ticket_name_tokens.intersection(sender_name_tokens))
         score = 0
         reasons = []
         if phone_match:
             score += 60
             reasons.append("نفس هاتف العميل")
+        if name_match:
+            score += 15
+            reasons.append("اسم المحوّل يطابق العميل")
         if remaining > 0 and abs(available - remaining) < 0.01:
             score += 30
             reasons.append("يكمل المبلغ المطلوب")
@@ -29989,6 +30003,7 @@ def restaurant_delivery_ticket_payment_suggestions(ticket_id: str, limit: int = 
         item["matchScore"] = score
         item["matchReasons"] = reasons
         item["phoneMatch"] = phone_match
+        item["nameMatch"] = name_match
         candidates.append(item)
 
     candidates.sort(
