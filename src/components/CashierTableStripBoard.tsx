@@ -42,8 +42,6 @@ type ViewMode = "table" | "cards";
 const POLL_MS = 28000;
 const LONG_MIN = 45;
 const IDLE_MIN = 25;
-const URGENT_BILL_MIN = 10;
-
 function fmtMoney(n: number) {
   return `${(Number.isFinite(n) ? n : 0).toFixed(0)} ج.م`;
 }
@@ -59,15 +57,13 @@ function fmtMins(m: number) {
 function statusMeta(s: TableOverviewSession) {
   const pay = Boolean(s.awaitingPayment);
   const bill = Boolean(s.billingRequestedAt);
-  const billAge = Math.max(0, Number(s.billAgeMinutes || 0));
-  if (pay && billAge >= URGENT_BILL_MIN) {
-    return { key: "urgent" as const, label: "تنتظر التسديد", cls: "hall-live-board__status--urgent" };
-  }
-  if (pay) {
-    return { key: "pay" as const, label: "في انتظار الدفع", cls: "hall-live-board__status--pay" };
-  }
-  if (bill) {
-    return { key: "bill" as const, label: "طُلِب الحساب", cls: "hall-live-board__status--bill" };
+  // أحمر فوري: طُلب الحساب / طُبع الشيك ولم يُقفَل الحساب بعد (تنبيه كاشير/مدير)
+  if (pay || bill) {
+    return {
+      key: "urgent" as const,
+      label: pay ? "شيك مطبوع — بانتظار التسديد" : "طُلِب الحساب — لم يُقفَل",
+      cls: "hall-live-board__status--urgent",
+    };
   }
   return { key: "active" as const, label: "نشطة", cls: "hall-live-board__status--active" };
 }
@@ -75,7 +71,6 @@ function statusMeta(s: TableOverviewSession) {
 function rowTone(s: TableOverviewSession): "" | "hall-live-board__row--pay" | "hall-live-board__row--urgent" {
   const st = statusMeta(s);
   if (st.key === "urgent") return "hall-live-board__row--urgent";
-  if (st.key === "pay") return "hall-live-board__row--pay";
   return "";
 }
 
@@ -589,10 +584,9 @@ function TableStrip({
   const minGap = Math.max(0, Number(s.minimumGap || 0));
   const st = statusMeta(s);
 
+  const unpaidBill = pay || bill;
   let border = "1px solid var(--border)";
-  if (pay && billAge >= URGENT_BILL_MIN) border = "1px solid rgba(239, 68, 68, 0.6)";
-  else if (pay) border = "1px solid rgba(234, 179, 8, 0.55)";
-  else if (bill) border = "1px solid rgba(249, 115, 22, 0.45)";
+  if (unpaidBill) border = "2px solid rgba(239, 68, 68, 0.75)";
 
   return (
     <div
@@ -610,14 +604,7 @@ function TableStrip({
         borderRadius: 10,
         padding: "0.65rem 0.75rem",
         cursor: "pointer",
-        background:
-          pay && billAge >= URGENT_BILL_MIN
-            ? "rgba(239, 68, 68, 0.08)"
-            : pay
-              ? "rgba(234, 179, 8, 0.06)"
-              : bill
-                ? "rgba(249, 115, 22, 0.05)"
-                : "rgba(0,0,0,0.12)",
+        background: unpaidBill ? "rgba(239, 68, 68, 0.12)" : "rgba(0,0,0,0.12)",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "start" }}>

@@ -35,3 +35,14 @@ export const WORKFLOW_ROLE_OPTIONS = [
   { value: "customer_self", label: "العميل نفسه" },
   { value: "server", label: "جرسون المناولة" },
 ] as const;
+
+/** خيارات «من يستلم من المطبخ» — تشمل مسار بدون مستلم */
+export const DELIVER_FROM_KITCHEN_OPTIONS = [
+  { value: "server", label: "جرسون مناولة" },
+  { value: "waiter", label: "نفس جرسون الطلبات" },
+  { value: "manager", label: "مدير المطعم" },
+  { value: "operation_manager", label: "مدير التشغيل" },
+  { value: "host", label: "جرسون الاستقبال" },
+  { value: "kitchen_window", label: "استلام مباشر من نافذة الشيف" },
+  { value: "none", label: "لا أحد — مباشرة للطاولة بعد إنهاء المطبخ" },
+] as const;

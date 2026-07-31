@@ -130,7 +130,8 @@ export default function PosPromotionsSettingsPage() {
     <div>
       <h2 style={{ marginTop: 0 }}>العروض والتخفيضات</h2>
       <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-        العروض تُطبّق تلقائياً في نقاط البيع (طلب سريع / جرسون) عند توفر الشروط.
+        العروض والكوبونات تُطبَّق على إجمالي الفاتورة عند طلب الحساب / من شاشة التسديد. للكوبون: نسبة
+        (<code>percent</code>) أو قيمة ثابتة (<code>amount</code>) مثل {"{\"code\":\"SAVE50\",\"amount\":50}"}.
       </p>
 
       <div className="grid-2" style={{ marginBottom: "1rem" }}>

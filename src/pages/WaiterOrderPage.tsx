@@ -2780,7 +2780,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         throw new Error(detail || `HTTP ${r.status}`);
       }
       setCart([]);
-      setCouponCode("");
+      // نبقي كود الكوبون حتى طلب الحساب ليُخصم من إجمالي الفاتورة
       setMsg("تم إرسال الطلب للمطبخ (الفاتورة تُنشأ عند «طلب الحساب» فقط).");
       // لا ننتظر إعادة جلب الطلبات — تخفيف ثقل «جاري الإرسال» بعد رد الخادم
       void loadSessionOrders();
@@ -2875,6 +2875,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           tipAmount: Math.max(0, tipAmount || 0),
           agentGuid: selectedAgentGuid || undefined,
           billDate: billDate || undefined,
+          couponCode: String(couponCode || "").trim() || undefined,
           mat3amActor: buildMat3amActor(user),
         }),
       });
@@ -2933,6 +2934,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
       setBillReviewOpen(false);
       setBillingRequestedAt(new Date().toISOString());
+      setCouponCode("");
       void loadSessionOrders();
       void loadSessionInvoices();
     } catch (e) {
@@ -3250,6 +3252,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   }
 
   async function submitPartialMove() {
+    if (!roleHasManagerOpsAccess(user?.role)) {
+      setMsg("نقل الأصناف بين الطاولات متاح للمدير فقط.");
+      return;
+    }
     if (!activeSessionId || !partialMoveTargetTableId) {
       setMsg("اختر البنود والطاولة الهدف أولاً.");
       return;
@@ -3877,7 +3883,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   بدون طاولة — توصيل
                 </span>
               )}
-              <input className="waiter-pos__coupon waiter-pos__hdr-coupon" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="قيمة الكوبون" disabled={billingLocked} />
+              <input
+                className="waiter-pos__coupon waiter-pos__hdr-coupon"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
+                placeholder="كود الكوبون"
+                title="كود ترويجي (مثل WELCOME10) — يُخصم من إجمالي الفاتورة عند طلب الحساب"
+                disabled={billingLocked}
+              />
             </div>
             <div className="waiter-pos__hdr-close-wrap">
               <button
@@ -5682,9 +5695,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   <div className="waiter-pos__table-move-block" style={{ borderColor: "rgba(14,165,233,0.45)" }}>
                     <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#38bdf8" }}>فصل ضيف أو بنود إلى طاولة أخرى</div>
                     <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 10 }}>
-                      اختر البنود المرسلة، ثم الطاولة والمقعد الهدف. الطاولة الفارغة ستُشغّل تلقائيًا، والمشغولة ستطلب تأكيدًا قبل إضافة البنود إلى حسابها.
+                      {roleHasManagerOpsAccess(user?.role)
+                        ? "اختر البنود المرسلة، ثم الطاولة والمقعد الهدف. الطاولة الفارغة ستُشغّل تلقائيًا، والمشغولة ستطلب تأكيدًا قبل إضافة البنود إلى حسابها."
+                        : "نقل الأصناف بين الطاولات اختصاص المدير فقط."}
                     </div>
-                    <select value={partialMoveTargetTableId} onChange={(e) => setPartialMoveTargetTableId(e.target.value)} disabled={billingLocked || partialMoveBusy} style={{ width: "100%", marginBottom: 10 }}>
+                    {!roleHasManagerOpsAccess(user?.role) ? (
+                      <div style={{ color: "#fca5a5", fontWeight: 700, marginBottom: 10 }}>غير متاح لدور الكابتن/الجرسون — اطلب المدير.</div>
+                    ) : null}
+                    <select value={partialMoveTargetTableId} onChange={(e) => setPartialMoveTargetTableId(e.target.value)} disabled={!roleHasManagerOpsAccess(user?.role) || billingLocked || partialMoveBusy} style={{ width: "100%", marginBottom: 10 }}>
                       <option value="">اختر الطاولة الهدف</option>
                       {transferPickBase.map((table) => (
                         <option key={`partial-target-${table.id}`} value={table.id}>
@@ -5731,7 +5749,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     <button
                       type="button"
                       className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action"
-                      disabled={billingLocked || partialMoveBusy || !partialMoveTargetTableId || !Object.values(partialMoveSelected).some(Boolean)}
+                      disabled={
+                        !roleHasManagerOpsAccess(user?.role) ||
+                        billingLocked ||
+                        partialMoveBusy ||
+                        !partialMoveTargetTableId ||
+                        !Object.values(partialMoveSelected).some(Boolean)
+                      }
                       onClick={() => void submitPartialMove()}
                       style={{ marginTop: 10 }}
                     >

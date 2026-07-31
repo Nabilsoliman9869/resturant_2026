@@ -45,6 +45,25 @@ function money(n: number) {
   return (Number(n) || 0).toFixed(2);
 }
 
+function todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function invBreakdown(inv: InvRow): Breakdown {
+  return (
+    inv.paymentBreakdown || {
+      cash: Number(inv.routeCash) || 0,
+      visa: Number(inv.routeVisa) || 0,
+      wallet: Number(inv.routeWallet) || 0,
+      instapay: Number(inv.routeInstapay) || 0,
+    }
+  );
+}
+
 /**
  * إقفال شيفت الكاشير — تقرير متحصلات + فئات نقدية + خصم مصروفات/مشتريات
  * ثم إرسال لاعتماد المدير (بدون حذف أي أنواع اعتماد أخرى).
@@ -56,6 +75,8 @@ export default function CashierShiftClosePage() {
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [fromDate, setFromDate] = useState(todayISO);
+  const [toDate, setToDate] = useState(todayISO);
   const [invoices, setInvoices] = useState<InvRow[]>([]);
   const [unassigned, setUnassigned] = useState<InvRow[]>([]);
   const [outflows, setOutflows] = useState<Outflow[]>([]);
@@ -84,12 +105,18 @@ export default function CashierShiftClosePage() {
 
   const load = useCallback(async () => {
     if (!uid) return;
+    if (fromDate && toDate && fromDate > toDate) {
+      show("err", "تاريخ البداية بعد تاريخ النهاية");
+      return;
+    }
     setBusy(true);
     try {
-      const r = await fetch(
-        `${base}/api/restaurant/cashier/shift-close/open?userId=${encodeURIComponent(uid)}`,
-        { cache: "no-store" },
-      );
+      const qs = new URLSearchParams({
+        userId: uid,
+        fromDate,
+        toDate,
+      });
+      const r = await fetch(`${base}/api/restaurant/cashier/shift-close/open?${qs}`, { cache: "no-store" });
       const j =
         tryParseJson<{
           invoices?: InvRow[];
@@ -122,7 +149,7 @@ export default function CashierShiftClosePage() {
     } finally {
       setBusy(false);
     }
-  }, [base, uid]);
+  }, [base, uid, fromDate, toDate]);
 
   useEffect(() => {
     void load();
@@ -141,17 +168,13 @@ export default function CashierShiftClosePage() {
     let instapay = 0;
     let invoiceTotal = 0;
     for (const inv of pool) {
-      const bd = inv.paymentBreakdown || {
-        cash: inv.routeCash || 0,
-        visa: inv.routeVisa || 0,
-        wallet: inv.routeWallet || 0,
-        instapay: inv.routeInstapay || 0,
-      };
+      const bd = invBreakdown(inv);
       cash += Number(bd.cash) || 0;
       visa += Number(bd.visa) || 0;
       wallet += Number(bd.wallet) || 0;
       instapay += Number(bd.instapay) || 0;
-      invoiceTotal += Number(inv.total) || 0;
+      const collected = (Number(bd.cash) || 0) + (Number(bd.visa) || 0) + (Number(bd.wallet) || 0) + (Number(bd.instapay) || 0);
+      invoiceTotal += collected > 0.0001 ? collected : Number(inv.total) || 0;
     }
     let expenses = Number(extraExpense) || 0;
     let purchases = Number(extraPurchase) || 0;
@@ -183,17 +206,25 @@ export default function CashierShiftClosePage() {
     };
   }, [pool, outflows, selectedOut, extraExpense, extraPurchase, denoms]);
 
+  function toggleAll(on: boolean) {
+    const next: Record<string, boolean> = {};
+    for (const x of invoices) next[x.invoiceId] = on;
+    if (claimUnassigned) for (const x of unassigned) next[x.invoiceId] = on;
+    setSelected(next);
+  }
+
   async function submit() {
     if (!uid) {
       show("err", "المستخدم غير معروف");
       return;
     }
     if (pool.length === 0) {
-      show("err", "لا توجد فواتير محددة للإقفال");
+      show("err", "لا توجد فواتير محددة للإقفال في الفترة المختارة");
       return;
     }
     const ok = window.confirm(
       `إرسال إقفال الشيفت لاعتماد المدير؟\n` +
+        `الفترة: ${fromDate} → ${toDate}\n` +
         `فواتير: ${totals.invoiceCount} · نقدي ${money(totals.cash)} · فيزا ${money(totals.visa)} · إنستا ${money(totals.instapay)}\n` +
         `صافي تسليم (معدود): ${money(totals.netHandover)} ج.م`,
     );
@@ -214,6 +245,8 @@ export default function CashierShiftClosePage() {
           visaReceiptsCount: Number(visaReceipts) || 0,
           transferNoticesCount: Number(transferNotices) || 0,
           notes,
+          fromDate,
+          toDate,
         }),
       });
       const j = tryParseJson<{ detail?: string; closeId?: string }>(await r.text()) ?? {};
@@ -245,17 +278,42 @@ export default function CashierShiftClosePage() {
           <div>
             <h2>تقرير إقفال الشيفت</h2>
             <p>
-              {sessionDisplayName(user)} — العمليات غير المقفلة فقط. بعد اعتماد المدير تُصفَّر ولن تظهر هنا مرة أخرى.
+              {sessionDisplayName(user)} — الفواتير غير المقفلة ضمن الفترة. بعد اعتماد المدير تُصفَّر ولن تظهر هنا مرة أخرى.
             </p>
           </div>
-          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void load()}>
-            تحديث
-          </button>
         </header>
+
+        <section className="shift-close__filters card">
+          <label>
+            من تاريخ
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          </label>
+          <label>
+            إلى تاريخ
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </label>
+          <div className="shift-close__filter-actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() => {
+                const t = todayISO();
+                setFromDate(t);
+                setToDate(t);
+              }}
+            >
+              اليوم
+            </button>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void load()}>
+              احتساب الفترة
+            </button>
+          </div>
+        </section>
 
         {msg ? <div className={`shift-close__msg is-${msg.type}`}>{msg.text}</div> : null}
 
-        <section className="shift-close__kpis">
+        <section className="shift-close__kpis" aria-label="ملخص المتحصلات">
           <div className="kpi kpi--cash">
             <span>نقدي</span>
             <strong>{money(totals.cash)}</strong>
@@ -268,119 +326,148 @@ export default function CashierShiftClosePage() {
             <span>إنستا / تحويل</span>
             <strong>{money(totals.instapay)}</strong>
           </div>
-          <div className="kpi">
+          <div className="kpi kpi--wallet">
             <span>محفظة</span>
             <strong>{money(totals.wallet)}</strong>
           </div>
           <div className="kpi kpi--total">
-            <span>مجمل الفواتير ({totals.invoiceCount})</span>
+            <span>مجمل المتحصل ({totals.invoiceCount} فاتورة)</span>
             <strong>{money(totals.invoiceTotal)}</strong>
           </div>
         </section>
 
-        <div className="shift-close__grid">
-          <section className="card shift-close__panel">
+        <section className="card shift-close__panel">
+          <div className="shift-close__panel-head">
             <h3>العمليات غير المقفلة</h3>
-            {invoices.length === 0 ? (
-              <p className="muted">لا توجد فواتير مسدَّدة منسوبة لك بانتظار الإقفال.</p>
-            ) : (
-              <div className="shift-close__table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>فاتورة</th>
-                      <th>طاولة</th>
-                      <th>نقدي</th>
-                      <th>فيزا</th>
-                      <th>إنستا</th>
-                      <th>الإجمالي</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {invoices.map((inv) => {
-                      const bd: Breakdown = inv.paymentBreakdown || {
-                        cash: Number(inv.routeCash) || 0,
-                        visa: Number(inv.routeVisa) || 0,
-                        wallet: Number(inv.routeWallet) || 0,
-                        instapay: Number(inv.routeInstapay) || 0,
-                      };
-                      return (
-                        <tr key={inv.invoiceId}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selected[inv.invoiceId])}
-                              onChange={(e) => setSelected((s) => ({ ...s, [inv.invoiceId]: e.target.checked }))}
-                            />
-                          </td>
-                          <td>{inv.billNumber || inv.invoiceId.slice(0, 8)}</td>
-                          <td>{inv.tableLabel || "—"}</td>
-                          <td>{money(Number(bd.cash) || 0)}</td>
-                          <td>{money(Number(bd.visa) || 0)}</td>
-                          <td>{money(Number(bd.instapay) || 0)}</td>
-                          <td>{money(inv.total)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <div className="shift-close__panel-tools">
+              <button type="button" className="btn btn-ghost" disabled={!invoices.length} onClick={() => toggleAll(true)}>
+                تحديد الكل
+              </button>
+              <button type="button" className="btn btn-ghost" disabled={!invoices.length} onClick={() => toggleAll(false)}>
+                إلغاء التحديد
+              </button>
+            </div>
+          </div>
+          {invoices.length === 0 ? (
+            <p className="muted">لا توجد فواتير مسدَّدة منسوبة لك بانتظار الإقفال في الفترة {fromDate} → {toDate}.</p>
+          ) : (
+            <div className="shift-close__table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>فاتورة</th>
+                    <th>طاولة</th>
+                    <th>وقت السداد</th>
+                    <th>نقدي</th>
+                    <th>فيزا</th>
+                    <th>إنستا</th>
+                    <th>محفظة</th>
+                    <th>المتحصل</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => {
+                    const bd = invBreakdown(inv);
+                    const collected =
+                      (Number(bd.cash) || 0) +
+                      (Number(bd.visa) || 0) +
+                      (Number(bd.wallet) || 0) +
+                      (Number(bd.instapay) || 0);
+                    return (
+                      <tr key={inv.invoiceId}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selected[inv.invoiceId])}
+                            onChange={(e) => setSelected((s) => ({ ...s, [inv.invoiceId]: e.target.checked }))}
+                          />
+                        </td>
+                        <td>{inv.billNumber || inv.invoiceId.slice(0, 8)}</td>
+                        <td>{inv.tableLabel || "—"}</td>
+                        <td>{String(inv.paidAt || "").slice(0, 16).replace("T", " ")}</td>
+                        <td>{money(Number(bd.cash) || 0)}</td>
+                        <td>{money(Number(bd.visa) || 0)}</td>
+                        <td>{money(Number(bd.instapay) || 0)}</td>
+                        <td>{money(Number(bd.wallet) || 0)}</td>
+                        <td>
+                          <strong>{money(collected || Number(inv.total) || 0)}</strong>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-            {unassigned.length > 0 ? (
-              <div className="shift-close__unassigned">
-                <label>
-                  <input type="checkbox" checked={claimUnassigned} onChange={(e) => setClaimUnassigned(e.target.checked)} />
-                  ضم فواتير قديمة غير منسوبة ({unassigned.length}) لهذا الشيفت
-                </label>
-                {claimUnassigned ? (
-                  <ul>
-                    {unassigned.map((u) => (
+          {unassigned.length > 0 ? (
+            <div className="shift-close__unassigned">
+              <label className="shift-close__checkline">
+                <input type="checkbox" checked={claimUnassigned} onChange={(e) => setClaimUnassigned(e.target.checked)} />
+                ضم فواتير غير منسوبة في الفترة ({unassigned.length}) لهذا الشيفت
+              </label>
+              {claimUnassigned ? (
+                <ul>
+                  {unassigned.map((u) => {
+                    const bd = invBreakdown(u);
+                    const collected =
+                      (Number(bd.cash) || 0) +
+                      (Number(bd.visa) || 0) +
+                      (Number(bd.wallet) || 0) +
+                      (Number(bd.instapay) || 0);
+                    return (
                       <li key={u.invoiceId}>
-                        <label>
+                        <label className="shift-close__checkline">
                           <input
                             type="checkbox"
                             checked={Boolean(selected[u.invoiceId])}
                             onChange={(e) => setSelected((s) => ({ ...s, [u.invoiceId]: e.target.checked }))}
-                          />{" "}
-                          {u.billNumber || u.invoiceId.slice(0, 8)} · {money(u.total)}
+                          />
+                          <span>
+                            {u.billNumber || u.invoiceId.slice(0, 8)} · {String(u.paidAt || "").slice(0, 10)} ·{" "}
+                            {money(collected || u.total)}
+                          </span>
                         </label>
                       </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            ) : null}
-          </section>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
 
+        <div className="shift-close__grid2">
           <section className="card shift-close__panel">
             <h3>تسليم الفئات النقدية (جنيه)</h3>
             <div className="shift-close__denoms">
               {DENOM_KEYS.map((k) => (
-                <label key={k}>
-                  <span>× {k}</span>
+                <div key={k} className="shift-close__denom-row">
+                  <span className="denom-label">فئة {k}</span>
                   <input
                     type="number"
                     min={0}
                     step={1}
                     value={denoms[k]}
                     onChange={(e) => setDenoms((d) => ({ ...d, [k]: e.target.value }))}
+                    aria-label={`عدد فئة ${k}`}
                   />
-                  <em>{money((Number(denoms[k]) || 0) * k)}</em>
-                </label>
+                  <span className="denom-sum">{money((Number(denoms[k]) || 0) * k)}</span>
+                </div>
               ))}
             </div>
             <div className="shift-close__declared">
-              المعدود نقداً: <strong>{money(totals.declaredCash)}</strong>
-              <span className={Math.abs(totals.variance) > 0.02 ? "is-warn" : ""}>
-                {" "}
-                · الفرق عن المتوقع: {money(totals.variance)}
-              </span>
+              <div>
+                المعدود نقداً: <strong>{money(totals.declaredCash)}</strong>
+              </div>
+              <div className={Math.abs(totals.variance) > 0.02 ? "is-warn" : ""}>
+                الفرق عن المتوقع: <strong>{money(totals.variance)}</strong>
+              </div>
             </div>
 
-            <h3 style={{ marginTop: "1.25rem" }}>إثباتات غير نقدية</h3>
-            <div className="shift-close__pair">
+            <h3 className="shift-close__subh">إثباتات غير نقدية</h3>
+            <div className="shift-close__stack">
               <label>
                 عدد إيصالات الفيزا
                 <input type="number" min={0} value={visaReceipts} onChange={(e) => setVisaReceipts(e.target.value)} />
@@ -395,18 +482,18 @@ export default function CashierShiftClosePage() {
           <section className="card shift-close__panel">
             <h3>الخصومات (مصروفات / مشتريات)</h3>
             {outflows.length === 0 ? (
-              <p className="muted">لا مصروفات مسجّلة من نوافذ الكاشير لهذا الشيفت.</p>
+              <p className="muted">لا مصروفات مسجّلة من نوافذ الكاشير في هذه الفترة.</p>
             ) : (
               <ul className="shift-close__outflows">
                 {outflows.map((o) => (
                   <li key={o.outflowId}>
-                    <label>
+                    <label className="shift-close__checkline">
                       <input
                         type="checkbox"
                         checked={Boolean(selectedOut[o.outflowId])}
                         onChange={(e) => setSelectedOut((s) => ({ ...s, [o.outflowId]: e.target.checked }))}
                       />
-                      <span>{o.kind === "purchase" ? "مشتريات" : "صرف"}</span>
+                      <span className="tag">{o.kind === "purchase" ? "مشتريات" : "صرف"}</span>
                       <strong>{money(o.amount)}</strong>
                       <em>{o.category || o.note || ""}</em>
                     </label>
@@ -414,7 +501,8 @@ export default function CashierShiftClosePage() {
                 ))}
               </ul>
             )}
-            <div className="shift-close__pair">
+
+            <div className="shift-close__stack">
               <label>
                 خصم إضافي — مصروفات
                 <input type="number" min={0} step={0.5} value={extraExpense} onChange={(e) => setExtraExpense(e.target.value)} />
@@ -424,19 +512,33 @@ export default function CashierShiftClosePage() {
                 <input type="number" min={0} step={0.5} value={extraPurchase} onChange={(e) => setExtraPurchase(e.target.value)} />
               </label>
             </div>
+
             <div className="shift-close__net">
-              <div>
-                نقدي متوقع بعد الخصم: <strong>{money(totals.expectedCash)}</strong>
+              <div className="net-row">
+                <span>إجمالي الخصومات</span>
+                <strong>{money(totals.deductions)}</strong>
               </div>
-              <div>
-                الصافي المسلم (حسب العدّ): <strong className="net">{money(totals.netHandover)}</strong>
+              <div className="net-row">
+                <span>نقدي متوقع بعد الخصم</span>
+                <strong>{money(totals.expectedCash)}</strong>
+              </div>
+              <div className="net-row net-row--focus">
+                <span>الصافي المسلم (حسب العدّ)</span>
+                <strong className="net">{money(totals.netHandover)}</strong>
               </div>
             </div>
+
             <label className="shift-close__notes">
               ملاحظات للكاشير / المدير
               <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="فروقات · عهدة ناقصة · …" />
             </label>
-            <button type="button" className="btn btn-primary shift-close__submit" disabled={busy || pool.length === 0} onClick={() => void submit()}>
+
+            <button
+              type="button"
+              className="btn btn-primary shift-close__submit"
+              disabled={busy || pool.length === 0}
+              onClick={() => void submit()}
+            >
               إرسال للإقفال واعتماد المدير
             </button>
             <p className="muted tiny">
@@ -488,45 +590,140 @@ export default function CashierShiftClosePage() {
 }
 
 const CSS = `
-.shift-close__wrap { display: grid; gap: 1rem; }
-.shift-close__hero { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
-.shift-close__hero h2 { margin: 0 0 0.25rem; font-size: 1.35rem; }
-.shift-close__hero p { margin: 0; color: var(--muted); max-width: 52rem; }
+.shift-close__wrap { display: grid; gap: 0.9rem; max-width: 1180px; }
+.shift-close__hero h2 { margin: 0 0 0.25rem; font-size: 1.3rem; }
+.shift-close__hero p { margin: 0; color: var(--muted); line-height: 1.45; }
+.shift-close__filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 200px)) auto;
+  gap: 0.75rem 1rem;
+  align-items: end;
+  padding: 0.85rem 1rem;
+}
+.shift-close__filters label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+.shift-close__filters input[type="date"] {
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  min-height: 2.4rem;
+}
+.shift-close__filter-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .shift-close__msg { padding: 0.65rem 0.9rem; border-radius: 10px; font-weight: 600; }
 .shift-close__msg.is-ok { background: #ecfdf5; color: #166534; }
 .shift-close__msg.is-err { background: #fef2f2; color: #991b1b; }
-.shift-close__kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.65rem; }
-.shift-close__kpis .kpi { background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%); color: #f8fafc; border-radius: 14px; padding: 0.85rem 1rem; display: grid; gap: 0.2rem; }
-.shift-close__kpis .kpi span { font-size: 0.78rem; opacity: 0.8; }
-.shift-close__kpis .kpi strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
-.kpi--cash { background: linear-gradient(160deg, #14532d, #166534) !important; }
-.kpi--visa { background: linear-gradient(160deg, #1e3a8a, #1d4ed8) !important; }
-.kpi--insta { background: linear-gradient(160deg, #4c1d95, #7c3aed) !important; }
-.kpi--total { background: linear-gradient(160deg, #7c2d12, #c2410c) !important; }
-.shift-close__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.85rem; align-items: start; }
-.shift-close__panel h3 { margin: 0 0 0.75rem; font-size: 1rem; }
-.shift-close__table-wrap { overflow: auto; }
+.shift-close__kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.55rem; }
+.shift-close__kpis .kpi {
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  display: grid;
+  gap: 0.15rem;
+  color: #f8fafc;
+  min-width: 0;
+}
+.shift-close__kpis .kpi span { font-size: 0.75rem; opacity: 0.88; }
+.shift-close__kpis .kpi strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.kpi--cash { background: linear-gradient(160deg, #14532d, #166534); }
+.kpi--visa { background: linear-gradient(160deg, #1e3a8a, #1d4ed8); }
+.kpi--insta { background: linear-gradient(160deg, #4c1d95, #7c3aed); }
+.kpi--wallet { background: linear-gradient(160deg, #0f172a, #334155); }
+.kpi--total { background: linear-gradient(160deg, #7c2d12, #c2410c); }
+.shift-close__panel { padding: 0.95rem 1rem; overflow: hidden; }
+.shift-close__panel h3 { margin: 0 0 0.7rem; font-size: 1rem; }
+.shift-close__panel-head { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.shift-close__panel-head h3 { margin: 0; }
+.shift-close__panel-tools { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.shift-close__table-wrap { overflow: auto; max-width: 100%; }
 .shift-close__panel table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
-.shift-close__panel th, .shift-close__panel td { padding: 0.4rem 0.35rem; border-bottom: 1px solid #e2e8f0; text-align: right; white-space: nowrap; }
+.shift-close__panel th, .shift-close__panel td {
+  padding: 0.45rem 0.4rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+  text-align: right;
+  white-space: nowrap;
+}
+.shift-close__grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; align-items: start; }
 .shift-close__denoms { display: grid; gap: 0.45rem; }
-.shift-close__denoms label { display: grid; grid-template-columns: 3.5rem 1fr auto; gap: 0.5rem; align-items: center; }
-.shift-close__denoms input { padding: 0.35rem 0.5rem; border-radius: 8px; border: 1px solid #cbd5e1; }
-.shift-close__denoms em { font-style: normal; font-variant-numeric: tabular-nums; color: #334155; min-width: 4.5rem; text-align: left; }
-.shift-close__declared { margin-top: 0.75rem; font-size: 0.92rem; }
+.shift-close__denom-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) 5rem;
+  gap: 0.55rem;
+  align-items: center;
+}
+.shift-close__denom-row input,
+.shift-close__stack input,
+.shift-close__notes textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-weight: 500;
+}
+.denom-label { font-size: 0.86rem; font-weight: 700; }
+.denom-sum { font-variant-numeric: tabular-nums; text-align: left; color: #334155; font-size: 0.9rem; }
+.shift-close__declared {
+  margin-top: 0.85rem;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.12);
+  font-size: 0.9rem;
+}
 .shift-close__declared .is-warn { color: #b45309; font-weight: 700; }
-.shift-close__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-top: 0.65rem; }
-.shift-close__pair label, .shift-close__notes { display: grid; gap: 0.3rem; font-size: 0.86rem; font-weight: 600; }
-.shift-close__pair input, .shift-close__notes textarea { font-weight: 500; padding: 0.4rem 0.55rem; border-radius: 8px; border: 1px solid #cbd5e1; }
-.shift-close__outflows { list-style: none; padding: 0; margin: 0 0 0.75rem; display: grid; gap: 0.35rem; }
-.shift-close__outflows label { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.88rem; }
-.shift-close__net { margin: 0.85rem 0; display: grid; gap: 0.35rem; padding: 0.75rem; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
-.shift-close__net .net { color: #166534; font-size: 1.15rem; }
-.shift-close__submit { width: 100%; margin-top: 0.75rem; padding: 0.7rem 1rem; font-weight: 800; }
-.shift-close__unassigned { margin-top: 0.85rem; padding-top: 0.75rem; border-top: 1px dashed #cbd5e1; }
-.shift-close__unassigned ul { margin: 0.4rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.25rem; }
+.shift-close__subh { margin: 1.1rem 0 0.55rem !important; }
+.shift-close__stack { display: grid; gap: 0.65rem; }
+.shift-close__stack label, .shift-close__notes {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+.shift-close__outflows { list-style: none; padding: 0; margin: 0 0 0.75rem; display: grid; gap: 0.4rem; }
+.shift-close__checkline { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.88rem; font-weight: 600; }
+.shift-close__checkline .tag {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 0.75rem;
+}
+.shift-close__checkline em { font-style: normal; color: var(--muted); font-weight: 500; }
+.shift-close__net {
+  margin: 0.85rem 0;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.8rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+}
+.net-row { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.9rem; }
+.net-row--focus { padding-top: 0.35rem; border-top: 1px dashed #cbd5e1; }
+.shift-close__net .net { color: #166534; font-size: 1.2rem; }
+.shift-close__submit { width: 100%; margin-top: 0.75rem; padding: 0.75rem 1rem; font-weight: 800; }
+.shift-close__unassigned { margin-top: 0.85rem; padding-top: 0.75rem; border-top: 1px dashed rgba(148, 163, 184, 0.5); }
+.shift-close__unassigned ul { margin: 0.45rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.3rem; }
 .muted { color: var(--muted); }
 .tiny { font-size: 0.8rem; margin-top: 0.5rem; }
-@media (max-width: 720px) {
-  .shift-close__pair { grid-template-columns: 1fr; }
+@media (max-width: 980px) {
+  .shift-close__kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shift-close__grid2 { grid-template-columns: 1fr; }
+  .shift-close__filters { grid-template-columns: 1fr 1fr; }
+  .shift-close__filter-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .shift-close__kpis { grid-template-columns: 1fr; }
+  .shift-close__filters { grid-template-columns: 1fr; }
 }
 `;

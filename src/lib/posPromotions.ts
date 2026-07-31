@@ -105,11 +105,20 @@ export function applyPromotions(cart: CartLine[], promos: Promotion[], couponCod
     if (p.type === "coupon") {
       const code = String(payload.code || "").trim().toLowerCase();
       const percent = toNum(payload.percent, 0);
-      if (code && percent > 0 && couponCode.trim().toLowerCase() === code) {
-        const d = (subtotal * percent) / 100;
-        invoiceDiscount += d;
-        notes.push(`${p.name}: كوبون ${percent}%`);
-        applied = true;
+      const amount = toNum(payload.amount ?? payload.value, 0);
+      if (code && couponCode.trim().toLowerCase() === code) {
+        let d = 0;
+        if (percent > 0) {
+          d = (subtotal * percent) / 100;
+          notes.push(`${p.name}: كوبون ${percent}%`);
+        } else if (amount > 0) {
+          d = Math.min(amount, subtotal);
+          notes.push(`${p.name}: كوبون ${amount.toFixed(2)} ج.م`);
+        }
+        if (d > 0) {
+          invoiceDiscount += d;
+          applied = true;
+        }
       }
     }
 

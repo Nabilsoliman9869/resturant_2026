@@ -68,17 +68,23 @@ export default function RunnerPage() {
           طلبات حالتها «جاهز» من المطبخ — اضغط بعد التوصيل الفعلي للطاولة.
         </p>
 
-        {deliverBy !== role ? (
+        {deliverBy === "none" || deliverBy === "kitchen_window" ? (
+          <div style={{ color: "var(--wp-muted)", padding: "0.8rem 1rem", background: "var(--wp-card)", borderRadius: 12, marginBottom: "1rem" }}>
+            {deliverBy === "none"
+              ? "السياسة الحالية: لا أحد يستلم من المطبخ — الأصناف تذهب مباشرة للطاولة بعد إنهاء المطبخ، ولا يوجد طابور تسليم هنا."
+              : "السياسة الحالية: استلام من نافذة الشيف — لا يُعرض طابور مناولة على هذه الشاشة."}
+          </div>
+        ) : deliverBy !== role ? (
           <div style={{ color: "var(--wp-muted)", padding: "0.8rem 1rem", background: "var(--wp-card)", borderRadius: 12, marginBottom: "1rem" }}>
             هذه الشاشة ليست دور الاستلام الحالي. الدور المحدد في المسار الآن: {deliverBy || "—"}.
           </div>
         ) : null}
 
-        {deliverBy === role && readyOrders.length === 0 ? (
+        {deliverBy !== "none" && deliverBy !== "kitchen_window" && deliverBy === role && readyOrders.length === 0 ? (
           <div style={{ color: "var(--wp-muted)", padding: "2rem", textAlign: "center", background: "var(--wp-card)", borderRadius: 16 }}>
             لا توجد طلبات جاهزة الآن.
           </div>
-        ) : deliverBy === role ? (
+        ) : deliverBy !== "none" && deliverBy !== "kitchen_window" && deliverBy === role ? (
           readyOrders.map((o, idx) => (
             <div
               key={o.id}

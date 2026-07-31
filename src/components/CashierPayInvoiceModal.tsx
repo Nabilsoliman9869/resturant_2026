@@ -25,6 +25,9 @@ export type CashierInvoiceLine = {
   unitPrice: number;
   lineTotal: number;
   seatNo?: number | null;
+  discount?: number;
+  productGuide?: string;
+  lineId?: string;
 };
 
 type CashierInvoiceSourceLine = CashierInvoiceLine & {
@@ -130,11 +133,103 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-const BILLING_MODE_LABEL: Record<"full_table" | "split_equal" | "split_by_order", string> = {
+type BillingMode = "full_table" | "split_equal" | "split_by_order" | "split_custom";
+type CustomSplitRow = { id: string; label: string; amount: string };
+
+const BILLING_MODE_LABEL: Record<BillingMode, string> = {
   full_table: "حساب الطاولة كاملة",
   split_equal: "سبليت بالتساوي",
   split_by_order: "سبليت حسب الطلب / الكرسي",
+  split_custom: "سبليت شيك مخصص",
 };
+
+const BILLING_MODE_LABEL_EN: Record<BillingMode, string> = {
+  full_table: "Full table check",
+  split_equal: "Equal split",
+  split_by_order: "Split by order / seat",
+  split_custom: "Custom split check",
+};
+
+type ReceiptLang = "ar" | "en";
+
+function receiptLabels(lang: ReceiptLang) {
+  if (lang === "en") {
+    return {
+      dir: "ltr" as const,
+      htmlLang: "en",
+      title: "Receipt",
+      customerCopy: "INVOICE — Customer copy",
+      invoiceNo: "Invoice No.",
+      table: "Table",
+      billRequested: "Bill requested",
+      itemsSum: "Items subtotal",
+      discount: "Discount",
+      tax: "Tax",
+      tipTable: "Tip (table)",
+      tipExtra: "Extra tip",
+      grand: "Table total",
+      checkType: "Check type",
+      payDist: "Payment breakdown",
+      cash: "Cash",
+      visa: "Card",
+      wallet: "Wallet",
+      instapay: "InstaPay",
+      payPending: "Payment not set yet",
+      thanks: "Thank you for visiting",
+      noItems: "No items",
+      equalShare: "Per-person share (equal split)",
+      persons: "guests",
+      equalTitle: "Per-person share (equal split)",
+      equalSub: "Total divided equally — each guest pays about this amount",
+      customTitle: "Custom split by guest",
+      customSub: "Shares must equal invoice total",
+      customWarn: "Enter guest amounts so they match the invoice total.",
+      equalWarn: "Enter number of guests above to show per-person share.",
+      guest: "Guest",
+      noprint: "To print or save PDF: press Ctrl+P and choose printer or Microsoft Print to PDF.",
+      serviceFallback: "Service charge",
+    };
+  }
+  return {
+    dir: "rtl" as const,
+    htmlLang: "ar",
+    title: "إيصال",
+    customerCopy: "فاتورة — نسخة عميل",
+    invoiceNo: "رقم الفاتورة",
+    table: "الطاولة",
+    billRequested: "طلب الحساب",
+    itemsSum: "مجموع الأصناف",
+    discount: "الخصم",
+    tax: "الضريبة",
+    tipTable: "تيبس (طاولة)",
+    tipExtra: "تيبس إضافي",
+    grand: "إجمالي الطاولة",
+    checkType: "نوع الحساب",
+    payDist: "توزيع الدفع",
+    cash: "نقدي",
+    visa: "فيزا",
+    wallet: "محفظة",
+    instapay: "انستاباي",
+    payPending: "لم يُحدَّد الدفع بعد",
+    thanks: "شكراً لزيارتكم",
+    noItems: "لا بنود",
+    equalShare: "نصيب الفرد (سبليت بالتساوي)",
+    persons: "أشخاص",
+    equalTitle: "نصيب كل شخص (تقسيم بالتساوي)",
+    equalSub: "الإجمالي مقسوم بالتساوي — كل عميل يدفع تقريباً هذا المبلغ",
+    customTitle: "تقسيم مخصص حسب الضيف",
+    customSub: "مجموع الحصص يجب أن يساوي إجمالي الفاتورة",
+    customWarn: "أدخل مبالغ الضيوف يدوياً بحيث يطابق مجموعها إجمالي الفاتورة.",
+    equalWarn: "أدخل عدد الأشخاص أعلاه ليظهر نصيب الفرد هنا وفي المذيّل.",
+    guest: "ضيف",
+    noprint: "للطباعة أو حفظ PDF: اضغط Ctrl+P واختر الطابعة أو «Microsoft Print to PDF».",
+    serviceFallback: "رسوم الخدمة",
+  };
+}
+
+function newCustomSplitRow(index: number, amount = ""): CustomSplitRow {
+  return { id: `guest-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, label: `ضيف ${index}`, amount };
+}
 
 function printHtmlInIframe(html: string): void {
   const iframe = document.createElement("iframe");
@@ -194,13 +289,14 @@ type ThermalReceiptInput = {
     tax: number;
     mode: string;
     vatPct: number;
+    svcPct?: number;
     serviceLabel: string;
   };
   totalDue: number;
   lockedFromSource: boolean;
   tableTipAdditive: number;
   extraTip: number;
-  billingMode: "full_table" | "split_equal" | "split_by_order";
+  billingMode: BillingMode;
   cash: number;
   visa: number;
   wallet: number;
@@ -208,11 +304,16 @@ type ThermalReceiptInput = {
   notes: string;
   splitEqualPersons?: number;
   perPersonShare?: number | null;
+  customSplitShares?: Array<{ label: string; amount: number }>;
   lineSplitSectionHtml?: string;
   seatSectionHtml?: string;
+  receiptLang?: ReceiptLang;
 };
 
 function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
+  const lang: ReceiptLang = p.receiptLang === "en" ? "en" : "ar";
+  const L = receiptLabels(lang);
+  const modeLabel = lang === "en" ? BILLING_MODE_LABEL_EN[p.billingMode] : BILLING_MODE_LABEL[p.billingMode];
   const forCustomer = p.customerReceipt !== false;
   const seatSectionHtml = p.seatSectionHtml || "";
   const lineRows = p.lines
@@ -223,59 +324,89 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
     .join("");
   const tipBlock =
     !p.lockedFromSource && (p.tableTipAdditive > 0.001 || p.extraTip > 0.001)
-      ? `${p.tableTipAdditive > 0.001 ? `<tr><td>تيبس (طاولة)</td><td>${p.tableTipAdditive.toFixed(2)}</td></tr>` : ""}${p.extraTip > 0.001 ? `<tr><td>تيبس إضافي</td><td>${p.extraTip.toFixed(2)}</td></tr>` : ""}`
+      ? `${p.tableTipAdditive > 0.001 ? `<tr><td>${L.tipTable}</td><td>${p.tableTipAdditive.toFixed(2)}</td></tr>` : ""}${p.extraTip > 0.001 ? `<tr><td>${L.tipExtra}</td><td>${p.extraTip.toFixed(2)}</td></tr>` : ""}`
       : "";
   const payRows =
     p.cash + p.visa + p.wallet + p.instapay > 0.001
-      ? `<tr><td>نقدي</td><td>${p.cash.toFixed(2)}</td></tr><tr><td>فيزا</td><td>${p.visa.toFixed(2)}</td></tr><tr><td>محفظة</td><td>${p.wallet.toFixed(2)}</td></tr><tr><td>انستاباي</td><td>${p.instapay.toFixed(2)}</td></tr>`
-      : `<tr><td colspan="2" class="muted">لم يُحدَّد الدفع بعد</td></tr>`;
+      ? `<tr><td>${L.cash}</td><td>${p.cash.toFixed(2)}</td></tr><tr><td>${L.visa}</td><td>${p.visa.toFixed(2)}</td></tr><tr><td>${L.wallet}</td><td>${p.wallet.toFixed(2)}</td></tr><tr><td>${L.instapay}</td><td>${p.instapay.toFixed(2)}</td></tr>`
+      : `<tr><td colspan="2" class="muted">${L.payPending}</td></tr>`;
   const tableLine = p.tableLabel
-    ? `<div class="c b tbl">الطاولة: ${escapeHtml(p.tableLabel)}</div>`
+    ? `<div class="c b tbl">${L.table}: ${escapeHtml(p.tableLabel)}</div>`
     : "";
   const billLine =
     p.billNo && p.billNo !== "—"
-      ? `<div class="c b billno">رقم الفاتورة: ${escapeHtml(p.billNo)}</div>`
+      ? `<div class="c b billno">${L.invoiceNo}: ${escapeHtml(p.billNo)}</div>`
       : "";
   const sessTech =
     forCustomer || !p.sessionId || String(p.sessionId) === String(p.invoiceGuid)
       ? ""
-      : `<div class="guid" style="margin-top:4px">معرّف الجلسة (تقني):<br/>${escapeHtml(p.sessionId)}</div>`;
+      : `<div class="guid" style="margin-top:4px">Session (tech):<br/>${escapeHtml(p.sessionId)}</div>`;
   const guidBlock = forCustomer
     ? ""
-    : `<div class="guid">مرجع تقني (CardGuide):<br/>${escapeHtml(p.invoiceGuid)}</div>`;
+    : `<div class="guid">Tech ref (CardGuide):<br/>${escapeHtml(p.invoiceGuid)}</div>`;
   const showSplit =
     p.billingMode === "split_equal" &&
     p.splitEqualPersons != null &&
     p.splitEqualPersons >= 1 &&
     p.perPersonShare != null;
+  const customShares = Array.isArray(p.customSplitShares) ? p.customSplitShares.filter((x) => x && Number(x.amount) > 0) : [];
+  const showCustomSplit = p.billingMode === "split_custom" && customShares.length >= 2;
   const splitShareValue = showSplit ? Number(p.perPersonShare ?? 0) : 0;
-  /** يظهر في أعلى الإيصال حتى تُرى المعاينة دون تمرير طويل */
+  const customRowsHtml = showCustomSplit
+    ? customShares
+        .map(
+          (g) =>
+            `<tr><td>${escapeHtml(String(g.label || L.guest))}</td><td style="text-align:left;font-weight:800">${Number(g.amount).toFixed(2)}</td></tr>`,
+        )
+        .join("")
+    : "";
   const splitTopBanner = showSplit
-    ? `<div class="split-top" dir="rtl">
-  <span class="split-top-lab">نصيب الفرد (سبليت بالتساوي)</span>
-  <span class="split-top-val">${splitShareValue.toFixed(2)} <small>ج.م</small></span>
-  <span class="split-top-sub">÷ ${p.splitEqualPersons} أشخاص</span>
+    ? `<div class="split-top" dir="${L.dir}">
+  <span class="split-top-lab">${L.equalShare}</span>
+  <span class="split-top-val">${splitShareValue.toFixed(2)} <small>EGP</small></span>
+  <span class="split-top-sub">÷ ${p.splitEqualPersons} ${L.persons}</span>
+</div>`
+    : showCustomSplit
+      ? `<div class="split-top" dir="${L.dir}">
+  <span class="split-top-lab">${L.customTitle}</span>
+  <span class="split-top-sub">${customShares.length} ${L.persons}</span>
 </div>`
     : p.billingMode === "split_equal" && !showSplit
-      ? `<div class="split-top split-top-warn" dir="rtl">أدخل <strong>عدد الأشخاص</strong> أعلاه ليظهر نصيب الفرد هنا وفي المذيّل.</div>`
+      ? `<div class="split-top split-top-warn" dir="${L.dir}">${L.equalWarn}</div>`
+      : p.billingMode === "split_custom" && !showCustomSplit
+        ? `<div class="split-top split-top-warn" dir="${L.dir}">${L.customWarn}</div>`
       : "";
   const splitBlock = showSplit
     ? `<div class="splitbox">
-  <div class="split-title">نصيب كل شخص (تقسيم بالتساوي)</div>
-  <div class="split-amt">${splitShareValue.toFixed(2)} <span class="cur">ج.م</span></div>
-  <div class="split-sub">الإجمالي مقسوم على ${p.splitEqualPersons} أشخاص — كل عميل يدفع تقريباً هذا المبلغ</div>
+  <div class="split-title">${L.equalTitle}</div>
+  <div class="split-amt">${splitShareValue.toFixed(2)} <span class="cur">EGP</span></div>
+  <div class="split-sub">${L.equalSub}</div>
   ${p.lineSplitSectionHtml || ""}
+</div>`
+    : showCustomSplit
+      ? `<div class="splitbox">
+  <div class="split-title">${L.customTitle}</div>
+  <table class="pay" style="margin-top:6px">${customRowsHtml}</table>
+  <div class="split-sub">${L.customSub} ${p.totalDue.toFixed(2)} EGP</div>
 </div>`
     : "";
   const notesForPrint = forCustomer ? sanitizeCustomerNote(p.notes) : p.notes;
   const notesBlock = notesForPrint
     ? `<div class="muted" style="margin-top:6px">${escapeHtml(notesForPrint)}</div>`
     : "";
+  const serviceLabel =
+    lang === "en"
+      ? escapeHtml(
+          p.ledger.mode === "recalc" && Number(p.ledger.svcPct || 0) > 0
+            ? `${L.serviceFallback} (${p.ledger.svcPct}%)`
+            : L.serviceFallback,
+        )
+      : escapeHtml(p.ledger.serviceLabel || L.serviceFallback);
   return `<!DOCTYPE html>
-<html dir="rtl" lang="ar">
+<html dir="${L.dir}" lang="${L.htmlLang}">
 <head>
   <meta charset="utf-8"/>
-  <title>إيصال</title>
+  <title>${L.title}</title>
   <style>
     @page { size: 80mm auto; margin: 2mm; }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
@@ -354,33 +485,33 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
   </style>
 </head>
 <body>
-  <div class="noprint">للطباعة أو حفظ PDF: اضغط Ctrl+P واختر الطابعة أو «Microsoft Print to PDF».</div>
-  <div class="c b" style="font-size:11px">فاتورة — نسخة عميل</div>
+  <div class="noprint">${L.noprint}</div>
+  <div class="c b" style="font-size:11px">${L.customerCopy}</div>
   ${billLine}
   <div class="c muted">${escapeHtml(p.billDate)}${p.agentName && p.agentName !== "—" ? ` · ${escapeHtml(p.agentName)}` : ""}</div>
   ${tableLine}
   ${splitTopBanner}
   ${guidBlock}
   ${sessTech}
-  <div class="muted">طلب الحساب: ${escapeHtml(p.requestedAt)}</div>
+  <div class="muted">${L.billRequested}: ${escapeHtml(p.requestedAt)}</div>
   <hr class="hr"/>
-  ${seatSectionHtml || `<table class="items">${lineRows || `<tr><td colspan="2" class="muted">لا بنود</td></tr>`}</table>`}
+  ${seatSectionHtml || `<table class="items">${lineRows || `<tr><td colspan="2" class="muted">${L.noItems}</td></tr>`}</table>`}
   <hr class="hr"/>
   <table class="tot">
-    <tr><td>مجموع الأصناف</td><td>${p.ledger.linesSum.toFixed(2)}</td></tr>
-    ${p.ledger.discount > 0.001 ? `<tr><td>الخصم</td><td>${p.ledger.discount.toFixed(2)}</td></tr>` : ""}
-    <tr><td>${escapeHtml(p.ledger.serviceLabel)}</td><td>${p.ledger.service.toFixed(2)}</td></tr>
-    <tr><td>الضريبة${p.ledger.mode === "recalc" ? ` (${p.ledger.vatPct}%)` : ""}</td><td>${p.ledger.tax.toFixed(2)}</td></tr>
+    <tr><td>${L.itemsSum}</td><td>${p.ledger.linesSum.toFixed(2)}</td></tr>
+    ${p.ledger.discount > 0.001 ? `<tr><td>${L.discount}</td><td>${p.ledger.discount.toFixed(2)}</td></tr>` : ""}
+    <tr><td>${serviceLabel}</td><td>${p.ledger.service.toFixed(2)}</td></tr>
+    <tr><td>${L.tax}${p.ledger.mode === "recalc" ? ` (${p.ledger.vatPct}%)` : ""}</td><td>${p.ledger.tax.toFixed(2)}</td></tr>
     ${tipBlock}
   </table>
-  <div class="grand">إجمالي الطاولة: ${p.totalDue.toFixed(2)} ج.م</div>
+  <div class="grand">${L.grand}: ${p.totalDue.toFixed(2)} EGP</div>
   ${splitBlock}
-  <div class="mode"><span class="b">نوع الحساب:</span> ${escapeHtml(BILLING_MODE_LABEL[p.billingMode])}</div>
-  <div class="b" style="margin-top:6px;font-size:10px">توزيع الدفع</div>
+  <div class="mode"><span class="b">${L.checkType}:</span> ${escapeHtml(modeLabel)}</div>
+  <div class="b" style="margin-top:6px;font-size:10px">${L.payDist}</div>
   <table class="pay">${payRows}</table>
   ${notesBlock}
   <hr class="hr"/>
-  <div class="c muted" style="font-size:8px">شكراً لزيارتكم</div>
+  <div class="c muted" style="font-size:8px">${L.thanks}</div>
 </body>
 </html>`;
 }
@@ -557,13 +688,19 @@ export function CashierPayInvoiceModal({
   const [lockedFromSource, setLockedFromSource] = useState(false);
   const [detailHint, setDetailHint] = useState<string>("");
   const [discountInput, setDiscountInput] = useState("");
+  const [couponInput, setCouponInput] = useState("");
+  const [managerDiscountPct, setManagerDiscountPct] = useState("");
+  const [lineDiscountDraft, setLineDiscountDraft] = useState<Record<string, string>>({});
+  const [discountBusy, setDiscountBusy] = useState(false);
   const [applyServiceCharge, setApplyServiceCharge] = useState(true);
   const [applyVatCharge, setApplyVatCharge] = useState(true);
   const [isTaxInvoice, setIsTaxInvoice] = useState(false);
   const [tipInput, setTipInput] = useState("");
-  const [billingMode, setBillingMode] = useState<"full_table" | "split_equal" | "split_by_order">("full_table");
+  const [billingMode, setBillingMode] = useState<BillingMode>("full_table");
   const [splitGuestsInput, setSplitGuestsInput] = useState("");
   const [splitShareLocked, setSplitShareLocked] = useState(false);
+  const [customSplitRows, setCustomSplitRows] = useState<CustomSplitRow[]>([]);
+  const [receiptLang, setReceiptLang] = useState<ReceiptLang>("en");
   const [pricingSnapshot, setPricingSnapshot] = useState<CashierPricingSnapshot | null>(null);
   const [cash, setCash] = useState("");
   const [visa, setVisa] = useState("");
@@ -593,12 +730,22 @@ export function CashierPayInvoiceModal({
     setBillingMode("full_table");
     setSplitGuestsInput("");
     setSplitShareLocked(false);
+    setCustomSplitRows([]);
+    setCouponInput("");
+    setManagerDiscountPct("");
+    setLineDiscountDraft({});
     autoPrintedRef.current = false;
     setCreditLimitApprovalPending(false);
     setGuestApprovalPending(false);
     setCreditLimitApproved(false);
     setGuestApproved(false);
   }, [open, invoiceId]);
+
+  useEffect(() => {
+    if (!open || !row) return;
+    const c = String((row as CashierInvoiceRow & { couponCode?: string }).couponCode || "").trim();
+    if (c) setCouponInput(c);
+  }, [open, row?.invoiceId]);
 
   useEffect(() => {
     if (!row) return;
@@ -612,8 +759,15 @@ export function CashierPayInvoiceModal({
   }, [row?.invoiceId, row?.sessionGuestCount, row?.seatingCoversGuestPayment, row?.seatingCoversOnAccount]);
 
   useEffect(() => {
-    if (billingMode !== "split_equal") setSplitShareLocked(false);
+    if (billingMode !== "split_equal" && billingMode !== "split_custom") setSplitShareLocked(false);
   }, [billingMode]);
+
+  useEffect(() => {
+    if (billingMode !== "split_custom") return;
+    if (customSplitRows.length > 0) return;
+    const n = Math.max(2, Math.min(12, Number(row?.sessionGuestCount) || 2));
+    setCustomSplitRows(Array.from({ length: n }, (_, i) => newCustomSplitRow(i + 1)));
+  }, [billingMode, customSplitRows.length, row?.sessionGuestCount]);
 
   const loadLocal = useCallback(async () => {
     const id = String(invoiceId || "").trim();
@@ -951,6 +1105,31 @@ export function CashierPayInvoiceModal({
     return round2(totalDue / splitPersonsN);
   }, [billingMode, splitPersonsN, totalDue]);
 
+  const customSplitParsed = useMemo(
+    () =>
+      customSplitRows.map((r) => ({
+        id: r.id,
+        label: String(r.label || "").trim() || "ضيف",
+        amount: parseMoneyInput(r.amount),
+      })),
+    [customSplitRows],
+  );
+  const customSplitSum = useMemo(
+    () => round2(customSplitParsed.reduce((s, r) => s + Math.max(0, r.amount), 0)),
+    [customSplitParsed],
+  );
+  const customSplitDiff = useMemo(() => round2(totalDue - customSplitSum), [totalDue, customSplitSum]);
+  const customSplitShares = useMemo(
+    () =>
+      customSplitParsed
+        .filter((r) => r.amount > 0.0001)
+        .map((r) => ({ label: r.label, amount: round2(r.amount) })),
+    [customSplitParsed],
+  );
+  const customSplitOk =
+    billingMode !== "split_custom" ||
+    (customSplitShares.length >= 2 && Math.abs(customSplitDiff) <= 0.02 && customSplitSum > 0.0001);
+
   const lineSplitSectionHtml = useMemo(() => {
     if (billingMode !== "split_equal" || splitPersonsN < 1 || lines.length === 0) return "";
     const rows = lines
@@ -966,6 +1145,75 @@ export function CashierPayInvoiceModal({
   const seatSectionHtml = useMemo(() => buildSeatSectionsHtml(lines), [lines]);
 
   const foldLocked = splitShareLocked;
+  const role = String(user?.role || "").trim().toLowerCase();
+  const isManagerDiscountRole = role === "manager" || role === "operation_manager" || role === "developer";
+
+  async function applyInvoiceDiscounts() {
+    const id = String(invoiceId || row?.invoiceId || "").trim();
+    if (!id) return;
+    const coupon = String(couponInput || "").trim();
+    const mgrAmt = parseMoneyInput(discountInput);
+    const mgrPct = parseMoneyInput(managerDiscountPct);
+    const lineDiscounts: Array<{ lineKey: string; name: string; amount: number }> = [];
+    if (isManagerDiscountRole) {
+      lines.forEach((ln, i) => {
+        const key = String(ln.lineId || ln.productGuide || `${ln.name}|${i}`);
+        const amt = parseMoneyInput(lineDiscountDraft[key] || "");
+        if (amt > 0.0001) lineDiscounts.push({ lineKey: key, name: ln.name, amount: amt });
+      });
+    }
+    if (!coupon && mgrAmt <= 0 && mgrPct <= 0 && lineDiscounts.length === 0) {
+      setMsg("أدخل كود كوبون أو خصم مدير أولاً.");
+      return;
+    }
+    if ((mgrAmt > 0 || mgrPct > 0 || lineDiscounts.length > 0) && !isManagerDiscountRole) {
+      setMsg("خصم الفاتورة/الأصناف متاح للمدير فقط. الكاشير يمكنه إدخال كود الكوبون.");
+      return;
+    }
+    setDiscountBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch(`${base}/api/restaurant/invoices-local/apply-discount`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId: id,
+          couponCode: coupon || undefined,
+          managerDiscountAmount: isManagerDiscountRole && mgrAmt > 0 ? mgrAmt : undefined,
+          managerDiscountPercent: isManagerDiscountRole && mgrPct > 0 ? mgrPct : undefined,
+          lineDiscounts: isManagerDiscountRole && lineDiscounts.length ? lineDiscounts : undefined,
+          mat3amActor: buildMat3amActor(user),
+        }),
+      });
+      const txt = await r.text();
+      const j = tryParseJson<{ detail?: unknown; invoice?: CashierInvoiceRow; promoNotes?: string[] }>(txt) ?? {};
+      if (!r.ok) {
+        const d = j.detail;
+        throw new Error(typeof d === "string" ? d : txt || "تعذر تطبيق الخصم");
+      }
+      if (j.invoice) {
+        setRow(j.invoice);
+        const invLines = Array.isArray(j.invoice.lines) ? j.invoice.lines : [];
+        if (invLines.length) setLines(invLines);
+        setHeaderDiscount(Number(j.invoice.discount || 0) || 0);
+        setHeaderTax(Number(j.invoice.tax || 0) || 0);
+        setHeaderService(Number(j.invoice.serviceCharge || 0) || 0);
+        setLockedFromSource(true);
+        setDiscountInput(Number(j.invoice.discount || 0) > 0 ? String(j.invoice.discount) : "");
+      } else {
+        await loadLocal();
+      }
+      setLineDiscountDraft({});
+      setManagerDiscountPct("");
+      const notes = Array.isArray(j.promoNotes) ? j.promoNotes.join(" · ") : "";
+      setMsg(notes ? `تم تطبيق الخصم: ${notes}` : "تم تطبيق الخصم على الفاتورة.");
+      onChanged?.();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setDiscountBusy(false);
+    }
+  }
 
   const pbCash = round2(parseMoneyInput(cash));
   const pbVisa = round2(parseMoneyInput(visa));
@@ -1009,6 +1257,7 @@ export function CashierPayInvoiceModal({
       !detailLoading &&
       zeroPricedLineNames.length === 0 &&
       settlementReady &&
+      customSplitOk &&
       totalDue >= 0 &&
       (lines.length === 0 || ledger.linesSum > 0.0001 || ledger.grand > 0.0001),
   );
@@ -1055,6 +1304,7 @@ export function CashierPayInvoiceModal({
         tax: ledger.tax,
         mode: ledger.mode,
         vatPct: ledger.vatPct,
+        svcPct: ledger.svcPct,
         serviceLabel: ledger.serviceLabel,
       },
       totalDue: round2(totalDue),
@@ -1069,8 +1319,10 @@ export function CashierPayInvoiceModal({
       notes: notes || "",
       splitEqualPersons: billingMode === "split_equal" && splitPersonsN >= 1 ? splitPersonsN : undefined,
       perPersonShare: perPersonShare,
+      customSplitShares: billingMode === "split_custom" ? customSplitShares : undefined,
       lineSplitSectionHtml: lineSplitSectionHtml || undefined,
       seatSectionHtml: seatSectionHtml || undefined,
+      receiptLang,
     });
   }, [
     row,
@@ -1091,8 +1343,10 @@ export function CashierPayInvoiceModal({
     notes,
     splitPersonsN,
     perPersonShare,
+    customSplitShares,
     lineSplitSectionHtml,
     seatSectionHtml,
+    receiptLang,
   ]);
 
   const runThermalPrint = useCallback(async () => {
@@ -1144,6 +1398,13 @@ export function CashierPayInvoiceModal({
       if ((isPartialAccount || isPartialGuest) && !partialOk) {
         throw new Error("للتسوية الجزئية: أدخل مبلغاً مدفوعاً الآن أقل من الإجمالي، والمتبقي يُرحَّل.");
       }
+      if (billingMode === "split_custom" && !customSplitOk) {
+        throw new Error(
+          customSplitShares.length < 2
+            ? "السبليت المخصص يحتاج ضيفين على الأقل بمبالغ أكبر من صفر."
+            : `مجموع حصص الضيوف (${customSplitSum.toFixed(2)}) يجب أن يساوي إجمالي الفاتورة (${totalDue2.toFixed(2)}). الفرق: ${customSplitDiff.toFixed(2)} ج.م`,
+        );
+      }
       const remainderSettlement =
         settlementMode === "partial_to_account" ? "on_account" : settlementMode === "partial_to_guest" ? "guest" : undefined;
       const body = {
@@ -1175,6 +1436,7 @@ export function CashierPayInvoiceModal({
           pricingMode: ledger.mode,
           splitEqualPersons: billingMode === "split_equal" && splitPersonsN >= 1 ? splitPersonsN : undefined,
           perPersonShare: perPersonShare ?? undefined,
+          customSplitShares: billingMode === "split_custom" ? customSplitShares : undefined,
         },
       };
       const r = await fetch(`${base}/api/restaurant/invoices-local/mark-paid`, {
@@ -1452,17 +1714,50 @@ export function CashierPayInvoiceModal({
                             <th style={{ textAlign: "center", padding: "0.35rem 0.25rem", width: "4.2rem" }}>كمية</th>
                             <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "4.5rem" }}>سعر</th>
                             <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "4.5rem" }}>إجمالي</th>
+                            {isManagerDiscountRole ? (
+                              <th style={{ textAlign: "left", padding: "0.35rem 0.25rem", width: "5rem" }}>خصم</th>
+                            ) : null}
                           </tr>
                         </thead>
                         <tbody>
-                          {section.lines.map((ln, i) => (
+                          {section.lines.map((ln, i) => {
+                            const globalIdx = lines.findIndex((x) => x === ln);
+                            const key = String(ln.lineId || ln.productGuide || `${ln.name}|${globalIdx >= 0 ? globalIdx : i}`);
+                            return (
                             <tr key={`${section.label}-${ln.name}-${i}`} style={{ borderBottom: "1px solid rgba(148,163,184,0.25)" }}>
-                              <td style={{ padding: "0.35rem 0.25rem" }}>{ln.name}</td>
+                              <td style={{ padding: "0.35rem 0.25rem" }}>
+                                {ln.name}
+                                {Number(ln.discount || 0) > 0.001 ? (
+                                  <div style={{ fontSize: "0.7rem", color: "#b45309" }}>خصم سابق {Number(ln.discount).toFixed(2)}</div>
+                                ) : null}
+                              </td>
                               <td style={{ textAlign: "center" }}>{ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}</td>
                               <td style={{ textAlign: "left" }}>{ln.unitPrice.toFixed(2)}</td>
                               <td style={{ textAlign: "left", fontWeight: 600 }}>{ln.lineTotal.toFixed(2)}</td>
+                              {isManagerDiscountRole ? (
+                                <td style={{ textAlign: "left" }}>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={lineDiscountDraft[key] || ""}
+                                    onChange={(e) => setLineDiscountDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                                    disabled={foldLocked || discountBusy || Boolean(row?.paidAt)}
+                                    placeholder="0"
+                                    style={{
+                                      width: "4.5rem",
+                                      padding: "0.2rem 0.3rem",
+                                      borderRadius: 6,
+                                      border: "1px solid var(--border)",
+                                      background: "var(--bg)",
+                                      color: "inherit",
+                                      fontSize: "0.78rem",
+                                    }}
+                                  />
+                                </td>
+                              ) : null}
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1590,18 +1885,17 @@ export function CashierPayInvoiceModal({
               ) : null}
             </div>
 
-            {!lockedFromSource ? (
+            {!row?.paidAt ? (
               <div className="card" style={{ marginTop: "0.75rem", padding: "0.65rem 0.75rem", fontSize: "0.86rem" }}>
-                <div style={{ fontWeight: 700, marginBottom: "0.45rem" }}>تعديلات الكاشير (إعادة حساب الخدمة والضريبة)</div>
+                <div style={{ fontWeight: 700, marginBottom: "0.45rem" }}>الخصم والكوبون</div>
                 <label style={{ display: "grid", gap: 4, marginBottom: "0.5rem" }}>
-                  <span style={{ color: "var(--muted)" }}>خصم إضافي (ج.م)</span>
+                  <span style={{ color: "var(--muted)" }}>كود الكوبون</span>
                   <input
                     type="text"
-                    inputMode="decimal"
-                    value={discountInput}
-                    onChange={(e) => setDiscountInput(e.target.value)}
-                    disabled={foldLocked}
-                    placeholder="0"
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value)}
+                    disabled={foldLocked || discountBusy}
+                    placeholder="مثال: WELCOME10"
                     style={{
                       padding: "0.45rem 0.55rem",
                       borderRadius: 8,
@@ -1611,17 +1905,69 @@ export function CashierPayInvoiceModal({
                     }}
                   />
                 </label>
-                {pricingSnapshot?.tbl007Service?.matched && pricingSnapshot.tbl007Service.productName ? (
+                {isManagerDiscountRole ? (
+                  <>
+                    <label style={{ display: "grid", gap: 4, marginBottom: "0.5rem" }}>
+                      <span style={{ color: "var(--muted)" }}>خصم مدير على الفاتورة (ج.م)</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={discountInput}
+                        onChange={(e) => setDiscountInput(e.target.value)}
+                        disabled={foldLocked || discountBusy}
+                        placeholder="0"
+                        style={{
+                          padding: "0.45rem 0.55rem",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg)",
+                          color: "inherit",
+                        }}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 4, marginBottom: "0.5rem" }}>
+                      <span style={{ color: "var(--muted)" }}>خصم مدير نسبة على الفاتورة (%)</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={managerDiscountPct}
+                        onChange={(e) => setManagerDiscountPct(e.target.value)}
+                        disabled={foldLocked || discountBusy}
+                        placeholder="0"
+                        style={{
+                          padding: "0.45rem 0.55rem",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg)",
+                          color: "inherit",
+                        }}
+                      />
+                    </label>
+                    <p style={{ margin: "0 0 0.45rem", fontSize: "0.72rem", color: "var(--muted)" }}>
+                      خصم الصنف: أدخل المبلغ في عمود «خصم» بجانب كل بند ثم اضغط تطبيق.
+                    </p>
+                  </>
+                ) : (
+                  <p style={{ margin: "0 0 0.45rem", fontSize: "0.75rem", color: "var(--muted)" }}>
+                    الكاشير يطبّق كود الكوبون فقط. خصم الفاتورة/الأصناف للمدير.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={foldLocked || discountBusy}
+                  onClick={() => void applyInvoiceDiscounts()}
+                  style={{ width: "100%" }}
+                >
+                  {discountBusy ? "جاري التطبيق…" : "تطبيق الخصم / الكوبون"}
+                </button>
+                {!lockedFromSource && pricingSnapshot?.tbl007Service?.matched && pricingSnapshot.tbl007Service.productName ? (
                   <p style={{ margin: "0.35rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
                     مطابقة TBL007: {pricingSnapshot.tbl007Service.productName}
                   </p>
                 ) : null}
               </div>
-            ) : (
-              <p style={{ marginTop: "0.65rem", fontSize: "0.78rem", color: "var(--muted)" }}>
-                الضريبة ورسوم الخدمة مُثبتة في الفاتورة المحفوظة — لا يُعاد حسابها هنا.
-              </p>
-            )}
+            ) : null}
 
             {allowPayment ? (
               <>
@@ -1801,6 +2147,7 @@ export function CashierPayInvoiceModal({
                     ["full_table", BILLING_MODE_LABEL.full_table],
                     ["split_equal", BILLING_MODE_LABEL.split_equal],
                     ["split_by_order", BILLING_MODE_LABEL.split_by_order],
+                    ["split_custom", BILLING_MODE_LABEL.split_custom],
                   ] as const
                 ).map(([val, lab]) => (
                   <label
@@ -1886,6 +2233,147 @@ export function CashierPayInvoiceModal({
                   >
                     إلغاء التثبيت
                   </button>
+                </div>
+              </div>
+            ) : null}
+            {billingMode === "split_custom" ? (
+              <div
+                style={{
+                  marginBottom: "0.65rem",
+                  padding: "0.55rem 0.65rem",
+                  borderRadius: 10,
+                  border: "1px dashed rgba(148,163,184,0.55)",
+                  fontSize: "0.82rem",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: "0.45rem" }}>سبليت شيك مخصص — أدخل مبلغ كل ضيف يدوياً</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {customSplitRows.map((r, idx) => (
+                    <div
+                      key={r.id}
+                      style={{ display: "grid", gridTemplateColumns: "1fr 7rem auto", gap: 6, alignItems: "center" }}
+                    >
+                      <input
+                        type="text"
+                        value={r.label}
+                        disabled={foldLocked}
+                        onChange={(e) =>
+                          setCustomSplitRows((prev) =>
+                            prev.map((x) => (x.id === r.id ? { ...x, label: e.target.value } : x)),
+                          )
+                        }
+                        placeholder={`ضيف ${idx + 1}`}
+                        style={{
+                          padding: "0.35rem 0.45rem",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg)",
+                          color: "inherit",
+                        }}
+                      />
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={r.amount}
+                        disabled={foldLocked}
+                        onChange={(e) =>
+                          setCustomSplitRows((prev) =>
+                            prev.map((x) => (x.id === r.id ? { ...x, amount: e.target.value } : x)),
+                          )
+                        }
+                        placeholder="0"
+                        style={{
+                          padding: "0.35rem 0.45rem",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg)",
+                          color: "inherit",
+                          textAlign: "left",
+                          fontWeight: 700,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={foldLocked || customSplitRows.length <= 2}
+                        onClick={() => setCustomSplitRows((prev) => prev.filter((x) => x.id !== r.id))}
+                        style={{ fontSize: "0.75rem", padding: "0.3rem 0.45rem" }}
+                        title="حذف الضيف"
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.55rem" }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={foldLocked || customSplitRows.length >= 16}
+                    onClick={() =>
+                      setCustomSplitRows((prev) => [...prev, newCustomSplitRow(prev.length + 1)])
+                    }
+                    style={{ fontSize: "0.82rem" }}
+                  >
+                    + إضافة ضيف
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={foldLocked || customSplitRows.length === 0}
+                    onClick={() => {
+                      setCustomSplitRows((prev) => {
+                        if (!prev.length) return prev;
+                        const others = prev.slice(0, -1).reduce((s, x) => s + parseMoneyInput(x.amount), 0);
+                        const rest = Math.max(0, round2(totalDue - others));
+                        return prev.map((x, i) => (i === prev.length - 1 ? { ...x, amount: String(rest) } : x));
+                      });
+                    }}
+                    style={{ fontSize: "0.82rem" }}
+                    title="يضع المتبقي على آخر ضيف ليطابق الإجمالي"
+                  >
+                    توزيع الباقي على آخر ضيف
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!customSplitOk || foldLocked}
+                    onClick={() => setSplitShareLocked(true)}
+                    style={{ fontSize: "0.82rem" }}
+                  >
+                    تثبيت التقسيم
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={!foldLocked}
+                    onClick={() => setSplitShareLocked(false)}
+                    style={{ fontSize: "0.82rem" }}
+                  >
+                    إلغاء التثبيت
+                  </button>
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.55rem",
+                    padding: "0.55rem 0.6rem",
+                    borderRadius: 10,
+                    border: customSplitOk ? "2px solid rgba(34,197,94,0.45)" : "2px solid rgba(239,68,68,0.45)",
+                    background: customSplitOk ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                    fontWeight: 700,
+                  }}
+                >
+                  <div>مجموع الحصص: {customSplitSum.toFixed(2)} ج.م</div>
+                  <div>إجمالي الفاتورة: {round2(totalDue).toFixed(2)} ج.م</div>
+                  {customSplitOk ? (
+                    <div style={{ color: "#15803d", marginTop: 4 }}>مطابق — يمكن إتمام التسديد</div>
+                  ) : (
+                    <div style={{ color: "#b91c1c", marginTop: 4 }}>
+                      {customSplitShares.length < 2
+                        ? "أدخل ضيفين على الأقل بمبالغ أكبر من صفر"
+                        : `غير مطابق — الفرق ${customSplitDiff.toFixed(2)} ج.م (يجب أن يكون صفر)`}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -1997,6 +2485,39 @@ export function CashierPayInvoiceModal({
                 )}
               </div>
             ) : null}
+            {billingMode === "split_custom" ? (
+              <div
+                style={{
+                  marginTop: "0.65rem",
+                  padding: "0.65rem 0.75rem",
+                  borderRadius: 10,
+                  border: customSplitOk ? "2px solid rgba(5,150,105,0.45)" : "2px solid rgba(239,68,68,0.45)",
+                  background: customSplitOk
+                    ? "linear-gradient(180deg, rgba(236,253,245,0.95), rgba(209,250,229,0.5))"
+                    : "linear-gradient(180deg, rgba(254,242,242,0.95), rgba(254,226,226,0.55))",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginBottom: "0.35rem" }}>ملخص السبليت المخصص</div>
+                {customSplitShares.length ? (
+                  <div style={{ display: "grid", gap: 4, fontSize: "0.9rem", fontWeight: 700 }}>
+                    {customSplitShares.map((g) => (
+                      <div key={`${g.label}-${g.amount}`} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <span>{g.label}</span>
+                        <span>{g.amount.toFixed(2)} ج.م</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "0.88rem", color: "var(--muted)" }}>أدخل مبالغ الضيوف أعلاه</div>
+                )}
+                <div style={{ marginTop: 8, fontWeight: 800, color: customSplitOk ? "#15803d" : "#b91c1c" }}>
+                  {customSplitOk
+                    ? `مطابق للإجمالي ${round2(totalDue).toFixed(2)} ج.م`
+                    : `غير مطابق — الفرق ${customSplitDiff.toFixed(2)} ج.م`}
+                </div>
+              </div>
+            ) : null}
             <details
               open
               style={{
@@ -2019,7 +2540,7 @@ export function CashierPayInvoiceModal({
                 style={{
                   width: "100%",
                   maxWidth: "84mm",
-                  height: billingMode === "split_equal" ? "min(70vh, 520px)" : "360px",
+                  height: billingMode === "split_equal" || billingMode === "split_custom" ? "min(70vh, 520px)" : "360px",
                   border: "1px solid rgba(148,163,184,0.45)",
                   borderRadius: 8,
                   marginTop: "0.5rem",
@@ -2102,6 +2623,37 @@ export function CashierPayInvoiceModal({
           <p style={{ color: "var(--danger)", fontSize: "0.88rem", marginTop: "0.75rem" }}>{msg}</p>
         ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "1rem", justifyContent: "flex-end", alignItems: "center" }}>
+          <div style={{ display: "inline-flex", gap: 4, alignItems: "center", marginInlineEnd: "auto", fontSize: "0.8rem" }}>
+            <span style={{ color: "var(--muted)" }}>لغة الشيك</span>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={paying || printing}
+              onClick={() => setReceiptLang("en")}
+              style={{
+                fontSize: "0.78rem",
+                padding: "0.25rem 0.55rem",
+                border: receiptLang === "en" ? "2px solid #2563eb" : "1px solid var(--border)",
+                fontWeight: receiptLang === "en" ? 800 : 500,
+              }}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={paying || printing}
+              onClick={() => setReceiptLang("ar")}
+              style={{
+                fontSize: "0.78rem",
+                padding: "0.25rem 0.55rem",
+                border: receiptLang === "ar" ? "2px solid #2563eb" : "1px solid var(--border)",
+                fontWeight: receiptLang === "ar" ? 800 : 500,
+              }}
+            >
+              عربي
+            </button>
+          </div>
           <button
             type="button"
             className="btn btn-ghost"

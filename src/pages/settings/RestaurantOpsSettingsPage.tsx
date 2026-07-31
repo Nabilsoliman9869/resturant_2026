@@ -532,7 +532,10 @@ export default function RestaurantOpsSettingsPage() {
           </div>
         </SettingRow>
 
-        <SettingRow label="من يستلم من المطبخ ويوصل للطاولات" tooltip="يُحدّد من يتولى توصيل الطلبات الجاهزة من المطبخ للطاولات.">
+        <SettingRow
+          label="من يستلم من المطبخ ويوصل للطاولات"
+          tooltip="يُحدّد مسار التسليم بعد إنهاء المطبخ: دور استلام (مناولة/جرسون…) يذهب لطابور التسليم، أو «لا أحد» فتذهب الأصناف مباشرة للطاولة."
+        >
           <select value={s.deliverFromKitchenBy} onChange={(e) => setS((x) => ({ ...x, deliverFromKitchenBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="server">جرسون مناولة</option>
             <option value="waiter">نفس جرسون الطلبات</option>
@@ -540,6 +543,7 @@ export default function RestaurantOpsSettingsPage() {
             <option value="operation_manager">مدير التشغيل</option>
             <option value="host">جرسون الاستقبال</option>
             <option value="kitchen_window">استلام مباشر من نافذة الشيف</option>
+            <option value="none">لا أحد — مباشرة للطاولة بعد إنهاء المطبخ</option>
           </select>
         </SettingRow>
 

@@ -37,6 +37,11 @@ type OrderRow = {
   createdAt?: string;
   completedAt?: string;
   kpiLeadMinutes?: number;
+  /** الكابتن / المرسل للمطبخ */
+  captainName?: string;
+  captainLogin?: string;
+  captainUserId?: string;
+  waiterId?: string;
 };
 
 type KdsSettings = { prepTargetMinutes: number; warnBeforeEndMinutes: number };
@@ -51,7 +56,12 @@ type KitchenSpecialistChefRow = {
   productGuids: string[];
 };
 type KitchenSpecialistStationRow = { id: string; label: string; jobTitle?: string; active?: boolean; stationCode?: string };
-type KitchenOpsSnapshot = { kitchenExecutionMode?: string; kitchenSpecialistStationsJson?: string; kitchenSpecialistChefsJson?: string };
+type KitchenOpsSnapshot = {
+  kitchenExecutionMode?: string;
+  kitchenSpecialistStationsJson?: string;
+  kitchenSpecialistChefsJson?: string;
+  deliverFromKitchenBy?: string;
+};
 type SummaryRow = { name: string; totalQty: number; preparedQty: number; remainingQty: number };
 type ManagerOrderInsight = {
   targetMinutes: number;
@@ -426,6 +436,26 @@ function KdsOrderCard({
           <div style={{ color: "var(--wp-muted)", fontSize: "0.88rem", marginTop: 4 }}>
             طاولة: <strong>{kitchenTableDisplay(order)}</strong> · الحالة: {orderStatusLabelAr(order.status)}
           </div>
+          {String(order.captainName || order.captainLogin || "").trim() ? (
+            <div
+              style={{
+                marginTop: 6,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 10px",
+                borderRadius: 999,
+                background: "rgba(14,165,233,0.12)",
+                border: "1px solid rgba(14,165,233,0.35)",
+                color: "#0c4a6e",
+                fontSize: "0.82rem",
+                fontWeight: 800,
+              }}
+              title="الكابتن المرسل للطلب"
+            >
+              كابتن: {String(order.captainName || order.captainLogin || "").trim()}
+            </div>
+          ) : null}
           {mode === "kitchen" ? (
             <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <span
@@ -597,6 +627,7 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
         kitchenExecutionMode: String(opj.kitchenExecutionMode || "current"),
         kitchenSpecialistStationsJson: String(opj.kitchenSpecialistStationsJson || "[]"),
         kitchenSpecialistChefsJson: String(opj.kitchenSpecialistChefsJson || "[]"),
+        deliverFromKitchenBy: String(opj.deliverFromKitchenBy || "server").trim().toLowerCase(),
       });
     } catch (e) {
       const raw = String(e || "").toLowerCase();
@@ -981,6 +1012,46 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
     }
   }
 
+  async function finishTableOrders(tableKey: string, orderIds: string[]) {
+    const key = `finish-table:${tableKey}`;
+    if (!tableKey && !orderIds.length) return;
+    if (!window.confirm(`إنهاء كل أصناف الطاولة ${tableKey}؟\nحسب السياسة: إما طابور الاستلام أو مباشرة للطاولة.`)) return;
+    setMsg("");
+    setBusyKeys((prev) => new Set(prev).add(key));
+    try {
+      const r = await fetch(`${base}/api/restaurant/orders/finish-table`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableId: tableKey, orderIds }),
+      });
+      const txt = await r.text();
+      if (!r.ok) throw new Error(txt);
+      const j = tryParseJson<{
+        linesFinished?: number;
+        ordersUpdated?: number;
+        deliveryPath?: string;
+      }>(txt) ?? {};
+      const pathLabel = String(j.deliveryPath || "") === "direct_to_table" ? "مباشرة للطاولة" : "طابور الاستلام";
+      setMsg(`تم إنهاء ${j.linesFinished ?? 0} بنداً (${j.ordersUpdated ?? 0} طلب) — المسار: ${pathLabel}.`);
+      await loadAll();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
+
+  const deliverPathHint =
+    String(ops.deliverFromKitchenBy || "server").trim().toLowerCase() === "none"
+      ? "بعد إنهاء المطبخ تذهب الأصناف مباشرة للطاولة (لا أحد يستلم)."
+      : String(ops.deliverFromKitchenBy || "").trim().toLowerCase() === "kitchen_window"
+        ? "مسار نافذة الشيف — بدون طابور مناولة."
+        : "بعد إنهاء المطبخ تذهب الأصناف لطابور من يستلم من المطبخ.";
+
   const summaryRows = useMemo(() => {
     const m = new Map<string, SummaryRow>();
     for (const o of filteredPending) {
@@ -1109,15 +1180,30 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
               flexWrap: "wrap",
             }}
           >
-            <div style={{ fontSize: "0.9rem", color: "#0f172a", fontWeight: 700 }}>ترحيل الجاهز من الأقدم إلى الأحدث</div>
-            <button
-              type="button"
-              className="waiter-pos__btn waiter-pos__btn--primary"
-              disabled={readyToSendCount <= 0}
-              onClick={() => void sendAllReady()}
-            >
-              {readyToSendCount > 0 ? `ترحيل الجاهز (${readyToSendCount})` : "ترحيل الجاهز"}
-            </button>
+            <div>
+              <div style={{ fontSize: "0.9rem", color: "#0f172a", fontWeight: 700 }}>ترحيل الجاهز من الأقدم إلى الأحدث</div>
+              <div style={{ fontSize: "0.78rem", color: "#475569", marginTop: 4 }}>{deliverPathHint}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {filterTable ? (
+                <button
+                  type="button"
+                  className="waiter-pos__btn waiter-pos__btn--ghost"
+                  disabled={busyKeys.has(`finish-table:${filterTable}`) || visible.length === 0}
+                  onClick={() => void finishTableOrders(filterTable, visible.map((o) => o.id))}
+                >
+                  {busyKeys.has(`finish-table:${filterTable}`) ? "..." : `إنهاء طاولة ${filterTable}`}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="waiter-pos__btn waiter-pos__btn--primary"
+                disabled={readyToSendCount <= 0}
+                onClick={() => void sendAllReady()}
+              >
+                {readyToSendCount > 0 ? `ترحيل الجاهز (${readyToSendCount})` : "ترحيل الجاهز"}
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -1323,23 +1409,52 @@ export default function KitchenPage({ mode = "kitchen" }: { mode?: KitchenPageMo
                     : row.activeExecutions > 0
                       ? riskTone("active")
                       : riskTone("normal");
+              const finishKey = `finish-table:${row.tableId}`;
+              const finishBusy = busyKeys.has(finishKey);
               return (
-                <button
+                <div
                   key={row.tableId}
-                  type="button"
                   className={`kds-sidebar__row ${filterTable === row.tableId ? "kds-sidebar__row--active" : ""}`}
-                  onClick={() => setFilterTable(row.tableId)}
                   style={{ borderInlineStart: `4px solid ${tone.border}` }}
                 >
-                  طاولة {row.tableId}
-                  <div style={{ marginTop: 4, fontSize: "0.8rem", color: "var(--wp-muted)" }}>
-                    {row.orders.length} طلب · {row.riskLabel} · {row.completionEtaLabel}
-                    <span className="kds-sidebar__pct" style={{ float: "left" }}>
-                      {row.completionPct}%
-                    </span>
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: "0.77rem", color: tone.fg }}>بنود مفتوحة: {Number(row.openQty).toFixed(Number.isInteger(row.openQty) ? 0 : 2)}</div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterTable(row.tableId)}
+                    style={{
+                      all: "unset",
+                      cursor: "pointer",
+                      display: "block",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    طاولة {row.tableId}
+                    <div style={{ marginTop: 4, fontSize: "0.8rem", color: "var(--wp-muted)" }}>
+                      {row.orders.length} طلب · {row.riskLabel} · {row.completionEtaLabel}
+                      <span className="kds-sidebar__pct" style={{ float: "left" }}>
+                        {row.completionPct}%
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: "0.77rem", color: tone.fg }}>
+                      بنود مفتوحة: {Number(row.openQty).toFixed(Number.isInteger(row.openQty) ? 0 : 2)}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="waiter-pos__btn waiter-pos__btn--ghost"
+                    style={{ marginTop: 8, width: "100%", fontSize: "0.8rem", padding: "0.35rem 0.5rem" }}
+                    disabled={finishBusy || row.openQty <= 0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void finishTableOrders(
+                        row.tableId,
+                        row.orders.map((o) => o.id),
+                      );
+                    }}
+                  >
+                    {finishBusy ? "..." : "إنهاء الطاولة"}
+                  </button>
+                </div>
               );
             })}
           </aside>

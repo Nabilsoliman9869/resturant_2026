@@ -110,6 +110,9 @@ export default function WorkflowRolesSettingsPage() {
 
         <div className="card">
           <h3 style={{ marginTop: 0 }}>من يستلم من المطبخ ويوصل للطاولات</h3>
+          <p style={{ marginTop: 0, marginBottom: 8, fontSize: "0.88rem", color: "var(--wp-muted)" }}>
+            مع دور استلام تذهب الأصناف الجاهزة لطابور التسليم. مع «لا أحد» تذهب مباشرة للطاولة بعد إنهاء المطبخ.
+          </p>
           <select value={s.deliverFromKitchenBy} onChange={(e) => setS((x) => ({ ...x, deliverFromKitchenBy: e.target.value }))} style={{ width: "100%" }}>
             <option value="server">جرسون مناولة</option>
             <option value="waiter">نفس جرسون الطلبات</option>
@@ -117,6 +120,7 @@ export default function WorkflowRolesSettingsPage() {
             <option value="operation_manager">مدير التشغيل</option>
             <option value="host">جرسون الاستقبال</option>
             <option value="kitchen_window">استلام مباشر من نافذة الشيف</option>
+            <option value="none">لا أحد — مباشرة للطاولة بعد إنهاء المطبخ</option>
           </select>
         </div>
 
