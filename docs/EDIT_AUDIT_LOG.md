@@ -973,3 +973,12 @@ eserved + active.
 - **تم 10:** نقل الأصناف بين الطاولات للمدير فقط (API + واجهة الجرسون).
 - **تم 11:** إيصال حراري إنجليزي افتراضياً مع تبديل عربي في مودال الدفع.
 - **الملفات الرئيسية:** `backend/api_server.py`، صفحات Kitchen/Runner/Waiter/CashierShiftClose، `CashierPayInvoiceModal`، `CashierTableStripBoard`، إعدادات Ops/Workflow/Promotions، `posPromotions.ts`، `workflowSettingsModel.ts`، `operationalRoles.css`.
+
+### 136 — قارئ بطاقات لتسليم الجهاز المشترك + فلتر مصدر تحويلات الدليفري — UTC 2026-07-31T10:05:00Z — ID `card-handover-a91c2e`
+
+- **إعدادات نقطة البيع:** خيار ثالث «جهاز مشترك — قارئ بطاقات» (`cardReaderHandoverEnabled`) بجانب المستقل وPIN/Ctrl؛ عمود SQL `CardReaderHandoverEnabled`.
+- **التقاط المسح:** `cardSwipeCapture.ts` يسمع أرقاماً سريعة + Enter (keyboard wedge) بدون حقل ظاهر؛ المطابقة عبر `pin-verify` على PIN كل المستخدمين (رقم الكارد = PIN).
+- **السلوك:** بطاقة النشط → لا تغيير؛ بطاقة آخر → تأكيد «جلسة نشطة للكابتن…» مع تنبيه السلة غير المرسلة ثم تبديل الجلسة؛ الشاشة المقفولة → فتح بحساب صاحب البطاقة. Ctrl+0/1 يبقى احتياطاً. إصلاح بحث PIN في الـ overlay بدون تقييد بـ login الحالي.
+- **WaiterOrderPage:** تسجيل dirty للسلة + تصفير السلة عند `mat3am:terminal-user-switched`.
+- **دليفري (سابق محلي):** فلاتر مصدر الترشيح فودافون كاش / أديب / أخرى على `DeliveryOrderPage`.
+- **الملفات:** `TerminalLockContext.tsx`، `PinOverlay.tsx`، `SharedTerminalSettingsPage.tsx`، `api_server.py`، `cardSwipeCapture.ts`، `terminalDirtyGuard.ts`، `WaiterOrderPage.tsx`، `DeliveryOrderPage.tsx`، `deliveryOrderPage.css`.

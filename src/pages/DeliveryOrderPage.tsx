@@ -22,11 +22,37 @@ type PaymentAllocation = {
   refNo?: string; smsAt?: string; createdAt?: string;
 };
 type PaymentSuggestion = {
-  id: string; sender?: string; amount?: number; allocatedAmount?: number; availableAmount?: number;
+  id: string; sender?: string; provider?: string; amount?: number; allocatedAmount?: number; availableAmount?: number;
   suggestedAmount?: number; fromPhone?: string; fromName?: string; refNo?: string; smsAt?: string;
   createdAt?: string; confidence?: number; matchScore?: number; matchReasons?: string[];
   phoneMatch?: boolean; nameMatch?: boolean;
 };
+type PaymentProviderFilter = "all" | "vodafone_cash" | "bank_adib" | "other";
+
+const PAYMENT_PROVIDER_FILTERS: { id: PaymentProviderFilter; label: string }[] = [
+  { id: "all", label: "الكل" },
+  { id: "vodafone_cash", label: "فودافون كاش" },
+  { id: "bank_adib", label: "أديب" },
+  { id: "other", label: "أخرى" },
+];
+
+function paymentProviderBucket(provider?: string): Exclude<PaymentProviderFilter, "all"> {
+  const key = String(provider || "").trim().toLowerCase();
+  if (key === "vodafone_cash") return "vodafone_cash";
+  if (key === "bank_adib") return "bank_adib";
+  return "other";
+}
+
+function paymentProviderLabel(provider?: string): string {
+  const key = String(provider || "").trim().toLowerCase();
+  if (key === "vodafone_cash") return "فودافون كاش";
+  if (key === "bank_adib") return "أديب";
+  if (key === "instapay") return "إنستاباي";
+  if (key === "orange_cash") return "أورنج كاش";
+  if (key === "etisalat_cash") return "اتصالات كاش";
+  if (key === "we_pay") return "وي باي";
+  return "أخرى";
+}
 type PaymentMatch = {
   invoiceTotal: number; prepaidAmount?: number; allocatedAmount: number;
   coveredAmount?: number; remainingDue: number;
@@ -85,6 +111,7 @@ export default function DeliveryOrderPage() {
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, number>>({});
   const [selectedPaymentId, setSelectedPaymentId] = useState("");
   const [showAllPayments, setShowAllPayments] = useState(false);
+  const [paymentProviderFilter, setPaymentProviderFilter] = useState<PaymentProviderFilter>("all");
   const locked = lockedStatuses.has(String(ticket?.status || "").toLowerCase());
   const paymentMode: "cod" | "prepaid" | "partial" = prepaidAmount <= 0 ? "cod" : "partial";
 
@@ -390,13 +417,48 @@ export default function DeliveryOrderPage() {
 
   const catalog = tab === "favorites" ? favorites : products;
   const paymentLocked = ["settled", "cancelled"].includes(String(ticket?.status || ""));
-  const visiblePaymentSuggestions = (paymentMatch?.suggestions || []).filter((row) => n(row.availableAmount) > 0);
+  const availablePaymentSuggestions = useMemo(
+    () => (paymentMatch?.suggestions || []).filter((row) => n(row.availableAmount) > 0),
+    [paymentMatch?.suggestions],
+  );
+  const providerFilterCounts = useMemo(() => {
+    const counts: Record<PaymentProviderFilter, number> = {
+      all: availablePaymentSuggestions.length,
+      vodafone_cash: 0,
+      bank_adib: 0,
+      other: 0,
+    };
+    for (const row of availablePaymentSuggestions) counts[paymentProviderBucket(row.provider)] += 1;
+    return counts;
+  }, [availablePaymentSuggestions]);
+  const visiblePaymentSuggestions = useMemo(
+    () => paymentProviderFilter === "all"
+      ? availablePaymentSuggestions
+      : availablePaymentSuggestions.filter((row) => paymentProviderBucket(row.provider) === paymentProviderFilter),
+    [availablePaymentSuggestions, paymentProviderFilter],
+  );
   const shownPaymentSuggestions = showAllPayments ? visiblePaymentSuggestions : visiblePaymentSuggestions.slice(0, 12);
   const exactMatchCount = visiblePaymentSuggestions.filter(
     (row) => row.phoneMatch
       && n(row.confidence) >= 85
       && Math.abs(n(row.availableAmount) - n(paymentMatch?.remainingDue)) < 0.01,
   ).length;
+
+  useEffect(() => {
+    if (!selectedPaymentId) return;
+    if (visiblePaymentSuggestions.some((row) => row.id === selectedPaymentId)) return;
+    const exactMatches = visiblePaymentSuggestions.filter(
+      (row) => row.phoneMatch
+        && n(row.confidence) >= 85
+        && Math.abs(n(row.availableAmount) - n(paymentMatch?.remainingDue)) < 0.01,
+    );
+    const namedExactMatches = exactMatches.filter((row) => row.nameMatch);
+    if (namedExactMatches.length === 1) {
+      setSelectedPaymentId(namedExactMatches[0].id);
+      return;
+    }
+    setSelectedPaymentId(exactMatches.length === 1 ? exactMatches[0].id : "");
+  }, [paymentMatch?.remainingDue, selectedPaymentId, visiblePaymentSuggestions]);
   return (
     <main className="delivery-order-page" dir="rtl">
       <header className="dop-top">
@@ -460,23 +522,49 @@ export default function DeliveryOrderPage() {
                 تأكيد وربط المحدد
               </button>
             </div> : null}
+            <div className="dop-payment-provider-filters" role="tablist" aria-label="مصدر التحويل">
+              {PAYMENT_PROVIDER_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={paymentProviderFilter === filter.id}
+                  className={`dop-payment-provider-filter ${paymentProviderFilter === filter.id ? "is-on" : ""}`}
+                  onClick={() => {
+                    setPaymentProviderFilter(filter.id);
+                    setShowAllPayments(false);
+                  }}
+                >
+                  {filter.label}
+                  <em>{providerFilterCounts[filter.id]}</em>
+                </button>
+              ))}
+            </div>
             <div className="dop-payment-table-wrap">
               <table className="dop-payment-table">
-                <thead><tr><th>اختيار</th><th>الترشيح</th><th>التحويل</th><th>المتاح</th><th>مبلغ الربط</th></tr></thead>
+                <thead><tr><th>اختيار</th><th>الترشيح</th><th>المصدر</th><th>التحويل</th><th>المتاح</th><th>مبلغ الربط</th></tr></thead>
                 <tbody>{shownPaymentSuggestions.map((row) => {
                   const exact = Boolean(row.phoneMatch)
                     && n(row.confidence) >= 85
                     && Math.abs(n(row.availableAmount) - n(paymentMatch?.remainingDue)) < 0.01;
                   const rowClass = exact ? "is-exact-match" : row.phoneMatch ? "is-phone-match" : n(row.matchScore) >= 15 ? "is-partial-match" : "";
+                  const providerClass = paymentProviderBucket(row.provider);
                   return <tr key={row.id} className={`${rowClass} ${selectedPaymentId === row.id ? "is-selected" : ""}`}>
                   <td><input className="dop-payment-select" type="checkbox" aria-label={`اختيار تحويل ${n(row.amount).toFixed(2)}`} checked={selectedPaymentId === row.id} disabled={paymentBusy || paymentLocked} onChange={() => setSelectedPaymentId((current) => current === row.id ? "" : row.id)} /></td>
                   <td><b>{row.fromName || row.fromPhone || "رقم مختلف/غير معروف"} <em className={`dop-match-badge ${exact ? "is-exact" : row.phoneMatch ? "is-phone" : "is-partial"}`}>{exact ? "تطابق كامل" : row.phoneMatch ? "نفس الهاتف" : "ترشيح"}</em></b><small>{(row.matchReasons || []).join(" · ") || "مطابقة يدوية"}{row.refNo ? ` · ${row.refNo}` : ""}</small></td>
+                  <td><span className={`dop-provider-badge is-${providerClass}`}>{paymentProviderLabel(row.provider)}</span><small>{row.sender || ""}</small></td>
                   <td>{n(row.amount).toFixed(2)} ج<small>{row.smsAt || row.createdAt || ""}</small></td>
                   <td>{n(row.availableAmount).toFixed(2)}</td>
                   <td><input type="number" min="0.01" step="0.01" max={n(row.availableAmount)} value={paymentAmounts[row.id] ?? n(row.suggestedAmount)} onChange={(event) => setPaymentAmounts((old) => ({ ...old, [row.id]: n(event.target.value) }))} /></td>
                 </tr>})}</tbody>
               </table>
-              {!shownPaymentSuggestions.length ? <p className="dop-payment-empty">لا توجد تحويلات واردة متاحة حالياً.</p> : null}
+              {!shownPaymentSuggestions.length ? (
+                <p className="dop-payment-empty">
+                  {availablePaymentSuggestions.length
+                    ? `لا توجد تحويلات ضمن «${PAYMENT_PROVIDER_FILTERS.find((f) => f.id === paymentProviderFilter)?.label || "المصدر"}». جرّب فلتر آخر.`
+                    : "لا توجد تحويلات واردة متاحة حالياً."}
+                </p>
+              ) : null}
             </div>
             {visiblePaymentSuggestions.length > 12 ? <button type="button" className="dop-payment-more" onClick={() => setShowAllPayments((v) => !v)}>{showAllPayments ? "عرض الأعلى فقط" : `عرض كل التحويلات (${visiblePaymentSuggestions.length})`}</button> : null}
           </section> : null}

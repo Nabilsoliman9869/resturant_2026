@@ -8,6 +8,7 @@ import { getApiBase } from "../../lib/apiBase";
 
 type Settings = {
   sharedTerminalEnabled: boolean;
+  cardReaderHandoverEnabled: boolean;
   // Hybrid v2:
   slidingRefreshAfterAction: boolean;
   stepUpForDangerOps: boolean;
@@ -43,6 +44,7 @@ type AuditRow = {
 
 const DEFAULTS: Settings = {
   sharedTerminalEnabled: false,
+  cardReaderHandoverEnabled: false,
   slidingRefreshAfterAction: true,
   stepUpForDangerOps: true,
   hardLogoutMinutes: 10,
@@ -163,6 +165,7 @@ export default function SharedTerminalSettingsPage() {
         <strong>اختصارات التسليم بين الجرسونات:</strong> <code>Ctrl+0</code> تعني أن المستخدم الحالي انتهى من الجهاز،
         وبعدها يضغط الجرسون التالي <code>Ctrl+1</code> لبدء دخول الـ PIN واستلام الشاشة. إذا كان تفعيل
         <strong> إلزام جدولة الوردية</strong> مفعلاً، فلن يُقبل PIN لمستخدم غير موجود في جدول اليوم.
+        في وضع <strong>قارئ البطاقات</strong>: رقم الكارد = PIN المستخدم؛ مسح بطاقة كابتن آخر يبدّل الجلسة بعد التأكيد.
       </div>
       <div
         style={{
@@ -182,18 +185,25 @@ export default function SharedTerminalSettingsPage() {
 
       <section style={card}>
         <h3 style={h3}>1) طريقة استخدام نقطة البيع</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <RadioCard
             checked={s.sharedTerminalEnabled === false}
-            onChange={() => setS({ ...s, sharedTerminalEnabled: false })}
+            onChange={() => setS({ ...s, sharedTerminalEnabled: false, cardReaderHandoverEnabled: false })}
             title="جهاز مستقل لكل مستخدم"
             desc="جلسة دخول عادية. لا overlay قفل. مناسب للأجهزة الشخصية أو المكتبية."
           />
           <RadioCard
-            checked={s.sharedTerminalEnabled === true}
-            onChange={() => setS({ ...s, sharedTerminalEnabled: true })}
-            title="جهاز مشترك بين كل الجرسونات"
-            desc="يُلزم تأكيد بـ PIN قبل العمليات الحسّاسة وعند الخمول وتبديل المستخدم."
+            checked={s.sharedTerminalEnabled === true && !s.cardReaderHandoverEnabled}
+            onChange={() => setS({ ...s, sharedTerminalEnabled: true, cardReaderHandoverEnabled: false })}
+            title="جهاز مشترك — PIN / Ctrl"
+            desc="Ctrl+0 يقفل، Ctrl+1 + PIN يفتح ويبدّل المستخدم. مناسب بدون قارئ بطاقات."
+            danger
+          />
+          <RadioCard
+            checked={s.sharedTerminalEnabled === true && s.cardReaderHandoverEnabled}
+            onChange={() => setS({ ...s, sharedTerminalEnabled: true, cardReaderHandoverEnabled: true })}
+            title="جهاز مشترك — قارئ بطاقات"
+            desc="رقم الكارد = PIN. مسح بطاقة النشط لا يغيّر شيئاً؛ بطاقة كابتن آخر تبدّل الجلسة بعد تنبيه إن وُجدت سلة غير مرسلة. Ctrl+0/1 يبقى احتياطاً."
             danger
           />
         </div>

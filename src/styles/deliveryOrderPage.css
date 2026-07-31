@@ -639,6 +639,71 @@
 }
 .dop-payment-confirm button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.dop-payment-provider-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0.45rem;
+}
+
+.dop-payment-provider-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.dop-payment-provider-filter em {
+  font-style: normal;
+  min-width: 1.1rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.18);
+  text-align: center;
+  font-size: 0.64rem;
+}
+
+.dop-payment-provider-filter.is-on {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(14, 165, 233, 0.16);
+  color: #7dd3fc;
+}
+
+.dop-payment-provider-filter.is-on em {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.dop-provider-badge {
+  display: inline-block;
+  padding: 0.14rem 0.4rem;
+  border-radius: 7px;
+  font-size: 0.64rem;
+  white-space: nowrap;
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+}
+
+.dop-provider-badge.is-vodafone_cash {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
+
+.dop-provider-badge.is-bank_adib {
+  background: rgba(37, 99, 235, 0.18);
+  color: #93c5fd;
+}
+
+.dop-provider-badge.is-other {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+}
+
 .dop-payment-table-wrap {
   overflow-x: auto;
 }

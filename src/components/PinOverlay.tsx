@@ -66,7 +66,7 @@ export function PinOverlay() {
     }
     setBusy(true);
     setErr(null);
-    const res = await lock.unlockWithPin(pin, user?.login || "");
+    const res = await lock.unlockWithPin(pin, "");
     setBusy(false);
     if (!res.ok) {
       setErr(res.error || "فشل التحقق");
@@ -87,10 +87,16 @@ export function PinOverlay() {
         : "نقطة البيع المشتركة — مطلوب PIN";
   const intentHelp =
     lock.overlayIntent === "shift_finished"
-      ? "اضغط Ctrl+1 عندما يصل الجرسون التالي، ثم أدخل PIN الخاص به للمتابعة."
+      ? lock.settings.cardReaderHandoverEnabled
+        ? "مرّر بطاقة الجرسون التالي، أو اضغط Ctrl+1 ثم أدخل PIN."
+        : "اضغط Ctrl+1 عندما يصل الجرسون التالي، ثم أدخل PIN الخاص به للمتابعة."
       : lock.overlayIntent === "next_user_login"
-        ? "هذه شاشة دخول الجرسون التالي. أدخل PIN الخاص بالمستخدم الذي سيستلم الجهاز الآن. إذا لم يكن ضمن جدول اليوم فسيُرفض الدخول."
-        : "إذا انتهيت من الجهاز اضغط Ctrl+0، وإذا جاء المستخدم التالي اضغط Ctrl+1 ثم أدخل الـ PIN.";
+        ? lock.settings.cardReaderHandoverEnabled
+          ? "مرّر بطاقتك أو أدخل PIN. رقم الكارد = PIN في إدارة المستخدمين. إذا لم تكن ضمن جدول اليوم فسيُرفض الدخول."
+          : "هذه شاشة دخول الجرسون التالي. أدخل PIN الخاص بالمستخدم الذي سيستلم الجهاز الآن. إذا لم يكن ضمن جدول اليوم فسيُرفض الدخول."
+        : lock.settings.cardReaderHandoverEnabled
+          ? "مرّر بطاقتك للدخول، أو أدخل PIN يدوياً. Ctrl+0/1 يبقى احتياطاً."
+          : "إذا انتهيت من الجهاز اضغط Ctrl+0، وإذا جاء المستخدم التالي اضغط Ctrl+1 ثم أدخل الـ PIN.";
 
   return (
     <div
@@ -269,7 +275,9 @@ export function PinOverlay() {
         </div>
         <div style={{ marginTop: 12, fontSize: ".75rem", color: "#8696bd", textAlign: "center" }}>
           <div style={{ marginBottom: 4 }}>
-            اختصارات الجهاز المشترك: <strong>Ctrl+0</strong> إنهاء الاستخدام الحالي، <strong>Ctrl+1</strong> بدء دخول المستخدم التالي
+            {lock.settings.cardReaderHandoverEnabled
+              ? <>مرّر البطاقة للدخول أو التبديل · احتياطي: <strong>Ctrl+0</strong> / <strong>Ctrl+1</strong> + PIN</>
+              : <>اختصارات الجهاز المشترك: <strong>Ctrl+0</strong> إنهاء الاستخدام الحالي، <strong>Ctrl+1</strong> بدء دخول المستخدم التالي</>}
           </div>
           محاولات فاشلة: {lock.lockState.failedAttempts} / {lock.settings.maxAttemptsBeforeLockout}
         </div>

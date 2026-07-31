@@ -26,6 +26,7 @@ import { roleHasManagerOpsAccess } from "../auth/roles";
 import { repairArabicDisplayText, sessionDisplayName } from "../auth/displayUser";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
+import { setTerminalDirtyChecker, TERMINAL_USER_SWITCHED_EVENT } from "../lib/terminalDirtyGuard";
 import { briefNetworkHint, safeFetch } from "../lib/safeFetch";
 import {
   effectiveTableIdsForUser,
@@ -507,6 +508,24 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [cart, setCart] = useState<CartLine[]>([]);
   const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    setTerminalDirtyChecker(() => ({
+      dirty: cart.length > 0,
+      detail: cart.length > 0 ? `سلة طلبات (${cart.length} بند)` : undefined,
+    }));
+    return () => setTerminalDirtyChecker(null);
+  }, [cart.length]);
+
+  useEffect(() => {
+    const onSwitch = () => {
+      setCart([]);
+      setMsg("تم تبديل الكابتن عبر البطاقة — صُفِّرت السلة المحلية غير المرسلة.");
+    };
+    window.addEventListener(TERMINAL_USER_SWITCHED_EVENT, onSwitch);
+    return () => window.removeEventListener(TERMINAL_USER_SWITCHED_EVENT, onSwitch);
+  }, []);
+
   /** بيانات عميل التوصيل — فقط عند embeddedChannel=delivery */
   const [deliverySearchQ, setDeliverySearchQ] = useState("");
   const [deliveryHits, setDeliveryHits] = useState<DeliveryAgentHit[]>([]);

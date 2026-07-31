@@ -15417,6 +15417,7 @@ def restaurant_workflow_settings_put(body: dict):
 
 TERMINAL_SETTINGS_DEFAULTS = {
     "sharedTerminalEnabled": False,
+    "cardReaderHandoverEnabled": False,  # تسليم الكابتن بقارئ بطاقات (PIN = رقم الكارد)
     # — النمط الافتراضي الجديد: هجين «نافذة منزلقة + step-up للعمليات الخطرة» —
     "slidingRefreshAfterAction": True,   # عمليات روتينية تجدّد العداد بدون قفل
     "stepUpForDangerOps": True,          # العمليات الخطرة تطلب PIN فوري في مكانها
@@ -15527,6 +15528,7 @@ def _terminal_settings_load(cursor) -> dict:
         "slidingRefreshAfterAction": True,
         "hardLogoutMinutes": 10,
         "stepUpForDangerOps": True,
+        "cardReaderHandoverEnabled": False,
     }
     try:
         cursor.execute(
@@ -15540,6 +15542,18 @@ def _terminal_settings_load(cursor) -> dict:
             out["slidingRefreshAfterAction"] = bool(r2[0])
             out["hardLogoutMinutes"] = int(r2[1] or 10)
             out["stepUpForDangerOps"] = bool(r2[2])
+    except Exception:
+        pass
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardReaderHandoverEnabled
+            FROM dbo.MAT3AM_TERMINAL_SETTINGS WHERE StateKey = N'global'
+            """
+        )
+        r3 = cursor.fetchone()
+        if r3 is not None:
+            out["cardReaderHandoverEnabled"] = bool(r3[0])
     except Exception:
         pass
     return out
@@ -15616,6 +15630,17 @@ def _terminal_settings_save(cursor, body: dict, by_name: str) -> dict:
         # الأعمدة الجديدة غير موجودة بعد — نتجاهل
         try: cursor.connection.rollback()
         except Exception: pass
+    try:
+        cursor.execute(
+            """
+            UPDATE dbo.MAT3AM_TERMINAL_SETTINGS
+               SET CardReaderHandoverEnabled = ?
+             WHERE StateKey = N'global'
+            """,
+            (1 if merged.get("cardReaderHandoverEnabled") else 0,),
+        )
+    except Exception:
+        pass
     cursor.connection.commit()
     return _terminal_settings_load(cursor)
 
@@ -36173,6 +36198,12 @@ def _ensure_mat3am_dev_schema(cursor) -> tuple:
         IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name = N'StepUpForDangerOps' AND Object_ID = Object_ID(N'dbo.MAT3AM_TERMINAL_SETTINGS'))
         BEGIN
             ALTER TABLE dbo.MAT3AM_TERMINAL_SETTINGS ADD StepUpForDangerOps BIT NOT NULL DEFAULT 1;
+        END
+        """,
+        """
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name = N'CardReaderHandoverEnabled' AND Object_ID = Object_ID(N'dbo.MAT3AM_TERMINAL_SETTINGS'))
+        BEGIN
+            ALTER TABLE dbo.MAT3AM_TERMINAL_SETTINGS ADD CardReaderHandoverEnabled BIT NOT NULL DEFAULT 0;
         END
         """,
         """

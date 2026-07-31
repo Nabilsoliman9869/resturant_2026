@@ -18,9 +18,13 @@ import { useAuth, type SessionUser } from "../auth/AuthContext";
 import type { RoleId } from "../auth/roles";
 import { getApiBase } from "../lib/apiBase";
 import { isSharedTerminalPinExempt } from "../lib/terminalPinPolicy";
+import { setCardSwipeHandler } from "../lib/cardSwipeCapture";
+import { getTerminalDirtyState, notifyTerminalUserSwitched } from "../lib/terminalDirtyGuard";
 
 type TerminalSettings = {
   sharedTerminalEnabled: boolean;
+  /** وضع تسليم الكابتن بقارئ بطاقات (رقم الكارد = PIN). */
+  cardReaderHandoverEnabled: boolean;
   // Hybrid v2:
   slidingRefreshAfterAction: boolean;
   stepUpForDangerOps: boolean;
@@ -42,6 +46,7 @@ type TerminalSettings = {
 
 const DEFAULT_SETTINGS: TerminalSettings = {
   sharedTerminalEnabled: false,
+  cardReaderHandoverEnabled: false,
   slidingRefreshAfterAction: true,
   stepUpForDangerOps: true,
   hardLogoutMinutes: 10,
@@ -303,7 +308,14 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
       role: (String(j.user?.role || user?.role || "waiter").toLowerCase() as RoleId),
       specialistStationCode: String(j.user?.specialistStationCode || "").trim().toLowerCase(),
     };
-    try { login(next); } catch { /* تجاهل */ }
+    try {
+      login(next);
+      notifyTerminalUserSwitched({
+        fromUserId: curId,
+        toUserId: newId,
+        toName: next.name,
+      });
+    } catch { /* تجاهل */ }
   }, [user?.id, user?.role, login]);
 
   const consumeToken = useCallback((j: PinVerifyResponse) => {
@@ -315,24 +327,25 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
 
   const callPinVerify = useCallback(async (pin: string, login_: string | undefined, reason: string) => {
     const localDate = browserLocalDateISO();
+    // بحث بـ PIN فقط عندما يكون login فارغاً — مطلوب لتبديل الكابتن بالكارد/Ctrl+1
     return safeFetch(`${getApiBase()}/api/terminal/pin-verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         pin,
         terminalId: getTerminalId(),
-        login: login_ || user?.login || "",
+        login: login_ ?? "",
         reason,
         oldUserId: user?.id || "",
         localDate,
       }),
     });
-  }, [user?.id, user?.login]);
+  }, [user?.id]);
 
   const unlockWithPin = useCallback(
     async (pin: string, login_?: string) => {
       try {
-        const r = await callPinVerify(pin, login_, lockState.reason || "mandatory_pin_overlay");
+        const r = await callPinVerify(pin, login_ ?? "", lockState.reason || "mandatory_pin_overlay");
         if (r.ok) {
           const j = (await r.json()) as PinVerifyResponse;
           consumeToken(j);
@@ -364,6 +377,87 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     },
     [lockState.reason, callPinVerify, consumeToken, restartIdleTimer, restartHardLogoutTimer]
   );
+
+  const handleCardSwipe = useCallback(
+    async (cardDigits: string) => {
+      if (!enabled || !settings.cardReaderHandoverEnabled) return;
+      const pin = String(cardDigits || "").trim();
+      if (pin.length < 4) return;
+
+      // الشاشة مقفولة: المسح = فتح بحساب صاحب البطاقة (بحث PIN لكل المستخدمين)
+      if (lockState.locked) {
+        const res = await unlockWithPin(pin, "");
+        if (!res.ok) {
+          window.alert(res.error || "بطاقة غير مسجّلة أو غير مسموحة");
+        }
+        return;
+      }
+
+      // الشاشة مفتوحة: طابق البطاقة مع المستخدمين
+      try {
+        const r = await callPinVerify(pin, "", "card_handover_probe");
+        if (!r.ok) {
+          let msg = "بطاقة غير مسجّلة";
+          try {
+            const j = await r.json();
+            msg = String(j?.detail || msg);
+          } catch { /* تجاهل */ }
+          window.alert(msg);
+          return;
+        }
+        const j = (await r.json()) as PinVerifyResponse;
+        const newId = String(j.user?.id || "").toUpperCase();
+        const curId = String(user?.id || "").toUpperCase();
+        if (!newId) return;
+
+        // نفس الكابتن النشط → لا تغيير
+        if (newId === curId) return;
+
+        const activeName = String(user?.name || user?.login || "الكابتن الحالي");
+        const nextName = String(j.user?.name || j.user?.login || "كابتن آخر");
+        const dirty = getTerminalDirtyState();
+        const dirtyNote = dirty.dirty
+          ? `\n\nتنبيه: توجد بيانات غير محفوظة${dirty.detail ? ` (${dirty.detail})` : ""}.`
+          : "";
+        const ok = window.confirm(
+          `توجد جلسة نشطة للكابتن ${activeName}.\nسيتم قفلها وفتح جلسة ${nextName}.${dirtyNote}\n\nمتابعة؟`,
+        );
+        if (!ok) return;
+
+        consumeToken(j);
+        setOverlayIntent("default");
+        setLockState({ locked: false, reason: null, failedAttempts: 0, lockoutUntilEpoch: null });
+        restartIdleTimer();
+        restartHardLogoutTimer();
+      } catch (err) {
+        window.alert("تعذّر قراءة البطاقة: " + String(err));
+      }
+    },
+    [
+      enabled,
+      settings.cardReaderHandoverEnabled,
+      lockState.locked,
+      unlockWithPin,
+      callPinVerify,
+      user?.id,
+      user?.name,
+      user?.login,
+      consumeToken,
+      restartIdleTimer,
+      restartHardLogoutTimer,
+    ],
+  );
+
+  useEffect(() => {
+    if (enabled && settings.cardReaderHandoverEnabled) {
+      setCardSwipeHandler((digits) => {
+        void handleCardSwipe(digits);
+      });
+      return () => setCardSwipeHandler(null);
+    }
+    setCardSwipeHandler(null);
+    return undefined;
+  }, [enabled, settings.cardReaderHandoverEnabled, handleCardSwipe]);
 
   const isTokenFresh = useCallback((freshSeconds: number = 60) => {
     const issued = lastTokenIssuedAtRef.current;
