@@ -66,6 +66,7 @@ import KidsAreaPage from "./pages/KidsAreaPage";
 import KidsAreaPackagesSettingsPage from "./pages/settings/KidsAreaPackagesSettingsPage";
 import DeliveryShippingZonesSettingsPage from "./pages/settings/DeliveryShippingZonesSettingsPage";
 import SharedTerminalSettingsPage from "./pages/settings/SharedTerminalSettingsPage";
+import TelegramOpsPulseSettingsPage from "./pages/settings/TelegramOpsPulseSettingsPage";
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
 import DeliveryManagementPage from "./pages/DeliveryManagementPage";
@@ -210,6 +211,7 @@ export default function App() {
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="delivery-shipping-zones" element={<DeliveryShippingZonesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
+          <Route path="telegram-ops-pulse" element={<TelegramOpsPulseSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />
@@ -277,6 +279,7 @@ export default function App() {
           <Route path="waiter-table-assignments" element={<WaiterTableAssignmentsPage />} />
           <Route path="kitchen-ops" element={<RestaurantOpsSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
+          <Route path="telegram-ops-pulse" element={<TelegramOpsPulseSettingsPage />} />
           <Route path="minimum-charge" element={<MinimumChargeSettingsPage />} />
           <Route path="pos-kds" element={<PosKdsSettingsPage />} />
           <Route path="pos-prep-times" element={<KdsPrepTimesSettingsPage />} />
@@ -432,6 +435,7 @@ export default function App() {
           <Route path="kids-area-packages" element={<KidsAreaPackagesSettingsPage />} />
           <Route path="delivery-shipping-zones" element={<DeliveryShippingZonesSettingsPage />} />
           <Route path="pos-shared-terminal" element={<SharedTerminalSettingsPage />} />
+          <Route path="telegram-ops-pulse" element={<TelegramOpsPulseSettingsPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
           <Route path="init-db" element={<DeveloperInitDb />} />

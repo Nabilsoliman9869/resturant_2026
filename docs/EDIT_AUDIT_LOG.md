@@ -990,3 +990,10 @@ eserved + active.
 - أثناء اللوحة: مسح كابتن آخر لا يبدّل الجلسة؛ مسح مدير يحدّث هوية المعتمِد.
 - **إخفاء** نافذة «مرحباً جارسون الطلبات» من `AppShell`؛ إزالة تصفير علامة المقدمة عند login.
 - **الملفات:** `TerminalLockContext.tsx`، `ManagerCardApprovalOverlay.tsx`، `AppShell.tsx`، `SharedTerminalSettingsPage.tsx`، `AuthContext.tsx`.
+
+### 138 — تليجرام نبض التشغيل (تقرير المالك/المدير) — UTC 2026-08-01T22:30:00Z — ID `tg-ops-pulse-9f2a1c`
+
+- **`backend/telegram_ops_pulse.py`:** بناء نص تقرير من لقطة التشغيل + تذاكر الدليفري + الموافقات المعلّقة؛ إرسال Bot API؛ أوامر `التقرير`/`/report`؛ جدولة كل N دقيقة مع ساعات صمت.
+- **`api_server.py`:** إعدادات `GET/PUT /api/settings/telegram-ops-pulse`، `POST …/send-now`، `GET …/preview`، worker خلفية عند startup (poll + schedule). التخزين: `config/restaurant/telegram_ops_pulse.json`.
+- **واجهة:** صفحة إعدادات `TelegramOpsPulseSettingsPage` + مسار الإعدادات للمدير/مدير التشغيل/المطوّر.
+- لا يغيّر بيانات التشغيل — قراءة فقط + إشعار تليجرام.

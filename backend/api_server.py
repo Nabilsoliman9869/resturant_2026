@@ -15887,6 +15887,122 @@ def settings_shared_terminal_put(body: dict):
         except Exception: pass
 
 
+# ---------- Telegram Ops Pulse (تقرير المالك/المدير) ----------
+_TELEGRAM_OPS_RUNTIME = None
+
+
+def _telegram_ops_build_context() -> dict:
+    snap = {}
+    try:
+        snap = _restaurant_operational_snapshot_sync(False) or {}
+    except Exception as e:
+        print(f"[telegram-ops] snapshot: {e}", flush=True)
+        snap = {}
+    tickets = []
+    try:
+        tickets = _delivery_tickets_load() or []
+    except Exception as e:
+        print(f"[telegram-ops] delivery: {e}", flush=True)
+    pending = []
+    try:
+        rows = _manager_approval_requests_load() or []
+        pending = [
+            r
+            for r in rows
+            if isinstance(r, dict)
+            and str(r.get("status") or "").strip().lower() == _MANAGER_APPROVAL_STATUS_PENDING
+        ]
+    except Exception as e:
+        print(f"[telegram-ops] approvals: {e}", flush=True)
+    venue = "المطعم"
+    try:
+        ops = _restaurant_read_ops_storage()
+        if isinstance(ops, dict):
+            venue = str(ops.get("venueName") or ops.get("restaurantName") or venue).strip() or venue
+    except Exception:
+        pass
+    try:
+        if os.path.isfile(_settings_path):
+            with open(_settings_path, "r", encoding="utf-8") as f:
+                raw_st = json.load(f)
+            if isinstance(raw_st, dict):
+                venue = str(raw_st.get("venueName") or raw_st.get("restaurantName") or venue).strip() or venue
+    except Exception:
+        pass
+    return {
+        "snap": snap if isinstance(snap, dict) else {},
+        "deliveryTickets": tickets if isinstance(tickets, list) else [],
+        "pendingApprovals": pending,
+        "venueLabel": venue,
+    }
+
+
+def _telegram_ops_runtime():
+    global _TELEGRAM_OPS_RUNTIME
+    if _TELEGRAM_OPS_RUNTIME is not None:
+        return _TELEGRAM_OPS_RUNTIME
+    import telegram_ops_pulse as tg_ops
+
+    _TELEGRAM_OPS_RUNTIME = tg_ops.OpsPulseRuntime(
+        settings_path_fn=lambda: _restaurant_path("telegram_ops_pulse"),
+        build_context_fn=_telegram_ops_build_context,
+    )
+    return _TELEGRAM_OPS_RUNTIME
+
+
+@app.get("/api/settings/telegram-ops-pulse")
+def settings_telegram_ops_pulse_get():
+    import telegram_ops_pulse as tg_ops
+
+    st = tg_ops.load_settings(_restaurant_path("telegram_ops_pulse"))
+    return {"ok": True, **tg_ops.settings_public(st)}
+
+
+@app.put("/api/settings/telegram-ops-pulse")
+def settings_telegram_ops_pulse_put(body: dict):
+    import telegram_ops_pulse as tg_ops
+
+    body = body if isinstance(body, dict) else {}
+    st = tg_ops.save_settings(_restaurant_path("telegram_ops_pulse"), body)
+    return {"ok": True, **tg_ops.settings_public(st)}
+
+
+@app.post("/api/telegram/ops-pulse/send-now")
+def telegram_ops_pulse_send_now(body: Optional[dict] = None):
+    """يرسل نبض التشغيل فوراً لكل chatIds المصرّح بها."""
+    body = body if isinstance(body, dict) else {}
+    rt = _telegram_ops_runtime()
+    out = rt.broadcast(reason=str(body.get("reason") or "manual"))
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("detail") or "تعذر الإرسال")
+    return out
+
+
+@app.get("/api/telegram/ops-pulse/preview")
+def telegram_ops_pulse_preview():
+    """معاينة نص التقرير بدون إرسال."""
+    rt = _telegram_ops_runtime()
+    import telegram_ops_pulse as tg_ops
+
+    st = tg_ops.load_settings(_restaurant_path("telegram_ops_pulse"))
+    text = rt.build_text(st)
+    return {"ok": True, "text": text, "length": len(text)}
+
+
+@app.on_event("startup")
+def _telegram_ops_pulse_startup():
+    def _boot():
+        try:
+            rt = _telegram_ops_runtime()
+            import telegram_ops_pulse as tg_ops
+
+            tg_ops.start_background_worker(rt, poll_seconds=4.0)
+        except Exception as e:
+            print(f"[telegram-ops] startup failed: {e}", flush=True)
+
+    _run_background_startup_task("telegram-ops-pulse", _boot)
+
+
 @app.post("/api/terminal/pin-verify")
 def terminal_pin_verify(body: dict, request: Request):
     """التحقق من PIN وإصدار terminalToken.

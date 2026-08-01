@@ -69,6 +69,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
         { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "يؤثر على: الطاولات المرئية والمسموح بها لكل كابتن" },
         { to: "users", label: "مستخدمو التطبيق", hint: "يؤثر على: حسابات الدخول، الأدوار، والصلاحيات" },
         { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "يؤثر على: الأجهزة المشتركة، PIN، والسلوك الموحد" },
+        { to: "telegram-ops-pulse", label: "تليجرام — نبض التشغيل", hint: "تقرير للصالة/المطبخ/الدليفري عبر تليجرام كل 30 د أو عند الطلب" },
       ],
     },
     {
@@ -106,6 +107,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
           { to: "role-schedule", label: "جدولة أدوار المستخدمين", hint: "يؤثر على: من يعمل اليوم ومن يُسمح له بالدخول" },
           { to: "waiter-table-assignments", label: "توزيع طاولات الجرسونات", hint: "يؤثر على: الطاولات المرئية لكل جرسون في الوردية" },
           { to: "pos-shared-terminal", label: "نقاط البيع المشتركة", hint: "يؤثر على: الجهاز المشترك، PIN، ومسار التبديل" },
+          { to: "telegram-ops-pulse", label: "تليجرام — نبض التشغيل", hint: "تقرير تشغيلي للمالك/المدير عبر تليجرام" },
         ],
       },
       {
