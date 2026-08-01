@@ -325,9 +325,25 @@ def get_updates(token: str, offset: int = 0, timeout: int = 0) -> dict:
 
 def chat_allowed(st: dict, chat_id: str) -> bool:
     allowed = [str(x) for x in (st.get("chatIds") or [])]
+    # قائمة فارغة = وضع تجربة: اقبل أول محادثة ثم سجّلها تلقائياً
     if not allowed:
-        return False
+        return True
     return str(chat_id) in allowed
+
+
+def ensure_chat_registered(path: str, chat_id: str) -> dict:
+    """يضيف chat_id للقائمة إن لم يكن موجوداً (مفيد لأول تشغيل)."""
+    st = load_settings(path)
+    cid = str(chat_id).strip()
+    if not cid:
+        return st
+    chats = [str(x) for x in (st.get("chatIds") or [])]
+    if cid not in chats:
+        chats.append(cid)
+        st["chatIds"] = chats
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(normalize_settings(st), f, ensure_ascii=False, indent=2)
+    return load_settings(path)
 
 
 def in_quiet_hours(st: dict, now: Optional[datetime] = None) -> bool:
@@ -430,15 +446,29 @@ class OpsPulseRuntime:
             }
 
     def handle_incoming_message(self, chat_id: str, text: str) -> Optional[dict]:
-        if not is_report_command(text):
-            return None
         path = self.path()
         st = load_settings(path)
         if not st.get("enabled"):
             return {"ok": False, "detail": "disabled"}
+        raw = str(text or "").strip()
+        # /start يسجّل المحادثة ويرد بترحيب
+        if raw.lower().startswith("/start"):
+            if not chat_allowed(st, chat_id):
+                send_message(st["botToken"], chat_id, "غير مصرح لهذا المحادثة باستلام تقارير المطعم.")
+                return {"ok": False, "detail": "chat_not_allowed"}
+            st = ensure_chat_registered(path, chat_id)
+            send_message(
+                st["botToken"],
+                chat_id,
+                f"تم ربط هذه المحادثة بنبض تشغيل «{st.get('venueLabel') or 'المطعم'}».\nأرسل: التقرير أو /report",
+            )
+            return {"ok": True, "chatId": chat_id, "action": "start"}
+        if not is_report_command(text):
+            return None
         if not chat_allowed(st, chat_id):
             send_message(st["botToken"], chat_id, "غير مصرح لهذا المحادثة باستلام تقارير المطعم.")
             return {"ok": False, "detail": "chat_not_allowed"}
+        st = ensure_chat_registered(path, chat_id)
         text_out = self.build_text(st)
         r = send_message(st["botToken"], chat_id, text_out)
         if r.get("ok"):
