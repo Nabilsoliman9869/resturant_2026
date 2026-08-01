@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import type { RoleId } from "./roles";
-import { clearWaiterUiPromptSession } from "../lib/waiterOrderUiPrefs";
 
 export type SessionUser = {
   id: string;
@@ -47,7 +46,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(() => loadStored());
 
   const login = useCallback((u: SessionUser) => {
-    clearWaiterUiPromptSession();
     setUser(u);
     const s = JSON.stringify(u);
     localStorage.setItem(STORAGE_KEY, s);
@@ -58,7 +56,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem(STORAGE_KEY);
-    clearWaiterUiPromptSession();
   }, []);
 
   const value = useMemo(

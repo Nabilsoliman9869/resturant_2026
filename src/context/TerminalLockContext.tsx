@@ -15,11 +15,12 @@ import {
   setTerminalToken,
 } from "../lib/terminalSession";
 import { useAuth, type SessionUser } from "../auth/AuthContext";
-import type { RoleId } from "../auth/roles";
+import { roleHasManagerOpsAccess, type RoleId } from "../auth/roles";
 import { getApiBase } from "../lib/apiBase";
 import { isSharedTerminalPinExempt } from "../lib/terminalPinPolicy";
 import { setCardSwipeHandler } from "../lib/cardSwipeCapture";
 import { getTerminalDirtyState, notifyTerminalUserSwitched } from "../lib/terminalDirtyGuard";
+import type { ManagerCardApprover } from "../components/ManagerCardApprovalOverlay";
 
 type TerminalSettings = {
   sharedTerminalEnabled: boolean;
@@ -120,6 +121,9 @@ type Ctx = {
   stepUp: (pin: string, opts: { reason: DangerOp; skipIfRecent?: boolean; freshSeconds?: number; login?: string }) => Promise<{ ok: true } | { ok: false; error: string; lockoutUntilEpoch?: number }>;
   /** يتحقق ما إذا كان الـ token الحالي «حديث» بما يكفي ليُتجاوز PIN في step-up. */
   isTokenFresh: (freshSeconds?: number) => boolean;
+  /** جلسة اعتماد مدير بالكارد فوق جلسة الكابتن (بدون تبديل المستخدم). */
+  managerCardApproval: ManagerCardApprover | null;
+  closeManagerCardApproval: () => void;
 };
 
 const TerminalLockContext = createContext<Ctx | null>(null);
@@ -146,6 +150,8 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     lockoutUntilEpoch: null,
   });
   const [overlayIntent, setOverlayIntent] = useState<OverlayIntent>("default");
+  const [managerCardApproval, setManagerCardApproval] = useState<ManagerCardApprover | null>(null);
+  const managerApprovalOpenRef = useRef(false);
 
   const pinExempt = isSharedTerminalPinExempt(user?.role);
   const enabled = !!settings.sharedTerminalEnabled && !pinExempt;
@@ -378,11 +384,34 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
     [lockState.reason, callPinVerify, consumeToken, restartIdleTimer, restartHardLogoutTimer]
   );
 
+  const closeManagerCardApproval = useCallback(() => {
+    managerApprovalOpenRef.current = false;
+    setManagerCardApproval(null);
+  }, []);
+
   const handleCardSwipe = useCallback(
     async (cardDigits: string) => {
       if (!enabled || !settings.cardReaderHandoverEnabled) return;
       const pin = String(cardDigits || "").trim();
       if (pin.length < 4) return;
+
+      // أثناء لوحة اعتماد المدير: تجاهل مسح كابتن آخر حتى لا نفقد جلسة الكابتن
+      if (managerApprovalOpenRef.current) {
+        try {
+          const r = await callPinVerify(pin, "", "manager_card_approval_refresh");
+          if (!r.ok) return;
+          const j = (await r.json()) as PinVerifyResponse;
+          if (roleHasManagerOpsAccess(j.user?.role)) {
+            setManagerCardApproval({
+              id: String(j.user.id),
+              name: String(j.user.name || j.user.login || "مدير"),
+              login: String(j.user.login || ""),
+              role: String(j.user.role || "manager"),
+            });
+          }
+        } catch { /* تجاهل */ }
+        return;
+      }
 
       // الشاشة مقفولة: المسح = فتح بحساب صاحب البطاقة (بحث PIN لكل المستخدمين)
       if (lockState.locked) {
@@ -412,6 +441,18 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
 
         // نفس الكابتن النشط → لا تغيير
         if (newId === curId) return;
+
+        // كارت مدير / مدير تشغيل / مطوّر → لوحة اعتماد فوق جلسة الكابتن (بدون تبديل)
+        if (roleHasManagerOpsAccess(j.user?.role)) {
+          managerApprovalOpenRef.current = true;
+          setManagerCardApproval({
+            id: String(j.user.id),
+            name: String(j.user.name || j.user.login || "مدير"),
+            login: String(j.user.login || ""),
+            role: String(j.user.role || "manager"),
+          });
+          return;
+        }
 
         const activeName = String(user?.name || user?.login || "الكابتن الحالي");
         const nextName = String(j.user?.name || j.user?.login || "كابتن آخر");
@@ -510,8 +551,24 @@ export function TerminalLockProvider({ children }: { children: ReactNode }) {
       unlockWithPin,
       stepUp,
       isTokenFresh,
+      managerCardApproval,
+      closeManagerCardApproval,
     }),
-    [settings, enabled, lockState, overlayIntent, lockTerminal, triggerLock, refreshSettings, pingActivity, unlockWithPin, stepUp, isTokenFresh]
+    [
+      settings,
+      enabled,
+      lockState,
+      overlayIntent,
+      lockTerminal,
+      triggerLock,
+      refreshSettings,
+      pingActivity,
+      unlockWithPin,
+      stepUp,
+      isTokenFresh,
+      managerCardApproval,
+      closeManagerCardApproval,
+    ],
   );
 
   return (
@@ -534,6 +591,8 @@ export function useTerminalLock(): Ctx {
       unlockWithPin: async () => ({ ok: false, error: "Provider غير مُركَّب" }),
       stepUp: async () => ({ ok: false, error: "Provider غير مُركَّب" }),
       isTokenFresh: () => false,
+      managerCardApproval: null,
+      closeManagerCardApproval: () => {},
     };
   }
   return c;

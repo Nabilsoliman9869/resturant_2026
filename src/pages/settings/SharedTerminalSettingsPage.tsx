@@ -165,7 +165,8 @@ export default function SharedTerminalSettingsPage() {
         <strong>اختصارات التسليم بين الجرسونات:</strong> <code>Ctrl+0</code> تعني أن المستخدم الحالي انتهى من الجهاز،
         وبعدها يضغط الجرسون التالي <code>Ctrl+1</code> لبدء دخول الـ PIN واستلام الشاشة. إذا كان تفعيل
         <strong> إلزام جدولة الوردية</strong> مفعلاً، فلن يُقبل PIN لمستخدم غير موجود في جدول اليوم.
-        في وضع <strong>قارئ البطاقات</strong>: رقم الكارد = PIN المستخدم؛ مسح بطاقة كابتن آخر يبدّل الجلسة بعد التأكيد.
+        في وضع <strong>قارئ البطاقات</strong>: رقم الكارد = PIN المستخدم؛ مسح بطاقة كابتن آخر يبدّل الجلسة بعد التأكيد؛
+        مسح بطاقة <strong>المدير</strong> يفتح لوحة اعتماد فوق جلسة الكابتن دون سرقتها.
       </div>
       <div
         style={{
@@ -203,7 +204,7 @@ export default function SharedTerminalSettingsPage() {
             checked={s.sharedTerminalEnabled === true && s.cardReaderHandoverEnabled}
             onChange={() => setS({ ...s, sharedTerminalEnabled: true, cardReaderHandoverEnabled: true })}
             title="جهاز مشترك — قارئ بطاقات"
-            desc="رقم الكارد = PIN. مسح بطاقة النشط لا يغيّر شيئاً؛ بطاقة كابتن آخر تبدّل الجلسة بعد تنبيه إن وُجدت سلة غير مرسلة. Ctrl+0/1 يبقى احتياطاً."
+            desc="رقم الكارد = PIN. مسح بطاقة النشط لا يغيّر شيئاً؛ بطاقة كابتن آخر تبدّل الجلسة بعد تنبيه إن وُجدت سلة غير مرسلة. بطاقة المدير تفتح لوحة اعتماد فوق جلسة الكابتن بدون تبديل. Ctrl+0/1 يبقى احتياطاً."
             danger
           />
         </div>

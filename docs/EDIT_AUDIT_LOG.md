@@ -982,3 +982,11 @@ eserved + active.
 - **WaiterOrderPage:** تسجيل dirty للسلة + تصفير السلة عند `mat3am:terminal-user-switched`.
 - **دليفري (سابق محلي):** فلاتر مصدر الترشيح فودافون كاش / أديب / أخرى على `DeliveryOrderPage`.
 - **الملفات:** `TerminalLockContext.tsx`، `PinOverlay.tsx`، `SharedTerminalSettingsPage.tsx`، `api_server.py`، `cardSwipeCapture.ts`، `terminalDirtyGuard.ts`، `WaiterOrderPage.tsx`، `DeliveryOrderPage.tsx`، `deliveryOrderPage.css`.
+
+### 137 — اعتماد المدير بالكارد فوق جلسة الكابتن + إخفاء ترحيب الويتر — UTC 2026-08-01T20:15:00Z — ID `mgr-card-appr-c7e2a1`
+
+- **كارت المدير على نقطة الكباتن:** مع تفعيل قارئ البطاقات، مسح بطاقة مدير/مدير تشغيل/مطوّر يفتح لوحة موافقات فوق جلسة الكابتن **بدون** `login`/تبديل مستخدم؛ كروت الكباتن تبقى كما هي (نفس النشط=تجاهل، كابتن آخر=تسليم).
+- **`ManagerCardApprovalOverlay`:** عرض المعلّق، اعتماد/رفض فردي، «اعتماد الكل الآمن» (قرار recommended بدون حد أقصى وبدون اختيار بدائل متعددة)؛ `reviewedBy` من صاحب الكارد.
+- أثناء اللوحة: مسح كابتن آخر لا يبدّل الجلسة؛ مسح مدير يحدّث هوية المعتمِد.
+- **إخفاء** نافذة «مرحباً جارسون الطلبات» من `AppShell`؛ إزالة تصفير علامة المقدمة عند login.
+- **الملفات:** `TerminalLockContext.tsx`، `ManagerCardApprovalOverlay.tsx`، `AppShell.tsx`، `SharedTerminalSettingsPage.tsx`، `AuthContext.tsx`.

@@ -1,24 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { CashierAlertsBar } from "./CashierAlertsBar";
 import { RestaurantDualBells } from "./RestaurantDualBells";
 import { DbConnectionBar } from "./DbConnectionBar";
 import { PinOverlay } from "./PinOverlay";
+import { ManagerCardApprovalOverlay } from "./ManagerCardApprovalOverlay";
 import { sessionDisplayName } from "../auth/displayUser";
 import { useAuth } from "../auth/AuthContext";
 import { useVenue } from "../context/VenueContext";
 import GlobalSearchModal from "./GlobalSearchModal";
 import { useDbEpoch } from "../context/DbSettingsRefreshContext";
-import { TerminalLockProvider } from "../context/TerminalLockContext";
+import { TerminalLockProvider, useTerminalLock } from "../context/TerminalLockContext";
 import { venueBrandLabel } from "../lib/venueType";
 import { ROLE_LABELS, roleHasManagerOpsAccess, type RoleId } from "../auth/roles";
-import { WaiterUiStylePrompt } from "./WaiterUiStylePrompt";
-import {
-  isWaiterUiPromptDoneThisSession,
-  roleUsesWaiterOrderUiStyle,
-  saveWaiterLastPath,
-  waiterPathAfterStylePick,
-} from "../lib/waiterOrderUiPrefs";
+import { saveWaiterLastPath } from "../lib/waiterOrderUiPrefs";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { WAITER_NAV_ITEMS } from "../lib/waiterNav";
 import { AppMenuProvider } from "../context/AppMenuContext";
@@ -212,23 +207,25 @@ function readSidebarInitialOpen(): boolean {
   return !window.matchMedia(`(max-width: ${NARROW_MAX_PX}px)`).matches;
 }
 
+function ManagerCardApprovalHost() {
+  const { user } = useAuth();
+  const { managerCardApproval, closeManagerCardApproval } = useTerminalLock();
+  if (!managerCardApproval) return null;
+  return (
+    <ManagerCardApprovalOverlay
+      approver={managerCardApproval}
+      captainLabel={sessionDisplayName(user) || user?.login || "الكابتن"}
+      onClose={closeManagerCardApproval}
+    />
+  );
+}
+
 export function AppShell({ role }: { role: RoleId }) {
   const { user, logout } = useAuth();
   const { venueType, venueName } = useVenue();
   const dbEpoch = useDbEpoch();
   const location = useLocation();
-  const navigate = useNavigate();
   const base = `/app/${role}`;
-  const [uiStylePromptOpen, setUiStylePromptOpen] = useState(
-    () => roleUsesWaiterOrderUiStyle(role) && !isWaiterUiPromptDoneThisSession(),
-  );
-
-  const handleWaiterUiStyleDone = useCallback(() => {
-    setUiStylePromptOpen(false);
-    if (role === "waiter") {
-      navigate(waiterPathAfterStylePick(), { replace: true });
-    }
-  }, [role, navigate]);
   const isOrderTakerFullscreen =
     (role === "waiter" || roleHasManagerOpsAccess(role)) &&
     location.pathname.startsWith(`${base}/order-taker`);
@@ -458,9 +455,7 @@ export function AppShell({ role }: { role: RoleId }) {
             <Outlet key={dbEpoch} />
           </main>
           <PinOverlay />
-          {uiStylePromptOpen && roleUsesWaiterOrderUiStyle(role) ? (
-            <WaiterUiStylePrompt roleLabel={ROLE_LABELS[role]} onDone={handleWaiterUiStyleDone} />
-          ) : null}
+          <ManagerCardApprovalHost />
           <GlobalSearchModal role={role} />
         </div>
       </AppMenuProvider>
