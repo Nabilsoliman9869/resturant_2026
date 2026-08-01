@@ -997,3 +997,10 @@ eserved + active.
 - **`api_server.py`:** إعدادات `GET/PUT /api/settings/telegram-ops-pulse`، `POST …/send-now`، `GET …/preview`، worker خلفية عند startup (poll + schedule). التخزين: `config/restaurant/telegram_ops_pulse.json`.
 - **واجهة:** صفحة إعدادات `TelegramOpsPulseSettingsPage` + مسار الإعدادات للمدير/مدير التشغيل/المطوّر.
 - لا يغيّر بيانات التشغيل — قراءة فقط + إشعار تليجرام.
+
+### 139 — تقرير تليجرام مرتب + صورة شبكة الطاولات + أوامر أقسام — UTC 2026-08-01T23:15:00Z — ID `tg-ops-v2-b4e8d1`
+
+- تقرير HTML مقسّم (صالة/مطبخ/دليفري/كباتن/موافقات) مع أوامر: التقرير، صالة، مطبخ، دليفري، /help.
+- صورة PNG لشبكة الطاولات ملوّنة حسب الحالة (Pillow) تُرفق مع التقرير/الصالة؛ إعداد `attachHallImage`.
+- إعدادات الواجهة: مدة الجدولة بأزرار جاهزة (15–120 د)، توضيح أن الطلب اليدوي يعمل خارج المواعيد وساعات الصمت.
+- `requirements.txt`: إضافة pillow.

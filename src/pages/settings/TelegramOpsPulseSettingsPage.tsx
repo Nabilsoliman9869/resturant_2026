@@ -13,6 +13,7 @@ type TelegramOpsSettings = {
   intervalMinutes: number;
   quietHoursStart: number;
   quietHoursEnd: number;
+  attachHallImage: boolean;
   venueLabel: string;
   lastScheduledAt?: string;
   lastSentAt?: string;
@@ -26,8 +27,11 @@ const DEFAULTS: TelegramOpsSettings = {
   intervalMinutes: 30,
   quietHoursStart: 3,
   quietHoursEnd: 9,
+  attachHallImage: true,
   venueLabel: "المطعم",
 };
+
+const INTERVAL_PRESETS = [15, 30, 45, 60, 90, 120];
 
 export default function TelegramOpsPulseSettingsPage() {
   const { user } = useAuth();
@@ -70,6 +74,7 @@ export default function TelegramOpsPulseSettingsPage() {
         intervalMinutes: s.intervalMinutes,
         quietHoursStart: s.quietHoursStart,
         quietHoursEnd: s.quietHoursEnd,
+        attachHallImage: s.attachHallImage,
         venueLabel: s.venueLabel,
         chatIds: chatIdsText
           .split(/[\n,;]+/)
@@ -131,18 +136,38 @@ export default function TelegramOpsPulseSettingsPage() {
   };
 
   return (
-    <div style={{ direction: "rtl", padding: "0.5rem 0.25rem 2rem", maxWidth: 720 }}>
+    <div style={{ direction: "rtl", padding: "0.5rem 0.25rem 2rem", maxWidth: 760 }}>
       <h2 style={{ margin: "0 0 6px" }}>تليجرام — نبض التشغيل</h2>
       <p style={{ color: "var(--muted)", fontSize: ".9rem", marginTop: 0 }}>
-        ملخص حي للصالة والمطبخ والدليفري والكباتن والموافقات. يُرسل كل نصف ساعة أو عند رسالة{" "}
-        <code>التقرير</code> / <code>/report</code> من محادثة مصرّح بها.
+        تقرير مرتب للصالة والمطبخ والدليفري والكباتن + صورة شبكة الطاولات. جدولة تلقائية أو طلب فوري من البوت.
       </p>
+
+      <section style={{ ...card, background: "rgba(16,185,129,0.08)", borderColor: "rgba(16,185,129,0.35)" }}>
+        <h3 style={h3}>كيف تطلب التقرير من تليجرام (في أي وقت)</h3>
+        <p style={{ margin: "0 0 8px", fontSize: ".88rem", lineHeight: 1.65 }}>
+          افتح البوت واكتب أحد الأوامر — <strong>لا تنتظر الجدولة</strong>:
+        </p>
+        <ul style={{ margin: 0, paddingInlineStart: "1.2rem", fontSize: ".86rem", lineHeight: 1.7 }}>
+          <li><code>التقرير</code> أو <code>/report</code> — التقرير الكامل + صورة الطاولات</li>
+          <li><code>صالة</code> أو <code>/hall</code> — الصالة وصورة الشبكة فقط</li>
+          <li><code>مطبخ</code> · <code>دليفري</code> — أقسام منفصلة</li>
+          <li><code>/help</code> — قائمة الأوامر</li>
+        </ul>
+      </section>
 
       <section style={card}>
         <h3 style={h3}>1) التفعيل والبوت</h3>
         <label style={row}>
           <input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} />
           تفعيل تكامل تليجرام
+        </label>
+        <label style={row}>
+          <input
+            type="checkbox"
+            checked={s.attachHallImage}
+            onChange={(e) => setS({ ...s, attachHallImage: e.target.checked })}
+          />
+          إرفاق صورة شبكة الطاولات (ملونة حسب الحالة)
         </label>
         <label style={{ display: "block", marginTop: 10 }}>
           اسم يظهر في التقرير
@@ -164,26 +189,19 @@ export default function TelegramOpsPulseSettingsPage() {
             placeholder={s.botTokenConfigured ? `محفوظ: ${s.botTokenMasked || "***"}` : "123456:ABC…"}
           />
         </label>
-        <p style={{ fontSize: ".8rem", color: "var(--muted)" }}>
-          اترك الحقل فارغاً عند الحفظ للإبقاء على التوكن الحالي. أنشئ بوتاً عبر BotFather ثم ابدأ محادثة معه.
-        </p>
         <label style={{ display: "block", marginTop: 10 }}>
-          Chat IDs المسموح بها (سطر لكل محادثة — مالك / مدير)
+          Chat IDs (سطر لكل مالك/مدير) — يُسجَّل تلقائياً عند أول /start إن كانت القائمة فارغة
           <textarea
-            style={{ ...input, minHeight: 90, fontFamily: "ui-monospace, monospace" }}
+            style={{ ...input, minHeight: 80, fontFamily: "ui-monospace, monospace" }}
             value={chatIdsText}
             onChange={(e) => setChatIdsText(e.target.value)}
-            placeholder={"123456789\n987654321"}
+            placeholder={"123456789"}
           />
         </label>
-        <p style={{ fontSize: ".8rem", color: "var(--muted)" }}>
-          لمعرفة chat_id: راسل البوت ثم افتح{" "}
-          <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> وابحث عن <code>chat.id</code>.
-        </p>
       </section>
 
       <section style={card}>
-        <h3 style={h3}>2) الجدولة</h3>
+        <h3 style={h3}>2) مدة التقرير التلقائي</h3>
         <label style={row}>
           <input
             type="checkbox"
@@ -192,20 +210,33 @@ export default function TelegramOpsPulseSettingsPage() {
           />
           إرسال تلقائي دوري
         </label>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
+        <p style={{ fontSize: ".82rem", color: "var(--muted)", margin: "8px 0" }}>اختر المدة بين التقارير:</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          {INTERVAL_PRESETS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={s.intervalMinutes === m ? "btn btn-primary" : "btn"}
+              onClick={() => setS({ ...s, intervalMinutes: m })}
+            >
+              كل {m} د
+            </button>
+          ))}
+        </div>
+        <label>
+          أو أدخل يدوياً (5–180 دقيقة)
+          <input
+            style={input}
+            type="number"
+            min={5}
+            max={180}
+            value={s.intervalMinutes}
+            onChange={(e) => setS({ ...s, intervalMinutes: Number(e.target.value) || 30 })}
+          />
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
           <label>
-            كل (دقيقة)
-            <input
-              style={input}
-              type="number"
-              min={5}
-              max={180}
-              value={s.intervalMinutes}
-              onChange={(e) => setS({ ...s, intervalMinutes: Number(e.target.value) || 30 })}
-            />
-          </label>
-          <label>
-            صمت من ساعة
+            صمت الجدولة من ساعة
             <input
               style={input}
               type="number"
@@ -228,8 +259,9 @@ export default function TelegramOpsPulseSettingsPage() {
           </label>
         </div>
         <p style={{ fontSize: ".8rem", color: "var(--muted)" }}>
-          الافتراضي: كل 30 دقيقة، صمت من 3 ص إلى 9 ص. آخر إرسال: {s.lastSentAt || "—"} · آخر جدولة:{" "}
-          {s.lastScheduledAt || "—"}
+          ساعات الصمت توقف <strong>الجدولة فقط</strong> — طلبك اليدوي من التليجرام يعمل دائماً.
+          <br />
+          آخر إرسال: {s.lastSentAt || "—"} · آخر جدولة: {s.lastScheduledAt || "—"}
           {s.lastError ? ` · خطأ: ${s.lastError}` : ""}
         </p>
       </section>
@@ -239,7 +271,7 @@ export default function TelegramOpsPulseSettingsPage() {
           حفظ
         </button>
         <button type="button" className="btn" disabled={busy} onClick={() => void loadPreview()}>
-          معاينة التقرير
+          معاينة النص
         </button>
         <button type="button" className="btn" disabled={busy || !s.enabled} onClick={() => void sendNow()}>
           إرسال الآن
@@ -273,7 +305,7 @@ const card: CSSProperties = {
   background: "rgba(255,255,255,0.03)",
 };
 const h3: CSSProperties = { margin: "0 0 8px", fontSize: "1rem" };
-const row: CSSProperties = { display: "flex", alignItems: "center", gap: 8 };
+const row: CSSProperties = { display: "flex", alignItems: "center", gap: 8, marginTop: 6 };
 const input: CSSProperties = {
   display: "block",
   width: "100%",

@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""نبض تشغيل المطعم عبر Telegram — تقرير عند الطلب + جدولة دورية."""
+"""نبض تشغيل المطعم عبر Telegram — تقرير مرتب + صورة شبكة الطاولات + جدولة/طلب يدوي."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -16,21 +16,38 @@ from typing import Any, Callable, Optional
 TELEGRAM_OPS_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "botToken": "",
-    "chatIds": [],  # أرقام أو نصوص chat_id المسموح بها
+    "chatIds": [],
     "scheduleEnabled": True,
     "intervalMinutes": 30,
-    "quietHoursStart": 3,   # ساعة محلية 0-23 — صمت بعد هذا
-    "quietHoursEnd": 9,     # حتى هذا
+    "quietHoursStart": 3,
+    "quietHoursEnd": 9,
+    "attachHallImage": True,
     "lastScheduledAt": "",
     "lastSentAt": "",
     "lastError": "",
     "venueLabel": "المطعم",
 }
 
-_CMD_RE = re.compile(
-    r"^\s*(?:/report(?:@\w+)?|التقرير|ارسل التقرير|أرسل التقرير|report)\s*$",
+_CMD_REPORT = re.compile(
+    r"^\s*(?:/report(?:@\w+)?|/full(?:@\w+)?|التقرير|ارسل التقرير|أرسل التقرير|تقرير كامل|report|full)\s*$",
     re.IGNORECASE | re.UNICODE,
 )
+_CMD_HELP = re.compile(r"^\s*(?:/help(?:@\w+)?|مساعدة|اوامر|أوامر)\s*$", re.IGNORECASE | re.UNICODE)
+_CMD_HALL = re.compile(
+    r"^\s*(?:/hall(?:@\w+)?|/tables(?:@\w+)?|صالة|الطاولات|طاولات|لوحة الصالة|hall|tables)\s*$",
+    re.IGNORECASE | re.UNICODE,
+)
+_CMD_KITCHEN = re.compile(r"^\s*(?:/kitchen(?:@\w+)?|مطبخ|kitchen)\s*$", re.IGNORECASE | re.UNICODE)
+_CMD_DELIVERY = re.compile(r"^\s*(?:/delivery(?:@\w+)?|دليفري|توصيل|delivery)\s*$", re.IGNORECASE | re.UNICODE)
+
+_STATUS_COLORS = {
+    "ready": (34, 197, 94),
+    "occupied": (239, 68, 68),
+    "reserved": (59, 130, 246),
+    "dirty": (245, 158, 11),
+    "cleaning": (251, 191, 36),
+    "unknown": (100, 116, 139),
+}
 
 _lock = threading.RLock()
 _poll_offset = 0
@@ -48,6 +65,7 @@ def normalize_settings(raw: Any) -> dict[str, Any]:
         chats = [x.strip() for x in chats.replace(";", ",").split(",") if x.strip()]
     out["chatIds"] = [str(x).strip() for x in chats if str(x).strip()]
     out["scheduleEnabled"] = bool(raw.get("scheduleEnabled", True))
+    out["attachHallImage"] = bool(raw.get("attachHallImage", True))
     try:
         out["intervalMinutes"] = max(5, min(180, int(raw.get("intervalMinutes") or 30)))
     except Exception:
@@ -68,7 +86,6 @@ def normalize_settings(raw: Any) -> dict[str, Any]:
 
 
 def settings_public(st: dict) -> dict:
-    """إخفاء التوكن في الاستجابة العامة."""
     out = dict(st)
     tok = str(out.get("botToken") or "")
     out["botTokenConfigured"] = bool(tok)
@@ -93,7 +110,6 @@ def save_settings(path: str, body: dict) -> dict:
             continue
         if k in body and body[k] is not None:
             merged[k] = body[k]
-    # لا تمسح التوكن لو أُرسل فارغاً مع قناع فقط
     if "botToken" in body:
         tok = str(body.get("botToken") or "").strip()
         if tok and tok != cur.get("botToken") and "…" not in tok and "***" not in tok:
@@ -101,7 +117,6 @@ def save_settings(path: str, body: dict) -> dict:
         elif not tok and body.get("clearBotToken"):
             merged["botToken"] = ""
     merged = normalize_settings(merged)
-    # احتفظ بطوابع الإرسال السابقة
     merged["lastScheduledAt"] = cur.get("lastScheduledAt") or ""
     merged["lastSentAt"] = cur.get("lastSentAt") or ""
     merged["lastError"] = cur.get("lastError") or ""
@@ -138,16 +153,11 @@ def _count_by(rows: list, key: str, normalize: Optional[Callable[[Any], str]] = 
 def _norm_table_status(raw: Any) -> str:
     s = str(raw or "").strip().lower()
     mapping = {
-        "ready": "ready",
-        "جاهزة": "ready",
-        "occupied": "occupied",
-        "مشغولة": "occupied",
-        "reserved": "reserved",
-        "محجوزة": "reserved",
-        "dirty": "dirty",
-        "متسخة": "dirty",
-        "cleaning": "cleaning",
-        "تنظيف": "cleaning",
+        "ready": "ready", "جاهزة": "ready",
+        "occupied": "occupied", "مشغولة": "occupied",
+        "reserved": "reserved", "محجوزة": "reserved",
+        "dirty": "dirty", "متسخة": "dirty",
+        "cleaning": "cleaning", "تنظيف": "cleaning",
     }
     return mapping.get(s, s or "unknown")
 
@@ -169,6 +179,64 @@ def _norm_order_status(raw: Any) -> str:
     return s or "other"
 
 
+def _table_label(t: dict) -> str:
+    for k in ("label", "name", "displayLabel", "tableLabel", "code", "id"):
+        v = str(t.get(k) or "").strip()
+        if v:
+            return v[:10]
+    return "?"
+
+
+def _gather_metrics(snap: dict, delivery_tickets: list, pending_approvals: list) -> dict:
+    tables = snap.get("tables") if isinstance(snap.get("tables"), list) else []
+    sessions = snap.get("sessions") if isinstance(snap.get("sessions"), list) else []
+    orders = snap.get("orders") if isinstance(snap.get("orders"), list) else []
+    transfers = snap.get("tempCaptainTransfers") if isinstance(snap.get("tempCaptainTransfers"), list) else []
+
+    t_counts = _count_by(tables, "status", _norm_table_status)
+    active_sessions = [
+        s for s in sessions
+        if isinstance(s, dict) and not s.get("closedAt") and not s.get("endedAt")
+    ]
+    o_counts = _count_by(orders, "status", _norm_order_status)
+    d_counts = _count_by(delivery_tickets, "status", lambda x: str(x or "").strip().lower() or "unknown")
+
+    bill_wait = sum(
+        1 for t in tables
+        if isinstance(t, dict) and (
+            t.get("awaitingPayment") or t.get("billingRequestedAt")
+            or str(t.get("billingStatus") or "").lower() in ("bill_requested", "awaiting_payment")
+        )
+    )
+    overdue = sum(1 for t in tables if isinstance(t, dict) and (t.get("cleanupOverdue") or t.get("noOrderOverdue")))
+
+    captain_loads: dict[str, int] = {}
+    for s in active_sessions:
+        name = str(s.get("captainName") or s.get("captainLogin") or s.get("waiterName") or "").strip()
+        if name:
+            captain_loads[name] = captain_loads.get(name, 0) + 1
+    for t in tables:
+        if not isinstance(t, dict) or _norm_table_status(t.get("status")) != "occupied":
+            continue
+        cname = str(t.get("captainName") or t.get("assignedCaptainName") or "").strip()
+        if cname:
+            captain_loads[cname] = captain_loads.get(cname, 0) + (0 if cname in captain_loads else 1)
+
+    return {
+        "tables": tables,
+        "t_counts": t_counts,
+        "active_sessions": active_sessions,
+        "o_counts": o_counts,
+        "d_counts": d_counts,
+        "bill_wait": bill_wait,
+        "overdue": overdue,
+        "captain_loads": captain_loads,
+        "transfers": len(transfers) if isinstance(transfers, list) else 0,
+        "pending_n": len([a for a in pending_approvals if isinstance(a, dict)]),
+        "table_total": len(tables),
+    }
+
+
 def compose_ops_pulse_text(
     *,
     venue_label: str,
@@ -176,120 +244,183 @@ def compose_ops_pulse_text(
     delivery_tickets: list,
     pending_approvals: list,
     now_local: Optional[datetime] = None,
+    section: str = "full",
 ) -> str:
     now = now_local or datetime.now()
     stamp = now.strftime("%Y-%m-%d %H:%M")
+    m = _gather_metrics(snap, delivery_tickets, pending_approvals)
+    tc = m["t_counts"]
+    oc = m["o_counts"]
+    dc = m["d_counts"]
+    occ = tc.get("occupied", 0)
+    ready = tc.get("ready", 0)
+    dirty = tc.get("dirty", 0) + tc.get("cleaning", 0)
+    reserved = tc.get("reserved", 0)
+    total = m["table_total"] or (occ + ready + dirty + reserved)
 
-    tables = snap.get("tables") if isinstance(snap.get("tables"), list) else []
-    sessions = snap.get("sessions") if isinstance(snap.get("sessions"), list) else []
-    orders = snap.get("orders") if isinstance(snap.get("orders"), list) else []
-    transfers = snap.get("tempCaptainTransfers") if isinstance(snap.get("tempCaptainTransfers"), list) else []
+    captains_lines = [
+        f"  • {n}: {c} جلسة"
+        for n, c in sorted(m["captain_loads"].items(), key=lambda x: (-x[1], x[0]))[:10]
+    ] or ["  • لا كباتن على جلسات نشطة"]
 
-    t_counts = _count_by(tables, "status", _norm_table_status)
-    occ = t_counts.get("occupied", 0)
-    ready = t_counts.get("ready", 0)
-    dirty = t_counts.get("dirty", 0) + t_counts.get("cleaning", 0)
-    reserved = t_counts.get("reserved", 0)
-    overdue = sum(1 for t in tables if isinstance(t, dict) and (t.get("cleanupOverdue") or t.get("noOrderOverdue")))
-    bill_wait = sum(
-        1
-        for t in tables
-        if isinstance(t, dict)
-        and (
-            t.get("awaitingPayment")
-            or t.get("billingRequestedAt")
-            or str(t.get("billingStatus") or "").lower() in ("bill_requested", "awaiting_payment")
-        )
-    )
+    d_open = sum(dc.get(k, 0) for k in (
+        "intake", "draft_quote", "quoted", "confirmed", "kitchen", "ready", "out_for_delivery", "delivered",
+    ))
 
-    active_sessions = [
-        s
-        for s in sessions
-        if isinstance(s, dict) and str(s.get("status") or "").lower() in ("", "open", "active", "seated", "occupied")
-        and not s.get("closedAt")
+    hall_block = [
+        "🏛 <b>الصالة / الطاولات</b>",
+        f"إجمالي الطاولات: <b>{total}</b>",
+        f"🔴 مشغولة <b>{occ}</b>   🟢 جاهزة <b>{ready}</b>",
+        f"🟡 متسخة/تنظيف <b>{dirty}</b>   🔵 محجوزة <b>{reserved}</b>",
+        f"جلسات نشطة: <b>{len(m['active_sessions'])}</b>",
+        f"بانتظار الحساب: <b>{m['bill_wait']}</b>   متأخرة: <b>{m['overdue']}</b>",
     ]
-    # إن لم يتضح الحقل، اعتبر غير المغلقة
-    if not active_sessions:
-        active_sessions = [s for s in sessions if isinstance(s, dict) and not s.get("closedAt") and not s.get("endedAt")]
+    kitchen_block = [
+        "🍳 <b>المطبخ</b>",
+        f"⏳ قيد الإرسال/الانتظار: <b>{oc.get('pending', 0)}</b>",
+        f"🔥 قيد التحضير: <b>{oc.get('preparing', 0)}</b>",
+        f"✅ جاهز للمناولة: <b>{oc.get('ready', 0)}</b>",
+    ]
+    delivery_block = [
+        "🛵 <b>الدليفري</b>",
+        f"تذاكر مفتوحة: <b>{d_open}</b>",
+        f"استقبال/عرض: <b>{dc.get('intake', 0) + dc.get('draft_quote', 0) + dc.get('quoted', 0)}</b>",
+        f"مطبخ/تأكيد: <b>{dc.get('kitchen', 0) + dc.get('confirmed', 0)}</b>",
+        f"جاهز: <b>{dc.get('ready', 0)}</b>   في الطريق: <b>{dc.get('out_for_delivery', 0)}</b>",
+        f"تم التسليم (غير مسدد): <b>{dc.get('delivered', 0)}</b>",
+    ]
+    captains_block = [
+        "👨‍🍳 <b>الكباتن</b>",
+        *captains_lines,
+        f"تحويلات مؤقتة: <b>{m['transfers']}</b>",
+    ]
+    approvals_block = [
+        "✅ <b>الموافقات</b>",
+        f"معلّقة بانتظار المدير: <b>{m['pending_n']}</b>",
+    ]
 
-    o_counts = _count_by(orders, "status", _norm_order_status)
-    kitchen_pending = o_counts.get("pending", 0)
-    kitchen_prep = o_counts.get("preparing", 0)
-    kitchen_ready = o_counts.get("ready", 0)
-
-    d_counts = _count_by(delivery_tickets, "status", lambda x: str(x or "").strip().lower() or "unknown")
-    d_kitchen = d_counts.get("kitchen", 0) + d_counts.get("confirmed", 0)
-    d_ready = d_counts.get("ready", 0)
-    d_out = d_counts.get("out_for_delivery", 0)
-    d_open = sum(
-        d_counts.get(k, 0)
-        for k in (
-            "intake",
-            "draft_quote",
-            "quoted",
-            "confirmed",
-            "kitchen",
-            "ready",
-            "out_for_delivery",
-            "delivered",
-        )
-    )
-
-    captain_loads: dict[str, int] = {}
-    for s in active_sessions:
-        name = str(s.get("captainName") or s.get("captainLogin") or s.get("waiterName") or "").strip()
-        if not name:
-            continue
-        captain_loads[name] = captain_loads.get(name, 0) + 1
-    # طاولات مشغولة بلا اسم كابتن في الجلسة
-    for t in tables:
-        if not isinstance(t, dict):
-            continue
-        if _norm_table_status(t.get("status")) != "occupied":
-            continue
-        cname = str(t.get("captainName") or t.get("assignedCaptainName") or "").strip()
-        if cname and cname not in captain_loads:
-            captain_loads[cname] = captain_loads.get(cname, 0)
-
-    captains_line = " · ".join(
-        f"{n} {c}" for n, c in sorted(captain_loads.items(), key=lambda x: (-x[1], x[0]))[:8]
-    ) or "لا كباتن مسجّلين على جلسات نشطة"
-    if len(captain_loads) > 8:
-        captains_line += f" · +{len(captain_loads) - 8}"
-
-    pending_n = len([a for a in pending_approvals if isinstance(a, dict)])
-    temp_tr = len(transfers)
-
-    lines = [
-        f"📊 {venue_label} — نبض التشغيل",
+    header = [
+        f"📊 <b>{venue_label}</b> — نبض التشغيل",
         f"🕒 {stamp}",
-        "━━━━━━━━━━━━━━━━",
-        f"🏛 الصالة: مشغولة {occ} · جاهزة {ready} · متسخة/تنظيف {dirty} · محجوزة {reserved}",
-        f"   جلسات نشطة ≈ {len(active_sessions)} · بانتظار حساب {bill_wait} · متأخرة {overdue}",
-        f"🍳 المطبخ: قيد {kitchen_pending} · تحضير {kitchen_prep} · جاهز {kitchen_ready}",
-        f"🛵 الدليفري: مفتوح {d_open} · مطبخ/تأكيد {d_kitchen} · جاهز {d_ready} · في الطريق {d_out}",
-        f"👨‍🍳 الكباتن: {captains_line}",
-        f"🔁 تحويلات كابتن مؤقتة: {temp_tr}",
-        f"✅ موافقات معلّقة: {pending_n}",
-        "━━━━━━━━━━━━━━━━",
-        "أوامر: التقرير | /report",
+        "──────────────",
     ]
-    return "\n".join(lines)
+    footer = [
+        "──────────────",
+        "الطلب اليدوي (في أي وقت):",
+        "<code>التقرير</code> أو /report",
+        "<code>صالة</code> · <code>مطبخ</code> · <code>دليفري</code> · /help",
+    ]
+
+    if section == "hall":
+        return "\n".join(header + hall_block + footer)
+    if section == "kitchen":
+        return "\n".join(header + kitchen_block + footer)
+    if section == "delivery":
+        return "\n".join(header + delivery_block + footer)
+
+    return "\n".join(
+        header + hall_block + [""] + kitchen_block + [""] + delivery_block
+        + [""] + captains_block + [""] + approvals_block + footer
+    )
+
+
+def help_text(venue_label: str, interval_minutes: int) -> str:
+    return "\n".join([
+        f"📖 أوامر بوت «{venue_label}»",
+        "──────────────",
+        "<b>عند الطلب (خارج المواعيد):</b>",
+        "• <code>التقرير</code> أو /report — التقرير الكامل",
+        "• <code>صالة</code> أو /hall — الصالة + صورة الطاولات",
+        "• <code>مطبخ</code> أو /kitchen",
+        "• <code>دليفري</code> أو /delivery",
+        "• /help — هذه القائمة",
+        "──────────────",
+        f"الجدولة التلقائية: كل <b>{interval_minutes}</b> دقيقة (إن كانت مفعّلة).",
+        "الطلب اليدوي يعمل دائماً حتى أثناء ساعات الصمت.",
+    ])
+
+
+def render_hall_board_png(snap: dict, venue_label: str = "المطعم") -> Optional[bytes]:
+    """صورة شبكة ملونة لحالة الطاولات (بديل سكرين شوت للوحة)."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return None
+
+    tables = [t for t in (snap.get("tables") or []) if isinstance(t, dict)]
+    if not tables:
+        return None
+
+    # ترتيب حسب التسمية
+    tables = sorted(tables, key=lambda t: (_table_label(t), str(t.get("id") or "")))
+    n = len(tables)
+    cols = 6 if n > 18 else (5 if n > 12 else 4)
+    rows = (n + cols - 1) // cols
+    cell_w, cell_h = 92, 64
+    pad = 12
+    header_h = 56
+    legend_h = 36
+    w = pad * 2 + cols * cell_w + (cols - 1) * 8
+    h = header_h + pad + rows * cell_h + (rows - 1) * 8 + legend_h + pad
+
+    img = Image.new("RGB", (w, h), (15, 23, 42))
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 14)
+        font_sm = ImageFont.truetype("arial.ttf", 11)
+        font_lg = ImageFont.truetype("arial.ttf", 16)
+    except Exception:
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+            font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
+            font_lg = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
+        except Exception:
+            font = ImageFont.load_default()
+            font_sm = font
+            font_lg = font
+
+    title = f"{venue_label} — Hall Board"
+    draw.text((pad, 14), title, fill=(226, 232, 240), font=font_lg)
+    draw.text((pad, 34), datetime.now().strftime("%Y-%m-%d %H:%M"), fill=(148, 163, 184), font=font_sm)
+
+    for i, t in enumerate(tables):
+        r, c = divmod(i, cols)
+        x = pad + c * (cell_w + 8)
+        y = header_h + r * (cell_h + 8)
+        st = _norm_table_status(t.get("status"))
+        color = _STATUS_COLORS.get(st, _STATUS_COLORS["unknown"])
+        draw.rounded_rectangle([x, y, x + cell_w, y + cell_h], radius=10, fill=color)
+        label = _table_label(t)
+        # نص أبيض وسط الخلية
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text((x + (cell_w - tw) / 2, y + (cell_h - th) / 2 - 6), label, fill=(255, 255, 255), font=font)
+        st_ar = {"ready": "ready", "occupied": "busy", "dirty": "dirty", "cleaning": "clean", "reserved": "rsv"}.get(st, st)
+        bbox2 = draw.textbbox((0, 0), st_ar, font=font_sm)
+        tw2 = bbox2[2] - bbox2[0]
+        draw.text((x + (cell_w - tw2) / 2, y + cell_h - 18), st_ar, fill=(255, 255, 255), font=font_sm)
+
+    # أسطورة
+    ly = h - legend_h + 8
+    lx = pad
+    for key, name in (("occupied", "Busy"), ("ready", "Ready"), ("dirty", "Dirty"), ("reserved", "Rsv")):
+        draw.rounded_rectangle([lx, ly, lx + 14, ly + 14], radius=3, fill=_STATUS_COLORS[key])
+        draw.text((lx + 18, ly - 1), name, fill=(203, 213, 225), font=font_sm)
+        lx += 70
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def is_report_command(text: str) -> bool:
-    return bool(_CMD_RE.match(str(text or "")))
+    return bool(_CMD_REPORT.match(str(text or "")))
 
 
 def _telegram_api(token: str, method: str, payload: dict, timeout: int = 25) -> dict:
     url = f"https://api.telegram.org/bot{token}/{method}"
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", errors="replace")
@@ -304,16 +435,57 @@ def _telegram_api(token: str, method: str, payload: dict, timeout: int = 25) -> 
         return {"ok": False, "description": str(e)}
 
 
-def send_message(token: str, chat_id: str, text: str) -> dict:
-    return _telegram_api(
-        token,
-        "sendMessage",
-        {
-            "chat_id": str(chat_id),
-            "text": text,
-            "disable_web_page_preview": True,
-        },
+def send_message(token: str, chat_id: str, text: str, *, parse_mode: str = "HTML") -> dict:
+    payload: dict[str, Any] = {
+        "chat_id": str(chat_id),
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    return _telegram_api(token, "sendMessage", payload)
+
+
+def send_photo(token: str, chat_id: str, png_bytes: bytes, caption: str = "") -> dict:
+    """إرسال صورة PNG عبر multipart."""
+    boundary = "----Mat3amTgBoundary7xK9"
+    lines: list[bytes] = []
+
+    def add_field(name: str, value: str) -> None:
+        lines.append(f"--{boundary}\r\n".encode())
+        lines.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        lines.append(value.encode("utf-8") + b"\r\n")
+
+    add_field("chat_id", str(chat_id))
+    if caption:
+        add_field("caption", caption[:1024])
+        add_field("parse_mode", "HTML")
+    lines.append(f"--{boundary}\r\n".encode())
+    lines.append(b'Content-Disposition: form-data; name="photo"; filename="hall.png"\r\n')
+    lines.append(b"Content-Type: image/png\r\n\r\n")
+    lines.append(png_bytes)
+    lines.append(b"\r\n")
+    lines.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(lines)
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
     )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace") if e.fp else str(e)
+        try:
+            return json.loads(err_body)
+        except Exception:
+            return {"ok": False, "description": err_body or str(e)}
+    except Exception as e:
+        return {"ok": False, "description": str(e)}
 
 
 def get_updates(token: str, offset: int = 0, timeout: int = 0) -> dict:
@@ -325,14 +497,12 @@ def get_updates(token: str, offset: int = 0, timeout: int = 0) -> dict:
 
 def chat_allowed(st: dict, chat_id: str) -> bool:
     allowed = [str(x) for x in (st.get("chatIds") or [])]
-    # قائمة فارغة = وضع تجربة: اقبل أول محادثة ثم سجّلها تلقائياً
     if not allowed:
         return True
     return str(chat_id) in allowed
 
 
 def ensure_chat_registered(path: str, chat_id: str) -> dict:
-    """يضيف chat_id للقائمة إن لم يكن موجوداً (مفيد لأول تشغيل)."""
     st = load_settings(path)
     cid = str(chat_id).strip()
     if not cid:
@@ -355,7 +525,6 @@ def in_quiet_hours(st: dict, now: Optional[datetime] = None) -> bool:
         return False
     if start < end:
         return start <= h < end
-    # يعبر منتصف الليل: مثلاً 23→7
     return h >= start or h < end
 
 
@@ -371,7 +540,6 @@ def should_run_schedule(st: dict, now: Optional[datetime] = None) -> bool:
     if not last:
         return True
     try:
-        # ISO or naive
         last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
         if last_dt.tzinfo:
             last_dt = last_dt.astimezone().replace(tzinfo=None)
@@ -382,8 +550,6 @@ def should_run_schedule(st: dict, now: Optional[datetime] = None) -> bool:
 
 
 class OpsPulseRuntime:
-    """يربط المسارات والجدولة بخادم FastAPI دون استيراد دائري ثقيل."""
-
     def __init__(
         self,
         *,
@@ -396,15 +562,40 @@ class OpsPulseRuntime:
     def path(self) -> str:
         return self.settings_path_fn()
 
-    def build_text(self, st: Optional[dict] = None) -> str:
+    def _ctx(self) -> dict:
+        return self.build_context_fn() or {}
+
+    def build_text(self, st: Optional[dict] = None, section: str = "full") -> str:
         st = st or load_settings(self.path())
-        ctx = self.build_context_fn() or {}
+        ctx = self._ctx()
         return compose_ops_pulse_text(
             venue_label=str(st.get("venueLabel") or ctx.get("venueLabel") or "المطعم"),
             snap=ctx.get("snap") if isinstance(ctx.get("snap"), dict) else {},
             delivery_tickets=ctx.get("deliveryTickets") if isinstance(ctx.get("deliveryTickets"), list) else [],
             pending_approvals=ctx.get("pendingApprovals") if isinstance(ctx.get("pendingApprovals"), list) else [],
+            section=section,
         )
+
+    def build_hall_image(self, st: Optional[dict] = None) -> Optional[bytes]:
+        st = st or load_settings(self.path())
+        ctx = self._ctx()
+        snap = ctx.get("snap") if isinstance(ctx.get("snap"), dict) else {}
+        return render_hall_board_png(snap, str(st.get("venueLabel") or "المطعم"))
+
+    def _deliver_to_chat(self, st: dict, chat_id: str, *, section: str = "full", with_image: Optional[bool] = None) -> dict:
+        token = str(st.get("botToken") or "")
+        text = self.build_text(st, section=section)
+        want_img = st.get("attachHallImage", True) if with_image is None else with_image
+        if want_img and section in ("full", "hall"):
+            png = self.build_hall_image(st)
+            if png:
+                # نص مختصر كتعليق + رسالة تفصيلية بعدها
+                cap = text if len(text) <= 1000 else (text[:990] + "…")
+                r = send_photo(token, chat_id, png, caption=cap)
+                if r.get("ok"):
+                    return r
+                # سقوط للنص فقط
+        return send_message(token, chat_id, text)
 
     def broadcast(self, *, reason: str = "manual") -> dict:
         path = self.path()
@@ -426,7 +617,7 @@ class OpsPulseRuntime:
             results = []
             ok_n = 0
             for cid in chats:
-                r = send_message(token, cid, text)
+                r = self._deliver_to_chat(st, cid, section="full")
                 ok = bool(r.get("ok"))
                 if ok:
                     ok_n += 1
@@ -442,7 +633,7 @@ class OpsPulseRuntime:
                 "total": len(chats),
                 "reason": reason,
                 "results": results,
-                "preview": text[:400],
+                "preview": text[:500],
             }
 
     def handle_incoming_message(self, chat_id: str, text: str) -> Optional[dict]:
@@ -451,29 +642,52 @@ class OpsPulseRuntime:
         if not st.get("enabled"):
             return {"ok": False, "detail": "disabled"}
         raw = str(text or "").strip()
-        # /start يسجّل المحادثة ويرد بترحيب
+        if not raw:
+            return None
+
+        if not chat_allowed(st, chat_id):
+            send_message(st["botToken"], chat_id, "غير مصرح لهذه المحادثة.")
+            return {"ok": False, "detail": "chat_not_allowed"}
+
         if raw.lower().startswith("/start"):
-            if not chat_allowed(st, chat_id):
-                send_message(st["botToken"], chat_id, "غير مصرح لهذا المحادثة باستلام تقارير المطعم.")
-                return {"ok": False, "detail": "chat_not_allowed"}
             st = ensure_chat_registered(path, chat_id)
             send_message(
                 st["botToken"],
                 chat_id,
-                f"تم ربط هذه المحادثة بنبض تشغيل «{st.get('venueLabel') or 'المطعم'}».\nأرسل: التقرير أو /report",
+                help_text(str(st.get("venueLabel") or "المطعم"), int(st.get("intervalMinutes") or 30)),
             )
             return {"ok": True, "chatId": chat_id, "action": "start"}
-        if not is_report_command(text):
+
+        if _CMD_HELP.match(raw):
+            st = ensure_chat_registered(path, chat_id)
+            send_message(
+                st["botToken"],
+                chat_id,
+                help_text(str(st.get("venueLabel") or "المطعم"), int(st.get("intervalMinutes") or 30)),
+            )
+            return {"ok": True, "action": "help"}
+
+        section = None
+        with_image = None
+        if is_report_command(raw):
+            section = "full"
+        elif _CMD_HALL.match(raw):
+            section = "hall"
+            with_image = True
+        elif _CMD_KITCHEN.match(raw):
+            section = "kitchen"
+            with_image = False
+        elif _CMD_DELIVERY.match(raw):
+            section = "delivery"
+            with_image = False
+        else:
             return None
-        if not chat_allowed(st, chat_id):
-            send_message(st["botToken"], chat_id, "غير مصرح لهذا المحادثة باستلام تقارير المطعم.")
-            return {"ok": False, "detail": "chat_not_allowed"}
+
         st = ensure_chat_registered(path, chat_id)
-        text_out = self.build_text(st)
-        r = send_message(st["botToken"], chat_id, text_out)
+        r = self._deliver_to_chat(st, chat_id, section=section, with_image=with_image)
         if r.get("ok"):
             patch_meta(path, lastSentAt=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), lastError="")
-        return {"ok": bool(r.get("ok")), "chatId": chat_id, "telegram": r}
+        return {"ok": bool(r.get("ok")), "chatId": chat_id, "section": section, "telegram": r}
 
     def poll_once(self) -> None:
         global _poll_offset
