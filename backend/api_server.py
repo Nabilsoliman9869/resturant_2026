@@ -23031,6 +23031,252 @@ def _restaurant_force_reset_table(table_id: str, *, reason: str = "", actor: Opt
     }
 
 
+def _restaurant_ops_day_reset(
+    *,
+    purge_history: bool = True,
+    clear_delivery: bool = True,
+    clear_invoices: bool = False,
+    actor: Optional[dict] = None,
+    reason: str = "",
+) -> dict:
+    """تصفير تشغيلي لبدء يوم عمل نظيف — بدون المساس بالمنيو/المستخدمين/الإعدادات/المخطط."""
+    actor = actor if isinstance(actor, dict) else {}
+    now_iso = datetime.now().isoformat()
+    reason_txt = str(reason or "").strip()[:500] or "ops_day_reset"
+    stats: dict[str, Any] = {
+        "at": now_iso,
+        "purgeHistory": bool(purge_history),
+        "clearDelivery": bool(clear_delivery),
+        "clearInvoices": bool(clear_invoices),
+    }
+
+    with _restaurant_table_sessions_lock:
+        sessions = _restaurant_load("table_sessions", [])
+        if not isinstance(sessions, list):
+            sessions = []
+        active_before = sum(
+            1 for s in sessions if isinstance(s, dict) and str(s.get("status") or "").lower() == "active"
+        )
+        if purge_history:
+            stats["sessionsCleared"] = len(sessions)
+            stats["activeSessionsClosed"] = active_before
+            _restaurant_save("table_sessions", [])
+        else:
+            closed = 0
+            for s in sessions:
+                if not isinstance(s, dict):
+                    continue
+                if str(s.get("status") or "").lower() != "active":
+                    continue
+                s["status"] = "completed"
+                s["endTime"] = now_iso
+                s["closedAt"] = now_iso
+                s["endedAt"] = now_iso
+                s["endReason"] = reason_txt
+                closed += 1
+            stats["activeSessionsClosed"] = closed
+            stats["sessionsCleared"] = 0
+            if closed:
+                _restaurant_save("table_sessions", sessions)
+
+    with _restaurant_orders_lock:
+        orders = _restaurant_load("orders", [])
+        if not isinstance(orders, list):
+            orders = []
+        open_statuses = {"pending", "preparing", "ready", "served", "delivered", "new", "sent", "queued"}
+        open_before = sum(
+            1
+            for o in orders
+            if isinstance(o, dict) and str(o.get("status") or "").strip().lower() in open_statuses
+        )
+        if purge_history:
+            stats["ordersCleared"] = len(orders)
+            stats["openOrdersCancelled"] = open_before
+            _restaurant_save("orders", [])
+        else:
+            cancelled = 0
+            for order in orders:
+                if not isinstance(order, dict):
+                    continue
+                st = str(order.get("status") or "").strip().lower()
+                if st in ("paid", "cancelled", "canceled"):
+                    continue
+                items = [_kds_normalize_item(x) for x in (order.get("items") or []) if isinstance(x, dict)]
+                for it in items:
+                    if bool(it.get("cancelled")):
+                        continue
+                    it["cancelled"] = True
+                    it["lineStatus"] = "cancelled"
+                    it["cancelledAt"] = now_iso
+                if items:
+                    order["items"] = items
+                    _kds_refresh_order_status(order)
+                else:
+                    order["status"] = "cancelled"
+                order["cancelledAt"] = str(order.get("cancelledAt") or "").strip() or now_iso
+                cancelled += 1
+            stats["openOrdersCancelled"] = cancelled
+            stats["ordersCleared"] = 0
+            if cancelled:
+                _restaurant_save("orders", orders)
+
+    tables = _restaurant_load("tables", [])
+    if not isinstance(tables, list):
+        tables = []
+    tables_reset = 0
+    for t in tables:
+        if not isinstance(t, dict):
+            continue
+        st = str(t.get("status") or "").strip().lower()
+        needs = st not in ("ready", "available", "") or any(
+            t.get(k)
+            for k in (
+                "awaitingPayment",
+                "billingRequestedAt",
+                "billingStatus",
+                "dirtyAt",
+                "cleaningStartedAt",
+                "sessionId",
+                "activeSessionId",
+                "captainUserId",
+                "captainName",
+                "assignedCaptainName",
+                "minimumCharge",
+            )
+        )
+        if not needs and st in ("ready", "available", ""):
+            # تأكد من تنظيف أعلام الفاتورة حتى لو كانت جاهزة
+            if not any(
+                t.get(k)
+                for k in ("awaitingPayment", "billingRequestedAt", "billingStatus", "sessionId", "activeSessionId")
+            ):
+                continue
+        t["status"] = "ready"
+        t["statusUpdatedAt"] = now_iso
+        t["readyAt"] = now_iso
+        t["dirtyAt"] = None
+        t["cleaningStartedAt"] = None
+        for key in (
+            "awaitingPayment",
+            "billingRequestedAt",
+            "billingStatus",
+            "sessionId",
+            "activeSessionId",
+            "captainUserId",
+            "captainName",
+            "assignedCaptainName",
+            "minimumCharge",
+            "minimumChargeUpdatedAt",
+            "cleanupOverdue",
+            "noOrderOverdue",
+            "reservedAt",
+            "guestCount",
+        ):
+            t.pop(key, None)
+        tables_reset += 1
+    if tables_reset:
+        _restaurant_save("tables", tables)
+    stats["tablesReset"] = tables_reset
+
+    approvals = _manager_approval_requests_load()
+    stats["approvalsCleared"] = len(approvals)
+    _manager_approval_requests_save([])
+
+    alerts = _restaurant_load("cashier_alerts", [])
+    alerts_n = len(alerts) if isinstance(alerts, list) else 0
+    _restaurant_save("cashier_alerts", [])
+    stats["cashierAlertsCleared"] = alerts_n
+
+    inbox = _role_inbox_load_rows()
+    _role_inbox_save_rows([])
+    stats["roleInboxCleared"] = len(inbox)
+
+    transfers = _restaurant_temp_captain_transfers_load()
+    _restaurant_temp_captain_transfers_save([])
+    stats["tempCaptainTransfersCleared"] = len(transfers)
+
+    returns = _guest_return_requests_load()
+    _guest_return_requests_save([])
+    stats["guestReturnsCleared"] = len(returns)
+
+    kn = _restaurant_load("kitchen_notifications", [])
+    kn_n = len(kn) if isinstance(kn, list) else 0
+    _restaurant_save("kitchen_notifications", [])
+    stats["kitchenNotificationsCleared"] = kn_n
+
+    if clear_delivery:
+        tickets = _delivery_tickets_load()
+        _delivery_tickets_save([])
+        stats["deliveryTicketsCleared"] = len(tickets)
+    else:
+        stats["deliveryTicketsCleared"] = 0
+
+    kids = _restaurant_load("kids_area_sessions", [])
+    if isinstance(kids, list):
+        stats["kidsSessionsCleared"] = len(kids)
+        _restaurant_save("kids_area_sessions", [])
+    else:
+        stats["kidsSessionsCleared"] = 0
+
+    if clear_invoices:
+        inv = _restaurant_load("invoices", [])
+        inv_n = len(inv) if isinstance(inv, list) else 0
+        _restaurant_save("invoices", [])
+        stats["invoicesCleared"] = inv_n
+    else:
+        stats["invoicesCleared"] = 0
+
+    # سجل تدقيق جديد ليوم نظيف (بعد المسح)
+    _restaurant_save("session_audit", [])
+    _append_session_audit_entry(
+        {
+            "at": now_iso,
+            "action": "ops_day_reset",
+            "sessionId": None,
+            "tableId": None,
+            "reason": reason_txt,
+            "actorId": str(actor.get("id") or "") or None,
+            "actorLogin": str(actor.get("login") or "") or None,
+            "actorRole": str(actor.get("role") or "") or None,
+            "stats": {k: v for k, v in stats.items() if k != "at"},
+        }
+    )
+    stats["sessionAuditReset"] = True
+
+    cache_invalidate_restaurant()
+    cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
+    cache_delete_pattern("mat3am:restaurant:order-taker-bootstrap:*")
+    cache_delete_pattern("mat3am:restaurant:role-inbox:*")
+    return {"ok": True, **stats}
+
+
+@app.post("/api/restaurant/ops-day-reset")
+@_with_restaurant_table_sessions_lock
+@_with_restaurant_orders_lock
+def restaurant_ops_day_reset(body: dict):
+    """بدء يوم عمل نظيف: مسح الجلسات/الطلبات/الموافقات/التنبيهات وإرجاع الطاولات لجاهزة."""
+    if not isinstance(body, dict):
+        body = {}
+    _terminal_require_user(body.get("mat3amActor"))
+    actor = _mat3am_actor_from_body(body)
+    if not str(actor.get("id") or "").strip():
+        raise HTTPException(status_code=400, detail="mat3amActor.id مطلوب")
+    if not _role_has_manager_ops_access(str(actor.get("role") or "").strip().lower()):
+        raise HTTPException(status_code=403, detail="تصفير يوم العمل لمدير التشغيل أو المدير أو المطوّر فقط.")
+    if str(body.get("confirm") or "").strip() != "RESET_DAY":
+        raise HTTPException(
+            status_code=400,
+            detail='للتأكيد أرسل confirm: \"RESET_DAY\" — العملية تمسح الجلسات والموافقات والتنبيهات.',
+        )
+    return _restaurant_ops_day_reset(
+        purge_history=bool(body.get("purgeHistory", True)),
+        clear_delivery=bool(body.get("clearDelivery", True)),
+        clear_invoices=bool(body.get("clearInvoices", False)),
+        actor=actor,
+        reason=str(body.get("reason") or "").strip(),
+    )
+
+
 @app.post("/api/restaurant/tables/{table_id}/reset")
 @_with_restaurant_table_sessions_lock
 @_with_restaurant_orders_lock

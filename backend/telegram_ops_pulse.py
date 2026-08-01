@@ -194,9 +194,15 @@ def _gather_metrics(snap: dict, delivery_tickets: list, pending_approvals: list)
     transfers = snap.get("tempCaptainTransfers") if isinstance(snap.get("tempCaptainTransfers"), list) else []
 
     t_counts = _count_by(tables, "status", _norm_table_status)
+    # مصدر الحقيقة في POS هو status=active (وليس غياب closedAt — الجلسات المكتملة كانت تُحسب خطأً).
     active_sessions = [
-        s for s in sessions
-        if isinstance(s, dict) and not s.get("closedAt") and not s.get("endedAt")
+        s
+        for s in sessions
+        if isinstance(s, dict)
+        and str(s.get("status") or "").strip().lower() == "active"
+        and not s.get("closedAt")
+        and not s.get("endedAt")
+        and not s.get("endTime")
     ]
     o_counts = _count_by(orders, "status", _norm_order_status)
     d_counts = _count_by(delivery_tickets, "status", lambda x: str(x or "").strip().lower() or "unknown")
