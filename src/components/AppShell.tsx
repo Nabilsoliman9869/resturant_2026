@@ -12,7 +12,7 @@ import GlobalSearchModal from "./GlobalSearchModal";
 import { useDbEpoch } from "../context/DbSettingsRefreshContext";
 import { TerminalLockProvider, useTerminalLock } from "../context/TerminalLockContext";
 import { venueBrandLabel } from "../lib/venueType";
-import { ROLE_LABELS, roleHasManagerOpsAccess, type RoleId } from "../auth/roles";
+import { roleHasManagerOpsAccess, type RoleId } from "../auth/roles";
 import { saveWaiterLastPath } from "../lib/waiterOrderUiPrefs";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { WAITER_NAV_ITEMS } from "../lib/waiterNav";
