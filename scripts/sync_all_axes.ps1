@@ -53,7 +53,10 @@ $StagePrefixes = @(
   ".cursor/rules/",
   "config/tbl_seed_pack_v1.json",
   "config/mat3am_exe_build.txt",
-  "config/settings.example.json"
+  "config/settings.example.json",
+  "config/license_branding.json",
+  "build_license_generator.bat",
+  "build_exe.bat"
 )
 
 function Test-StagePath([string]$Path) {
