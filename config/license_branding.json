@@ -1,0 +1,16 @@
+{
+  "companyNameAr": "شركة إكسترا ويب للاستشارات والأنظمة",
+  "companyNameEn": "Xtra Web Consulting & Systems",
+  "productName": "Mat3amPOS",
+  "copyrightLine": "جميع الحقوق محفوظة © {year} {company}. يُمنع النسخ أو التوزيع أو التشغيل دون رقم رخصة صادر من الشركة.",
+  "phones": [
+    "0100 000 0000",
+    "0111 000 0000"
+  ],
+  "whatsapp": "0100 000 0000",
+  "email": "support@example.com",
+  "website": "",
+  "splashSeconds": 2,
+  "activationServerUrl": "https://resturant2026-production.up.railway.app",
+  "requireOnlineBurn": true
+}
