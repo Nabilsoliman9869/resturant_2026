@@ -15,6 +15,12 @@ config/tbl_seed_pack_from_db.generated.json
 .env.*.local
 # إعدادات SQL المحلية — انسخ من config/settings.example.json
 config/settings.json
+# سر ومسجل رخص Mat3amPOS (داخلي للشركة فقط)
+config/mat3am_license_secret.txt
+config/license_ledger.json
+config/license_burns.json
+license.dat
+**/license.dat
 
 # بيانات تشغيل المطعم (محلية/تجريبية) — لا تُرفع إلا مخطط الصالة المرجعي
 config/restaurant/*

@@ -1010,3 +1010,11 @@ eserved + active.
 - **`POST /api/restaurant/ops-day-reset`:** مسح الجلسات/الطلبات/الموافقات/التنبيهات/الوارد/التحويلات/المرتجعات/الدليفري، وإرجاع الطاولات لجاهزة (مع تأكيد `RESET_DAY`). الفواتير اختيارية.
 - **واجهة:** `OpsDayResetPage` + رابط في إعدادات المدير/مدير التشغيل/المطوّر.
 - **`telegram_ops_pulse.py`:** عدّ الجلسات النشطة عبر `status=active` فقط (كانت الجلسات المكتملة بدون `closedAt` تُحسب نشطة بالخطأ).
+
+### 141 — ترخيص EXE برقم لمرة واحدة + شاشة حقوق وهواتف — UTC 2026-08-02T00:50:00Z — ID `exe-license-gate-c91f2a`
+
+- **`mat3am_license.py` / `mat3am_license_gate.py`:** مفاتيح `M3AM-…` موقّعة HMAC، ربط بالجهاز، شاشة إقلاع (حقوق الشركة + هواتف + تفعيل).
+- **`mat3am_exe_entry.py`:** لا يشغّل الخادم قبل نجاح الترخيص (وضع EXE).
+- **مولّد داخلي:** `scripts/mat3am_license_generator.py` + `build_license_generator.bat` وسجل `license_ledger.json`.
+- **حرق أونلاين:** `POST /api/license/activate` + `GET /api/license/status`؛ إعدادات الهوية في `config/license_branding.json`.
+- **توثيق:** `docs/LICENSE_EXE.md`؛ تحديث `docs/BUILD_EXE.md`.

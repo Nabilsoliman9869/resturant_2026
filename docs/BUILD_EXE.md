@@ -24,10 +24,25 @@ npm run build
 من جذر المشروع (بعد `pip install pyinstaller pyodbc uvicorn fastapi`):
 
 ```bat
+build_exe.bat
+```
+
+أو:
+
+```bat
 pyinstaller Mat3amPOS.spec --noconfirm
 ```
 
 الناتج: `dist\Mat3amPOS.exe` — يضم `ui` و`config` و`docs` كما في `Mat3amPOS.spec`.
+
+### الترخيص (رقم لمرة واحدة + شاشة حقوق)
+
+قبل شحن العملاء راجع **`docs/LICENSE_EXE.md`**:
+
+1. عدّل `config/license_branding.json` (اسم الشركة + الهواتف).
+2. أنشئ السر عبر `python scripts\mat3am_license_generator.py`.
+3. ضع نفس السر على Railway: `MAT3AM_LICENSE_SECRET`.
+4. ابنِ EXE ثم وزّع مع رقم رخصة واحد لكل جهاز.
 
 ## الخيار 3 — تطبيق سطح مكتب (Electron / Tauri)
 

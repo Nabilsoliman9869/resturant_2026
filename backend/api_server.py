@@ -15989,6 +15989,105 @@ def telegram_ops_pulse_preview():
     return {"ok": True, "text": text, "length": len(text)}
 
 
+def _license_burns_path() -> Path:
+    return Path(str(DATA_DIR)) / "config" / "license_burns.json"
+
+
+def _license_burns_load() -> dict:
+    p = _license_burns_path()
+    if not p.is_file():
+        return {"burns": []}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            if not isinstance(data.get("burns"), list):
+                data["burns"] = []
+            return data
+    except Exception:
+        pass
+    return {"burns": []}
+
+
+def _license_burns_save(data: dict) -> None:
+    p = _license_burns_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
+@app.get("/api/license/status")
+def license_status_api():
+    """حالة الرخصة على هذا الجهاز (للتشخيص)."""
+    try:
+        from mat3am_license import license_status_public
+
+        return license_status_public()
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@app.post("/api/license/activate")
+def license_activate_online(body: dict):
+    """حرق رقم رخصة لمرة واحدة عالمياً (يستدعيه EXE عند التفعيل)."""
+    if not isinstance(body, dict):
+        body = {}
+    try:
+        from mat3am_license import (
+            normalize_license_key,
+            verify_license_key_format,
+            _key_hash,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"وحدة الترخيص غير متاحة: {e}") from e
+
+    raw_key = str(body.get("key") or "").strip()
+    machine_id = str(body.get("machineId") or "").strip()
+    if not machine_id:
+        raise HTTPException(status_code=400, detail="machineId مطلوب")
+    ok, norm_or_msg = verify_license_key_format(raw_key)
+    if not ok:
+        raise HTTPException(status_code=400, detail=norm_or_msg)
+    norm = norm_or_msg
+    key_hash = str(body.get("keyHash") or "").strip() or _key_hash(norm)
+    if key_hash != _key_hash(norm):
+        raise HTTPException(status_code=400, detail="keyHash غير متطابق")
+
+    store = _license_burns_load()
+    burns = store.get("burns") if isinstance(store.get("burns"), list) else []
+    now_iso = datetime.now().isoformat()
+    for row in burns:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("keyHash") or "") != key_hash:
+            continue
+        prev_machine = str(row.get("machineId") or "")
+        if prev_machine and prev_machine == machine_id:
+            return {
+                "ok": True,
+                "message": "الرخصة محروقة مسبقاً لنفس الجهاز",
+                "reactivated": True,
+            }
+        raise HTTPException(
+            status_code=409,
+            detail="هذا الرقم مُستخدم مسبقاً على جهاز آخر — تواصل مع الشركة لنقل الرخصة.",
+        )
+
+    burns.append(
+        {
+            "keyHash": key_hash,
+            "keyMasked": normalize_license_key(norm)[:9] + "****",
+            "machineId": machine_id,
+            "hostname": str(body.get("hostname") or "")[:120],
+            "burnedAt": now_iso,
+            "product": str(body.get("product") or "M3AM"),
+        }
+    )
+    store["burns"] = burns[-5000:]
+    _license_burns_save(store)
+    return {"ok": True, "message": "تم حرق الرخصة وربطها بالجهاز", "burnedAt": now_iso}
+
+
 @app.on_event("startup")
 def _telegram_ops_pulse_startup():
     def _boot():

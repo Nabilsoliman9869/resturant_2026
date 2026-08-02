@@ -4,6 +4,8 @@ Build target: single-file EXE via PyInstaller.
 
 يجب تعيين MAT3AM_BASE_DIR قبل استيراد api_server — وإلا يُستخدم مجلد مؤقت (_MEIPASS)
 ويُفقد ملف config/settings.json عند كل تشغيل.
+
+قبل التشغيل: بوابة رخصة لمرة واحدة + شاشة حقوق الشركة والهواتف.
 """
 from __future__ import annotations
 
@@ -33,11 +35,27 @@ def _seed_persistent_config_from_bundle(persist_root: Path, meipass: str) -> Non
     bundled = Path(meipass) / "config"
     target = persist_root / "config"
     settings = target / "settings.json"
+    target.mkdir(parents=True, exist_ok=True)
+    # دائماً حدّث ملف الهوية/الترخيص من الحزمة إن وُجد (لا يكتب فوق settings)
+    for name in ("license_branding.json", "mat3am_license_secret.txt", "mat3am_exe_build.txt"):
+        src = bundled / name
+        dst = target / name
+        if src.is_file() and (name != "mat3am_license_secret.txt" or not dst.is_file()):
+            try:
+                shutil.copy2(src, dst)
+            except Exception:
+                pass
+        elif src.is_file() and name == "license_branding.json":
+            # حدّث الهوية إن لم يُخصّص العميل الملف
+            try:
+                if not dst.is_file():
+                    shutil.copy2(src, dst)
+            except Exception:
+                pass
     if settings.is_file():
         return
     if not bundled.is_dir():
         return
-    target.mkdir(parents=True, exist_ok=True)
     for root, _dirs, files in os.walk(bundled):
         rel = Path(root).relative_to(bundled)
         dest_dir = target / rel
@@ -65,6 +83,31 @@ def _configure_frozen_base_dir() -> None:
 
 
 _configure_frozen_base_dir()
+
+# بوابة الترخيص قبل استيراد الخادم الثقيل
+try:
+    from mat3am_license_gate import ensure_licensed_or_exit
+
+    ensure_licensed_or_exit()
+except SystemExit:
+    raise
+except Exception as _lic_ex:
+    # إن فشلت الواجهة الرسومية بشكل غير متوقع — لا نفتح البرنامج بدون رخصة في وضع EXE
+    if getattr(sys, "frozen", False) and (os.environ.get("MAT3AM_SKIP_LICENSE") or "").strip() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        try:
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                f"تعذر عرض شاشة الترخيص:\n{_lic_ex}",
+                "Mat3amPOS",
+                0x10,
+            )
+        except Exception:
+            print(f"license gate error: {_lic_ex}", flush=True)
+        sys.exit(2)
 
 import pyodbc  # noqa: E402
 import uvicorn  # noqa: E402
