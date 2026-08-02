@@ -13,11 +13,23 @@ from mat3am_license import (
     is_license_valid_locally,
     load_branding,
     normalize_license_key,
+    read_local_license,
 )
 
 
 def _year() -> int:
     return int(time.strftime("%Y"))
+
+
+def _license_expiry_line() -> str:
+    data = read_local_license() or {}
+    label = str(data.get("planLabel") or "").strip()
+    expires = str(data.get("expiresAt") or "").strip()
+    if expires:
+        return f"صلاحية النسخة: {label or 'مرخّصة'} — حتى {expires[:10]}"
+    if label:
+        return f"صلاحية النسخة: {label}"
+    return ""
 
 
 def show_license_gate(*, force: bool = False) -> bool:
@@ -236,6 +248,18 @@ def _build_header(root, brand: dict, *, show_form: bool):
     ).pack(fill="x", pady=(4, 0))
 
     if not show_form:
+        exp = _license_expiry_line()
+        if exp:
+            tk.Label(
+                wrap,
+                text=exp,
+                bg="#0f172a",
+                fg="#34d399",
+                font=("Segoe UI", 10, "bold"),
+                wraplength=480,
+                justify="right",
+                anchor="e",
+            ).pack(fill="x", pady=(8, 0))
         tk.Label(
             wrap,
             text="جاري التشغيل…",
@@ -263,7 +287,7 @@ def ensure_licensed_or_exit() -> None:
 
             ctypes.windll.user32.MessageBoxW(
                 0,
-                "لا يمكن تشغيل البرنامج بدون رخصة صالحة.\nتواصل مع الشركة للحصول على رقم تفعيل لمرة واحدة.",
+                "لا يمكن تشغيل البرنامج بدون رخصة صالحة أو بعد انتهاء المدة.\nتواصل مع سير كونسلت للتفعيل أو التجديد.",
                 "Mat3amPOS — مطلوب ترخيص",
                 0x10,
             )

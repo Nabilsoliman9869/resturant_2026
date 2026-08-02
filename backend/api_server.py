@@ -16081,6 +16081,9 @@ def license_activate_online(body: dict):
             "hostname": str(body.get("hostname") or "")[:120],
             "burnedAt": now_iso,
             "product": str(body.get("product") or "M3AM"),
+            "planId": str(body.get("planId") or "") or None,
+            "months": body.get("months"),
+            "planLabel": str(body.get("planLabel") or "") or None,
         }
     )
     store["burns"] = burns[-5000:]

@@ -1018,3 +1018,9 @@ eserved + active.
 - **مولّد داخلي:** `scripts/mat3am_license_generator.py` + `build_license_generator.bat` وسجل `license_ledger.json`.
 - **حرق أونلاين:** `POST /api/license/activate` + `GET /api/license/status`؛ إعدادات الهوية في `config/license_branding.json`.
 - **توثيق:** `docs/LICENSE_EXE.md`؛ تحديث `docs/BUILD_EXE.md`.
+
+### 142 — صلاحية زمنية للرخصة + هوية سير كونسلت — UTC 2026-08-02T01:40:00Z — ID `lic-duration-sirconsult`
+
+- أنواع مدة: تجريبي 1ش، ربع 3، نصف 6، سنوي 12، سنتان 24، دائم، مخصص؛ الانتهاء يُحسب من تاريخ التفعيل ويوقف التشغيل بعده.
+- تحديث `license_branding.json` باسم سير كونسلت وأرقام الهواتف الرسمية.
+- مولّد الرخص يعرض اختيار نوع الصلاحية؛ شاشة الإقلاع تعرض تاريخ الانتهاء.

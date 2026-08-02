@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-مولّد أرقام رخصة Mat3amPOS (للاستخدام الداخلي للشركة فقط).
+مولّد أرقام رخصة Mat3amPOS (داخلي لسير كونسلت).
 
-تشغيل:
+أمثلة:
   python scripts/mat3am_license_generator.py
-  python scripts/mat3am_license_generator.py --count 10 --batch A --customer "مطعم النخيل"
-
-السجل: config/license_ledger.json (محلي — لا يُرفع)
-السر:  config/mat3am_license_secret.txt (إن وُجد) وإلا السر الافتراضي للتطوير
+  python scripts/mat3am_license_generator.py --count 3 --plan trial --customer "مطعم تجريبي"
+  python scripts/mat3am_license_generator.py --count 1 --plan year --customer "مطعم النخيل"
+  python scripts/mat3am_license_generator.py --count 1 --plan custom --months 9 --customer "عرض خاص"
 """
 from __future__ import annotations
 
@@ -18,6 +17,7 @@ import secrets
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -25,8 +25,10 @@ sys.path.insert(0, str(ROOT / "backend"))
 from mat3am_license import (  # noqa: E402
     generate_license_key,
     normalize_license_key,
+    parse_license_key_meta,
+    plan_choices_for_ui,
     resolve_license_secret,
-    verify_license_key_format,
+    resolve_plan,
 )
 
 LEDGER = ROOT / "config" / "license_ledger.json"
@@ -55,19 +57,32 @@ def ensure_secret_file() -> str:
     secret = secrets.token_hex(32)
     SECRET_FILE.write_text(secret + "\n", encoding="utf-8")
     print(f"[مهم] تم إنشاء سر جديد: {SECRET_FILE}")
-    print("انسخ نفس الملف بجانب EXE عند الشحن، أو أعد بناء EXE بعد وضعه في config/")
     return secret
 
 
-def generate_batch(count: int, batch: str, customer: str, note: str) -> list[dict]:
+def generate_batch(
+    count: int,
+    batch: str,
+    customer: str,
+    note: str,
+    plan: str = "year",
+    months: Optional[int] = None,
+) -> list[dict]:
     secret = ensure_secret_file()
+    plan_id, plan_months, plan_label = resolve_plan(plan, months)
     ledger = _load_ledger()
     serial = int(ledger.get("nextSerial") or 1)
     keys = ledger.get("keys") if isinstance(ledger.get("keys"), list) else []
     created = []
     for _ in range(max(1, count)):
-        key = generate_license_key(serial=serial, secret=secret, batch=batch)
-        ok, norm = verify_license_key_format(key, secret=secret)
+        key = generate_license_key(
+            serial=serial,
+            secret=secret,
+            batch=batch,
+            plan=plan_id,
+            months=plan_months if plan_id == "custom" else None,
+        )
+        ok, norm, meta = parse_license_key_meta(key, secret=secret)
         if not ok:
             raise RuntimeError(f"فشل توليد مفتاح: {norm}")
         row = {
@@ -76,6 +91,9 @@ def generate_batch(count: int, batch: str, customer: str, note: str) -> list[dic
             "key": norm,
             "customer": customer,
             "note": note,
+            "planId": meta.get("planId") or plan_id,
+            "months": meta.get("months") if meta.get("months") is not None else plan_months,
+            "planLabel": meta.get("labelAr") or plan_label,
             "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "status": "issued",
             "burnedAt": None,
@@ -109,23 +127,27 @@ def mark_burned(key: str, machine_id: str = "") -> bool:
 
 def run_gui() -> None:
     import tkinter as tk
-    from tkinter import messagebox, scrolledtext
+    from tkinter import messagebox, scrolledtext, ttk
 
     ensure_secret_file()
     root = tk.Tk()
-    root.title("مولّد رخص Mat3amPOS — داخلي للشركة")
-    root.geometry("640x520")
+    root.title("مولّد رخص Mat3amPOS — سير كونسلت")
+    root.geometry("720x580")
     root.configure(bg="#111827")
 
     frm = tk.Frame(root, bg="#111827", padx=16, pady=14)
     frm.pack(fill="both", expand=True)
 
-    tk.Label(frm, text="مولّد أرقام رخصة لمرة واحدة", bg="#111827", fg="#f9fafb", font=("Segoe UI", 14, "bold")).pack(
-        anchor="e"
-    )
     tk.Label(
         frm,
-        text="كل رقم يُستخدم لتفعيل جهاز واحد. احتفظ بالسجل والسر في مكان آمن.",
+        text="توليد رقم رخصة لمرة واحدة + تحديد مدة الصلاحية",
+        bg="#111827",
+        fg="#f9fafb",
+        font=("Segoe UI", 14, "bold"),
+    ).pack(anchor="e")
+    tk.Label(
+        frm,
+        text="تجريبي شهر · ربع سنوي · نصف سنوي · سنوي · سنتان · دائم · أو أشهر مخصصة",
         bg="#111827",
         fg="#9ca3af",
         font=("Segoe UI", 9),
@@ -135,16 +157,33 @@ def run_gui() -> None:
     batch_var = tk.StringVar(value="A")
     count_var = tk.StringVar(value="1")
     note_var = tk.StringVar()
+    months_var = tk.StringVar(value="9")
+    plan_labels = plan_choices_for_ui()
+    plan_map = {label: pid for pid, label in plan_labels}
+    plan_var = tk.StringVar(value=plan_labels[3][1])  # سنوي افتراضي
 
     def row(label: str, var: tk.StringVar) -> None:
         box = tk.Frame(frm, bg="#111827")
         box.pack(fill="x", pady=3)
-        tk.Label(box, text=label, width=16, anchor="e", bg="#111827", fg="#e5e7eb").pack(side="right")
+        tk.Label(box, text=label, width=18, anchor="e", bg="#111827", fg="#e5e7eb").pack(side="right")
         tk.Entry(box, textvariable=var, justify="right", bg="#1f2937", fg="#f9fafb", insertbackground="#fff").pack(
             side="right", fill="x", expand=True, padx=(0, 8)
         )
 
     row("العميل / المطعم", customer_var)
+
+    plan_box = tk.Frame(frm, bg="#111827")
+    plan_box.pack(fill="x", pady=3)
+    tk.Label(plan_box, text="نوع الصلاحية", width=18, anchor="e", bg="#111827", fg="#e5e7eb").pack(side="right")
+    ttk.Combobox(
+        plan_box,
+        textvariable=plan_var,
+        values=[lbl for _pid, lbl in plan_labels],
+        state="readonly",
+        justify="right",
+    ).pack(side="right", fill="x", expand=True, padx=(0, 8))
+
+    row("أشهر (للمخصص فقط)", months_var)
     row("الدفعة (حرف)", batch_var)
     row("العدد", count_var)
     row("ملاحظة", note_var)
@@ -158,12 +197,30 @@ def run_gui() -> None:
         except ValueError:
             messagebox.showerror("خطأ", "العدد غير صالح")
             return
-        rows = generate_batch(n, (batch_var.get() or "A")[:1], customer_var.get().strip(), note_var.get().strip())
+        plan_id = plan_map.get(plan_var.get(), "year")
+        custom_months = None
+        if plan_id == "custom":
+            try:
+                custom_months = max(1, min(120, int(months_var.get().strip() or "1")))
+            except ValueError:
+                messagebox.showerror("خطأ", "عدد الأشهر غير صالح")
+                return
+        rows = generate_batch(
+            n,
+            (batch_var.get() or "A")[:1],
+            customer_var.get().strip(),
+            note_var.get().strip(),
+            plan=plan_id,
+            months=custom_months,
+        )
         out.insert("end", f"\n--- {time.strftime('%Y-%m-%d %H:%M')} — {len(rows)} مفتاح ---\n")
         for r in rows:
-            out.insert("end", f"{r['key']}   |  #{r['serial']}  |  {r.get('customer') or '-'}\n")
+            out.insert(
+                "end",
+                f"{r['key']}  |  {r.get('planLabel')}  |  #{r['serial']}  |  {r.get('customer') or '-'}\n",
+            )
         out.see("end")
-        messagebox.showinfo("تم", f"تم توليد {len(rows)} رقم وحفظها في license_ledger.json")
+        messagebox.showinfo("تم", f"تم توليد {len(rows)} رقم\nالنوع: {rows[0].get('planLabel')}")
 
     tk.Button(
         frm,
@@ -186,13 +243,26 @@ def main() -> int:
     parser.add_argument("--batch", default="A")
     parser.add_argument("--customer", default="")
     parser.add_argument("--note", default="")
+    parser.add_argument(
+        "--plan",
+        default="year",
+        help="trial|quarter|half|year|years2|perpetual|custom",
+    )
+    parser.add_argument("--months", type=int, default=None, help="للخطة custom فقط")
     parser.add_argument("--gui", action="store_true", help="فتح الواجهة الرسومية")
     args = parser.parse_args()
 
     if args.count > 0 and not args.gui:
-        rows = generate_batch(args.count, args.batch, args.customer, args.note)
+        rows = generate_batch(
+            args.count,
+            args.batch,
+            args.customer,
+            args.note,
+            plan=args.plan,
+            months=args.months,
+        )
         for r in rows:
-            print(r["key"])
+            print(f"{r['key']}\t{r.get('planLabel')}")
         print(f"# saved {len(rows)} keys → {LEDGER}", file=sys.stderr)
         return 0
 
