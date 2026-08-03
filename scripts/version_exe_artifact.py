@@ -39,6 +39,12 @@ def main() -> int:
     dst = dist / f"Mat3amPOS{n:03d}.exe"
     shutil.copy2(src, dst)
     print(f"[version-exe] created: {dst}")
+    # نسخة جاهزة للتسليم مع الرخص
+    ship = root / "dist_for_liLicense"
+    ship.mkdir(parents=True, exist_ok=True)
+    ship_exe = ship / "Mat3amPOS.exe"
+    shutil.copy2(src, ship_exe)
+    print(f"[version-exe] shipped copy: {ship_exe}")
     return 0
 
 

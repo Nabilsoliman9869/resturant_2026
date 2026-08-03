@@ -37,8 +37,9 @@ if "%~1"=="" (
 if errorlevel 1 exit /b 1
 
 echo.
-echo [5/5] تم — الناتج: dist\Mat3amPOS.exe + نسخة مرقمة Mat3amPOSNNN.exe
+echo [5/5] تم — الناتج: dist\Mat3amPOS.exe + نسخة مرقمة + dist_for_liLicense\Mat3amPOS.exe
 echo  تحقق: خصائص الملف ^> التفاصيل ^> Product version = طابع التاريخ
 echo  أو شغّل ثم افتح: http://127.0.0.1:2288/__whoami__  وابحث عن EXE_BUILD=
+echo  تسليم الرخص/العميل: مجلد dist_for_liLicense
 echo ========================================
 pause

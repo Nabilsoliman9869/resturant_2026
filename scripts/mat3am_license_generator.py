@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import secrets
 import sys
 import time
@@ -33,6 +34,65 @@ from mat3am_license import (  # noqa: E402
 
 LEDGER = ROOT / "config" / "license_ledger.json"
 SECRET_FILE = ROOT / "config" / "mat3am_license_secret.txt"
+OUT_DIR = ROOT / "dist_for_liLicense"
+
+
+def _safe_name(text: str) -> str:
+    s = re.sub(r'[\\/:*?"<>|\s]+', "_", (text or "").strip())
+    s = re.sub(r"_+", "_", s).strip("._")
+    return s[:60] if s else "customer"
+
+
+def export_license_files(rows: list[dict]) -> list[Path]:
+    """يحفظ ناتج الرخصة في dist_for_liLicense لسهولة التسليم."""
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or "").strip()
+        if not key:
+            continue
+        customer = str(row.get("customer") or "customer").strip() or "customer"
+        serial = row.get("serial")
+        plan_label = str(row.get("planLabel") or "")
+        months = row.get("months")
+        fname = f"license_{_safe_name(customer)}_S{serial}_{stamp}.txt"
+        path = OUT_DIR / fname
+        body = "\n".join(
+            [
+                "Mat3amPOS — رقم رخصة",
+                "شركة: سير كونسلت لتكنولوجيا المعلومات والاستشارات المالية ش.م.م",
+                f"العميل: {customer}",
+                f"الرقم التسلسلي: {serial}",
+                f"نوع الصلاحية: {plan_label}",
+                f"الأشهر: {months}",
+                f"تاريخ الإصدار: {row.get('createdAt') or time.strftime('%Y-%m-%dT%H:%M:%S')}",
+                "",
+                "رقم الرخصة:",
+                key,
+                "",
+                "تعليمات للعميل:",
+                "1) شغّل Mat3amPOS.exe",
+                "2) الصق رقم الرخصة في شاشة التفعيل",
+                "3) يلزم إنترنت في أول تفعيل فقط",
+                "4) الرقم لجهاز واحد ولا يُعاد استخدامه",
+                "",
+            ]
+        )
+        path.write_text(body, encoding="utf-8")
+        written.append(path)
+    if rows:
+        batch_path = OUT_DIR / f"licenses_batch_{stamp}.txt"
+        lines = [f"# دفعة رخص {stamp}", ""]
+        for row in rows:
+            lines.append(
+                f"{row.get('key')}\t{row.get('planLabel')}\t#{row.get('serial')}\t{row.get('customer') or '-'}"
+            )
+        batch_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        written.append(batch_path)
+    return written
 
 
 def _load_ledger() -> dict:
@@ -105,6 +165,10 @@ def generate_batch(
     ledger["nextSerial"] = serial
     ledger["keys"] = keys
     _save_ledger(ledger)
+    try:
+        export_license_files(created)
+    except Exception as ex:
+        print(f"[license-export] تحذير: تعذر الحفظ في dist_for_liLicense: {ex}", file=sys.stderr)
     return created
 
 
@@ -220,7 +284,15 @@ def run_gui() -> None:
                 f"{r['key']}  |  {r.get('planLabel')}  |  #{r['serial']}  |  {r.get('customer') or '-'}\n",
             )
         out.see("end")
-        messagebox.showinfo("تم", f"تم توليد {len(rows)} رقم\nالنوع: {rows[0].get('planLabel')}")
+        exported = list(OUT_DIR.glob(f"license_{_safe_name(customer_var.get())}_*"))
+        msg = f"تم توليد {len(rows)} رقم\nالنوع: {rows[0].get('planLabel')}\n\nتم الحفظ أيضاً في:\ndist_for_liLicense"
+        messagebox.showinfo("تم", msg)
+        try:
+            import os
+
+            os.startfile(str(OUT_DIR))
+        except Exception:
+            pass
 
     tk.Button(
         frm,

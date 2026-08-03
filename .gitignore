@@ -4,6 +4,10 @@ dist/
 *.tsbuildinfo
 build/
 
+# ناتج تسليم الرخص/EXE للعملاء — لا يُرفع (ما عدا README)
+dist_for_liLicense/*
+!dist_for_liLicense/README.txt
+
 # مؤقتات Excel (ملفات قفل — لا تُرفع)
 ~$*
 
