@@ -1024,3 +1024,7 @@ eserved + active.
 - أنواع مدة: تجريبي 1ش، ربع 3، نصف 6، سنوي 12، سنتان 24، دائم، مخصص؛ الانتهاء يُحسب من تاريخ التفعيل ويوقف التشغيل بعده.
 - تحديث `license_branding.json` باسم سير كونسلت وأرقام الهواتف الرسمية.
 - مولّد الرخص يعرض اختيار نوع الصلاحية؛ شاشة الإقلاع تعرض تاريخ الانتهاء.
+
+### 143 — إصلاح سقوط EXE المرخّص (uvicorn isatty) — UTC 2026-08-05T07:42:28Z — ID `exe-stdio-005a65c9ca5f`
+
+- **`backend/mat3am_exe_entry.py`:** تعويض `sys.stdout`/`sys.stderr` عند `None` (بناء `console=False`) بكائن يدعم `isatty()`، وتشغيل uvicorn بـ `use_colors=False` لمنع `ValueError: Unable to configure formatter 'default'`.

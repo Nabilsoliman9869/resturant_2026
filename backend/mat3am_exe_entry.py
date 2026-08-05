@@ -21,6 +21,53 @@ import webbrowser
 from pathlib import Path
 
 
+class _SafeStdio:
+    """بديل آمن عندما يكون stdout/stderr = None (PyInstaller console=False)."""
+
+    encoding = "utf-8"
+
+    def write(self, data: object) -> int:
+        if isinstance(data, (bytes, bytearray)):
+            return len(data)
+        return len(str(data))
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+    def fileno(self) -> int:
+        raise OSError("no fileno for SafeStdio")
+
+    def readable(self) -> bool:
+        return False
+
+    def writable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    @property
+    def closed(self) -> bool:
+        return False
+
+
+def _ensure_stdio() -> None:
+    """
+    مع console=False يكون sys.stdout/stderr = None.
+    uvicorn ColourizedFormatter يستدعي sys.stdout.isatty() فيُسقط التشغيل.
+    """
+    if sys.stdout is None:
+        sys.stdout = _SafeStdio()  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = _SafeStdio()  # type: ignore[assignment]
+
+
+_ensure_stdio()
+
+
 def _persistent_data_root() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", "") or ".") / "Mat3amPOS"
@@ -231,7 +278,8 @@ def main() -> None:
     _ensure_prerequisites()
     t = threading.Thread(target=_open_browser_later, daemon=True)
     t.start()
-    uvicorn.run(app, host="0.0.0.0", port=XTRA_API_PORT)
+    # use_colors=False يتجنب مسار isatty في تنسيق سجلات uvicorn داخل EXE بدون كونسول
+    uvicorn.run(app, host="0.0.0.0", port=XTRA_API_PORT, use_colors=False)
 
 
 if __name__ == "__main__":
