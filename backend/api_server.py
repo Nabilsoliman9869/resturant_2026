@@ -8785,6 +8785,238 @@ def _mat3am_default_currency_guid_for_invoice(cursor) -> str:
     )
 
 
+def _mat3am_strip_pos_seat_suffix(name: str) -> str:
+    """يزيل لاحقة المقعد من اسم بند الطلب: «صنف (كرسي 1)» أو «صنف (1)»."""
+    s = str(name or "").strip()
+    if not s:
+        return ""
+    s2 = re.sub(r"\s*\(\s*كرسي\s*\d+\s*\)\s*$", "", s, flags=re.IGNORECASE)
+    s2 = re.sub(r"\s*\(\s*\d+\s*\)\s*$", "", s2)
+    return (s2.strip() or s)[:255]
+
+
+def _mat3am_tbl007_card_exists(cursor, product_guide: str) -> bool:
+    pg = str(product_guide or "").strip()
+    if not pg:
+        return False
+    try:
+        uuid.UUID(pg)
+    except Exception:
+        return False
+    try:
+        cursor.execute(
+            "SELECT TOP 1 1 FROM dbo.TBL007 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+            (_mat3am_guid_sql_param(pg),),
+        )
+        return bool(cursor.fetchone())
+    except Exception:
+        return False
+
+
+def _mat3am_tbl007_col_exists(cursor, col_name: str) -> bool:
+    col = re.sub(r"[^A-Za-z0-9_]", "", str(col_name or ""))
+    if not col:
+        return False
+    try:
+        cursor.execute(
+            f"SELECT CASE WHEN COL_LENGTH('dbo.TBL007', '{col}') IS NULL THEN 0 ELSE 1 END"
+        )
+        r = cursor.fetchone()
+        return bool(r and r[0])
+    except Exception:
+        return False
+
+
+def _mat3am_find_tbl007_by_name(cursor, product_name: str) -> Optional[str]:
+    name = _mat3am_strip_pos_seat_suffix(product_name)
+    if not name:
+        return None
+    has_na = _mat3am_tbl007_col_exists(cursor, "NotActive")
+    active_sql = " AND ISNULL(NotActive, 0) = 0" if has_na else ""
+    try:
+        cursor.execute(
+            f"""
+            SELECT TOP 1 CardGuide FROM dbo.TBL007
+            WHERE ProductName = ?{active_sql}
+            ORDER BY ProductName
+            """,
+            (name,),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip().upper()
+    except Exception:
+        pass
+    try:
+        cursor.execute(
+            f"""
+            SELECT TOP 1 CardGuide FROM dbo.TBL007
+            WHERE ProductName LIKE ?{active_sql}
+            ORDER BY ProductName
+            """,
+            (name + "%",),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip().upper()
+    except Exception:
+        pass
+    return None
+
+
+def _mat3am_ensure_pos_auto_product_group(cursor) -> Optional[str]:
+    """مجموعة TBL006 لأصناف تُنشأ تلقائياً عند حفظ فاتورة EXE (GroupGuid إلزامي في بعض القواعد)."""
+    group_name = "أصناف POS تلقائي"
+    latin = "MAT3AM_POS_AUTO_GROUP"
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 CardGuide FROM dbo.TBL006
+            WHERE GroupName = ? OR LatinName = ?
+            """,
+            (group_name, latin),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip().upper()
+    except Exception:
+        pass
+    try:
+        gg = str(uuid.uuid4()).upper()
+        cols = ["CardGuide", "GroupName"]
+        vals = ["CAST(? AS uniqueidentifier)", "?"]
+        params: list = [gg, group_name]
+        for col, val in (("LatinName", latin), ("Security", 1)):
+            try:
+                cursor.execute(
+                    f"SELECT CASE WHEN COL_LENGTH('dbo.TBL006','{col}') IS NULL THEN 0 ELSE 1 END"
+                )
+                if cursor.fetchone()[0]:
+                    cols.append(col)
+                    vals.append("?")
+                    params.append(val)
+            except Exception:
+                pass
+        try:
+            cursor.execute(
+                "SELECT CASE WHEN COL_LENGTH('dbo.TBL006','CardCode') IS NULL THEN 0 ELSE 1 END"
+            )
+            if cursor.fetchone()[0]:
+                try:
+                    code = str(_tbl_next_card_code(cursor, "TBL006"))
+                except Exception:
+                    code = datetime.now().strftime("%y%m%d%H%M")
+                cols.append("CardCode")
+                vals.append("?")
+                params.append(code)
+        except Exception:
+            pass
+        cursor.execute(
+            f"INSERT INTO dbo.TBL006 ({', '.join(cols)}) VALUES ({', '.join(vals)})",
+            tuple(params),
+        )
+        return gg
+    except Exception as ex:
+        print("[mat3am] ensure pos auto product group:", ex)
+        try:
+            cursor.execute("SELECT TOP 1 CardGuide FROM dbo.TBL006 WHERE CardGuide IS NOT NULL")
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0]).strip().upper()
+        except Exception:
+            pass
+        return None
+
+
+def _mat3am_create_tbl007_stub_for_invoice(
+    cursor, card_guide: str, product_name: str, unit_price: float = 0.0
+) -> str:
+    """ينشئ صفاً أدنى في TBL007 بنفس CardGuide (أو جديد) حتى لا يسقط FK_TBL023_TBL007."""
+    gid = str(card_guide or "").strip().upper()
+    try:
+        uuid.UUID(gid)
+    except Exception:
+        gid = str(uuid.uuid4()).upper()
+    name = _mat3am_strip_pos_seat_suffix(product_name) or f"صنف POS {gid[:8]}"
+    name = name[:255]
+    try:
+        price = max(0.0, float(unit_price or 0))
+    except (TypeError, ValueError):
+        price = 0.0
+
+    try:
+        card_code = str(_tbl_next_card_code(cursor, "TBL007"))
+    except Exception:
+        card_code = datetime.now().strftime("%y%m%d%H%M%S")
+
+    group_guid = _mat3am_ensure_pos_auto_product_group(cursor)
+    if not group_guid:
+        raise RuntimeError("تعذر تحديد GroupGuid في TBL006 لإنشاء الصنف تلقائياً")
+
+    cols = ["CardGuide", "ProductName", "GroupGuid"]
+    vals_sql = ["CAST(? AS uniqueidentifier)", "?", "CAST(? AS uniqueidentifier)"]
+    params: list = [gid, name, group_guid]
+
+    if _mat3am_tbl007_col_exists(cursor, "CardCode"):
+        cols.append("CardCode")
+        vals_sql.append("?")
+        params.append(card_code)
+
+    optional: list[tuple[str, object]] = [
+        ("LatinName", "MAT3AM_POS_AUTO"),
+        ("AgentPrice", price),
+        ("EndUserPrice", price),
+        ("NotActive", 0),
+        ("Security", 1),
+        ("StockProduct", 0),
+        ("ProductType", 0),
+        ("Source", 1),
+        ("NotTaxable", 0),
+    ]
+    for col, val in optional:
+        if col in cols:
+            continue
+        if _mat3am_tbl007_col_exists(cursor, col):
+            cols.append(col)
+            vals_sql.append("?")
+            params.append(val)
+
+    cursor.execute(
+        f"INSERT INTO dbo.TBL007 ({', '.join(cols)}) VALUES ({', '.join(vals_sql)})",
+        tuple(params),
+    )
+    return gid
+
+
+def _mat3am_ensure_tbl007_product_for_invoice(
+    cursor, product_guide: str, product_name: str, unit_price: float = 0.0
+) -> str:
+    """
+    يضمن ProductGuide موجوداً في TBL007 قبل INSERT TBL023.
+    مسار EXE/العميل: GUID قديم محذوف أو كاش منيو غير متزامن → مطابقة بالاسم ثم إنشاء تلقائي.
+    """
+    pg = str(product_guide or "").strip().upper()
+    display = _mat3am_strip_pos_seat_suffix(product_name) or pg or "صنف"
+
+    if pg and _mat3am_tbl007_card_exists(cursor, pg):
+        return pg
+
+    by_name = _mat3am_find_tbl007_by_name(cursor, product_name)
+    if by_name:
+        return by_name
+
+    try:
+        return _mat3am_create_tbl007_stub_for_invoice(cursor, pg, product_name, unit_price)
+    except Exception as ex:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"الصنف غير موجود في بطاقة المواد (TBL007): {display}. "
+                f"أضفه من شاشة الأصناف أو صحّح المنيو ثم أعد الحفظ. ({ex})"
+            ),
+        )
+
+
 def _mat3am_insert_tbl023_invoice_lines_xtra_style(
     cursor,
     main_guide: str,
@@ -8798,9 +9030,17 @@ def _mat3am_insert_tbl023_invoice_lines_xtra_style(
     الفرق الوحيد المطلوب لقواعد إكسترا الحديثة (مثل oya_Mohandessin): عمود ``Unit``
     في ``TBL023`` قد يكون ``tinyint``؛ المرجع الأصلي يمرّر ``item.Unit`` كنص، بينما
     عمود ``Unit`` يُمرَّر كـ ``tinyint`` عبر ``CAST`` بعد ``_mat3am_tbl023_unit_as_tinyint``.
+
+    قبل الإدراج: ضمان وجود ProductGuide في TBL007 (FK_TBL023_TBL007) لمسار EXE/العميل.
     """
     for item in invoice.Items:
         unit_val = int(_mat3am_tbl023_unit_as_tinyint(item.Unit))
+        product_guide = _mat3am_ensure_tbl007_product_for_invoice(
+            cursor,
+            item.ProductGuide,
+            item.ProductName,
+            float(item.UnitPrice or 0),
+        )
         if source_bill_guid:
             cursor.execute(
                 """
@@ -8810,7 +9050,7 @@ def _mat3am_insert_tbl023_invoice_lines_xtra_style(
                 """,
                 (
                     main_guide,
-                    item.ProductGuide,
+                    product_guide,
                     item.Quantity,
                     unit_val,
                     item.TotalValue,
@@ -8828,7 +9068,7 @@ def _mat3am_insert_tbl023_invoice_lines_xtra_style(
                 """,
                 (
                     main_guide,
-                    item.ProductGuide,
+                    product_guide,
                     item.Quantity,
                     unit_val,
                     item.TotalValue,

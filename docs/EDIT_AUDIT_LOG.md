@@ -1028,3 +1028,7 @@ eserved + active.
 ### 143 — إصلاح سقوط EXE المرخّص (uvicorn isatty) — UTC 2026-08-05T07:42:28Z — ID `exe-stdio-005a65c9ca5f`
 
 - **`backend/mat3am_exe_entry.py`:** تعويض `sys.stdout`/`sys.stderr` عند `None` (بناء `console=False`) بكائن يدعم `isatty()`، وتشغيل uvicorn بـ `use_colors=False` لمنع `ValueError: Unable to configure formatter 'default'`.
+
+### 144 — إصلاح FK_TBL023_TBL007 عند حفظ أوامر EXE — UTC 2026-08-05T13:05:00Z — ID `exe-fk023-7c4e9a12b0d1`
+
+- **`backend/api_server.py`:** قبل INSERT بنود `TBL023` يُضمن وجود `ProductGuide` في `TBL007` (مطابقة بالاسم بعد إزالة لاحقة المقعد، ثم إنشاء صنف تلقائي في مجموعة «أصناف POS تلقائي») لمنع سقوط حفظ فاتورة العميل على EXE.
