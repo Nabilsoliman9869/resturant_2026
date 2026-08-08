@@ -1070,3 +1070,8 @@ eserved + active.
 - **`WaiterOrderPage.tsx`:** زر مضغوط «كراسي (n)» بدل شريط يأكل الهيدر؛ إصلاح تباين نصوص/شيبس نافذة الضيوف.
 - **`CaptainBillReviewModal` / `ManagerTableChecksModal` / `ManagerTableInstructionsMenu`:** زجاج شفاف كبير فوق نقطة البيع.
 - **`WaiterTablesPage.tsx`:** تلميح «يمين على الطاولة» بلون واضح على خلفية كهرمانية.
+
+### 151 — عدم إغلاق الطاولة بعد سداد كرسي واحد — UTC 2026-08-08T13:05:00Z — ID `seat-pay-keep-session-b3e91a04`
+
+- **`api_server.py`:** منطق `_restaurant_should_close_session_after_settlement` — لا يُغلق بعد `mark-paid` / on-account / guest لمجرد انعدام فواتير معلّقة؛ يحترم `partialBillingAt` والبنود غير المفوترة. طلب حساب مقعد يضبط `partialBillingAt` حتى بلا بنود أخرى.
+- **`CashierPayInvoiceModal.tsx`:** توضيح خيار إغلاق الطاولة؛ افتراضي يبقى مفتوحاً لباقي الكراسي.

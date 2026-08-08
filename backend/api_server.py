@@ -27459,6 +27459,95 @@ def _restaurant_billing_session_ids(root_session_id: str) -> list[str]:
     return list(ids)
 
 
+def _restaurant_session_cluster_has_unbilled_order_items(root_session_id: str) -> bool:
+    """هل ما زالت بنود طلبات غير مفوترة (بلا finalInvoiceId) على جلسة الفوترة أو المدموجة معها؟"""
+    cluster = set(_restaurant_billing_session_ids(root_session_id))
+    if not cluster:
+        return False
+    orders = _restaurant_load("orders", [])
+    if not isinstance(orders, list):
+        return False
+    for o in orders:
+        if not isinstance(o, dict):
+            continue
+        sid = str(o.get("sessionId") or "").strip()
+        bill_sid = str(o.get("billingSessionId") or "").strip()
+        if sid not in cluster and bill_sid not in cluster:
+            continue
+        if str(o.get("status") or "").strip().lower() == "cancelled":
+            continue
+        items = o.get("items") if isinstance(o.get("items"), list) else []
+        if items:
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                if bool(it.get("cancelled")):
+                    continue
+                if not str(it.get("finalInvoiceId") or "").strip():
+                    return True
+        elif not str(o.get("finalInvoiceId") or o.get("invoiceId") or "").strip():
+            # طلب بلا بنود مفصلة وغير مفوتر — اعتبره غير مكتمل إن كان ما زال مفتوحاً
+            st = str(o.get("status") or "").strip().lower()
+            if st and st not in ("cancelled", "void"):
+                return True
+    return False
+
+
+def _restaurant_session_partial_billing_open(root_session_id: str) -> bool:
+    """فوترة جزئية بالمقاعد: الجلسة تبقى مفتوحة حتى يغلقها الكاشير صراحة."""
+    rid = str(root_session_id or "").strip()
+    if not rid:
+        return False
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        return False
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("id") or "").strip() != rid:
+            continue
+        return bool(str(s.get("partialBillingAt") or "").strip())
+    return False
+
+
+def _restaurant_should_close_session_after_settlement(
+    root_session_id: str,
+    *,
+    close_session_flag: bool,
+    invoices: Optional[list] = None,
+) -> bool:
+    """قرار إغلاق الجلسة بعد تسديد/ترحيل شيك واحد.
+
+    لا تُغلق تلقائياً لمجرد انعدام فواتير معلّقة — ذلك كان يقفل باقي الكراسي
+    بعد سداد كرسي واحد قبل طلب حسابهم.
+    """
+    rid = str(root_session_id or "").strip()
+    if not rid:
+        return False
+    raw = invoices if isinstance(invoices, list) else _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    cluster = set(_restaurant_billing_session_ids(rid))
+    pending = any(
+        isinstance(inv, dict)
+        and str(inv.get("sessionId") or "").strip() in cluster
+        and bool(inv.get("awaitingPayment"))
+        and not str(inv.get("paidAt") or "").strip()
+        and str(inv.get("paymentStatus") or "").strip() not in ("on_account", "guest_on_account")
+        for inv in raw
+    )
+    unbilled = _restaurant_session_cluster_has_unbilled_order_items(rid)
+    partial_open = _restaurant_session_partial_billing_open(rid)
+    # فواتير أو بنود غير مفوترة ⇒ ممنوع الإغلاق (يحمي كراسي لم تُحاسب بعد)
+    if pending or unbilled:
+        return False
+    # فوترة مقاعد جزئية: أغلق فقط إن طلب الكاشير صراحة
+    if partial_open:
+        return bool(close_session_flag)
+    # حساب طاولة مكتمل (لا فوترة جزئية): أغلق تلقائياً بعد آخر شيك
+    return True
+
+
 def _restaurant_finalize_merged_source_sessions(
     target_session_id: str,
     *,
@@ -29123,16 +29212,11 @@ def restaurant_invoices_local_mark_paid(body: dict):
     else:
         raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات؛ لم يُسجل الدفع محلياً حفاظاً على المطابقة.")
     if sid:
-        # إغلاق تلقائي عند اكتمال التسديد لكل فواتير الجلسة في السجل المحلي.
-        # closeSession=true يبقى إجبارياً، وإلا يغلق فقط عند عدم وجود أي فاتورة معلّقة.
-        pending_for_session = any(
-            isinstance(inv, dict)
-            and str(inv.get("sessionId") or "").strip() == sid
-            and bool(inv.get("awaitingPayment"))
-            and not str(inv.get("paidAt") or "").strip()
-            for inv in raw
+        should_close = _restaurant_should_close_session_after_settlement(
+            sid,
+            close_session_flag=bool(body.get("closeSession")),
+            invoices=raw,
         )
-        should_close = bool(body.get("closeSession")) or (not pending_for_session)
         if should_close:
             try:
                 _restaurant_close_session_cluster_after_payment(sid, now_iso)
@@ -30004,7 +30088,11 @@ def restaurant_invoices_local_mark_on_account(body: dict):
         raise HTTPException(status_code=503, detail="فشل الاتصال بقاعدة البيانات؛ لم يُرحل الحساب محلياً.")
 
     if sid:
-        should_close = bool(body.get("closeSession", True))
+        should_close = _restaurant_should_close_session_after_settlement(
+            sid,
+            close_session_flag=bool(body.get("closeSession")),
+            invoices=raw,
+        )
         if should_close:
             try:
                 _restaurant_close_session_cluster_after_payment(sid, now_iso)
@@ -30088,11 +30176,17 @@ def restaurant_invoices_local_mark_guest(body: dict):
             conn.close()
         except Exception:
             pass
-    if sid and bool(body.get("closeSession", True)):
-        try:
-            _restaurant_close_session_cluster_after_payment(sid, now_iso)
-        except Exception:
-            pass
+    if sid:
+        should_close = _restaurant_should_close_session_after_settlement(
+            sid,
+            close_session_flag=bool(body.get("closeSession")),
+            invoices=raw,
+        )
+        if should_close:
+            try:
+                _restaurant_close_session_cluster_after_payment(sid, now_iso)
+            except Exception:
+                pass
     return {
         "ok": True,
         "invoiceId": invoice_id,
@@ -36914,16 +37008,17 @@ def restaurant_sessions_request_bill(body: dict):
                 for sn in billed_seats_now:
                     prev_billed[str(sn)] = inv_ids_joined
                 s["billedSeats"] = prev_billed
-                # اقفل الجلسة فقط إن لم يتبقَّ بنود غير مفوترة
-                if still_unbilled_any:
+                # حساب مقعد/جزئي: أبقِ الطاولة مفتوحة للطلب والحساب على باقي الكراسي
+                # (حتى لو لم تُطلب أصناف بعد على الكرسي الآخر)
+                if still_unbilled_any or partial_bill:
                     s.pop("billingRequestedAt", None)
                     s["partialBillingAt"] = now_iso
                 else:
                     s["billingRequestedAt"] = now_iso
                     s.pop("partialBillingAt", None)
-                if s.get("couponCode") and not still_unbilled_any:
+                if s.get("couponCode") and not still_unbilled_any and not partial_bill:
                     s["couponCode"] = None
-            elif current_session_id in billing_session_ids and not still_unbilled_any:
+            elif current_session_id in billing_session_ids and not still_unbilled_any and not partial_bill:
                 s["billingRequestedAt"] = now_iso
         _restaurant_save("table_sessions", sess)
         if table_id_for_policy:
@@ -36962,7 +37057,7 @@ def restaurant_sessions_request_bill(body: dict):
             "sessionId": session_id,
             "splitApplied": bool(split_enabled or partial_bill or len(created_invoices) > 1),
             "partialBill": bool(still_unbilled_any or partial_bill),
-            "sessionStillOpen": bool(still_unbilled_any),
+            "sessionStillOpen": bool(still_unbilled_any or partial_bill),
             "billedSeats": billed_seats_now,
             "tipAmount": tip_amount,
             "invoices": created_invoices,

@@ -1469,7 +1469,7 @@ export function CashierPayInvoiceModal({
     try {
       const body = {
         invoiceId: id,
-        closeSession: closeSession ?? true,
+        closeSession: Boolean(closeSession),
         checkID01: isTaxInvoice ? 1 : 0,
       };
       const r = await fetch(`${base}/api/restaurant/invoices-local/mark-on-account`, {
@@ -1537,7 +1537,7 @@ export function CashierPayInvoiceModal({
     try {
       const body = {
         invoiceId: id,
-        closeSession: closeSession ?? true,
+        closeSession: Boolean(closeSession),
         checkID01: isTaxInvoice ? 1 : 0,
       };
       const r = await fetch(`${base}/api/restaurant/invoices-local/mark-guest`, {
@@ -2586,7 +2586,7 @@ export function CashierPayInvoiceModal({
             </button>
             <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: "0.5rem", fontSize: "0.9rem" }}>
               <input type="checkbox" checked={closeSession} onChange={(e) => setCloseSession(e.target.checked)} />
-              إغلاق الجلسة بعد التسديد (إن لم تبقَ فواتير معلّقة)
+              إغلاق الطاولة بعد هذا الشيك (اتركه فارغاً إن بقيت كراسي تطلب/تسدّد لاحقاً)
             </label>
               </>
             ) : null}
@@ -2599,7 +2599,7 @@ export function CashierPayInvoiceModal({
                 </div>
                 <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginTop: "0.55rem", fontSize: "0.86rem" }}>
                   <input type="checkbox" checked={closeSession} onChange={(e) => setCloseSession(e.target.checked)} />
-                  إغلاق الجلسة بعد الترحيل
+                  إغلاق الطاولة بعد الترحيل (فقط إن انتهت كل الكراسي)
                 </label>
               </div>
             ) : null}
@@ -2612,7 +2612,7 @@ export function CashierPayInvoiceModal({
                 </div>
                 <label style={{ display: "inline-flex", gap: 8, alignItems: "center", marginTop: "0.55rem", fontSize: "0.86rem" }}>
                   <input type="checkbox" checked={closeSession} onChange={(e) => setCloseSession(e.target.checked)} />
-                  إغلاق الجلسة بعد التحميل
+                  إغلاق الطاولة بعد التحميل (فقط إن انتهت كل الكراسي)
                 </label>
               </div>
             ) : null}
