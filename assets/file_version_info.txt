@@ -22,7 +22,7 @@ VSVersionInfo(
           StringStruct(u'LegalCopyright', u''),
           StringStruct(u'OriginalFilename', u'Mat3amPOS.exe'),
           StringStruct(u'ProductName', u'Mat3am POS'),
-          StringStruct(u'ProductVersion', u'2026-08-06T07:19:54Z | M260806-0719-1A89B0C'),
+          StringStruct(u'ProductVersion', u'2026-08-08T08:39:57Z | M260808-0839-AAA8CAE'),
         ])
     ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
