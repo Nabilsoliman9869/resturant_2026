@@ -597,6 +597,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [showGapPicks, setShowGapPicks] = useState(false);
   /** مقاعد يُطلب حسابها الآن (مطلوب اختيار كرسي واحد على الأقل — حساب على مستوى الكرسي) */
   const [billSeatNos, setBillSeatNos] = useState<number[]>([]);
+  /** نافذة اختيار الكرسي قبل مراجعة الحساب (ظاهرة من زر طلب الحساب) */
+  const [billSeatPickerOpen, setBillSeatPickerOpen] = useState(false);
   const [mgrCtxMenu, setMgrCtxMenu] = useState<
     | { kind: "seat"; x: number; y: number; seatNo: number }
     | { kind: "line"; x: number; y: number; lineId: string; name: string }
@@ -2967,7 +2969,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     ];
   }
 
-  function openBillReview(opts?: { seats?: number[] }) {
+  function openBillReview(opts?: { seats?: number[]; skipPicker?: boolean }) {
     setMsg("");
     if (!activeSessionId) {
       setMsg("لا توجد جلسة نشطة.");
@@ -2989,11 +2991,33 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       return;
     }
     if (billingLocked) {
-      setMsg("طُلِب الحساب مسبقاً — انتظر تسديد الكاشير.");
+      setMsg("طُلِب الحساب مسبقاً لكل الطاولة — انتظر تسديد الكاشير. إن كان حساباً جزئياً حدّث الشاشة.");
       return;
     }
-    const presetSeats = (opts?.seats || []).filter((n) => n >= 1 && n <= 12);
-    // طلب الحساب على مستوى الكرسي: افتراض المقعد الحالي إن كان له بنود غير مفوترة
+    if (assignmentMode === "per_seat" && unbilledSeatNos.length === 0) {
+      setMsg("لا توجد مقاعد غير مفوترة لطلب الحساب.");
+      return;
+    }
+    const presetSeats = (opts?.seats || []).filter((n) => n >= 1 && n <= 12 && unbilledSeatNos.includes(n));
+    const alreadyPicked = billSeatNos.filter((n) => unbilledSeatNos.includes(n));
+    // من زر «طلب الحساب»: إن لم يُحدَّد كرسي مسبقاً → نافذة اختيار واضحة لكل الكراسي غير المفوترة
+    if (assignmentMode === "per_seat" && !opts?.skipPicker && presetSeats.length === 0) {
+      if (alreadyPicked.length >= 1) {
+        setBillSeatNos(alreadyPicked);
+        setBillSeatPickerOpen(false);
+        if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && reviewTotal > sessionMaxInvoiceLimit) {
+          setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
+          return;
+        }
+        setBillReviewOpen(true);
+        return;
+      }
+      if (unbilledSeatNos.length >= 1) {
+        setBillSeatNos([]);
+        setBillSeatPickerOpen(true);
+        return;
+      }
+    }
     setBillSeatNos((prev) => {
       if (presetSeats.length > 0) return presetSeats;
       if (prev.length > 0) {
@@ -3004,7 +3028,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         if (selectedSeat !== SHARED_SEAT_NO && unbilledSeatNos.includes(selectedSeat)) {
           return [selectedSeat];
         }
-        if (unbilledSeatNos.length > 0) return [unbilledSeatNos[0]!];
+        if (unbilledSeatNos.length === 1) return [unbilledSeatNos[0]!];
       }
       return prev;
     });
@@ -3012,7 +3036,19 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
       return;
     }
+    setBillSeatPickerOpen(false);
     setBillReviewOpen(true);
+  }
+
+  function confirmBillSeatPicker() {
+    const seats = billSeatNos.filter((n) => unbilledSeatNos.includes(n));
+    if (seats.length === 0) {
+      setMsg("اختر كرسي واحد على الأقل غير مفوتر لطلب حسابه.");
+      return;
+    }
+    setBillSeatNos(seats);
+    setBillSeatPickerOpen(false);
+    openBillReview({ seats, skipPicker: true });
   }
 
   async function requestBill(opts?: { autoPrint?: boolean }) {
@@ -4048,10 +4084,61 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--bill"
                 disabled={requestBillBusy || !activeSessionId || billingLocked || sessionGuestApprovalPending || Boolean(mergedIntoSessionId)}
                 onClick={() => openBillReview()}
+                title="يفتح اختيار الكرسي ثم مراجعة الحساب"
               >
                 {requestBillBusy ? "…" : mergedIntoSessionId ? "الحساب من الهدف" : "طلب الحساب"}
               </button>
             </div>
+            ) : null}
+            {!isDeliveryEmbedded && activeSessionId && assignmentMode === "per_seat" && unbilledSeatNos.length > 0 ? (
+              <div
+                className="waiter-pos__hdr-bill-seats"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 4,
+                  alignItems: "center",
+                  width: "100%",
+                  marginTop: 4,
+                  paddingTop: 4,
+                  borderTop: "1px solid rgba(148,163,184,0.25)",
+                }}
+                title="اختر الكرسي ثم اضغط طلب الحساب — أو اضغط طلب الحساب مباشرة ليظهر الاختيار"
+              >
+                <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#fef08a", marginInlineEnd: 4 }}>
+                  حساب كرسي:
+                </span>
+                {unbilledSeatNos.map((sn) => {
+                  const on = billSeatNos.includes(sn);
+                  return (
+                    <button
+                      key={`hdr-bill-seat-${sn}`}
+                      type="button"
+                      className="waiter-pos__btn waiter-pos__btn--ghost"
+                      disabled={billingLocked}
+                      onClick={() =>
+                        setBillSeatNos((prev) =>
+                          prev.includes(sn) ? prev.filter((x) => x !== sn) : [...prev, sn].sort((a, b) => a - b),
+                        )
+                      }
+                      onDoubleClick={() => openBillReview({ seats: [sn], skipPicker: true })}
+                      style={{
+                        padding: "2px 8px",
+                        fontWeight: 900,
+                        fontSize: "0.78rem",
+                        background: on ? "#fef3c7" : "rgba(15,23,42,0.35)",
+                        color: on ? "#92400e" : "#e5e7eb",
+                        borderColor: on ? "#b45309" : "rgba(148,163,184,0.35)",
+                      }}
+                    >
+                      {sn}
+                    </button>
+                  );
+                })}
+                <span style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
+                  {billSeatNos.length ? `محدد: ${billSeatNos.join("، ")}` : "اضغط كرسي ثم طلب الحساب · أو دبل كليك على الكرسي"}
+                </span>
+              </div>
             ) : null}
             <div className="waiter-pos__hdr-fields">
               <select
@@ -6538,6 +6625,88 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           tableLabel={selectedTable?.name || selectedTableId}
           onClose={() => setMgrChecksOpen(false)}
         />
+      ) : null}
+      {billSeatPickerOpen ? (
+        <div
+          className="waiter-pos__ops-modal-overlay"
+          role="presentation"
+          onClick={() => setBillSeatPickerOpen(false)}
+          style={{ zIndex: 90 }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="اختيار كرسي لطلب الحساب"
+            className="waiter-pos__ops-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 440 }}
+          >
+            <div className="waiter-pos__ops-modal__head">
+              <div className="waiter-pos__ops-modal__head-copy">
+                <h3 className="waiter-pos__ops-modal__title">طلب الحساب — اختر الكرسي</h3>
+                <div className="waiter-pos__ops-modal__note">
+                  كل كرسي غير مفوتر يظهر هنا. اختر الثاني أو الثالث… دون انتظار سداد الأول. يصدر شيك مستقل لكل كرسي محدد.
+                </div>
+              </div>
+              <button type="button" className="waiter-pos__ops-modal__close" onClick={() => setBillSeatPickerOpen(false)} aria-label="إغلاق">
+                ×
+              </button>
+            </div>
+            <div className="waiter-pos__ops-modal__body" style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {unbilledSeatNos.map((sn) => {
+                  const on = billSeatNos.includes(sn);
+                  const label = String(seatGuestLabels[sn] ?? "").trim();
+                  return (
+                    <button
+                      key={`picker-seat-${sn}`}
+                      type="button"
+                      className="waiter-pos__btn"
+                      onClick={() =>
+                        setBillSeatNos((prev) =>
+                          prev.includes(sn) ? prev.filter((x) => x !== sn) : [...prev, sn].sort((a, b) => a - b),
+                        )
+                      }
+                      style={{
+                        minWidth: 72,
+                        fontWeight: 900,
+                        background: on ? "#fef3c7" : undefined,
+                        color: on ? "#92400e" : undefined,
+                        borderColor: on ? "#b45309" : undefined,
+                      }}
+                    >
+                      كرسي {sn}
+                      {label ? ` · ${label}` : ""}
+                    </button>
+                  );
+                })}
+              </div>
+              {unbilledSeatNos.length === 0 ? (
+                <div style={{ color: "var(--muted)" }}>لا مقاعد غير مفوترة حالياً.</div>
+              ) : null}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="waiter-pos__btn waiter-pos__btn--ghost"
+                  onClick={() => setBillSeatNos([...unbilledSeatNos])}
+                >
+                  تحديد الكل غير المفوتر
+                </button>
+                <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" onClick={() => setBillSeatNos([])}>
+                  مسح التحديد
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setBillSeatPickerOpen(false)}>
+                  إلغاء
+                </button>
+                <button type="button" className="btn btn-primary" disabled={billSeatNos.length === 0} onClick={() => confirmBillSeatPicker()}>
+                  متابعة لمراجعة الحساب ({billSeatNos.length || 0})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

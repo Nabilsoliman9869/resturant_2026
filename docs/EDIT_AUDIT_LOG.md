@@ -1059,3 +1059,7 @@ eserved + active.
 - **`ManagerTableChecksModal.tsx`:** شيكات الطاولة (عرض/فتح/طباعة/تصحيح).
 - **`WaiterTablesPage` / `CashierTableStripBoard` / `WaiterOrderPage`:** تعليمات مدير على طاولة + كرسي + صنف السلة.
 - **`KitchenPage` + `operationalRoles.css`:** بطاقة مطبخ أوضح (طاولة كبيرة، كمية بارزة، حالة واحدة).
+
+### 149 — اختيار كرسي ظاهر عند طلب الحساب — UTC 2026-08-08T12:40:00Z — ID `bill-seat-picker-ui-d4a91e02`
+
+- **`WaiterOrderPage.tsx`:** شريط كراسي غير مفوترة في الهيدر؛ نافذة اختيار كرسي عند «طلب الحساب»؛ دبل-كليك على كرسي يطلب حسابه مباشرة.
