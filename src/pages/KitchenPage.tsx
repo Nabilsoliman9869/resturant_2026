@@ -19,6 +19,8 @@ type OrderItem = {
   lineStatus?: string;
   lineStartedAt?: string | null;
   cancelled?: boolean;
+  notes?: string;
+  kitchenNotes?: string;
 };
 type OrderRow = {
   id: string;
@@ -418,11 +420,18 @@ function KdsOrderCard({
   return (
     <div className={`kds-card ${urgent || overdue || insight.clientOverdue ? "kds-card--urgent" : ""}`}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: "1.02rem" }} title={`معرّف النظام: ${order.id}`}>
-            {kdsOrderDisplayTitle(order)}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            className="kds-card__table-hero"
+            title={`معرّف النظام: ${order.id}`}
+            style={{ fontWeight: 900, fontSize: "1.35rem", letterSpacing: "0.01em", lineHeight: 1.2 }}
+          >
+            {kitchenTableDisplay(order)}
+            <span style={{ fontWeight: 700, fontSize: "0.95rem", marginInlineStart: 8, opacity: 0.85 }}>
+              {kdsOrderDisplayTitle(order)}
+            </span>
             {order.generalOrder ? (
-              <span style={{ marginRight: 8, fontSize: "0.75rem", color: "var(--wp-accent, #38bdf8)" }}>· طلب عام</span>
+              <span style={{ marginRight: 8, fontSize: "0.75rem", color: "var(--wp-accent, #38bdf8)" }}>· عام</span>
             ) : null}
           </div>
           {!(
@@ -433,8 +442,8 @@ function KdsOrderCard({
               مرجع قديم: {order.id.slice(0, 8)}…
             </div>
           ) : null}
-          <div style={{ color: "var(--wp-muted)", fontSize: "0.88rem", marginTop: 4 }}>
-            طاولة: <strong>{kitchenTableDisplay(order)}</strong> · الحالة: {orderStatusLabelAr(order.status)}
+          <div style={{ color: "var(--wp-muted)", fontSize: "0.8rem", marginTop: 4 }}>
+            {orderStatusLabelAr(order.status)}
           </div>
           {String(order.captainName || order.captainLogin || "").trim() ? (
             <div
@@ -480,8 +489,7 @@ function KdsOrderCard({
               </span>
             </div>
           ) : null}
-          <div style={{ marginTop: 8, fontSize: "0.9rem", lineHeight: 1.45 }}>{orderLabel(order)}</div>
-          <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }} className="kds-card__items">
             {(order.items || []).map((it, idx) => {
               const prepared = Boolean(it.prepared);
               const qty = Math.max(0, Number(it.quantity || 1));
@@ -492,28 +500,65 @@ function KdsOrderCard({
               const lineStarted = Boolean(lineStatus === "preparing");
               const lineDone = Boolean((prepared || lineStatus === "ready") && !handedToRunner && !delivered);
               const lineSent = Boolean(handedToRunner && !delivered);
-              const lineStateLabel = delivered ? "اكتمل التسليم" : lineSent ? "مرسل" : lineDone ? "تم الانتهاء" : lineStarted ? "قيد التنفيذ" : "انتظار";
+              const lineStateLabel = delivered
+                ? "تم التسليم"
+                : lineSent
+                  ? "مرسل"
+                  : lineDone
+                    ? "جاهز"
+                    : lineStarted
+                      ? "تنفيذ"
+                      : "انتظار";
+              const badgeBg = delivered
+                ? "#64748b"
+                : lineSent
+                  ? "#b45309"
+                  : lineDone
+                    ? "#065f46"
+                    : lineStarted
+                      ? "#1e3a8a"
+                      : "#334155";
               return (
                 <div
                   key={String(it.lineId || `${order.id}-${idx}`)}
+                  className="kds-card__item-row"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr auto auto auto",
-                    gap: 8,
+                    gridTemplateColumns: "auto 1fr auto",
+                    gap: 10,
                     alignItems: "center",
-                    padding: "6px 8px",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 10,
-                    opacity: delivered ? 0.6 : 1,
+                    padding: "10px 12px",
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    borderRadius: 12,
+                    background: delivered ? "rgba(148,163,184,0.12)" : "rgba(255,255,255,0.55)",
+                    opacity: delivered ? 0.55 : 1,
                   }}
                 >
-                  <div>
-                    {it.name || "صنف"} ×{it.quantity || 1}
-                    <span style={{ display: "block", marginTop: 2, fontSize: "0.78rem", color: "var(--wp-muted)" }}>{lineStateLabel}</span>
-                    {qty > 1 ? (
-                      <span style={{ display: "block", marginTop: 2, fontSize: "0.8rem", color: "var(--wp-muted)" }}>
-                        التقدّم: {preparedQty}/{qty}
-                      </span>
+                  <div
+                    style={{
+                      minWidth: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      display: "grid",
+                      placeItems: "center",
+                      fontWeight: 900,
+                      fontSize: "1.35rem",
+                      background: "#0f172a",
+                      color: "#f8fafc",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                    title="الكمية"
+                  >
+                    {qty > 1 && preparedQty > 0 && preparedQty < qty ? `${preparedQty}/${qty}` : qty}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: "1.12rem", lineHeight: 1.25, color: "#0f172a" }}>
+                      {it.name || "صنف"}
+                    </div>
+                    {String(it.notes || it.kitchenNotes || "").trim() ? (
+                      <div style={{ marginTop: 2, fontSize: "0.8rem", fontWeight: 700, color: "#b45309" }}>
+                        {String(it.notes || it.kitchenNotes || "").trim()}
+                      </div>
                     ) : null}
                   </div>
                   <span
@@ -521,51 +566,16 @@ function KdsOrderCard({
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      minWidth: 88,
-                      padding: "6px 10px",
+                      minWidth: 72,
+                      padding: "8px 10px",
                       borderRadius: 10,
-                      fontWeight: 800,
+                      fontWeight: 900,
                       fontSize: "0.82rem",
-                      background: lineStarted ? "#1e3a8a" : "#e5e7eb",
-                      color: lineStarted ? "#ffffff" : "#6b7280",
-                      border: `1px solid ${lineStarted ? "#1e3a8a" : "#cbd5e1"}`,
+                      background: badgeBg,
+                      color: "#fff",
                     }}
                   >
-                    قيد التنفيذ
-                  </span>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minWidth: 88,
-                      padding: "6px 10px",
-                      borderRadius: 10,
-                      fontWeight: 800,
-                      fontSize: "0.82rem",
-                      background: lineDone ? "#065f46" : "#e5e7eb",
-                      color: lineDone ? "#ffffff" : "#6b7280",
-                      border: `1px solid ${lineDone ? "#065f46" : "#cbd5e1"}`,
-                    }}
-                  >
-                    تم الانتهاء
-                  </span>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minWidth: 88,
-                      padding: "6px 10px",
-                      borderRadius: 10,
-                      fontWeight: 800,
-                      fontSize: "0.82rem",
-                      background: lineSent ? "#b45309" : "#e5e7eb",
-                      color: lineSent ? "#ffffff" : "#6b7280",
-                      border: `1px solid ${lineSent ? "#b45309" : "#cbd5e1"}`,
-                    }}
-                  >
-                    مرسل
+                    {lineStateLabel}
                   </span>
                 </div>
               );

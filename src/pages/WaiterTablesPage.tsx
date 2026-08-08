@@ -17,6 +17,7 @@ import {
   ManagerTableInstructionsMenu,
   type ManagerTableInstructionItem,
 } from "../components/ManagerTableInstructionsMenu";
+import { ManagerTableChecksModal } from "../components/ManagerTableChecksModal";
 import {
   effectiveTableIdsForUser,
   normalizeAssignedTableId,
@@ -184,6 +185,7 @@ export default function WaiterTablesPage() {
   const [hallReportTableName, setHallReportTableName] = useState<string | null>(null);
   /** قائمة يمين «تعليمات المدير» على شريحة الطاولة */
   const [mgrInstructions, setMgrInstructions] = useState<{ x: number; y: number; table: RestTable } | null>(null);
+  const [mgrChecksTable, setMgrChecksTable] = useState<{ id: string; label: string } | null>(null);
   const businessDayLabel = useMemo(() => getBusinessDayWindow().labelAr, []);
 
   /**
@@ -1669,7 +1671,7 @@ export default function WaiterTablesPage() {
       },
       {
         id: "session-report",
-        label: "تقرير الجلسة الحالية",
+        label: "تقرير الطاولة / الجلسة",
         hint: "ملخص طلبات وأصناف الجلسة النشطة",
         onSelect: () => {
           const fakeEv = {
@@ -1677,6 +1679,17 @@ export default function WaiterTablesPage() {
             stopPropagation() {},
           } as ReactMouseEvent<HTMLElement>;
           showTableReport(table, fakeEv);
+        },
+      },
+      {
+        id: "table-checks",
+        label: "شيكات الطاولة…",
+        hint: "كل الشيكات المنفَّذة على الطاولة — فتح / طباعة / تصحيح",
+        onSelect: () => {
+          setMgrChecksTable({
+            id: tid,
+            label: String(table.name || tid || "طاولة"),
+          });
         },
       },
       {
@@ -3184,6 +3197,14 @@ export default function WaiterTablesPage() {
           })()}
           items={buildManagerInstructionItems(mgrInstructions.table)}
           onClose={() => setMgrInstructions(null)}
+        />
+      ) : null}
+      {mgrChecksTable ? (
+        <ManagerTableChecksModal
+          open
+          tableId={mgrChecksTable.id}
+          tableLabel={mgrChecksTable.label}
+          onClose={() => setMgrChecksTable(null)}
         />
       ) : null}
     </div>

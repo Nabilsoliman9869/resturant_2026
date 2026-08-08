@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+﻿import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export type ManagerTableInstructionItem = {
   id: string;
@@ -14,6 +14,8 @@ type ManagerTableInstructionsMenuProps = {
   open: boolean;
   x: number;
   y: number;
+  /** عنوان القائمة — افتراضي «تعليمات المدير» */
+  title?: string;
   tableLabel: string;
   captainLabel?: string | null;
   sessionHint?: string | null;
@@ -28,6 +30,7 @@ export function ManagerTableInstructionsMenu({
   open,
   x,
   y,
+  title = "تعليمات المدير",
   tableLabel,
   captainLabel,
   sessionHint,
@@ -77,7 +80,7 @@ export function ManagerTableInstructionsMenu({
     <div
       ref={panelRef}
       role="menu"
-      aria-label="تعليمات المدير"
+      aria-label={title}
       style={{
         position: "fixed",
         left: pos.left,
@@ -97,7 +100,7 @@ export function ManagerTableInstructionsMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       <div style={{ padding: "0.35rem 0.55rem 0.5rem", borderBottom: "1px solid rgba(148,163,184,0.22)", marginBottom: 4 }}>
-        <div style={{ fontWeight: 900, fontSize: "0.95rem" }}>تعليمات المدير</div>
+        <div style={{ fontWeight: 900, fontSize: "0.95rem" }}>{title}</div>
         <div style={{ fontSize: "0.78rem", color: "#cbd5e1", marginTop: 2 }}>
           {tableLabel || "طاولة"}
           {captainLabel ? ` · كابتن: ${captainLabel}` : " · بلا كابتن"}

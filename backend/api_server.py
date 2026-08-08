@@ -28098,19 +28098,37 @@ def restaurant_invoices_local(
     date_to: Optional[str] = None,
     payment_status: Optional[str] = None,
     session_id: Optional[str] = None,
+    table_id: Optional[str] = None,
 ):
     """فواتير محلية — بعد «طلب الحساب» تظهر بـ awaitingPayment حتى يُسدّد الكاشير.
-    payment_status: awaiting | paid | all (افتراضي all للتوافق)."""
+    payment_status: awaiting | paid | all (افتراضي all للتوافق).
+    table_id: كل شيكات الطاولة عبر جلساتها (تاريخية + حالية)."""
     raw = _restaurant_load("invoices", [])
     if not isinstance(raw, list):
         raw = []
     ps = (payment_status or "all").strip().lower()
+    tid_filter = str(table_id or "").strip()
+    session_ids_for_table: set[str] = set()
+    if tid_filter:
+        sess_list = _restaurant_load("table_sessions", [])
+        for s in sess_list if isinstance(sess_list, list) else []:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("tableId") or "").strip() == tid_filter:
+                sid = str(s.get("id") or "").strip()
+                if sid:
+                    session_ids_for_table.add(sid)
     rows = []
     for inv in raw:
         if not isinstance(inv, dict):
             continue
         if session_id and str(inv.get("sessionId") or "").strip() != str(session_id).strip():
             continue
+        if tid_filter:
+            inv_sid = str(inv.get("sessionId") or "").strip()
+            inv_tid = str(inv.get("tableId") or inv.get("tableIdResolved") or "").strip()
+            if inv_tid != tid_filter and inv_sid not in session_ids_for_table:
+                continue
         awaiting = bool(inv.get("awaitingPayment"))
         paid_at = str(inv.get("paidAt") or "").strip()
         on_account = str(inv.get("paymentStatus") or "").strip() == "on_account"
@@ -28723,6 +28741,202 @@ def restaurant_invoices_local_apply_discount(body: dict):
         "promoNotes": found.get("promoNotes"),
         "couponMatched": bool(disc_meta.get("couponMatched")),
     }
+
+
+@app.post("/api/restaurant/invoices-local/manager-amend")
+def restaurant_invoices_local_manager_amend(body: dict):
+    """
+    تصحيح مدير لشيك محلي (حتى بعد التسديد): أصناف/كميات/أسعار و/أو طريقة الدفع.
+    يُحدَّث السجل المحلي + أثر تدقيق؛ تحديث SQL اختياري عند وجود MainGuide.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    _terminal_require_user(body.get("mat3amActor"))
+    actor = _mat3am_actor_from_body(body)
+    if not _role_has_manager_ops_access(actor.get("role")):
+        raise HTTPException(status_code=403, detail="تصحيح الشيك متاح للمدير / مدير التشغيل / المطوّر فقط")
+    invoice_id = str(body.get("invoiceId") or "").strip()
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoiceId مطلوب")
+    note = str(body.get("note") or body.get("reason") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="سبب التصحيح (note) إلزامي للتدقيق")
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    found = None
+    for inv in raw:
+        if isinstance(inv, dict) and str(inv.get("invoiceId") or "") == invoice_id:
+            found = inv
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة في السجل المحلي")
+
+    before_snap = {
+        "total": float(found.get("total") or 0),
+        "paymentMethod": str(found.get("paymentMethod") or ""),
+        "lines": found.get("lines") if isinstance(found.get("lines"), list) else [],
+    }
+    changed = False
+
+    # تعديل البنود
+    new_lines_raw = body.get("lines")
+    if isinstance(new_lines_raw, list):
+        rebuilt = []
+        for ln in new_lines_raw:
+            if not isinstance(ln, dict):
+                continue
+            try:
+                qty = float(ln.get("quantity") or ln.get("Quantity") or 0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            if qty <= 0:
+                continue
+            try:
+                up = float(ln.get("unitPrice") or ln.get("UnitPrice") or 0)
+            except (TypeError, ValueError):
+                up = 0.0
+            name = str(ln.get("name") or ln.get("ProductName") or "صنف").strip() or "صنف"
+            tv = round(qty * up, 2)
+            rebuilt.append(
+                {
+                    "name": name,
+                    "quantity": qty,
+                    "unitPrice": up,
+                    "lineTotal": tv,
+                    "productGuide": str(ln.get("productGuide") or ln.get("ProductGuide") or "") or None,
+                    "lineId": str(ln.get("lineId") or "") or None,
+                    "seatNo": ln.get("seatNo"),
+                }
+            )
+        if not rebuilt:
+            raise HTTPException(status_code=400, detail="بعد التصحيح لا تبقى بنود صالحة في الشيك")
+        found["lines"] = rebuilt
+        found["sourceLines"] = [dict(x) for x in rebuilt]
+        subtotal = round(sum(float(x.get("lineTotal") or 0) for x in rebuilt), 2)
+        disc = max(0.0, float(found.get("discount") or 0))
+        svc = max(0.0, float(found.get("serviceCharge") or 0))
+        tax = max(0.0, float(found.get("tax") or 0))
+        tip = max(0.0, float(found.get("tipAmount") or 0))
+        # إعادة حساب خدمة/ضريبة من الصافي بعد الخصم (ما لم يُعطَّل)
+        net = max(0.0, subtotal - disc)
+        if body.get("recalcTaxService") is not False:
+            svc_pct = 12.0
+            vat_pct = 14.0
+            try:
+                conn_p = get_connection()
+                if conn_p:
+                    try:
+                        cur_p = conn_p.cursor()
+                        pol = _mat3am_pos_policy_row_from_cursor(cur_p)
+                        if isinstance(pol, dict):
+                            svc_pct = float(pol.get("servicePercent") or svc_pct)
+                            vat_pct = float(pol.get("vatPercent") or vat_pct)
+                    finally:
+                        conn_p.close()
+            except Exception:
+                pass
+            if not found.get("noService"):
+                svc = round(net * svc_pct / 100.0, 2)
+            else:
+                svc = 0.0
+            if not found.get("noVat"):
+                tax = round((net + svc) * vat_pct / 100.0, 2)
+            else:
+                tax = 0.0
+        found["subtotal"] = net
+        found["serviceCharge"] = svc
+        found["tax"] = tax
+        found["total"] = round(net + svc + tax + tip, 2)
+        changed = True
+
+    # طريقة الدفع
+    pay_method = body.get("paymentMethod")
+    if pay_method is not None:
+        pm = str(pay_method or "").strip()
+        if pm:
+            found["paymentMethod"] = pm
+            changed = True
+        elif str(found.get("paidAt") or "").strip():
+            raise HTTPException(status_code=400, detail="طريقة الدفع فارغة")
+
+    if not changed:
+        raise HTTPException(status_code=400, detail="لم يُرسل تعديل (lines أو paymentMethod)")
+
+    now_iso = datetime.now().isoformat()
+    hist = found.get("managerAmendments")
+    if not isinstance(hist, list):
+        hist = []
+    hist.append(
+        {
+            "at": now_iso,
+            "note": note,
+            "by": {"id": actor.get("id"), "name": actor.get("name") or actor.get("login"), "role": actor.get("role")},
+            "beforeTotal": before_snap.get("total"),
+            "afterTotal": float(found.get("total") or 0),
+            "beforePaymentMethod": before_snap.get("paymentMethod"),
+            "afterPaymentMethod": str(found.get("paymentMethod") or ""),
+        }
+    )
+    found["managerAmendments"] = hist[-40:]
+    found["managerAmendedAt"] = now_iso
+    found["managerAmendedBy"] = {
+        "id": actor.get("id"),
+        "name": actor.get("name") or actor.get("login"),
+        "role": actor.get("role"),
+    }
+
+    # تحديث SQL خفيف إن وُجدت الفاتورة المحاسبية (Discount/ملاحظات — البنود قد تختلف هيكلياً)
+    main_guide = str(found.get("mainGuide") or found.get("MainGuide") or found.get("sqlMainGuide") or "").strip()
+    if main_guide:
+        conn = None
+        try:
+            conn = get_connection()
+            if conn:
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        "UPDATE TBL022 SET Discount = ?, Total = ?, Notes = LEFT(ISNULL(Notes,'') + ?, 400) WHERE MainGuide = ?",
+                        (
+                            float(found.get("discount") or 0),
+                            float(found.get("total") or 0),
+                            f" | تعديل مدير {now_iso[:16]}: {note[:120]}",
+                            main_guide,
+                        ),
+                    )
+                    conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    _restaurant_save("invoices", raw)
+    try:
+        _append_session_audit_entry(
+            {
+                "type": "manager_invoice_amend",
+                "invoiceId": invoice_id,
+                "sessionId": str(found.get("sessionId") or ""),
+                "note": note,
+                "actor": found.get("managerAmendedBy"),
+                "at": now_iso,
+                "beforeTotal": before_snap.get("total"),
+                "afterTotal": float(found.get("total") or 0),
+            }
+        )
+    except Exception:
+        pass
+    cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
+    return {"ok": True, "invoice": _restaurant_enrich_invoice_with_table(found)}
 
 
 @app.post("/api/restaurant/invoices-local/mark-paid")

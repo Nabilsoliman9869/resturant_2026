@@ -4088,8 +4088,8 @@
 
 .kds-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 0.9rem;
 }
 
 .kds-card {
@@ -4098,6 +4098,22 @@
   border-radius: 16px;
   padding: 1rem 1.1rem;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.kds-card__table-hero {
+  color: var(--wp-text, #0f172a);
+}
+
+.kds-card__items {
+  margin-top: 0.35rem;
+}
+
+.kds-card__item-row {
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.kds-card__item-row:not([style*="opacity: 0.55"]):hover {
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
 }
 
 .kds-card--urgent {

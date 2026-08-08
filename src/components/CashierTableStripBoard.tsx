@@ -10,6 +10,7 @@ import {
   managerOrderTakerBase,
   type ManagerTableInstructionItem,
 } from "./ManagerTableInstructionsMenu";
+import { ManagerTableChecksModal } from "./ManagerTableChecksModal";
 import "../styles/hallLiveBoard.css";
 
 export type TableOverviewSession = {
@@ -99,6 +100,7 @@ export function CashierTableStripBoard() {
   const [captainFilter, setCaptainFilter] = useState("");
   const [inspect, setInspect] = useState<TableOverviewSession | null>(null);
   const [mgrMenu, setMgrMenu] = useState<{ x: number; y: number; session: TableOverviewSession } | null>(null);
+  const [mgrChecks, setMgrChecks] = useState<{ id: string; label: string } | null>(null);
 
   function openManagerPos(s: TableOverviewSession) {
     const tid = String(s.tableId || "").trim();
@@ -148,6 +150,17 @@ export function CashierTableStripBoard() {
         onSelect: () => openPay(String(s.awaitingInvoiceId)),
       });
     }
+    items.push({
+      id: "table-checks",
+      label: "شيكات الطاولة…",
+      hint: "كل الشيكات على الطاولة — فتح / طباعة / تصحيح",
+      disabled: !String(s.tableId || "").trim(),
+      onSelect: () =>
+        setMgrChecks({
+          id: String(s.tableId || ""),
+          label: String(s.tableDisplayName || s.tableId || "طاولة"),
+        }),
+    });
     items.push({
       id: "details",
       label: "تفاصيل الجلسة",
@@ -511,6 +524,14 @@ export function CashierTableStripBoard() {
           sessionHint={mgrMenu.session.sessionId ? `جلسة · ${String(mgrMenu.session.sessionId).slice(0, 8)}` : null}
           items={buildMgrItems(mgrMenu.session)}
           onClose={() => setMgrMenu(null)}
+        />
+      ) : null}
+      {mgrChecks ? (
+        <ManagerTableChecksModal
+          open
+          tableId={mgrChecks.id}
+          tableLabel={mgrChecks.label}
+          onClose={() => setMgrChecks(null)}
         />
       ) : null}
       {msg ? (

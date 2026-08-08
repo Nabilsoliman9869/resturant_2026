@@ -1052,3 +1052,10 @@ eserved + active.
 - **`ManagerTableInstructionsMenu.tsx`:** قائمة سياق موحّدة «تعليمات المدير».
 - **`WaiterTablesPage.tsx`:** يمين على شريحة الطاولة (مدير/تشغيل/مطوّر) → فتح نقطة بيع جرسون الطلبات، تحويل كابتن، تقارير، تنظيف، Reset.
 - **`CashierTableStripBoard.tsx`:** نفس القائمة من اللوحة الحية → فتح `order-taker` للطاولة.
+
+### 148 — طبقات المدير + شيكات الطاولة + قراءة المطبخ — UTC 2026-08-08T11:40:00Z — ID `mgr-layers-checks-kds-c8d2e91a`
+
+- **`api_server.py`:** `table_id` على `invoices-local`؛ `POST …/manager-amend` لتصحيح أصناف/أسعار/طريقة دفع مع تدقيق.
+- **`ManagerTableChecksModal.tsx`:** شيكات الطاولة (عرض/فتح/طباعة/تصحيح).
+- **`WaiterTablesPage` / `CashierTableStripBoard` / `WaiterOrderPage`:** تعليمات مدير على طاولة + كرسي + صنف السلة.
+- **`KitchenPage` + `operationalRoles.css`:** بطاقة مطبخ أوضح (طاولة كبيرة، كمية بارزة، حالة واحدة).

@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { OperationalRoleHeader } from "../components/OperationalRoleHeader";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
+import {
+  ManagerTableInstructionsMenu,
+  type ManagerTableInstructionItem,
+} from "../components/ManagerTableInstructionsMenu";
+import { ManagerTableChecksModal } from "../components/ManagerTableChecksModal";
 import {
   fetchDailyMenuFromApi,
   fetchDailyMenuSchedule,
@@ -592,6 +597,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [showGapPicks, setShowGapPicks] = useState(false);
   /** مقاعد يُطلب حسابها الآن (مطلوب اختيار كرسي واحد على الأقل — حساب على مستوى الكرسي) */
   const [billSeatNos, setBillSeatNos] = useState<number[]>([]);
+  const [mgrCtxMenu, setMgrCtxMenu] = useState<
+    | { kind: "seat"; x: number; y: number; seatNo: number }
+    | { kind: "line"; x: number; y: number; lineId: string; name: string }
+    | null
+  >(null);
+  const [mgrChecksOpen, setMgrChecksOpen] = useState(false);
   const [reorderSeatTargets, setReorderSeatTargets] = useState<Record<string, number>>({});
   const [reorderBusyKey, setReorderBusyKey] = useState("");
   const [partialMoveSelected, setPartialMoveSelected] = useState<Record<string, boolean>>({});
@@ -2836,7 +2847,127 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
   }
 
-  function openBillReview() {
+  function openMgrSeatMenu(seatNo: number, ev: ReactMouseEvent) {
+    if (!roleHasManagerOpsAccess(user?.role)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setMgrCtxMenu({ kind: "seat", x: ev.clientX, y: ev.clientY, seatNo });
+  }
+
+  function openMgrLineMenu(lineId: string, name: string, ev: ReactMouseEvent) {
+    if (!roleHasManagerOpsAccess(user?.role)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setMgrCtxMenu({ kind: "line", x: ev.clientX, y: ev.clientY, lineId, name });
+  }
+
+  function buildMgrSeatItems(seatNo: number): ManagerTableInstructionItem[] {
+    const hasUnbilled = unbilledSeatNos.includes(seatNo);
+    return [
+      {
+        id: "bill-seat",
+        label: `طلب حساب كرسي ${seatNo}`,
+        hint: "يصدر شيك لهذا الكرسي فقط",
+        primary: true,
+        disabled: billingLocked || !hasUnbilled,
+        onSelect: () => {
+          setSelectedSeat(seatNo);
+          openBillReview({ seats: [seatNo] });
+        },
+      },
+      {
+        id: "select-seat",
+        label: "اجعله الكرسي الحالي للطلب",
+        onSelect: () => setSelectedSeat(seatNo),
+      },
+      {
+        id: "returns",
+        label: "مرتجع…",
+        onSelect: () => {
+          setNavoptsActiveTab("returns");
+          setReturnModalLines(returnableLines);
+          setReturnModalOpen(true);
+        },
+      },
+      {
+        id: "reorder",
+        label: "إعادة توزيع البنود…",
+        onSelect: () => setNavoptsActiveTab("reorder"),
+      },
+      {
+        id: "table-checks",
+        label: "شيكات الطاولة…",
+        disabled: !selectedTableId,
+        onSelect: () => setMgrChecksOpen(true),
+      },
+    ];
+  }
+
+  function buildMgrLineItems(lineId: string, name: string): ManagerTableInstructionItem[] {
+    return [
+      {
+        id: "discount",
+        label: "خصم نسبة على الصنف…",
+        hint: "يُطبَّق على سعر الوحدة في السلة",
+        primary: true,
+        disabled: billingLocked,
+        onSelect: () => {
+          const raw = window.prompt(`نسبة الخصم على «${name}» (مثال 10)`, "10");
+          if (raw == null) return;
+          const pct = Math.max(0, Math.min(100, Number(raw) || 0));
+          setCart((prev) =>
+            prev.map((l) => {
+              if (l.id !== lineId) return l;
+              const nextPrice = Math.round(Math.max(0, Number(l.unitPrice || 0) * (1 - pct / 100)) * 100) / 100;
+              return { ...l, unitPrice: nextPrice };
+            }),
+          );
+          setMsg(`تم خصم ${pct}% من «${name}» في السلة.`);
+        },
+      },
+      {
+        id: "discount-amt",
+        label: "خصم قيمة على الصنف…",
+        disabled: billingLocked,
+        onSelect: () => {
+          const raw = window.prompt(`قيمة الخصم بالجنيه على «${name}»`, "5");
+          if (raw == null) return;
+          const amt = Math.max(0, Number(raw) || 0);
+          setCart((prev) =>
+            prev.map((l) => {
+              if (l.id !== lineId) return l;
+              const nextPrice = Math.max(0, Number(l.unitPrice || 0) - amt);
+              return { ...l, unitPrice: nextPrice };
+            }),
+          );
+          setMsg(`تم خصم ${amt.toFixed(2)} ج.م من سعر «${name}».`);
+        },
+      },
+      {
+        id: "remove",
+        label: "حذف من السلة",
+        danger: true,
+        disabled: billingLocked,
+        onSelect: () => removeLine(lineId),
+      },
+      {
+        id: "reorder",
+        label: "نقل / إعادة توزيع…",
+        onSelect: () => setNavoptsActiveTab("reorder"),
+      },
+      {
+        id: "returns",
+        label: "مرتجع…",
+        onSelect: () => {
+          setNavoptsActiveTab("returns");
+          setReturnModalLines(returnableLines);
+          setReturnModalOpen(true);
+        },
+      },
+    ];
+  }
+
+  function openBillReview(opts?: { seats?: number[] }) {
     setMsg("");
     if (!activeSessionId) {
       setMsg("لا توجد جلسة نشطة.");
@@ -2861,8 +2992,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("طُلِب الحساب مسبقاً — انتظر تسديد الكاشير.");
       return;
     }
+    const presetSeats = (opts?.seats || []).filter((n) => n >= 1 && n <= 12);
     // طلب الحساب على مستوى الكرسي: افتراض المقعد الحالي إن كان له بنود غير مفوترة
     setBillSeatNos((prev) => {
+      if (presetSeats.length > 0) return presetSeats;
       if (prev.length > 0) {
         const still = prev.filter((n) => unbilledSeatNos.includes(n) || n === SHARED_SEAT_NO);
         if (still.length > 0) return still;
@@ -4741,7 +4874,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   </div>
                   <div className="waiter-pos__order-box">
                     {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
-                      <div key={`desk-line-${l.id}`} className="waiter-pos__order-line">
+                      <div
+                        key={`desk-line-${l.id}`}
+                        className="waiter-pos__order-line"
+                        onContextMenu={(ev) => openMgrLineMenu(l.id, l.name, ev)}
+                        title={roleHasManagerOpsAccess(user?.role) ? "يمين: تعليمات المدير على الصنف" : undefined}
+                      >
                         <div style={{ flex: 1 }}>
                           {(() => {
                             const xn = seatNoFromLine(l);
@@ -5001,7 +5139,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     <h3 style={{ marginTop: 0 }}>السلة — قيد الإرسال</h3>
                     <div className="waiter-pos__order-box">
                       {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
-                        <div key={`top-line-${l.id}`} className="waiter-pos__order-line">
+                        <div
+                          key={`top-line-${l.id}`}
+                          className="waiter-pos__order-line"
+                          onContextMenu={(ev) => openMgrLineMenu(l.id, l.name, ev)}
+                          title={roleHasManagerOpsAccess(user?.role) ? "يمين: تعليمات المدير على الصنف" : undefined}
+                        >
                           <div style={{ flex: 1 }}>
                             {(() => {
                               const xn = seatNoFromLine(l);
@@ -5957,6 +6100,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                               setSelectedSeat(n);
                               if (seatNameEditorSeat != null && seatNameEditorSeat !== n) setSeatNameEditorSeat(null);
                             }}
+                            onContextMenu={(ev) => openMgrSeatMenu(n, ev)}
+                            title={roleHasManagerOpsAccess(user?.role) ? "يمين: تعليمات المدير على الكرسي" : undefined}
                             role="presentation"
                           >
                             <div className="waiter-pos__seat-slot-head">
@@ -6102,7 +6247,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                               type="button"
                               className="waiter-pos__btn waiter-pos__btn--ghost"
                               disabled={billingLocked || !hasUnbilled}
-                              title={!hasUnbilled ? "لا بنود غير مفوترة على هذا الكرسي" : `طلب حساب كرسي ${sn}`}
+                              title={
+                                roleHasManagerOpsAccess(user?.role)
+                                  ? "يمين: تعليمات المدير · يسار: تحديد للحساب"
+                                  : !hasUnbilled
+                                    ? "لا بنود غير مفوترة على هذا الكرسي"
+                                    : `طلب حساب كرسي ${sn}`
+                              }
                               style={{
                                 padding: "4px 8px",
                                 fontWeight: 800,
@@ -6116,6 +6267,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                   prev.includes(sn) ? prev.filter((x) => x !== sn) : [...prev, sn].sort((a, b) => a - b),
                                 )
                               }
+                              onContextMenu={(ev) => openMgrSeatMenu(sn, ev)}
                             >
                               {sn}
                             </button>
@@ -6359,6 +6511,34 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           )
         }
       />
+      {mgrCtxMenu ? (
+        <ManagerTableInstructionsMenu
+          open
+          title={mgrCtxMenu.kind === "seat" ? "تعليمات المدير — كرسي" : "تعليمات المدير — صنف"}
+          x={mgrCtxMenu.x}
+          y={mgrCtxMenu.y}
+          tableLabel={
+            mgrCtxMenu.kind === "seat"
+              ? `كرسي ${mgrCtxMenu.seatNo}`
+              : mgrCtxMenu.name
+          }
+          captainLabel={selectedTable?.name || selectedTableId || null}
+          items={
+            mgrCtxMenu.kind === "seat"
+              ? buildMgrSeatItems(mgrCtxMenu.seatNo)
+              : buildMgrLineItems(mgrCtxMenu.lineId, mgrCtxMenu.name)
+          }
+          onClose={() => setMgrCtxMenu(null)}
+        />
+      ) : null}
+      {mgrChecksOpen && selectedTableId ? (
+        <ManagerTableChecksModal
+          open
+          tableId={selectedTableId}
+          tableLabel={selectedTable?.name || selectedTableId}
+          onClose={() => setMgrChecksOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
