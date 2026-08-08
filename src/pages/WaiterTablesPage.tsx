@@ -14,6 +14,10 @@ import { fetchOperationalSnapshot, RESTAURANT_POLL_MS } from "../lib/restaurantO
 import { getBusinessDayWindow, isInCurrentBusinessDay } from "../lib/businessDay";
 import { HallDayReportPanel } from "../components/HallDayReportPanel";
 import {
+  ManagerTableInstructionsMenu,
+  type ManagerTableInstructionItem,
+} from "../components/ManagerTableInstructionsMenu";
+import {
   effectiveTableIdsForUser,
   normalizeAssignedTableId,
   normalizeTempCaptainTransfers,
@@ -178,6 +182,8 @@ export default function WaiterTablesPage() {
   const [hallReportOpen, setHallReportOpen] = useState(false);
   const [hallReportTableId, setHallReportTableId] = useState<string | null>(null);
   const [hallReportTableName, setHallReportTableName] = useState<string | null>(null);
+  /** قائمة يمين «تعليمات المدير» على شريحة الطاولة */
+  const [mgrInstructions, setMgrInstructions] = useState<{ x: number; y: number; table: RestTable } | null>(null);
   const businessDayLabel = useMemo(() => getBusinessDayWindow().labelAr, []);
 
   /**
@@ -1570,6 +1576,149 @@ export default function WaiterTablesPage() {
         ? "/app/developer"
         : "/app/waiter";
 
+  /** فتح نقطة بيع جرسون الطلبات من تعليمات المدير (يتجاوز قفل الكابتن الحصري). */
+  async function openManagerPosForTable(table: RestTable) {
+    const tid = String(table.id || "").trim();
+    if (!tid) return;
+    const tStatus = String(table.status || "").toLowerCase();
+    const notReady = tStatus === "dirty" || tStatus === "cleaning";
+    if (notReady) {
+      setMsg("الطاولة غير جاهزة. أكمل دورة التنظيف أولًا.");
+      return;
+    }
+    const sessRow =
+      sessions.find((s) => String(s?.tableId || "") === tid && String(s?.status || "").toLowerCase() === "active") || null;
+    const sidStr = sessRow?.id ? String(sessRow.id) : sessionByTable.get(tid) || "";
+    if (Boolean(sessRow?.guestApprovalPending)) {
+      setMsg("بانتظار اعتماد المدير لجلسة الضيف — اعتمد أو ارفض أولاً.");
+      return;
+    }
+    if (!sidStr) {
+      await claimCaptain({ tableId: tid, navigateAfterClaim: true });
+      return;
+    }
+    const bp = sessRow?.billingProfile;
+    const src = String(bp?.source || "").toLowerCase();
+    const currentMode =
+      bp?.active === false
+        ? ""
+        : src === "vip_owner_agent" && String(bp?.vipAgentGuid || "").trim()
+          ? `__agent__:${String(bp?.vipAgentGuid || "").trim().toUpperCase()}`
+          : src === "vip_owner_template" && String(bp?.vipTemplateId || "").trim()
+            ? String(bp?.vipTemplateId || "").trim()
+            : bp && String(bp?.source || "").trim()
+              ? "__ops_defaults__"
+              : "";
+    const chosen = vipChoiceBySession[sidStr] ?? "";
+    if (chosen && chosen !== currentMode) {
+      await applyVipBilling(sidStr, chosen);
+    }
+    const q = `tableId=${encodeURIComponent(tid)}` + (sidStr ? `&sessionId=${encodeURIComponent(sidStr)}` : "");
+    navigate(`${orderTakerBase}/order-taker?${q}`);
+  }
+
+  function openManagerInstructionsMenu(table: RestTable, ev: ReactMouseEvent<HTMLElement>) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setMgrInstructions({ x: ev.clientX, y: ev.clientY, table });
+  }
+
+  function buildManagerInstructionItems(table: RestTable): ManagerTableInstructionItem[] {
+    const tid = String(table.id || "").trim();
+    const tStatus = String(table.status || "").toLowerCase();
+    const notReady = tStatus === "dirty" || tStatus === "cleaning";
+    const sessRow =
+      sessions.find((s) => String(s?.tableId || "") === tid && String(s?.status || "").toLowerCase() === "active") || null;
+    const sidStr = sessRow?.id ? String(sessRow.id) : sessionByTable.get(tid) || "";
+    const captainLabel =
+      repairArabicDisplayText(String(sessRow?.captainName || sessRow?.captainLogin || "").trim()) || "";
+    const canForceReset = Boolean(
+      roleHasManagerOpsAccess(user?.role) && (sidStr || tStatus === "dirty" || tStatus === "cleaning" || Boolean(sessRow)),
+    );
+    const items: ManagerTableInstructionItem[] = [
+      {
+        id: "open-pos",
+        label: "فتح نقطة بيع جرسون الطلبات",
+        hint: sidStr ? "يفتح جلسة الطاولة الحالية كجرسون طلبات" : "يفتح جلسة جديدة ويسكّنك كابتن ثم يدخل نقطة البيع",
+        primary: true,
+        disabled: notReady || Boolean(sessRow?.guestApprovalPending),
+        onSelect: () => {
+          void openManagerPosForTable(table);
+        },
+      },
+      {
+        id: "claim-me",
+        label: captainLabel ? "حوّل الكابتن إليّ" : "تسكيني كابتن على الطاولة",
+        hint: sidStr
+          ? "يسكّنك كابتن على الجلسة الحالية دون فتح نقطة البيع فوراً"
+          : "يفتح جلسة ويسكّنك كابتن دون الدخول لنقطة البيع",
+        disabled: notReady || Boolean(sessRow?.guestApprovalPending),
+        onSelect: () => {
+          void claimCaptain({ tableId: tid, sessionId: sidStr || null, navigateAfterClaim: false });
+        },
+      },
+      {
+        id: "reassign",
+        label: "تغيير / تحويل كابتن…",
+        hint: "اختيار جرسون طلبات أو استقبال بديل",
+        disabled: !sidStr,
+        onSelect: () => {
+          setReassignSid(sidStr);
+          setReassignPickId("");
+        },
+      },
+      {
+        id: "session-report",
+        label: "تقرير الجلسة الحالية",
+        hint: "ملخص طلبات وأصناف الجلسة النشطة",
+        onSelect: () => {
+          const fakeEv = {
+            preventDefault() {},
+            stopPropagation() {},
+          } as ReactMouseEvent<HTMLElement>;
+          showTableReport(table, fakeEv);
+        },
+      },
+      {
+        id: "day-report",
+        label: "تقرير اليوم لهذه الطاولة",
+        hint: "تقرير يوم العمل للطاولة",
+        onSelect: () => openHallDayReport(table),
+      },
+    ];
+    if (tStatus === "dirty") {
+      items.push({
+        id: "start-clean",
+        label: "بدء تنظيف",
+        onSelect: () => {
+          void changeTableStatus(tid, "cleaning");
+        },
+      });
+    }
+    if (tStatus === "cleaning") {
+      items.push({
+        id: "done-clean",
+        label: "تم التنظيف — جاهزة",
+        onSelect: () => {
+          void changeTableStatus(tid, "ready");
+        },
+      });
+    }
+    if (canForceReset) {
+      items.push({
+        id: "reset",
+        label: "Reset للطاولة",
+        hint: "تنظيف تشغيلي كامل — استخدم بحذر",
+        danger: true,
+        disabled: tableResetBusyId === tid,
+        onSelect: () => {
+          void resetTableByTableId(tid);
+        },
+      });
+    }
+    return items;
+  }
+
   const headerTitle =
     user?.role === "manager"
       ? "شريحات الطاولات — المدير"
@@ -1600,6 +1749,11 @@ export default function WaiterTablesPage() {
       <div className="role-op__main">
         <div className="waiter-tables-toolbar">
           <h2 className="role-op__section-title">اختر الطاولة</h2>
+          {roleHasManagerOpsAccess(user?.role) ? (
+            <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fef08a" }} title="كليك يمين على أي طاولة">
+              يمين على الطاولة = تعليمات المدير
+            </span>
+          ) : null}
           <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)" }}>{businessDayLabel}</span>
           <div className="waiter-tables-toolbar__jump">
             <input
@@ -1891,8 +2045,15 @@ export default function WaiterTablesPage() {
                 <div
                   className={`role-op__pick-card waiter-tblcard--spec waiter-tables-card--${cardTone}${billReq ? " waiter-tables-card--bill" : ""}${vipOwnerLabel ? " waiter-tblcard--owner" : ""}${isIncomingItemTransfer ? " waiter-tblcard--incoming-transfer" : ""}`}
                   onClick={openOrderTakerForTable}
-                  onContextMenu={(ev) => showTableReport(t, ev)}
+                  onContextMenu={(ev) => {
+                    if (roleHasManagerOpsAccess(user?.role)) {
+                      openManagerInstructionsMenu(t, ev);
+                      return;
+                    }
+                    showTableReport(t, ev);
+                  }}
                   aria-label={`بطاقة طاولة ${displayLabel}`}
+                  title={roleHasManagerOpsAccess(user?.role) ? "يمين: تعليمات المدير" : undefined}
                 >
                   <div className="waiter-tblcard__spec-top">
                     <div className="waiter-tblcard__spec-id">
@@ -2999,6 +3160,32 @@ export default function WaiterTablesPage() {
         tableName={hallReportTableName}
         apiBase={base}
       />
+      {mgrInstructions ? (
+        <ManagerTableInstructionsMenu
+          open
+          x={mgrInstructions.x}
+          y={mgrInstructions.y}
+          tableLabel={String(mgrInstructions.table.name || mgrInstructions.table.id || "طاولة")}
+          captainLabel={(() => {
+            const tid = String(mgrInstructions.table.id || "");
+            const sess =
+              sessions.find(
+                (s) => String(s?.tableId || "") === tid && String(s?.status || "").toLowerCase() === "active",
+              ) || null;
+            return repairArabicDisplayText(String(sess?.captainName || sess?.captainLogin || "").trim()) || null;
+          })()}
+          sessionHint={(() => {
+            const tid = String(mgrInstructions.table.id || "");
+            const sess =
+              sessions.find(
+                (s) => String(s?.tableId || "") === tid && String(s?.status || "").toLowerCase() === "active",
+              ) || null;
+            return sess?.id ? `جلسة نشطة · ${String(sess.id).slice(0, 8)}` : "لا توجد جلسة نشطة";
+          })()}
+          items={buildManagerInstructionItems(mgrInstructions.table)}
+          onClose={() => setMgrInstructions(null)}
+        />
+      ) : null}
     </div>
   );
 }

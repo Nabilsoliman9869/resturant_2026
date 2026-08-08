@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { roleHasManagerOpsAccess } from "../auth/roles";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 import { CashierPayInvoiceModal } from "./CashierPayInvoiceModal";
+import {
+  ManagerTableInstructionsMenu,
+  managerOrderTakerBase,
+  type ManagerTableInstructionItem,
+} from "./ManagerTableInstructionsMenu";
 import "../styles/hallLiveBoard.css";
 
 export type TableOverviewSession = {
@@ -76,6 +83,10 @@ function rowTone(s: TableOverviewSession): "" | "hall-live-board__row--pay" | "h
 
 export function CashierTableStripBoard() {
   const base = getApiBase();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isManager = roleHasManagerOpsAccess(user?.role);
   const [sessions, setSessions] = useState<TableOverviewSession[]>([]);
   const [generatedAt, setGeneratedAt] = useState("");
   const [msg, setMsg] = useState("");
@@ -87,6 +98,63 @@ export function CashierTableStripBoard() {
   const [zoneFilter, setZoneFilter] = useState("");
   const [captainFilter, setCaptainFilter] = useState("");
   const [inspect, setInspect] = useState<TableOverviewSession | null>(null);
+  const [mgrMenu, setMgrMenu] = useState<{ x: number; y: number; session: TableOverviewSession } | null>(null);
+
+  function openManagerPos(s: TableOverviewSession) {
+    const tid = String(s.tableId || "").trim();
+    if (!tid) {
+      setMsg("لا يوجد معرّف طاولة لهذه الجلسة.");
+      return;
+    }
+    const basePath = managerOrderTakerBase(location.pathname);
+    const q =
+      `tableId=${encodeURIComponent(tid)}` +
+      (s.sessionId ? `&sessionId=${encodeURIComponent(String(s.sessionId))}` : "");
+    navigate(`${basePath}/order-taker?${q}`);
+  }
+
+  function openMgrMenu(s: TableOverviewSession, ev: ReactMouseEvent) {
+    if (!isManager) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setMgrMenu({ x: ev.clientX, y: ev.clientY, session: s });
+  }
+
+  function buildMgrItems(s: TableOverviewSession): ManagerTableInstructionItem[] {
+    const items: ManagerTableInstructionItem[] = [
+      {
+        id: "open-pos",
+        label: "فتح نقطة بيع جرسون الطلبات",
+        hint: "تعليمات المدير — دخول نقطة البيع لنفس الطاولة",
+        primary: true,
+        disabled: !String(s.tableId || "").trim(),
+        onSelect: () => openManagerPos(s),
+      },
+      {
+        id: "captain-tables",
+        label: "فتح شريحات الطاولات",
+        hint: "لوحة الكابتن الكاملة للتحويل والدمج والتنظيف",
+        onSelect: () => {
+          const basePath = managerOrderTakerBase(location.pathname);
+          navigate(`${basePath}/captain-tables`);
+        },
+      },
+    ];
+    if (s.awaitingPayment && s.awaitingInvoiceId) {
+      items.push({
+        id: "pay",
+        label: "تسديد الشيك",
+        hint: "فتح نافذة التسديد للكاشير/المدير",
+        onSelect: () => openPay(String(s.awaitingInvoiceId)),
+      });
+    }
+    items.push({
+      id: "details",
+      label: "تفاصيل الجلسة",
+      onSelect: () => setInspect(s),
+    });
+    return items;
+  }
 
   const load = useCallback(async () => {
     try {
@@ -211,7 +279,14 @@ export function CashierTableStripBoard() {
       ) : null}
 
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: "0.5rem" }}>
-        <h3 style={{ margin: 0, fontSize: "1.05rem" }}>قائمة الطاولات المفتوحة (حية)</h3>
+        <div>
+          <h3 style={{ margin: 0, fontSize: "1.05rem" }}>قائمة الطاولات المفتوحة (حية)</h3>
+          {isManager ? (
+            <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 2 }}>
+              يمين على الطاولة = تعليمات المدير (فتح نقطة بيع جرسون الطلبات…)
+            </div>
+          ) : null}
+        </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
           {generatedAt ? (
             <span style={{ fontSize: "0.72rem", color: "var(--muted)" }} title={generatedAt}>
@@ -338,6 +413,8 @@ export function CashierTableStripBoard() {
                     key={s.sessionId}
                     className={`hall-live-board__row ${rowTone(s)}`}
                     onClick={() => setInspect(s)}
+                    onContextMenu={(ev) => openMgrMenu(s, ev)}
+                    title={isManager ? "يمين: تعليمات المدير" : undefined}
                   >
                     <td>
                       <strong>{s.tableDisplayName || "طاولة"}</strong>
@@ -419,10 +496,28 @@ export function CashierTableStripBoard() {
               s={s}
               onOpenPay={openPay}
               onInspect={() => setInspect(s)}
+              onContextMenu={isManager ? (ev) => openMgrMenu(s, ev) : undefined}
             />
           ))}
         </div>
       )}
+      {mgrMenu ? (
+        <ManagerTableInstructionsMenu
+          open
+          x={mgrMenu.x}
+          y={mgrMenu.y}
+          tableLabel={String(mgrMenu.session.tableDisplayName || mgrMenu.session.tableId || "طاولة")}
+          captainLabel={mgrMenu.session.captainName || mgrMenu.session.captainLogin || null}
+          sessionHint={mgrMenu.session.sessionId ? `جلسة · ${String(mgrMenu.session.sessionId).slice(0, 8)}` : null}
+          items={buildMgrItems(mgrMenu.session)}
+          onClose={() => setMgrMenu(null)}
+        />
+      ) : null}
+      {msg ? (
+        <div style={{ marginTop: 8, fontSize: "0.8rem", color: "#fca5a5" }} role="status">
+          {msg}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -569,10 +664,12 @@ function TableStrip({
   s,
   onOpenPay,
   onInspect,
+  onContextMenu,
 }: {
   s: TableOverviewSession;
   onOpenPay: (invoiceId: string) => void;
   onInspect: () => void;
+  onContextMenu?: (ev: ReactMouseEvent) => void;
 }) {
   const bill = Boolean(s.billingRequestedAt);
   const pay = Boolean(s.awaitingPayment);
@@ -593,6 +690,8 @@ function TableStrip({
       role="button"
       tabIndex={0}
       onClick={onInspect}
+      onContextMenu={onContextMenu}
+      title={onContextMenu ? "يمين: تعليمات المدير" : undefined}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
