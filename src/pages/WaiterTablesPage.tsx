@@ -58,6 +58,8 @@ type TableSession = {
     vipAgentGuid?: string;
     vipOwnerLabel?: string;
   };
+  ownerSeatNos?: number[];
+  seatBillingOverrides?: Record<string, { agentGuid?: string; isOwner?: boolean; discountPct?: number }>;
 };
 type StaffUser = { id: string; login: string; name: string; role: string; isActive?: boolean };
 type RoleSchedEntry = { id: number; userId: string; roleCode: string; validFrom: string; validTo: string };
@@ -153,6 +155,7 @@ export default function WaiterTablesPage() {
   const [vipTemplates, setVipTemplates] = useState<VipTemplate[]>([]);
   const [ownersVipAgents, setOwnersVipAgents] = useState<OwnersVipAgent[]>([]);
   const [vipChoiceBySession, setVipChoiceBySession] = useState<Record<string, string>>({});
+  const [vipOwnerSeatsBySession, setVipOwnerSeatsBySession] = useState<Record<string, number[]>>({});
   const [vipBusySessionId, setVipBusySessionId] = useState<string>("");
   const [captainTransferBusySessionId, setCaptainTransferBusySessionId] = useState<string>("");
   const [noOrderBusySessionId, setNoOrderBusySessionId] = useState<string>("");
@@ -1325,6 +1328,10 @@ export default function WaiterTablesPage() {
       } else {
         body.vipTemplateId = mode;
       }
+      if (mode) {
+        const seats = (vipOwnerSeatsBySession[sessionId] || []).filter((n) => n >= 1 && n <= 12);
+        if (seats.length > 0) body.ownerSeatNos = seats;
+      }
       const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/billing-profile`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1341,14 +1348,17 @@ export default function WaiterTablesPage() {
         setMsg(typeof d === "string" ? d : t || `HTTP ${r.status}`);
         return;
       }
+      const seats = (vipOwnerSeatsBySession[sessionId] || []).filter((n) => n >= 1 && n <= 12);
       setMsg(
         !mode
           ? "تم إلغاء Owner/VIP للجلسة."
-          : mode === "__ops_defaults__"
-            ? "تم تطبيق افتراضيات Owner/VIP."
-            : mode.startsWith("__agent__:")
-              ? "تم ربط الجلسة بعميل الملاك من القاعدة."
-              : "تم تطبيق قالب Owner/VIP.",
+          : seats.length
+            ? `تم تطبيق Owner/VIP على المقاعد: ${seats.join("، ")} — باقي الطاولة نقدي.`
+            : mode === "__ops_defaults__"
+              ? "تم تطبيق افتراضيات Owner/VIP على الطاولة كلها."
+              : mode.startsWith("__agent__:")
+                ? "تم ربط الجلسة بعميل الملاك (الطاولة كلها إن لم تُحدَّد مقاعد)."
+                : "تم تطبيق قالب Owner/VIP.",
       );
       await loadTables();
     } catch (e) {
@@ -2243,6 +2253,54 @@ export default function WaiterTablesPage() {
                       >
                         {vipBusySessionId === sidStr ? "…" : isGuestSession || guestApprovalPending ? "—" : customerTypeLocked ? "مقفول" : "تطبيق"}
                       </button>
+                    </div>
+                  ) : null}
+
+                  {sidStr && !isGuestSession && !guestApprovalPending ? (
+                    <div
+                      style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}
+                      onClick={(e) => e.stopPropagation()}
+                      data-tooltip="مقاعد المالك فقط — الباقي يُحاسب نقدياً. اتركها فارغة = الطاولة كلها"
+                    >
+                      <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#92400e", width: "100%" }}>
+                        مقاعد المالك (اختياري):
+                        {Array.isArray(sessRow?.ownerSeatNos) && sessRow.ownerSeatNos.length
+                          ? ` الحالي ${sessRow.ownerSeatNos.join("، ")}`
+                          : ""}
+                      </span>
+                      {Array.from({ length: Math.min(12, Math.max(2, Number(sessRow?.guestCount) || 6)) }, (_, i) => i + 1).map((sn) => {
+                        const selected = (vipOwnerSeatsBySession[sidStr] || []).includes(sn);
+                        const savedOwner = Boolean(
+                          sessRow?.seatBillingOverrides?.[String(sn)]?.agentGuid
+                          || sessRow?.seatBillingOverrides?.[String(sn)]?.isOwner
+                          || (Array.isArray(sessRow?.ownerSeatNos) && sessRow.ownerSeatNos.includes(sn)),
+                        );
+                        return (
+                          <button
+                            key={`own-seat-${sidStr}-${sn}`}
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{
+                              padding: "2px 7px",
+                              fontSize: "0.72rem",
+                              fontWeight: 800,
+                              border: selected || savedOwner ? "1px solid #b45309" : "1px solid var(--border)",
+                              background: selected ? "#fef3c7" : savedOwner ? "#fff7ed" : "transparent",
+                            }}
+                            disabled={customerTypeLocked || vipBusySessionId === sidStr}
+                            onClick={() => {
+                              setVipOwnerSeatsBySession((prev) => {
+                                const cur = new Set(prev[sidStr] || []);
+                                if (cur.has(sn)) cur.delete(sn);
+                                else cur.add(sn);
+                                return { ...prev, [sidStr]: [...cur].sort((a, b) => a - b) };
+                              });
+                            }}
+                          >
+                            {sn}
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : null}
 

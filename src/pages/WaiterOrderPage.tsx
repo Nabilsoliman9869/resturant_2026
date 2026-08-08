@@ -589,6 +589,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [showCostDrawer, setShowCostDrawer] = useState(false);
   const [showGapPicks, setShowGapPicks] = useState(false);
   const [splitBySeat, setSplitBySeat] = useState(false);
+  /** مقاعد يُطلب حسابها الآن فقط (فارغ = كل المقاعد غير المفوترة) */
+  const [billSeatNos, setBillSeatNos] = useState<number[]>([]);
   const [reorderSeatTargets, setReorderSeatTargets] = useState<Record<string, number>>({});
   const [reorderBusyKey, setReorderBusyKey] = useState("");
   const [partialMoveSelected, setPartialMoveSelected] = useState<Record<string, boolean>>({});
@@ -2777,7 +2779,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         paymentMethod: "cash",
         postToSqlInvoice: false,
         items,
-        subtotal: billingTotals.netPortion,
+        // صافي قبل خصم المالك — الخصم يُطبَّق مرة واحدة عند طلب الحساب (تجنّب المضاعفة)
+        subtotal: netAfterMinimum,
         discountValue,
         serviceCharge,
         tax: vatValue,
@@ -2861,25 +2864,32 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     setRequestBillBusy(true);
     try {
       let splitGroups: Array<{ id: string; name: string; seats: number[] }> = [];
-      if (splitBySeat) {
+      const selectedBillSeats = billSeatNos.filter((n) => n >= 1 && n <= 12);
+      const wantSplit = splitBySeat || selectedBillSeats.length > 0;
+      if (wantSplit) {
         const openOrders = sessionOrders.filter((o) => String(o.status || "").toLowerCase() !== "cancelled");
         const seatsWithItems = new Set<number>();
         for (const o of openOrders) {
           for (const it of o.items || []) {
+            if (String((it as { finalInvoiceId?: string }).finalInvoiceId || "").trim()) continue;
             const sx = extractSeatFromOrderItem(it as { name?: string; seatNo?: number });
             if (sx != null) seatsWithItems.add(sx);
           }
         }
         const groupsBuild: typeof splitGroups = [];
-        for (const seatNo of visibleSeatNumbers) {
+        const seatLoop = selectedBillSeats.length > 0 ? selectedBillSeats : visibleSeatNumbers;
+        for (const seatNo of seatLoop) {
+          if (selectedBillSeats.length === 0 && !seatsWithItems.has(seatNo)) continue;
           const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
           groupsBuild.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
         }
-        const orphanSeats = [...seatsWithItems]
-          .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
-          .sort((a, b) => a - b);
-        if (orphanSeats.length > 0) {
-          groupsBuild.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
+        if (selectedBillSeats.length === 0) {
+          const orphanSeats = [...seatsWithItems]
+            .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
+            .sort((a, b) => a - b);
+          if (orphanSeats.length > 0) {
+            groupsBuild.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
+          }
         }
         splitGroups = groupsBuild;
       }
@@ -2888,8 +2898,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: activeSessionId,
-          splitBySeat,
+          splitBySeat: wantSplit,
           seatGroups: splitGroups,
+          billSeatNos: selectedBillSeats.length > 0 ? selectedBillSeats : undefined,
+          partialBill: selectedBillSeats.length > 0,
           pendingCartCount: cart.filter((line) => Number(line.qty || 0) > 0).length,
           tipAmount: Math.max(0, tipAmount || 0),
           agentGuid: selectedAgentGuid || undefined,
@@ -2901,6 +2913,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const t = await r.text();
       const j = tryParseJson<{
         splitApplied?: boolean;
+        partialBill?: boolean;
+        sessionStillOpen?: boolean;
+        billedSeats?: number[];
         invoiceId?: string;
         billNumber?: number;
         invoices?: Array<{
@@ -2918,7 +2933,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       if (!r.ok) throw new Error(t);
       const createdInvoices = Array.isArray(j.invoices) ? j.invoices : [];
       const firstInvoice = createdInvoices[0];
-      if (j.splitApplied && Array.isArray(j.invoices) && j.invoices.length > 1) {
+      const stillOpen = Boolean(j.sessionStillOpen || j.partialBill);
+      if (stillOpen && Array.isArray(j.billedSeats) && j.billedSeats.length) {
+        setMsg(
+          `تم إصدار فاتورة للمقاعد ${j.billedSeats.join("، ")} — باقي الطاولة ما زال مفتوحاً للطلب/الحساب.`,
+        );
+      } else if (j.splitApplied && Array.isArray(j.invoices) && j.invoices.length > 1) {
         setMsg(
           autoPrint
             ? `تم طلب الحساب وتقسيمه إلى ${j.invoices.length} شيكات. فُتح أول شيك للطباعة المباشرة، وبقية الشيكات متاحة من قائمة الجلسة.`
@@ -2952,8 +2972,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }
       }
       setBillReviewOpen(false);
-      setBillingRequestedAt(new Date().toISOString());
-      setCouponCode("");
+      setBillSeatNos([]);
+      if (stillOpen) {
+        setBillingRequestedAt(null);
+      } else {
+        setBillingRequestedAt(new Date().toISOString());
+        setCouponCode("");
+      }
       void loadSessionOrders();
       void loadSessionInvoices();
     } catch (e) {
@@ -5998,6 +6023,41 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
                       سبليت — فاتورة لكل ضيف؛ المشترك ١٣ يُقسَّم بالتساوي
                     </label>
+                    <div style={{ marginTop: 8, color: "#e5e7eb" }}>
+                      <div style={{ fontWeight: 800, fontSize: "0.8rem", marginBottom: 4 }}>
+                        حساب مقاعد محددة (بدون انتظار الباقي)
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {visibleSeatNumbers.map((sn) => {
+                          const on = billSeatNos.includes(sn);
+                          return (
+                            <button
+                              key={`bill-seat-${sn}`}
+                              type="button"
+                              className="waiter-pos__btn waiter-pos__btn--ghost"
+                              disabled={billingLocked}
+                              style={{
+                                padding: "4px 8px",
+                                fontWeight: 800,
+                                background: on ? "#fef3c7" : "transparent",
+                                color: on ? "#92400e" : "#e5e7eb",
+                                borderColor: on ? "#b45309" : undefined,
+                              }}
+                              onClick={() =>
+                                setBillSeatNos((prev) =>
+                                  prev.includes(sn) ? prev.filter((x) => x !== sn) : [...prev, sn].sort((a, b) => a - b),
+                                )
+                              }
+                            >
+                              {sn}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: "0.72rem", opacity: 0.85, marginTop: 4 }}>
+                        فارغ = كل المقاعد غير المفوترة. محدّد = فاتورة لهؤلاء فقط والطاولة تبقى مفتوحة.
+                      </div>
+                    </div>
                   </div>
                 </>
               </div>

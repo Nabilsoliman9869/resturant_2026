@@ -706,7 +706,8 @@ export function CashierPayInvoiceModal({
   const [visa, setVisa] = useState("");
   const [wallet, setWallet] = useState("");
   const [instapay, setInstapay] = useState("");
-  const [closeSession, setCloseSession] = useState(true);
+  /** افتراضي: لا تغلق الطاولة إن وُجدت فواتير شيكات أخرى بانتظار التسديد */
+  const [closeSession, setCloseSession] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [paying, setPaying] = useState(false);

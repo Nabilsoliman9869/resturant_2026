@@ -23902,6 +23902,133 @@ def _billing_profile_from_vip_template(template: dict) -> dict:
     }
 
 
+def _parse_owner_seat_nos(raw) -> list[int]:
+    """يقبل [2,3] أو '2,3' → مقاعد مالك 1..12."""
+    out: list[int] = []
+    if raw is None:
+        return out
+    if isinstance(raw, str):
+        parts = re.split(r"[\s,;]+", raw.strip())
+        seq = parts
+    elif isinstance(raw, (list, tuple, set)):
+        seq = list(raw)
+    else:
+        seq = [raw]
+    for x in seq:
+        try:
+            n = int(x)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= n <= 12 and n not in out:
+            out.append(n)
+    return sorted(out)
+
+
+def _seat_override_from_billing_profile(profile: Optional[dict]) -> dict:
+    """يحّول billingProfile جلسة إلى seatBillingOverrides لكرسي مالك."""
+    bp = profile if isinstance(profile, dict) else {}
+    try:
+        disc = float(bp.get("discountPct") or 0)
+    except (TypeError, ValueError):
+        disc = 0.0
+    disc = max(0.0, min(100.0, disc))
+    try:
+        cm = float(bp.get("costMarkupPct") or 0)
+    except (TypeError, ValueError):
+        cm = 0.0
+    cm = max(0.0, min(300.0, cm))
+    pm = str(bp.get("priceMode") or "menu").strip().lower()
+    if pm not in ("menu", "cost_plus"):
+        pm = "menu"
+    return {
+        "agentGuid": str(bp.get("vipAgentGuid") or "").strip().upper(),
+        "label": str(bp.get("vipOwnerLabel") or "").strip()[:200],
+        "noService": bool(bp.get("noService")),
+        "noVat": bool(bp.get("noVat")),
+        "discountPct": disc,
+        "priceMode": pm,
+        "costMarkupPct": cm if pm == "cost_plus" else 0.0,
+        "isOwner": True,
+    }
+
+
+def _billing_profile_from_seat_override(override: Optional[dict]) -> Optional[dict]:
+    """سياسة فوترة لمقعد واحد — None = نقدي عادي."""
+    if not isinstance(override, dict):
+        return None
+    is_owner = bool(override.get("isOwner")) or bool(str(override.get("agentGuid") or "").strip())
+    if not is_owner:
+        return None
+    ag = str(override.get("agentGuid") or "").strip().upper()
+    try:
+        disc = float(override.get("discountPct") or 0)
+    except (TypeError, ValueError):
+        disc = 0.0
+    disc = max(0.0, min(100.0, disc))
+    try:
+        cm = float(override.get("costMarkupPct") or 0)
+    except (TypeError, ValueError):
+        cm = 0.0
+    cm = max(0.0, min(300.0, cm))
+    pm = str(override.get("priceMode") or "menu").strip().lower()
+    if pm not in ("menu", "cost_plus"):
+        pm = "menu"
+    return {
+        "active": True,
+        "source": "seat_override",
+        "vipAgentGuid": ag,
+        "vipOwnerLabel": str(override.get("label") or "").strip()[:200],
+        "noService": bool(override.get("noService")),
+        "noVat": bool(override.get("noVat")),
+        "discountPct": disc,
+        "priceMode": pm,
+        "costMarkupPct": cm if pm == "cost_plus" else 0.0,
+    }
+
+
+def _resolve_batch_billing_profile(
+    seats: list[int],
+    seat_overrides: Optional[dict],
+    session_profile: Optional[dict],
+) -> Optional[dict]:
+    """
+    لكل دفعة فاتورة (مقعد/مجموعة):
+    - إن وُجدت seatBillingOverrides: أول مقعد مالك في الدفعة يحدد السياسة؛ بلا مالك → نقدي.
+    - وإلا (وضع قديم): سياسة الجلسة كلها.
+    """
+    ov = seat_overrides if isinstance(seat_overrides, dict) else {}
+    if ov:
+        for sn in seats:
+            prof = _billing_profile_from_seat_override(ov.get(str(sn)) or ov.get(sn))
+            if prof:
+                return prof
+        return None
+    if isinstance(session_profile, dict) and session_profile.get("active") is not False:
+        return dict(session_profile)
+    return None
+
+
+def _apply_owner_seats_to_session(session_row: dict, profile: Optional[dict], owner_seats: list[int]) -> None:
+    """يكتب seatBillingOverrides لمقاعد المالك ويمسح الباقي من وضع المالك."""
+    if not isinstance(session_row, dict):
+        return
+    if not profile or profile.get("active") is False:
+        session_row.pop("seatBillingOverrides", None)
+        session_row.pop("ownerSeatNos", None)
+        return
+    stub = _seat_override_from_billing_profile(profile)
+    if owner_seats:
+        merged = {}
+        for sn in owner_seats:
+            merged[str(sn)] = dict(stub)
+        session_row["seatBillingOverrides"] = merged
+        session_row["ownerSeatNos"] = list(owner_seats)
+    else:
+        # توافق قديم: بدون تحديد مقاعد = الطاولة كلها كمالك
+        session_row.pop("seatBillingOverrides", None)
+        session_row["ownerSeatNos"] = []
+
+
 def _assert_actor_may_manage_session_billing(session: dict, body: dict) -> None:
     """مسند الطلب أو المدير/المطوّر يغيّرون سياسة الفوترة على الجلسة."""
     actor = _mat3am_actor_from_body(body)
@@ -24514,8 +24641,12 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
                 detail="جلسة ضيف — لا يمكن تحويلها لملاك/VIP. أغلق الجلسة وأعد فتحها كجلسة عادية أولاً.",
             )
         _assert_actor_may_manage_session_billing(s, body)
+        owner_seats = _parse_owner_seat_nos(
+            body.get("ownerSeatNos") if body.get("ownerSeatNos") is not None else body.get("ownerSeats")
+        )
         if clear:
             s.pop("billingProfile", None)
+            _apply_owner_seats_to_session(s, None, [])
         elif vip_ag:
             conn = get_connection()
             if not conn:
@@ -24533,6 +24664,7 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
                     conn.close()
                 except Exception:
                     pass
+            _apply_owner_seats_to_session(s, s.get("billingProfile"), owner_seats)
         elif vip_tid:
             found = None
             for item in _vip_owner_templates_loaded():
@@ -24547,10 +24679,13 @@ def restaurant_patch_session_billing_profile(session_id: str, body: dict):
                     detail="قالب Owner/VIP بدون عميل في TBL016 — أكمل اختيار العميل ثم احفظ الإعدادات.",
                 )
             s["billingProfile"] = _billing_profile_from_vip_template(found)
+            _apply_owner_seats_to_session(s, s.get("billingProfile"), owner_seats)
         elif body.get("applyOpsDefaults") in (True, "1", "true", "yes", "on", 1):
             s["billingProfile"] = _billing_profile_from_ops_special_defaults()
+            _apply_owner_seats_to_session(s, s.get("billingProfile"), owner_seats)
         elif isinstance(body.get("billingProfile"), dict):
             s["billingProfile"] = body["billingProfile"]
+            _apply_owner_seats_to_session(s, s.get("billingProfile"), owner_seats)
         else:
             raise HTTPException(
                 status_code=400,
@@ -35899,10 +36034,23 @@ def restaurant_sessions_request_bill(body: dict):
             continue
         if str(o.get("status") or "").lower() == "cancelled":
             continue
-        if o.get("finalInvoiceId"):
+        # طلب مفوتر بالكامل فقط يُستبعد؛ الفوترة الجزئية بالمقعد تترك بنوداً بلا finalInvoiceId
+        items_o = o.get("items") if isinstance(o.get("items"), list) else []
+        has_unbilled_line = False
+        for raw_it in items_o:
+            if not isinstance(raw_it, dict):
+                continue
+            if bool(raw_it.get("cancelled")):
+                continue
+            if str(raw_it.get("finalInvoiceId") or "").strip():
+                continue
+            has_unbilled_line = True
+            break
+        if not has_unbilled_line and (o.get("finalInvoiceId") or o.get("invoiceId")):
             continue
-        if o.get("invoiceId"):
-            continue
+        if not has_unbilled_line and not items_o:
+            if o.get("finalInvoiceId") or o.get("invoiceId"):
+                continue
         pending.append(o)
     # حزم طلب الحساب:
     # - البنود التي لم تبدأ بالمطبخ تُلغى تلقائيًا (cancelled)
@@ -35953,10 +36101,12 @@ def restaurant_sessions_request_bill(body: dict):
             detail="لا توجد طلبات مفتوحة لهذه الجلسة (أو سبق فوترتها).",
         )
 
-    split_enabled = bool(body.get("splitBySeat"))
-    raw_groups = body.get("seatGroups") if isinstance(body.get("seatGroups"), list) else []
     tip_amount = max(0.0, float(body.get("tipAmount") or 0.0))
     coupon_code_req = str(body.get("couponCode") or body.get("coupon") or "").strip()
+    bill_seat_filter = _parse_owner_seat_nos(
+        body.get("billSeatNos") if body.get("billSeatNos") is not None else body.get("billSeats")
+    )
+    partial_bill = bool(body.get("partialBill")) or bool(bill_seat_filter)
     sess_rows = _restaurant_load("table_sessions", [])
     session_row = next(
         (
@@ -35977,6 +36127,12 @@ def restaurant_sessions_request_bill(body: dict):
         if isinstance(session_row, dict) and isinstance(session_row.get("billingProfile"), dict)
         else None
     )
+    seat_billing_overrides = (
+        dict(session_row.get("seatBillingOverrides"))
+        if isinstance(session_row, dict) and isinstance(session_row.get("seatBillingOverrides"), dict)
+        else {}
+    )
+    seat_scoped_billing = bool(seat_billing_overrides)
     billing_profile_active = bool(session_billing_profile) and session_billing_profile.get("active") is not False
 
     def _extract_seat_num(item_name: str) -> Optional[int]:
@@ -35988,6 +36144,9 @@ def restaurant_sessions_request_bill(body: dict):
         except Exception:
             return None
 
+    split_enabled = bool(body.get("splitBySeat")) or seat_scoped_billing or partial_bill
+    raw_groups = body.get("seatGroups") if isinstance(body.get("seatGroups"), list) else []
+
     split_groups: list[dict] = []
     if split_enabled:
         for idx, g in enumerate(raw_groups):
@@ -35997,6 +36156,10 @@ def restaurant_sessions_request_bill(body: dict):
             seats = sorted({int(x) for x in seats_raw if str(x).isdigit() and int(x) > 0})
             if not seats:
                 continue
+            if bill_seat_filter:
+                seats = [x for x in seats if x in bill_seat_filter]
+            if not seats:
+                continue
             split_groups.append(
                 {
                     "id": str(g.get("id") or f"check-{idx+1}"),
@@ -36004,8 +36167,15 @@ def restaurant_sessions_request_bill(body: dict):
                     "seats": seats,
                 }
             )
-        if len(split_groups) < 2:
+        # سماح بفاتورة مقعد واحد (حساب منفصل) — لا نشترط مجموعتين
+        if not split_groups and (seat_scoped_billing or partial_bill):
+            split_enabled = True
+        elif len(split_groups) < 1:
             split_enabled = False
+        elif len(split_groups) == 1 and not partial_bill and not seat_scoped_billing:
+            # سلوك قديم: سبليت يحتاج مجموعتين ما لم يكن حساباً جزئياً/مالك مقاعد
+            if not bool(body.get("splitBySeat")):
+                split_enabled = False
 
     approved_return_qty_map = _approved_guest_return_qty_map_for_session(session_id)
     items_body = []
@@ -36014,6 +36184,9 @@ def restaurant_sessions_request_bill(body: dict):
             if not isinstance(raw_it, dict):
                 continue
             it = _kds_normalize_item(raw_it)
+            # بند سبق فوترته (حساب مقعد منفصل) — تخطّيه
+            if str(it.get("finalInvoiceId") or raw_it.get("finalInvoiceId") or "").strip():
+                continue
             pg = str(it.get("productGuide") or raw_it.get("productId") or raw_it.get("menuItemId") or "")
             name = str(it.get("name") or "")
             order_line_id = str(it.get("lineId") or raw_it.get("lineId") or "")
@@ -36026,6 +36199,9 @@ def restaurant_sessions_request_bill(body: dict):
                         seat_num = nn
                 except (TypeError, ValueError):
                     pass
+            if bill_seat_filter:
+                if seat_num is None or int(seat_num) not in bill_seat_filter:
+                    continue
             qty = float(it.get("quantity") or 0)
             approved_return_qty = float(
                 approved_return_qty_map.get((str(o.get("id") or ""), order_line_id), 0.0) or 0.0
@@ -36131,6 +36307,28 @@ def restaurant_sessions_request_bill(body: dict):
     # كرسي ١٣ وهمي: بنود «طلب مشترك» تُوزّع بالتساوي على شيكات السبليت (لا يُنشأ شيك باسمه)
     SHARED_SPLIT_SEAT_NUM = 13
 
+    # إن لم تُرسل مجموعات: ابنِ شيكاً لكل مقعد له بنود (مالك مقاعد / حساب جزئي)
+    if split_enabled and not split_groups:
+        seat_labels = (
+            session_row.get("seatGuestLabels")
+            if isinstance(session_row, dict) and isinstance(session_row.get("seatGuestLabels"), dict)
+            else {}
+        )
+        seats_present = sorted(
+            {
+                int(x.get("_seatNum"))
+                for x in items_body
+                if x.get("_seatNum") is not None
+                and str(x.get("_seatNum")).isdigit()
+                and int(x.get("_seatNum")) != SHARED_SPLIT_SEAT_NUM
+            }
+        )
+        if bill_seat_filter:
+            seats_present = [s for s in seats_present if s in bill_seat_filter]
+        for sn in seats_present:
+            lbl = str(seat_labels.get(str(sn)) or seat_labels.get(sn) or "").strip() or f"مقعد {sn}"
+            split_groups.append({"id": f"check-{sn}", "name": lbl, "seats": [sn]})
+
     invoice_batches: list[dict] = []
     if split_enabled:
         shared_split_pool = [dict(x) for x in items_body if x.get("_seatNum") == SHARED_SPLIT_SEAT_NUM]
@@ -36140,11 +36338,17 @@ def restaurant_sessions_request_bill(body: dict):
             g_items = [dict(x) for x in items_for_batches if x.get("_seatNum") in seats]
             if not g_items:
                 continue
-            for x in g_items:
-                x.pop("_seatNum", None)
             g_sub = sum(float(x.get("TotalValue") or 0) for x in g_items)
-            invoice_batches.append({"name": g["name"], "items": g_items, "subtotal": g_sub})
-        if len(invoice_batches) < 2:
+            invoice_batches.append(
+                {
+                    "name": g["name"],
+                    "items": g_items,
+                    "subtotal": g_sub,
+                    "seats": sorted(seats),
+                }
+            )
+        # حساب مقعد واحد مسموح؛ أقل من شيك واحد → ألغِ السبليت
+        if len(invoice_batches) < 1:
             split_enabled = False
         elif split_enabled:
             orphans = [dict(x) for x in items_for_batches if x.get("_seatNum") is None]
@@ -36189,9 +36393,21 @@ def restaurant_sessions_request_bill(body: dict):
 
     if not split_enabled:
         items_one = [dict(x) for x in items_body]
-        for x in items_one:
-            x.pop("_seatNum", None)
-        invoice_batches = [{"name": "فاتورة الجلسة", "items": items_one, "subtotal": sum(float(x.get("TotalValue") or 0) for x in items_one)}]
+        seats_one = sorted(
+            {
+                int(x.get("_seatNum"))
+                for x in items_one
+                if x.get("_seatNum") is not None and str(x.get("_seatNum")).isdigit()
+            }
+        )
+        invoice_batches = [
+            {
+                "name": "فاتورة الجلسة",
+                "items": items_one,
+                "subtotal": sum(float(x.get("TotalValue") or 0) for x in items_one),
+                "seats": seats_one,
+            }
+        ]
 
     conn = get_connection()
     if not conn:
@@ -36200,30 +36416,13 @@ def restaurant_sessions_request_bill(body: dict):
         cursor = conn.cursor()
         _ensure_menu_tables(cursor)
         pos_policy = _mat3am_pos_policy_row_from_cursor(cursor)
-        profile_agent = (
-            str(session_billing_profile.get("vipAgentGuid") or "").strip().upper()
-            if isinstance(session_billing_profile, dict)
+        default_cash_agent = _pick_default_cash_agent_guid(cursor)
+        req_agent = str(body.get("agentGuid") or "").strip()
+        session_agent = (
+            str(session_row.get("agentGuid") or "").strip().upper()
+            if isinstance(session_row, dict)
             else ""
         )
-        req_agent = str(body.get("agentGuid") or "").strip()
-        session_agent = str(session_row.get("agentGuid") or "").strip().upper()
-        if profile_agent:
-            agent_guide = profile_agent
-        elif req_agent:
-            agent_guide = req_agent
-        elif session_agent:
-            agent_guide = session_agent
-        else:
-            agent_guide = _pick_default_cash_agent_guid(cursor)
-        if not agent_guide:
-            raise HTTPException(status_code=400, detail="لا يوجد عميل افتراضي في TBL016")
-        agent_name = ""
-        try:
-            cursor.execute("SELECT TOP 1 AgentName FROM dbo.TBL016 WHERE CardGuide = CAST(? AS uniqueidentifier)", (agent_guide,))
-            r = cursor.fetchone()
-            agent_name = str(r[0]).strip() if r and r[0] else ""
-        except Exception:
-            pass
         order_kind = _normalize_restaurant_order_kind(str(body.get("orderType") or "table"))
         invoice_type_guid = _get_restaurant_invoice_type_guid(cursor, order_kind, body.get("invoiceType") or body.get("invoiceTypeGuide") or body.get("invoiceTypeName"))
         cursor.execute(
@@ -36243,54 +36442,119 @@ def restaurant_sessions_request_bill(body: dict):
         else:
             bill_date = today
         created_invoices: list[dict] = []
+        billed_line_keys: set[tuple[str, str]] = set()
         parts_count = max(1, len(invoice_batches))
         share_tip = tip_amount / parts_count
         table_phrase = _restaurant_table_phrase_for_bill_notes(session_id)
         discount_meta_all: list[dict] = []
         for idx, part in enumerate(invoice_batches):
-            part_items = [dict(x) for x in (part["items"] or []) if isinstance(x, dict)]
-            if not part_items:
+            part_items_raw = [dict(x) for x in (part["items"] or []) if isinstance(x, dict)]
+            if not part_items_raw:
                 continue
-            if billing_profile_active:
-                part_items = _apply_billing_profile_to_invoice_lines(cursor, part_items, session_billing_profile)
+            part_seats = [int(s) for s in (part.get("seats") or []) if str(s).isdigit()]
+            if not part_seats:
+                part_seats = sorted(
+                    {
+                        int(x.get("_seatNum"))
+                        for x in part_items_raw
+                        if x.get("_seatNum") is not None and str(x.get("_seatNum")).isdigit()
+                    }
+                )
+            part_profile = _resolve_batch_billing_profile(
+                part_seats,
+                seat_billing_overrides if seat_scoped_billing else None,
+                session_billing_profile if billing_profile_active else None,
+            )
+            part_profile_active = bool(part_profile) and part_profile.get("active") is not False
+
+            # أسعار مجملة قبل أي خصم سطري — لتجنّب مضاعفة الخصم في SQL
+            if part_profile_active:
+                priced_items = _apply_billing_profile_to_invoice_lines(cursor, part_items_raw, part_profile)
             else:
-                part_items = _enrich_invoice_lines_from_menu(cursor, part_items)
-            # كوبون + خصم مدير (صنف/إجمالي) — يُعاد حساب الخدمة والضريبة دائماً
-            disc_meta = _invoice_resolve_manager_and_coupon_discounts(body if isinstance(body, dict) else {}, part_items)
+                priced_items = _enrich_invoice_lines_from_menu(cursor, part_items_raw)
+            for x in priced_items:
+                x.pop("_seatNum", None)
+            gross_before = round(sum(float(x.get("TotalValue") or 0) for x in priced_items), 2)
+            work_items = [dict(x) for x in priced_items]
+            disc_meta = _invoice_resolve_manager_and_coupon_discounts(body if isinstance(body, dict) else {}, work_items)
             if str(disc_meta.get("couponCode") or "").strip() and not disc_meta.get("couponMatched"):
                 raise HTTPException(
                     status_code=400,
                     detail=f"كود الكوبون غير صالح أو غير نشط: {disc_meta.get('couponCode')}",
                 )
             discount_meta_all.append(disc_meta)
-            tip_p = float(share_tip if split_enabled else tip_amount)
+            tip_p = float(share_tip if (split_enabled or partial_bill) else tip_amount)
             part_totals = _billing_profile_invoice_totals(
-                part_items,
-                session_billing_profile if billing_profile_active else None,
+                work_items,
+                part_profile if part_profile_active else None,
                 pos_policy,
                 tip_p,
                 extra_discount=float(disc_meta.get("extraDiscount") or 0),
             )
+            # خصم واحد في رأس الفاتورة؛ البنود تُحفظ بالإجمالي قبل الخصم
+            sql_discount = round(
+                max(0.0, gross_before - float(part_totals.get("netAfterDiscount") or 0)),
+                2,
+            )
+            profile_agent = (
+                str(part_profile.get("vipAgentGuid") or "").strip().upper()
+                if part_profile_active and isinstance(part_profile, dict)
+                else ""
+            )
+            if profile_agent:
+                agent_guide = profile_agent
+            elif req_agent:
+                agent_guide = req_agent
+            elif session_agent:
+                agent_guide = session_agent
+            else:
+                agent_guide = default_cash_agent
+            if not agent_guide:
+                raise HTTPException(status_code=400, detail="لا يوجد عميل افتراضي في TBL016")
+            agent_name = ""
+            try:
+                cursor.execute(
+                    "SELECT TOP 1 AgentName FROM dbo.TBL016 WHERE CardGuide = CAST(? AS uniqueidentifier)",
+                    (agent_guide,),
+                )
+                r = cursor.fetchone()
+                agent_name = str(r[0]).strip() if r and r[0] else ""
+            except Exception:
+                pass
             coupon_note = ""
             if str(disc_meta.get("couponCode") or "").strip():
                 coupon_note = f" | كوبون={disc_meta.get('couponCode')}"
+            owner_note = ""
+            if part_profile_active:
+                owner_note = f" | مالك={part_profile.get('vipOwnerLabel') or agent_name or 'VIP'}"
+            elif seat_scoped_billing:
+                owner_note = " | نقدي"
             inv = {
                 "BillNumber": bill_num + idx,
                 "BillDate": bill_date,
                 "DoneIn": bill_date,
                 "AgentGuide": agent_guide,
                 "InvoiceType": invoice_type_guid,
-                "Notes": f"مطعم — طلب حساب — {table_phrase} — {part['name']}{coupon_note}",
+                "Notes": f"مطعم — طلب حساب — {table_phrase} — {part['name']}{owner_note}{coupon_note}",
                 "PaymentMethod": "نقدي",
-                "Discount": part_totals["discountValue"],
+                "Discount": sql_discount,
                 "TaxValue": part_totals["tax"],
                 "LocalAdministrativeTax": part_totals["serviceCharge"],
-                "Items": part_items,
+                "Items": priced_items,
             }
             invoice_header = InvoiceHeader(**inv)
             result = save_invoice(invoice_header)
             main_g = str(result.get("MainGuide") or "")
-            lines_agg = _invoice_lines_aggregate_for_store(part_items)
+            lines_agg = _invoice_lines_aggregate_for_store(priced_items)
+            source_lines = _invoice_source_lines_from_part_items(priced_items)
+            for sl in source_lines:
+                if isinstance(sl, dict):
+                    billed_line_keys.add(
+                        (str(sl.get("orderId") or ""), str(sl.get("lineId") or ""))
+                    )
+            # احتفظ بمفاتيح البنود من part الأصلي
+            for x in part_items_raw:
+                billed_line_keys.add((str(x.get("_orderId") or ""), str(x.get("_lineId") or "")))
             created_invoices.append(
                 {
                     "invoiceId": main_g,
@@ -36299,16 +36563,18 @@ def restaurant_sessions_request_bill(body: dict):
                     "tipAmount": tip_p,
                     "billNumber": bill_num + idx,
                     "subtotal": part_totals["netAfterDiscount"],
-                    "grossSubtotal": part_totals["subtotal"],
+                    "grossSubtotal": gross_before,
                     "tax": part_totals["tax"],
                     "serviceCharge": part_totals["serviceCharge"],
-                    "discount": part_totals["discountValue"],
+                    "discount": sql_discount,
                     "discountPct": part_totals["discountPct"],
+                    "vipDiscount": float(part_totals.get("vipDiscount") or 0),
                     "couponCode": str(disc_meta.get("couponCode") or "") or None,
                     "promoNotes": list(disc_meta.get("promoNotes") or []),
-                    "billingProfile": dict(session_billing_profile) if isinstance(session_billing_profile, dict) else None,
+                    "billingProfile": dict(part_profile) if part_profile_active else None,
+                    "seats": part_seats,
                     "lines": lines_agg,
-                    "sourceLines": _invoice_source_lines_from_part_items(part_items),
+                    "sourceLines": source_lines,
                     "agentGuid": agent_guide,
                     "agentName": agent_name,
                 }
@@ -36317,14 +36583,58 @@ def restaurant_sessions_request_bill(body: dict):
         if not created_invoices:
             raise HTTPException(status_code=500, detail="تعذر إنشاء فواتير للجلسة")
         now_iso = datetime.now().isoformat()
-        pending_ids = {str(o.get("id")) for o in pending if o.get("id")}
+        inv_ids_joined = ",".join([x["invoiceId"] for x in created_invoices])
+        still_unbilled_any = False
         for o in all_o:
             if not isinstance(o, dict):
                 continue
-            if str(o.get("id") or "") in pending_ids:
-                o["finalInvoiceId"] = ",".join([x["invoiceId"] for x in created_invoices])
+            if str(o.get("sessionId") or "").strip() not in billing_session_ids and str(
+                o.get("billingSessionId") or ""
+            ).strip() not in billing_session_ids:
+                continue
+            items = o.get("items") if isinstance(o.get("items"), list) else []
+            changed = False
+            order_all_billed = True
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                if bool(it.get("cancelled")):
+                    continue
+                lid = str(it.get("lineId") or "")
+                key = (str(o.get("id") or ""), lid)
+                # مطابقة مرنة إن لم يوجد lineId
+                matched = key in billed_line_keys or (
+                    not lid and any(k[0] == str(o.get("id") or "") for k in billed_line_keys)
+                )
+                if matched and not str(it.get("finalInvoiceId") or "").strip():
+                    # اربط البند بأول فاتورة تحتوي مقعده إن أمكن
+                    seat_inv = inv_ids_joined
+                    for part in created_invoices:
+                        seats_p = part.get("seats") if isinstance(part.get("seats"), list) else []
+                        sn = it.get("seatNo")
+                        try:
+                            sn_i = int(sn) if sn is not None else None
+                        except (TypeError, ValueError):
+                            sn_i = None
+                        if sn_i is not None and sn_i in [int(x) for x in seats_p if str(x).isdigit()]:
+                            seat_inv = str(part.get("invoiceId") or seat_inv)
+                            break
+                    it["finalInvoiceId"] = seat_inv
+                    it["billedAt"] = now_iso
+                    changed = True
+                if not bool(it.get("cancelled")) and not str(it.get("finalInvoiceId") or "").strip():
+                    order_all_billed = False
+                    still_unbilled_any = True
+            if changed:
+                o["items"] = items
+                o["billingSessionId"] = session_id
+            if order_all_billed and items:
+                o["finalInvoiceId"] = inv_ids_joined
                 o["billedAt"] = now_iso
                 o["billingSessionId"] = session_id
+            elif changed and not order_all_billed:
+                # فوترة جزئية — لا تغلق الطلب بالكامل
+                o.pop("finalInvoiceId", None)
         _restaurant_save("orders", all_o)
         inv_list = _restaurant_load("invoices", [])
         for part in created_invoices:
@@ -36336,7 +36646,7 @@ def restaurant_sessions_request_bill(body: dict):
                     "requestedAt": now_iso,
                     "awaitingPayment": True,
                     "paidAt": None,
-                    "splitName": part["name"] if split_enabled else None,
+                    "splitName": part["name"] if (split_enabled or partial_bill) else None,
                     "tipAmount": part.get("tipAmount") or 0.0,
                     "billNumber": part.get("billNumber"),
                     "subtotal": part.get("subtotal"),
@@ -36347,7 +36657,8 @@ def restaurant_sessions_request_bill(body: dict):
                     "promoNotes": part.get("promoNotes") if isinstance(part.get("promoNotes"), list) else [],
                     "lines": part.get("lines") if isinstance(part.get("lines"), list) else [],
                     "sourceLines": part.get("sourceLines") if isinstance(part.get("sourceLines"), list) else [],
-                    "billingProfile": dict(session_billing_profile) if isinstance(session_billing_profile, dict) else None,
+                    "billingProfile": part.get("billingProfile"),
+                    "seats": part.get("seats") if isinstance(part.get("seats"), list) else [],
                     "agentGuid": part.get("agentGuid"),
                     "agentName": part.get("agentName"),
                     "printCount": 0,
@@ -36362,18 +36673,36 @@ def restaurant_sessions_request_bill(body: dict):
         _restaurant_save("invoices", inv_list)
         sess = _restaurant_load("table_sessions", [])
         table_id_for_policy = str(pending[0].get("tableId") or "").strip() if pending else ""
+        billed_seats_now = sorted(
+            {
+                int(s)
+                for part in created_invoices
+                for s in (part.get("seats") or [])
+                if str(s).isdigit()
+            }
+        )
         for s in sess:
             if not isinstance(s, dict):
                 continue
             current_session_id = str(s.get("id") or "")
-            if current_session_id in billing_session_ids:
-                s["billingRequestedAt"] = now_iso
             if current_session_id == session_id:
                 if not table_id_for_policy:
                     table_id_for_policy = str(s.get("tableId") or "").strip()
-                # الكوبون استُهلك مع طلب الحساب
-                if s.get("couponCode"):
+                prev_billed = s.get("billedSeats") if isinstance(s.get("billedSeats"), dict) else {}
+                for sn in billed_seats_now:
+                    prev_billed[str(sn)] = inv_ids_joined
+                s["billedSeats"] = prev_billed
+                # اقفل الجلسة فقط إن لم يتبقَّ بنود غير مفوترة
+                if still_unbilled_any:
+                    s.pop("billingRequestedAt", None)
+                    s["partialBillingAt"] = now_iso
+                else:
+                    s["billingRequestedAt"] = now_iso
+                    s.pop("partialBillingAt", None)
+                if s.get("couponCode") and not still_unbilled_any:
                     s["couponCode"] = None
+            elif current_session_id in billing_session_ids and not still_unbilled_any:
+                s["billingRequestedAt"] = now_iso
         _restaurant_save("table_sessions", sess)
         if table_id_for_policy:
             try:
@@ -36409,7 +36738,10 @@ def restaurant_sessions_request_bill(body: dict):
             "total": sum(float(x["total"]) for x in created_invoices),
             "awaitingPayment": True,
             "sessionId": session_id,
-            "splitApplied": split_enabled,
+            "splitApplied": bool(split_enabled or partial_bill or len(created_invoices) > 1),
+            "partialBill": bool(still_unbilled_any or partial_bill),
+            "sessionStillOpen": bool(still_unbilled_any),
+            "billedSeats": billed_seats_now,
             "tipAmount": tip_amount,
             "invoices": created_invoices,
             "workflow": {

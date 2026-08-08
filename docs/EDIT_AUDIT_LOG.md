@@ -1032,3 +1032,11 @@ eserved + active.
 ### 144 — إصلاح FK_TBL023_TBL007 عند حفظ أوامر EXE — UTC 2026-08-05T13:05:00Z — ID `exe-fk023-7c4e9a12b0d1`
 
 - **`backend/api_server.py`:** قبل INSERT بنود `TBL023` يُضمن وجود `ProductGuide` في `TBL007` (مطابقة بالاسم بعد إزالة لاحقة المقعد، ثم إنشاء صنف تلقائي في مجموعة «أصناف POS تلقائي») لمنع سقوط حفظ فاتورة العميل على EXE.
+
+### 145 — محاسبة مالك بالمقاعد + حساب جزئي + خصم مرة واحدة — UTC 2026-08-08T08:40:00Z — ID `owner-seats-bill-a8f31c2e`
+
+- **`backend/api_server.py`:** `ownerSeatNos` / `seatBillingOverrides` عند تطبيق Owner/VIP؛ طلب حساب بمقاعد مختارة (`billSeatNos`/`partialBill`) مع سياسة لكل دفعة؛ فوترة بنود وليس الطلب كله؛ خصم SQL من الإجمالي قبل الخصم مرة واحدة.
+- **`WaiterTablesPage.tsx`:** اختيار مقاعد المالك عند تطبيق VIP.
+- **`WaiterOrderPage.tsx`:** اختيار مقاعد لطلب الحساب المنفصل؛ `kitchenTotals` قبل خصم المالك.
+- **`CashierPayInvoiceModal.tsx`:** افتراضي عدم إغلاق الجلسة بعد تسديد شيك واحد.
+- توثيق: `docs/DELIVERY_AXES_PACKAGE.md`.
