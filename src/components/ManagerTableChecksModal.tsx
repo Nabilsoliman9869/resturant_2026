@@ -170,45 +170,34 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
       role="dialog"
       aria-modal="true"
       aria-label="شيكات الطاولة"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1180,
-        background: "rgba(2,6,23,0.62)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "1rem",
-      }}
+      className="waiter-pos__glass-overlay"
+      style={{ zIndex: 1320 }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !payOpen && !amendInv) onClose();
       }}
     >
       <div
-        className="card"
-        style={{
-          width: "min(920px, 100%)",
-          maxHeight: "92vh",
-          overflow: "auto",
-          direction: "rtl",
-          padding: "1rem 1.1rem",
-        }}
+        className="waiter-pos__glass-panel waiter-pos__ops-modal--wide"
+        style={{ padding: 0, overflow: "hidden" }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "1.15rem" }}>شيكات الطاولة</h2>
-            <div style={{ color: "var(--muted)", fontSize: "0.84rem", marginTop: 4 }}>
+        <div className="waiter-pos__ops-modal__head">
+          <div className="waiter-pos__ops-modal__head-copy">
+            <h2 className="waiter-pos__ops-modal__title" style={{ fontSize: "1.25rem" }}>
+              شيكات الطاولة
+            </h2>
+            <div className="waiter-pos__ops-modal__note">
               {tableLabel || "طاولة"} · آخر {daysBack} يوم · كل الشيكات المنفَّذة/المعلّقة
             </div>
           </div>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
-            إغلاق
+          <button type="button" className="waiter-pos__ops-modal__close" onClick={onClose} aria-label="إغلاق">
+            ×
           </button>
         </div>
+        <div className="waiter-pos__ops-modal__body">
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12, alignItems: "center" }}>
-          <label style={{ fontSize: "0.82rem", fontWeight: 700 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <label style={{ fontSize: "0.86rem", fontWeight: 800, color: "#0f172a" }}>
             المدى:{" "}
             <select value={daysBack} onChange={(e) => setDaysBack(Number(e.target.value) || 7)} style={{ marginInlineStart: 6 }}>
               <option value={1}>اليوم</option>
@@ -217,31 +206,31 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
               <option value={30}>30 يوم</option>
             </select>
           </label>
-          <button type="button" className="btn btn-ghost" style={{ fontSize: "0.8rem" }} onClick={() => void load()} disabled={loading}>
+          <button type="button" className="btn btn-ghost" style={{ fontSize: "0.82rem" }} onClick={() => void load()} disabled={loading}>
             {loading ? "…" : "تحديث"}
           </button>
         </div>
 
         {msg ? (
-          <p style={{ marginTop: 10, color: msg.includes("تم") ? "#86efac" : "#fca5a5", fontSize: "0.85rem" }}>{msg}</p>
+          <p style={{ marginTop: 10, color: msg.includes("تم") ? "#166534" : "#b91c1c", fontSize: "0.88rem", fontWeight: 700 }}>{msg}</p>
         ) : null}
 
         <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.86rem" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem", color: "#0f172a" }}>
             <thead>
-              <tr style={{ textAlign: "right", borderBottom: "1px solid var(--border)" }}>
-                <th style={{ padding: "0.45rem" }}>الوقت</th>
-                <th style={{ padding: "0.45rem" }}>رقم</th>
-                <th style={{ padding: "0.45rem" }}>الحالة</th>
-                <th style={{ padding: "0.45rem" }}>الدفع</th>
-                <th style={{ padding: "0.45rem" }}>الإجمالي</th>
-                <th style={{ padding: "0.45rem" }}></th>
+              <tr style={{ textAlign: "right", borderBottom: "1px solid rgba(15,23,42,0.12)" }}>
+                <th style={{ padding: "0.55rem", color: "#334155" }}>الوقت</th>
+                <th style={{ padding: "0.55rem", color: "#334155" }}>رقم</th>
+                <th style={{ padding: "0.55rem", color: "#334155" }}>الحالة</th>
+                <th style={{ padding: "0.55rem", color: "#334155" }}>الدفع</th>
+                <th style={{ padding: "0.55rem", color: "#334155" }}>الإجمالي</th>
+                <th style={{ padding: "0.55rem" }}></th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: "1rem", color: "var(--muted)" }}>
+                  <td colSpan={6} style={{ padding: "1rem", color: "#475569", fontWeight: 700 }}>
                     {loading ? "جاري التحميل…" : "لا شيكات لهذه الطاولة في المدى المحدد."}
                   </td>
                 </tr>
@@ -249,20 +238,20 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
                 rows.map((inv) => {
                   const when = String(inv.paidAt || inv.requestedAt || "").replace("T", " ").slice(0, 16);
                   return (
-                    <tr key={String(inv.invoiceId)} style={{ borderBottom: "1px solid rgba(148,163,184,0.18)" }}>
-                      <td style={{ padding: "0.45rem" }}>{when || "—"}</td>
-                      <td style={{ padding: "0.45rem", fontWeight: 800 }}>
+                    <tr key={String(inv.invoiceId)} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)" }}>
+                      <td style={{ padding: "0.55rem" }}>{when || "—"}</td>
+                      <td style={{ padding: "0.55rem", fontWeight: 900 }}>
                         {inv.billNumber != null ? `#${inv.billNumber}` : String(inv.invoiceId || "").slice(0, 8)}
                       </td>
-                      <td style={{ padding: "0.45rem" }}>{statusLabel(inv)}</td>
-                      <td style={{ padding: "0.45rem" }}>{inv.paymentMethod || "—"}</td>
-                      <td style={{ padding: "0.45rem", fontWeight: 800 }}>{money(Number(inv.total || 0))}</td>
-                      <td style={{ padding: "0.45rem" }}>
+                      <td style={{ padding: "0.55rem" }}>{statusLabel(inv)}</td>
+                      <td style={{ padding: "0.55rem" }}>{inv.paymentMethod || "—"}</td>
+                      <td style={{ padding: "0.55rem", fontWeight: 900 }}>{money(Number(inv.total || 0))}</td>
+                      <td style={{ padding: "0.55rem" }}>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button type="button" className="btn btn-primary" style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }} onClick={() => openCheck(inv)}>
+                          <button type="button" className="btn btn-primary" style={{ fontSize: "0.78rem", padding: "0.28rem 0.65rem" }} onClick={() => openCheck(inv)}>
                             فتح / طباعة
                           </button>
-                          <button type="button" className="btn btn-ghost" style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }} onClick={() => startAmend(inv)}>
+                          <button type="button" className="btn btn-ghost" style={{ fontSize: "0.78rem", padding: "0.28rem 0.65rem" }} onClick={() => startAmend(inv)}>
                             تصحيح
                           </button>
                         </div>
@@ -273,6 +262,7 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
               )}
             </tbody>
           </table>
+        </div>
         </div>
       </div>
 
@@ -295,26 +285,19 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
         <div
           role="dialog"
           aria-modal="true"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 1190,
-            background: "rgba(2,6,23,0.55)",
-            display: "grid",
-            placeItems: "center",
-            padding: 16,
-          }}
+          className="waiter-pos__glass-overlay"
+          style={{ zIndex: 1330 }}
           onClick={() => !amendBusy && setAmendInv(null)}
         >
           <div
-            className="card"
-            style={{ width: "min(640px, 100%)", maxHeight: "90vh", overflow: "auto", padding: "1rem", direction: "rtl" }}
+            className="waiter-pos__glass-panel"
+            style={{ width: "min(720px, calc(100vw - 28px))", maxHeight: "90vh", overflow: "auto", padding: "1.15rem 1.25rem" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontWeight: 900, marginBottom: 8 }}>
+            <div style={{ fontWeight: 950, marginBottom: 8, color: "#0f172a", fontSize: "1.12rem" }}>
               تصحيح شيك {amendInv.billNumber != null ? `#${amendInv.billNumber}` : String(amendInv.invoiceId || "").slice(0, 8)}
             </div>
-            <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: 10 }}>
+            <div style={{ fontSize: "0.86rem", color: "#334155", marginBottom: 10, fontWeight: 700, lineHeight: 1.5 }}>
               عدّل الأصناف/الأسعار وطريقة الدفع ثم احفظ مع سبب إلزامي (يُسجَّل في التدقيق).
             </div>
             <div style={{ display: "grid", gap: 8 }}>

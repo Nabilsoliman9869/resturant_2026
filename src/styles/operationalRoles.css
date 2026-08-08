@@ -1130,27 +1130,45 @@
   font-weight: 850 !important;
 }
 
-.waiter-pos__ops-modal-overlay {
+/* نوافذ منبثقة شفافة: نقطة البيع تبقى مرئية خلفها مع تباين خط واضح */
+.waiter-pos__ops-modal-overlay,
+.waiter-pos__glass-overlay {
   position: fixed;
   inset: 0;
   z-index: 1300;
-  background: rgba(2, 9, 23, 0.68);
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: clamp(12px, 2.5vw, 28px);
 }
 
-.waiter-pos__ops-modal {
-  width: min(1120px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+.waiter-pos__ops-modal,
+.waiter-pos__glass-panel {
+  width: min(1040px, calc(100vw - 28px));
+  max-height: min(90vh, calc(100vh - 28px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 20px;
-  border: 1px solid rgba(51, 65, 85, 0.95);
-  background: linear-gradient(180deg, #0b1220 0%, #111827 100%);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.48);
+  border-radius: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(248, 250, 252, 0.93);
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  box-shadow: 0 28px 70px rgba(2, 6, 23, 0.28);
+  color: #0f172a;
+  direction: rtl;
+}
+
+.waiter-pos__ops-modal--seat-picker {
+  width: min(640px, calc(100vw - 28px));
+  max-height: min(82vh, calc(100vh - 28px));
+}
+
+.waiter-pos__ops-modal--wide {
+  width: min(1120px, calc(100vw - 28px));
 }
 
 .waiter-pos__ops-modal__head {
@@ -1158,9 +1176,9 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  padding: 18px 20px 16px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(15, 23, 42, 0.88) 100%);
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.62);
 }
 
 .waiter-pos__ops-modal__head-copy {
@@ -1169,27 +1187,28 @@
 
 .waiter-pos__ops-modal__title {
   margin: 0;
-  color: #f8fafc;
-  font-size: 1.2rem;
+  color: #0f172a;
+  font-size: clamp(1.15rem, 2.2vw, 1.35rem);
   font-weight: 950;
+  letter-spacing: 0.01em;
 }
 
 .waiter-pos__ops-modal__note {
   margin-top: 6px;
-  color: #94a3b8;
-  font-size: 0.84rem;
+  color: #334155;
+  font-size: 0.9rem;
   font-weight: 700;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .waiter-pos__ops-modal__close {
   flex-shrink: 0;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  background: rgba(15, 23, 42, 0.65);
-  color: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.88);
+  color: #0f172a;
   font-size: 1.35rem;
   line-height: 1;
   cursor: pointer;
@@ -1199,7 +1218,29 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 18px 20px 20px;
+  padding: 20px 22px 22px;
+  color: #0f172a;
+}
+
+/* داخل النوافذ الزجاجية: لا ترث ألوان الهيدر الداكن لنقطة البيع */
+.waiter-pos__ops-modal .waiter-pos__btn,
+.waiter-pos__ops-modal .waiter-pos__btn--ghost,
+.waiter-pos__glass-panel .waiter-pos__btn,
+.waiter-pos__glass-panel .waiter-pos__btn--ghost {
+  color: #0f172a !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+.waiter-pos__ops-modal input,
+.waiter-pos__ops-modal select,
+.waiter-pos__ops-modal textarea,
+.waiter-pos__glass-panel input,
+.waiter-pos__glass-panel select,
+.waiter-pos__glass-panel textarea {
+  color: #0f172a !important;
+  background: #ffffff !important;
+  -webkit-text-fill-color: #0f172a;
 }
 
 .waiter-pos__ops-modal__grid-row {
@@ -1207,10 +1248,121 @@
   grid-template-columns: minmax(0, 1.6fr) 140px 170px 96px;
   gap: 10px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(15, 23, 42, 0.42);
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  color: #0f172a;
+}
+
+.waiter-pos__seat-pick-chip {
+  min-width: 88px;
+  min-height: 48px;
+  padding: 0.55rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  font-weight: 900;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.waiter-pos__seat-pick-chip.is-on {
+  background: #fef3c7;
+  border-color: #b45309;
+  color: #78350f;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+
+.waiter-pos__seat-pick-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: #64748b;
+}
+
+/* قائمة سياق المدير — زجاجية بخط داكن واضح */
+.mgr-ctx-menu {
+  position: fixed;
+  z-index: 1400;
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(72vh, 480px);
+  overflow: auto;
+  direction: rtl;
+  padding: 0.55rem 0.45rem;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(248, 250, 252, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.28);
+  color: #0f172a;
+}
+
+.mgr-ctx-menu__title {
+  font-weight: 950;
+  font-size: 0.98rem;
+  color: #0f172a;
+}
+
+.mgr-ctx-menu__sub {
+  font-size: 0.8rem;
+  color: #334155;
+  margin-top: 2px;
+  font-weight: 700;
+}
+
+.mgr-ctx-menu__hint {
+  font-size: 0.72rem;
+  color: #475569;
+  margin-top: 2px;
+}
+
+.mgr-ctx-menu__item {
+  text-align: right;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #0f172a;
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  font-weight: 800;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mgr-ctx-menu__item:hover:not(:disabled) {
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.mgr-ctx-menu__item.is-primary {
+  border-color: rgba(180, 83, 9, 0.45);
+  background: rgba(254, 243, 199, 0.85);
+  color: #78350f;
+}
+
+.mgr-ctx-menu__item.is-danger {
+  color: #991b1b;
+  background: rgba(254, 226, 226, 0.55);
+}
+
+.mgr-ctx-menu__item:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.mgr-ctx-menu__item-hint {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #475569;
+  margin-top: 2px;
+}
+
+.waiter-pos__hdr-action-btn--seats {
+  background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%) !important;
+  border-color: rgba(14, 165, 233, 0.55) !important;
 }
 
 .waiter-pos__ops-modal__grid-row--invoice {

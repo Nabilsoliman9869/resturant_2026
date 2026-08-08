@@ -1063,3 +1063,10 @@ eserved + active.
 ### 149 — اختيار كرسي ظاهر عند طلب الحساب — UTC 2026-08-08T12:40:00Z — ID `bill-seat-picker-ui-d4a91e02`
 
 - **`WaiterOrderPage.tsx`:** شريط كراسي غير مفوترة في الهيدر؛ نافذة اختيار كرسي عند «طلب الحساب»؛ دبل-كليك على كرسي يطلب حسابه مباشرة.
+
+### 150 — تباين خطوط النوافذ الزجاجية + مساحة POS — UTC 2026-08-08T12:55:00Z — ID `glass-modal-contrast-a7c4e91f`
+
+- **`operationalRoles.css`:** نوافذ منبثقة كبيرة بخلفية شفافة فاتحة وخط داكن `#0f172a`؛ قائمة سياق المدير `.mgr-ctx-menu`؛ منع وراثة ألوان الهيدر الداكن داخل الزجاج.
+- **`WaiterOrderPage.tsx`:** زر مضغوط «كراسي (n)» بدل شريط يأكل الهيدر؛ إصلاح تباين نصوص/شيبس نافذة الضيوف.
+- **`CaptainBillReviewModal` / `ManagerTableChecksModal` / `ManagerTableInstructionsMenu`:** زجاج شفاف كبير فوق نقطة البيع.
+- **`WaiterTablesPage.tsx`:** تلميح «يمين على الطاولة» بلون واضح على خلفية كهرمانية.

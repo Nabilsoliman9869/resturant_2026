@@ -1763,7 +1763,18 @@ export default function WaiterTablesPage() {
         <div className="waiter-tables-toolbar">
           <h2 className="role-op__section-title">اختر الطاولة</h2>
           {roleHasManagerOpsAccess(user?.role) ? (
-            <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fef08a" }} title="كليك يمين على أي طاولة">
+            <span
+              style={{
+                fontSize: "0.78rem",
+                fontWeight: 800,
+                color: "#78350f",
+                background: "#fef3c7",
+                border: "1px solid #f59e0b",
+                borderRadius: 999,
+                padding: "0.2rem 0.65rem",
+              }}
+              title="كليك يمين على أي طاولة"
+            >
               يمين على الطاولة = تعليمات المدير
             </span>
           ) : null}
