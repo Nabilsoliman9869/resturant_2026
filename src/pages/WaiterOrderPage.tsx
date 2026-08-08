@@ -4047,7 +4047,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 type="button"
                 className="waiter-pos__btn waiter-pos__hdr-action-btn waiter-pos__hdr-action-btn--bill"
                 disabled={requestBillBusy || !activeSessionId || billingLocked || sessionGuestApprovalPending || Boolean(mergedIntoSessionId)}
-                onClick={openBillReview}
+                onClick={() => openBillReview()}
               >
                 {requestBillBusy ? "…" : mergedIntoSessionId ? "الحساب من الهدف" : "طلب الحساب"}
               </button>
