@@ -36144,7 +36144,15 @@ def restaurant_sessions_request_bill(body: dict):
         except Exception:
             return None
 
-    split_enabled = bool(body.get("splitBySeat")) or seat_scoped_billing or partial_bill
+    # سياسة المنتج: طلب الحساب على مستوى الكرسي (شيك لكل مقعد) دون انتظار الباقي.
+    # يُلغى السبليت فقط إذا أُرسل splitBySeat=false صراحةً وبدون فلتر مقاعد/مالك.
+    if bill_seat_filter:
+        split_enabled = True
+        partial_bill = True
+    elif body.get("splitBySeat") is False and not seat_scoped_billing and not partial_bill:
+        split_enabled = False
+    else:
+        split_enabled = True
     raw_groups = body.get("seatGroups") if isinstance(body.get("seatGroups"), list) else []
 
     split_groups: list[dict] = []

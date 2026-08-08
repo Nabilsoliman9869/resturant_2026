@@ -1040,3 +1040,9 @@ eserved + active.
 - **`WaiterOrderPage.tsx`:** اختيار مقاعد لطلب الحساب المنفصل؛ `kitchenTotals` قبل خصم المالك.
 - **`CashierPayInvoiceModal.tsx`:** افتراضي عدم إغلاق الجلسة بعد تسديد شيك واحد.
 - توثيق: `docs/DELIVERY_AXES_PACKAGE.md`.
+
+### 146 — طلب الحساب إلزامياً على مستوى الكرسي — UTC 2026-08-08T09:25:00Z — ID `seat-bill-level-f6a2c91d`
+
+- **`WaiterOrderPage.tsx`:** طلب الحساب يشترط اختيار كرسي؛ افتراض المقعد الحالي؛ شيك لكل كرسي محدد؛ استبعاد البنود المفوترة (`finalInvoiceId`)؛ مراجعة الحساب للمقاعد المحددة فقط.
+- **`api_server.py`:** تفعيل سبليت المقعد افتراضياً؛ `billSeatNos` يفرض حساباً جزئياً على مستوى الكرسي.
+- **`CaptainBillReviewModal.tsx`:** تسمية «حساب على مستوى الكرسي».

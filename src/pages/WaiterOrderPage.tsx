@@ -220,6 +220,8 @@ type ServerOrderItem = {
   lineStatus?: string;
   cancelled?: boolean;
   productGuide?: string;
+  /** إن وُجد: البند مُفوتر سابقاً (حساب كرسي منفصل) */
+  finalInvoiceId?: string;
 };
 
 type ServerOrder = {
@@ -588,8 +590,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [showSummary, setShowSummary] = useState(false);
   const [showCostDrawer, setShowCostDrawer] = useState(false);
   const [showGapPicks, setShowGapPicks] = useState(false);
-  const [splitBySeat, setSplitBySeat] = useState(false);
-  /** مقاعد يُطلب حسابها الآن فقط (فارغ = كل المقاعد غير المفوترة) */
+  /** مقاعد يُطلب حسابها الآن (مطلوب اختيار كرسي واحد على الأقل — حساب على مستوى الكرسي) */
   const [billSeatNos, setBillSeatNos] = useState<number[]>([]);
   const [reorderSeatTargets, setReorderSeatTargets] = useState<Record<string, number>>({});
   const [reorderBusyKey, setReorderBusyKey] = useState("");
@@ -1291,6 +1292,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const orderStatus = String(o.status || "").toLowerCase();
       if (orderStatus === "cancelled") continue;
       for (const it of activeOrderItems(o)) {
+        if (String(it.finalInvoiceId || "").trim()) continue;
         const lid = String(it.lineId || "").trim();
         if (!lid) continue;
         const originalQty = Number(it.quantity ?? 1) || 1;
@@ -1311,6 +1313,22 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
     return rows;
   }, [sessionOrders, approvedReturnsMap]);
+
+  /** بنود مراجعة الحساب للمقاعد المحددة فقط */
+  const scopedBillReviewLines = useMemo(() => {
+    if (!billSeatNos.length) return billReviewLines;
+    const want = new Set(billSeatNos);
+    return billReviewLines.filter((ln) => ln.seatNo != null && want.has(Number(ln.seatNo)));
+  }, [billReviewLines, billSeatNos]);
+
+  const unbilledSeatNos = useMemo(() => {
+    const seats = new Set<number>();
+    for (const ln of billReviewLines) {
+      const sn = ln.seatNo != null ? Number(ln.seatNo) : NaN;
+      if (Number.isFinite(sn) && sn >= 1 && sn !== SHARED_SEAT_NO) seats.add(Math.floor(sn));
+    }
+    return [...seats].sort((a, b) => a - b);
+  }, [billReviewLines]);
 
   const returnedReviewLines = useMemo<CaptainBillReviewLine[]>(() => {
     const rows: CaptainBillReviewLine[] = [];
@@ -2201,8 +2219,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const minimumChargeDelta = currentSeatMinimumSummary.minimumGap;
 
   const reviewSeatMinimumSummary = useMemo(
-    () => buildSeatMinimumSummary(billReviewLines.map((line) => ({ lineTotal: Number(line.lineTotal || 0), seatNo: line.seatNo ?? null }))),
-    [buildSeatMinimumSummary, billReviewLines],
+    () =>
+      buildSeatMinimumSummary(
+        scopedBillReviewLines.map((line) => ({ lineTotal: Number(line.lineTotal || 0), seatNo: line.seatNo ?? null })),
+      ),
+    [buildSeatMinimumSummary, scopedBillReviewLines],
   );
 
   const reviewMinimumChargeDelta = reviewSeatMinimumSummary.minimumGap;
@@ -2832,16 +2853,30 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       );
       return;
     }
-    if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && reviewTotal > sessionMaxInvoiceLimit) {
-      setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
-      return;
-    }
     if (cart.some((line) => Number(line.qty || 0) > 0)) {
       setMsg("يوجد بنود في السلة لم تُرسل للمطبخ بعد.");
       return;
     }
     if (billingLocked) {
       setMsg("طُلِب الحساب مسبقاً — انتظر تسديد الكاشير.");
+      return;
+    }
+    // طلب الحساب على مستوى الكرسي: افتراض المقعد الحالي إن كان له بنود غير مفوترة
+    setBillSeatNos((prev) => {
+      if (prev.length > 0) {
+        const still = prev.filter((n) => unbilledSeatNos.includes(n) || n === SHARED_SEAT_NO);
+        if (still.length > 0) return still;
+      }
+      if (assignmentMode === "per_seat") {
+        if (selectedSeat !== SHARED_SEAT_NO && unbilledSeatNos.includes(selectedSeat)) {
+          return [selectedSeat];
+        }
+        if (unbilledSeatNos.length > 0) return [unbilledSeatNos[0]!];
+      }
+      return prev;
+    });
+    if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && reviewTotal > sessionMaxInvoiceLimit) {
+      setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
       return;
     }
     setBillReviewOpen(true);
@@ -2861,47 +2896,61 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       return;
     }
     const autoPrint = Boolean(opts?.autoPrint);
+    // سياسة المنتج: طلب الحساب على مستوى الكرسي — شيك لكل مقعد محدد، دون انتظار الباقي
+    let selectedBillSeats = billSeatNos.filter((n) => n >= 1 && n <= 12);
+    if (assignmentMode === "per_seat") {
+      if (selectedBillSeats.length === 0) {
+        if (selectedSeat !== SHARED_SEAT_NO && unbilledSeatNos.includes(selectedSeat)) {
+          selectedBillSeats = [selectedSeat];
+        } else if (unbilledSeatNos.length === 1) {
+          selectedBillSeats = [unbilledSeatNos[0]!];
+        }
+      }
+      if (selectedBillSeats.length === 0) {
+        setMsg("اختر كرسي واحد على الأقل لطلب حسابه (الحساب على مستوى الكرسي).");
+        return;
+      }
+    }
     setRequestBillBusy(true);
     try {
-      let splitGroups: Array<{ id: string; name: string; seats: number[] }> = [];
-      const selectedBillSeats = billSeatNos.filter((n) => n >= 1 && n <= 12);
-      const wantSplit = splitBySeat || selectedBillSeats.length > 0;
-      if (wantSplit) {
-        const openOrders = sessionOrders.filter((o) => String(o.status || "").toLowerCase() !== "cancelled");
-        const seatsWithItems = new Set<number>();
-        for (const o of openOrders) {
-          for (const it of o.items || []) {
-            if (String((it as { finalInvoiceId?: string }).finalInvoiceId || "").trim()) continue;
-            const sx = extractSeatFromOrderItem(it as { name?: string; seatNo?: number });
-            if (sx != null) seatsWithItems.add(sx);
-          }
+      const openOrders = sessionOrders.filter((o) => String(o.status || "").toLowerCase() !== "cancelled");
+      const seatsWithItems = new Set<number>();
+      for (const o of openOrders) {
+        for (const it of o.items || []) {
+          if (String(it.finalInvoiceId || "").trim()) continue;
+          const sx = extractSeatFromOrderItem(it);
+          if (sx != null) seatsWithItems.add(sx);
         }
-        const groupsBuild: typeof splitGroups = [];
-        const seatLoop = selectedBillSeats.length > 0 ? selectedBillSeats : visibleSeatNumbers;
-        for (const seatNo of seatLoop) {
-          if (selectedBillSeats.length === 0 && !seatsWithItems.has(seatNo)) continue;
-          const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
-          groupsBuild.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
+      }
+      const seatLoop =
+        selectedBillSeats.length > 0
+          ? selectedBillSeats
+          : visibleSeatNumbers.filter((n) => seatsWithItems.has(n));
+      const splitGroups: Array<{ id: string; name: string; seats: number[] }> = [];
+      for (const seatNo of seatLoop) {
+        if (!seatsWithItems.has(seatNo) && selectedBillSeats.length > 0) {
+          // السماح بطلب كرسي محدد حتى لو التسمية فقط — الـ API يرفض إن لم توجد بنود
         }
-        if (selectedBillSeats.length === 0) {
-          const orphanSeats = [...seatsWithItems]
-            .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
-            .sort((a, b) => a - b);
-          if (orphanSeats.length > 0) {
-            groupsBuild.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
-          }
+        const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
+        splitGroups.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
+      }
+      if (selectedBillSeats.length === 0) {
+        const orphanSeats = [...seatsWithItems]
+          .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
+          .sort((a, b) => a - b);
+        if (orphanSeats.length > 0) {
+          splitGroups.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
         }
-        splitGroups = groupsBuild;
       }
       const r = await fetch(`${base}/api/restaurant/sessions/request-bill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: activeSessionId,
-          splitBySeat: wantSplit,
+          splitBySeat: true,
           seatGroups: splitGroups,
           billSeatNos: selectedBillSeats.length > 0 ? selectedBillSeats : undefined,
-          partialBill: selectedBillSeats.length > 0,
+          partialBill: true,
           pendingCartCount: cart.filter((line) => Number(line.qty || 0) > 0).length,
           tipAmount: Math.max(0, tipAmount || 0),
           agentGuid: selectedAgentGuid || undefined,
@@ -6019,29 +6068,48 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         </button>
                       </div>
                     ) : null}
-                    <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, marginTop: 6, color: "#e5e7eb", lineHeight: 1.35 }}>
-                      <input type="checkbox" checked={splitBySeat} onChange={(e) => setSplitBySeat(e.target.checked)} disabled={billingLocked} />
-                      سبليت — فاتورة لكل ضيف؛ المشترك ١٣ يُقسَّم بالتساوي
-                    </label>
                     <div style={{ marginTop: 8, color: "#e5e7eb" }}>
                       <div style={{ fontWeight: 800, fontSize: "0.8rem", marginBottom: 4 }}>
-                        حساب مقاعد محددة (بدون انتظار الباقي)
+                        طلب الحساب على مستوى الكرسي (بدون انتظار الباقي)
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                        <button
+                          type="button"
+                          className="waiter-pos__btn waiter-pos__btn--ghost"
+                          disabled={billingLocked || unbilledSeatNos.length === 0}
+                          style={{ padding: "4px 8px", fontWeight: 800, fontSize: "0.72rem" }}
+                          onClick={() => setBillSeatNos(unbilledSeatNos.length ? [...unbilledSeatNos] : [])}
+                        >
+                          كل غير المفوتر
+                        </button>
+                        <button
+                          type="button"
+                          className="waiter-pos__btn waiter-pos__btn--ghost"
+                          disabled={billingLocked || selectedSeat === SHARED_SEAT_NO || !unbilledSeatNos.includes(selectedSeat)}
+                          style={{ padding: "4px 8px", fontWeight: 800, fontSize: "0.72rem" }}
+                          onClick={() => setBillSeatNos([selectedSeat])}
+                        >
+                          الكرسي الحالي فقط
+                        </button>
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                         {visibleSeatNumbers.map((sn) => {
                           const on = billSeatNos.includes(sn);
+                          const hasUnbilled = unbilledSeatNos.includes(sn);
                           return (
                             <button
                               key={`bill-seat-${sn}`}
                               type="button"
                               className="waiter-pos__btn waiter-pos__btn--ghost"
-                              disabled={billingLocked}
+                              disabled={billingLocked || !hasUnbilled}
+                              title={!hasUnbilled ? "لا بنود غير مفوترة على هذا الكرسي" : `طلب حساب كرسي ${sn}`}
                               style={{
                                 padding: "4px 8px",
                                 fontWeight: 800,
                                 background: on ? "#fef3c7" : "transparent",
-                                color: on ? "#92400e" : "#e5e7eb",
+                                color: on ? "#92400e" : !hasUnbilled ? "#6b7280" : "#e5e7eb",
                                 borderColor: on ? "#b45309" : undefined,
+                                opacity: !hasUnbilled ? 0.45 : 1,
                               }}
                               onClick={() =>
                                 setBillSeatNos((prev) =>
@@ -6055,7 +6123,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         })}
                       </div>
                       <div style={{ fontSize: "0.72rem", opacity: 0.85, marginTop: 4 }}>
-                        فارغ = كل المقاعد غير المفوترة. محدّد = فاتورة لهؤلاء فقط والطاولة تبقى مفتوحة.
+                        اختر الكرسي/الكراسي — يصدر شيك لكل كرسي محدد، وباقي الطاولة يبقى مفتوحاً للطلب والحساب.
+                        {billSeatNos.length > 0 ? ` المحدد الآن: ${billSeatNos.join("، ")}` : ""}
                       </div>
                     </div>
                   </div>
@@ -6220,12 +6289,16 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       ) : null}
       <CaptainBillReviewModal
         open={billReviewOpen}
-        tableLabel={selectedTable?.name || selectedTableId || "—"}
+        tableLabel={
+          billSeatNos.length
+            ? `${selectedTable?.name || selectedTableId || "—"} · كرسي ${billSeatNos.join(" + ")}`
+            : selectedTable?.name || selectedTableId || "—"
+        }
         ordersCount={sessionOrders.filter((o) => String(o.status || "").toLowerCase() !== "cancelled").length}
-        splitBySeat={splitBySeat}
+        splitBySeat={true}
         returnableCount={returnableLines.length}
         printerHint={captainPrinterHint}
-        lines={billReviewLines}
+        lines={scopedBillReviewLines}
         returnedLines={returnedReviewLines}
         totals={{
           subtotal: reviewBillingTotals.netPortion,

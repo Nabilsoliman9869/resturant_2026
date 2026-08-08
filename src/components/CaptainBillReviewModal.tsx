@@ -130,7 +130,7 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
             </h2>
             <div style={{ color: "var(--muted)", fontSize: "0.86rem", marginTop: 4 }}>
               الطاولة: {tableLabel || "—"} · الطلبات: {ordersCount} · البنود: {lines.length}
-              {splitBySeat ? " · سبليت حسب المقاعد" : ""}
+              {splitBySeat ? " · حساب على مستوى الكرسي" : ""}
             </div>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
