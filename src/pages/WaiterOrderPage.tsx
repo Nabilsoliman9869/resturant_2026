@@ -3261,8 +3261,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               serviceCharge: Number(inv.serviceCharge ?? serviceCharge) || serviceCharge,
               discount: Number(inv.discount ?? discountValue) || discountValue,
               lines: Array.isArray(inv.lines) ? (inv.lines as CashierInvoiceRow["lines"]) : [],
-              tableLabel: selectedTable?.name || selectedTableId,
+              seats: Array.isArray((inv as { seats?: number[] }).seats) ? (inv as { seats?: number[] }).seats : undefined,
+              tableLabel:
+                selectedTable?.number != null
+                  ? `T${selectedTable.number}`
+                  : selectedTable?.name && !/^[0-9a-fA-F-]{20,}$/i.test(String(selectedTable.name))
+                    ? String(selectedTable.name)
+                    : undefined,
               tableName: selectedTable?.name || null,
+              tableNumber: selectedTable?.number != null ? Number(selectedTable.number) : undefined,
             } as CashierInvoiceRow;
           })
           .filter((x): x is CashierInvoiceRow => Boolean(x));

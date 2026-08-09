@@ -1081,3 +1081,9 @@ eserved + active.
 - **`WaiterOrderPage.tsx`:** أنماط طلب الحساب (شيك لكل كرسي / مالك منفصل+باقي مجمّع / المحدد مجمّعاً)؛ طباعة كل الشيكات بالترتيب؛ إرسال `kitchenNotes`/`modifiers` منفصلة للمطبخ؛ قراءة `ownerSeatNos`.
 - **`KitchenPage` + `kitchenTicketDisplay.ts` + CSS:** عرض بند المطبخ كإطار موحّد بأسطر (رئيسي / جانبي / طهي / ملاحظة).
 - **`api_server.py`:** إصلاح `_iso_to_local_dt` لـ UTC؛ مطابقة GUID↔T11 في تقرير الصالة؛ جلسات بنشاط داخل النافذة؛ الحفاظ على ملاحظات/إضافات في `_kds_normalize_item`.
+
+### 153 — شيك إنجليزي بإطار + رقم طاولة/كرسي/اسم — UTC 2026-08-09T10:20:00Z — ID `receipt-en-frame-e8c21a90`
+
+- **`CashierPayInvoiceModal.tsx`:** قالب طباعة بإطار عام وأقسام مميزة؛ `Table No.` بدل GUID؛ `Chair No.` و`Name` عند التوفر؛ أقسام Items/Totals/Payment.
+- **`api_server.py`:** إثراء `tableLabel`/`tableNumber` دون إرجاع GUID كاسم طاولة.
+- **`WaiterOrderPage.tsx`:** تمرير رقم/اسم الطاولة عند طباعة شيك الكابتن.

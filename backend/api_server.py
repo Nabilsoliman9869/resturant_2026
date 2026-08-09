@@ -28418,13 +28418,22 @@ def _restaurant_enrich_invoice_with_table(inv: dict) -> dict:
             out["tableName"] = nm or None
             num = t.get("number")
             if num is not None:
-                out["tableLabel"] = f"طاولة {num}"
-            elif nm:
+                out["tableLabel"] = f"T{num}"
+            elif nm and not re.match(r"^[0-9a-fA-F]{8}-", nm):
                 out["tableLabel"] = nm
             else:
-                out["tableLabel"] = tid
+                fb = _session_table_display_fallback(tid)
+                out["tableLabel"] = fb if fb and not re.match(r"^[0-9a-fA-F]{8}-", str(fb)) else (nm or "")
         else:
-            out["tableLabel"] = tid
+            fb = _session_table_display_fallback(tid)
+            out["tableLabel"] = fb if fb and not re.match(r"^[0-9a-fA-F]{8}-", str(fb)) else ""
+            # حاول استخراج رقم من الاسم الاحتياطي
+            mnum = re.search(r"(\d+)", str(fb or ""))
+            if mnum:
+                try:
+                    out["tableNumber"] = int(mnum.group(1))
+                except Exception:
+                    pass
     # إشارات جاهزة للواجهة: هل اعتماد التسكين يكفي لتسوية الضيف/CL؟
     inv_id = str(out.get("invoiceId") or "").strip()
     if inv_id and approved_at and not sess_row.get("guestApprovalPending"):

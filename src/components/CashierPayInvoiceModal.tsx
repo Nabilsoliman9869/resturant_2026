@@ -53,6 +53,7 @@ export type CashierInvoiceRow = {
   tipAmount?: number;
   lines?: CashierInvoiceLine[];
   sourceLines?: CashierInvoiceSourceLine[];
+  seats?: number[];
   billingProfile?: {
     active?: boolean;
     noService?: boolean;
@@ -118,8 +119,60 @@ type SqlInvoicePayload = {
   }>;
 };
 
-function seatLabel(seatNo?: number | null): string {
-  return seatNo != null && Number(seatNo) >= 1 ? `كرسي ${seatNo}` : "بدون كرسي";
+function looksLikeGuid(s: string): boolean {
+  const t = String(s || "").trim();
+  if (!t) return false;
+  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i.test(t)) return true;
+  if (/^[0-9a-fA-F]{32}$/i.test(t.replace(/-/g, ""))) return true;
+  return false;
+}
+
+/** رقم طاولة للإيصال — لا يعرض GUID أبداً */
+function formatReceiptTableNo(row: CashierInvoiceRow | null | undefined): string {
+  if (!row) return "";
+  if (row.tableNumber != null && Number.isFinite(Number(row.tableNumber))) {
+    return `T${Number(row.tableNumber)}`;
+  }
+  for (const raw of [row.tableName, row.tableLabel, row.tableIdResolved]) {
+    const s = String(raw || "").trim();
+    if (!s || looksLikeGuid(s)) continue;
+    const m = s.match(/(?:طاولة|table)\s*#?\s*([A-Za-z]?\d+)/i) || s.match(/^(T?\d+)$/i) || s.match(/^([A-Z]-\d+)$/i);
+    if (m) {
+      const tok = String(m[1] || "").toUpperCase();
+      if (tok.startsWith("T") || tok.includes("-")) return tok;
+      return `T${tok}`;
+    }
+    return s;
+  }
+  return "";
+}
+
+function receiptSeatNosFrom(row: CashierInvoiceRow | null | undefined, lines: CashierInvoiceLine[]): number[] {
+  const out: number[] = [];
+  const push = (n: unknown) => {
+    const v = Number(n);
+    if (Number.isFinite(v) && v >= 1 && v <= 24 && !out.includes(v)) out.push(v);
+  };
+  if (Array.isArray(row?.seats)) {
+    for (const s of row!.seats!) push(s);
+  }
+  for (const ln of lines) push(ln.seatNo);
+  return out.sort((a, b) => a - b);
+}
+
+function receiptGuestName(row: CashierInvoiceRow | null | undefined): string {
+  const split = String(row?.splitName || "").trim();
+  if (split && !looksLikeGuid(split) && !/^check-/i.test(split)) return split;
+  const agent = String(row?.agentName || "").trim();
+  if (agent && agent !== "—" && !looksLikeGuid(agent)) return agent;
+  return "";
+}
+
+function seatLabel(seatNo?: number | null, lang: ReceiptLang = "ar"): string {
+  if (seatNo != null && Number(seatNo) >= 1) {
+    return lang === "en" ? `Chair ${seatNo}` : `كرسي ${seatNo}`;
+  }
+  return lang === "en" ? "No chair" : "بدون كرسي";
 }
 
 function parseMoneyInput(s: string): number {
@@ -160,7 +213,9 @@ function receiptLabels(lang: ReceiptLang) {
       title: "Receipt",
       customerCopy: "INVOICE — Customer copy",
       invoiceNo: "Invoice No.",
-      table: "Table",
+      table: "Table No.",
+      chair: "Chair No.",
+      guestName: "Name",
       billRequested: "Bill requested",
       itemsSum: "Items subtotal",
       discount: "Discount",
@@ -188,6 +243,9 @@ function receiptLabels(lang: ReceiptLang) {
       guest: "Guest",
       noprint: "To print or save PDF: press Ctrl+P and choose printer or Microsoft Print to PDF.",
       serviceFallback: "Service charge",
+      itemsHeader: "Items",
+      totalsHeader: "Totals",
+      footerHeader: "Payment",
     };
   }
   return {
@@ -196,7 +254,9 @@ function receiptLabels(lang: ReceiptLang) {
     title: "إيصال",
     customerCopy: "فاتورة — نسخة عميل",
     invoiceNo: "رقم الفاتورة",
-    table: "الطاولة",
+    table: "رقم الطاولة",
+    chair: "رقم الكرسي",
+    guestName: "الاسم",
     billRequested: "طلب الحساب",
     itemsSum: "مجموع الأصناف",
     discount: "الخصم",
@@ -224,6 +284,9 @@ function receiptLabels(lang: ReceiptLang) {
     guest: "ضيف",
     noprint: "للطباعة أو حفظ PDF: اضغط Ctrl+P واختر الطابعة أو «Microsoft Print to PDF».",
     serviceFallback: "رسوم الخدمة",
+    itemsHeader: "الأصناف",
+    totalsHeader: "الإجماليات",
+    footerHeader: "الدفع",
   };
 }
 
@@ -275,8 +338,11 @@ type ThermalReceiptInput = {
   billDate: string;
   agentName: string;
   invoiceGuid: string;
-  /** تسمية الطاولة للإيصال — لا يُعرض معرّف الجلسة كـ«جلسة» بالخطأ */
+  /** رقم الطاولة المعروض — لا GUID */
   tableLabel?: string | null;
+  tableNo?: string | null;
+  chairNos?: number[];
+  guestName?: string | null;
   sessionId?: string | null;
   /** إيصال للعميل: بدون GUID ولا معرفات تقنية */
   customerReceipt?: boolean;
@@ -319,23 +385,34 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
   const lineRows = p.lines
     .map(
       (ln) =>
-        `<tr><td colspan="2">${escapeHtml(ln.name)}</td></tr><tr><td>${ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}×${ln.unitPrice.toFixed(2)}</td><td style="text-align:left">${ln.lineTotal.toFixed(2)}</td></tr>`,
+        `<tr><td colspan="2">${escapeHtml(ln.name)}</td></tr><tr><td>${ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}×${ln.unitPrice.toFixed(2)}</td><td class="num">${ln.lineTotal.toFixed(2)}</td></tr>`,
     )
     .join("");
   const tipBlock =
     !p.lockedFromSource && (p.tableTipAdditive > 0.001 || p.extraTip > 0.001)
-      ? `${p.tableTipAdditive > 0.001 ? `<tr><td>${L.tipTable}</td><td>${p.tableTipAdditive.toFixed(2)}</td></tr>` : ""}${p.extraTip > 0.001 ? `<tr><td>${L.tipExtra}</td><td>${p.extraTip.toFixed(2)}</td></tr>` : ""}`
+      ? `${p.tableTipAdditive > 0.001 ? `<tr><td>${L.tipTable}</td><td class="num">${p.tableTipAdditive.toFixed(2)}</td></tr>` : ""}${p.extraTip > 0.001 ? `<tr><td>${L.tipExtra}</td><td class="num">${p.extraTip.toFixed(2)}</td></tr>` : ""}`
       : "";
   const payRows =
     p.cash + p.visa + p.wallet + p.instapay > 0.001
-      ? `<tr><td>${L.cash}</td><td>${p.cash.toFixed(2)}</td></tr><tr><td>${L.visa}</td><td>${p.visa.toFixed(2)}</td></tr><tr><td>${L.wallet}</td><td>${p.wallet.toFixed(2)}</td></tr><tr><td>${L.instapay}</td><td>${p.instapay.toFixed(2)}</td></tr>`
+      ? `<tr><td>${L.cash}</td><td class="num">${p.cash.toFixed(2)}</td></tr><tr><td>${L.visa}</td><td class="num">${p.visa.toFixed(2)}</td></tr><tr><td>${L.wallet}</td><td class="num">${p.wallet.toFixed(2)}</td></tr><tr><td>${L.instapay}</td><td class="num">${p.instapay.toFixed(2)}</td></tr>`
       : `<tr><td colspan="2" class="muted">${L.payPending}</td></tr>`;
-  const tableLine = p.tableLabel
-    ? `<div class="c b tbl">${L.table}: ${escapeHtml(p.tableLabel)}</div>`
-    : "";
+  const tableNo = String(p.tableNo || p.tableLabel || "").trim();
+  const chairs = Array.isArray(p.chairNos) ? p.chairNos.filter((n) => Number(n) >= 1) : [];
+  const guestName = String(p.guestName || "").trim();
+  const metaRows = [
+    tableNo ? `<div class="meta-row"><span class="meta-k">${L.table}</span><span class="meta-v">${escapeHtml(tableNo)}</span></div>` : "",
+    chairs.length
+      ? `<div class="meta-row"><span class="meta-k">${L.chair}</span><span class="meta-v">${escapeHtml(chairs.join(", "))}</span></div>`
+      : "",
+    guestName
+      ? `<div class="meta-row"><span class="meta-k">${L.guestName}</span><span class="meta-v">${escapeHtml(guestName)}</span></div>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
   const billLine =
     p.billNo && p.billNo !== "—"
-      ? `<div class="c b billno">${L.invoiceNo}: ${escapeHtml(p.billNo)}</div>`
+      ? `<div class="billno">${L.invoiceNo}: <strong>${escapeHtml(p.billNo)}</strong></div>`
       : "";
   const sessTech =
     forCustomer || !p.sessionId || String(p.sessionId) === String(p.invoiceGuid)
@@ -356,7 +433,7 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
     ? customShares
         .map(
           (g) =>
-            `<tr><td>${escapeHtml(String(g.label || L.guest))}</td><td style="text-align:left;font-weight:800">${Number(g.amount).toFixed(2)}</td></tr>`,
+            `<tr><td>${escapeHtml(String(g.label || L.guest))}</td><td class="num">${Number(g.amount).toFixed(2)}</td></tr>`,
         )
         .join("")
     : "";
@@ -402,6 +479,7 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
             : L.serviceFallback,
         )
       : escapeHtml(p.ledger.serviceLabel || L.serviceFallback);
+  const currency = "EGP";
   return `<!DOCTYPE html>
 <html dir="${L.dir}" lang="${L.htmlLang}">
 <head>
@@ -412,37 +490,92 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     * { box-sizing: border-box; }
     body {
-      width: 72mm;
-      max-width: 72mm;
+      width: 76mm;
+      max-width: 76mm;
       margin: 0 auto;
-      padding: 3mm 2mm;
+      padding: 2mm;
       font-family: Tahoma, "Segoe UI", Arial, sans-serif;
       font-size: 10px;
       line-height: 1.35;
-      color: #111;
+      color: #0f172a;
+      background: #fff;
+    }
+    .ticket {
+      border: 2px solid #0f172a;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .sec { padding: 7px 8px; }
+    .sec-head {
+      background: #0f172a;
+      color: #f8fafc;
+      text-align: center;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      padding: 8px 6px;
+    }
+    .sec-meta {
+      background: #f1f5f9;
+      border-bottom: 1px solid #cbd5e1;
+    }
+    .sec-items {
+      border-bottom: 1px solid #cbd5e1;
+    }
+    .sec-totals {
+      background: #fffbeb;
+      border-bottom: 1px solid #f59e0b;
+    }
+    .sec-pay {
+      background: #f8fafc;
+    }
+    .sec-title {
+      font-size: 8.5px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #334155;
+      margin: 0 0 5px;
+      padding-bottom: 3px;
+      border-bottom: 1px dashed #94a3b8;
     }
     .c { text-align: center; }
     .b { font-weight: 700; }
-    .hr { border: 0; border-top: 1px dashed #222; margin: 6px 0; }
-    .items { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-    .items td { padding: 1px 0; word-break: break-word; }
-    .tot { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
-    .tot td { padding: 2px 0; }
-    .tot td:last-child { text-align: left; font-variant-numeric: tabular-nums; }
-    .pay { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-top: 4px; }
-    .pay td { padding: 2px 0; }
-    .pay td:last-child { text-align: left; font-variant-numeric: tabular-nums; }
-    .muted { color: #555; font-size: 9px; }
-    .grand { font-size: 12px; font-weight: 800; margin: 8px 0; text-align: center; }
-    .guid { font-size: 8px; word-break: break-all; color: #333; margin: 4px 0; }
-    .mode { font-size: 9px; margin-top: 6px; padding-top: 4px; border-top: 1px dotted #999; }
-    .tbl { font-size: 11px; margin-top: 6px; }
-    .billno { font-size: 11px; margin-top: 4px; }
+    .billno { text-align: center; font-size: 11px; margin-top: 2px; }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: baseline;
+      padding: 3px 0;
+      border-bottom: 1px dotted #cbd5e1;
+      font-size: 11px;
+    }
+    .meta-row:last-child { border-bottom: 0; }
+    .meta-k { font-weight: 800; color: #334155; flex: 0 0 auto; }
+    .meta-v { font-weight: 900; color: #0f172a; text-align: ${lang === "en" ? "right" : "left"}; word-break: break-word; }
+    .items, .tot, .pay { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+    .items td, .tot td, .pay td { padding: 2px 0; word-break: break-word; }
+    .num { text-align: ${lang === "en" ? "right" : "left"}; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .muted { color: #64748b; font-size: 9px; }
+    .grand {
+      font-size: 13px;
+      font-weight: 900;
+      margin: 8px 0 2px;
+      text-align: center;
+      padding: 6px 4px;
+      border: 2px solid #0f172a;
+      border-radius: 6px;
+      background: #fff;
+    }
+    .guid { font-size: 8px; word-break: break-all; color: #334155; margin: 4px 0; }
+    .mode { font-size: 9px; margin-top: 6px; }
     .splitbox {
-      border: 2px solid #111;
+      border: 2px solid #0f172a;
       border-radius: 6px;
       padding: 8px 6px;
-      margin: 10px 0;
+      margin: 8px 0;
       text-align: center;
       background: #fafafa;
     }
@@ -453,7 +586,7 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
     .split-top {
       display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px;
       background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
-      border: 2px solid #059669; border-radius: 8px; padding: 8px 6px; margin: 8px 0 10px;
+      border: 2px solid #059669; border-radius: 8px; padding: 8px 6px; margin: 6px 0;
       font-size: 11px; line-height: 1.3;
     }
     .split-top-lab { font-weight: 800; color: #065f46; }
@@ -462,10 +595,10 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
     .split-top-sub { font-size: 10px; color: #047857; font-weight: 600; }
     .split-top-warn { background: #fffbeb; border-color: #f59e0b; color: #92400e; font-size: 10px; padding: 7px; }
     .seat-section {
-      border: 1px solid #222;
+      border: 1.5px solid #334155;
       border-radius: 6px;
       padding: 6px 5px;
-      margin: 8px 0;
+      margin: 6px 0;
       background: #fff;
     }
     .seat-section-head {
@@ -473,45 +606,58 @@ function buildThermalReceiptHtml(p: ThermalReceiptInput): string {
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      border-bottom: 1px dashed #666;
+      border-bottom: 1px dashed #64748b;
       padding-bottom: 4px;
       margin-bottom: 4px;
       font-size: 10px;
       font-weight: 800;
-      color: #111;
+      color: #0f172a;
     }
+    .thanks { text-align: center; font-size: 9px; color: #475569; padding: 6px 8px 8px; }
     .noprint { font-size: 8px; color: #666; margin-bottom: 6px; }
     @media print { .noprint { display: none !important; } }
   </style>
 </head>
 <body>
   <div class="noprint">${L.noprint}</div>
-  <div class="c b" style="font-size:11px">${L.customerCopy}</div>
-  ${billLine}
-  <div class="c muted">${escapeHtml(p.billDate)}${p.agentName && p.agentName !== "—" ? ` · ${escapeHtml(p.agentName)}` : ""}</div>
-  ${tableLine}
-  ${splitTopBanner}
-  ${guidBlock}
-  ${sessTech}
-  <div class="muted">${L.billRequested}: ${escapeHtml(p.requestedAt)}</div>
-  <hr class="hr"/>
-  ${seatSectionHtml || `<table class="items">${lineRows || `<tr><td colspan="2" class="muted">${L.noItems}</td></tr>`}</table>`}
-  <hr class="hr"/>
-  <table class="tot">
-    <tr><td>${L.itemsSum}</td><td>${p.ledger.linesSum.toFixed(2)}</td></tr>
-    ${p.ledger.discount > 0.001 ? `<tr><td>${L.discount}</td><td>${p.ledger.discount.toFixed(2)}</td></tr>` : ""}
-    <tr><td>${serviceLabel}</td><td>${p.ledger.service.toFixed(2)}</td></tr>
-    <tr><td>${L.tax}${p.ledger.mode === "recalc" ? ` (${p.ledger.vatPct}%)` : ""}</td><td>${p.ledger.tax.toFixed(2)}</td></tr>
-    ${tipBlock}
-  </table>
-  <div class="grand">${L.grand}: ${p.totalDue.toFixed(2)} EGP</div>
-  ${splitBlock}
-  <div class="mode"><span class="b">${L.checkType}:</span> ${escapeHtml(modeLabel)}</div>
-  <div class="b" style="margin-top:6px;font-size:10px">${L.payDist}</div>
-  <table class="pay">${payRows}</table>
-  ${notesBlock}
-  <hr class="hr"/>
-  <div class="c muted" style="font-size:8px">${L.thanks}</div>
+  <div class="ticket">
+    <div class="sec-head">
+      <div>${L.customerCopy}</div>
+      ${billLine}
+      <div class="muted" style="color:#cbd5e1;margin-top:3px;font-size:9px">${escapeHtml(p.billDate)}</div>
+    </div>
+    <div class="sec sec-meta">
+      ${metaRows || `<div class="muted">${L.table}: —</div>`}
+      <div class="muted" style="margin-top:5px">${L.billRequested}: ${escapeHtml(p.requestedAt)}</div>
+      ${splitTopBanner}
+      ${guidBlock}
+      ${sessTech}
+    </div>
+    <div class="sec sec-items">
+      <div class="sec-title">${L.itemsHeader}</div>
+      ${seatSectionHtml || `<table class="items">${lineRows || `<tr><td colspan="2" class="muted">${L.noItems}</td></tr>`}</table>`}
+    </div>
+    <div class="sec sec-totals">
+      <div class="sec-title">${L.totalsHeader}</div>
+      <table class="tot">
+        <tr><td>${L.itemsSum}</td><td class="num">${p.ledger.linesSum.toFixed(2)}</td></tr>
+        ${p.ledger.discount > 0.001 ? `<tr><td>${L.discount}</td><td class="num">${p.ledger.discount.toFixed(2)}</td></tr>` : ""}
+        <tr><td>${serviceLabel}</td><td class="num">${p.ledger.service.toFixed(2)}</td></tr>
+        <tr><td>${L.tax}${p.ledger.mode === "recalc" ? ` (${p.ledger.vatPct}%)` : ""}</td><td class="num">${p.ledger.tax.toFixed(2)}</td></tr>
+        ${tipBlock}
+      </table>
+      <div class="grand">${L.grand}: ${p.totalDue.toFixed(2)} ${currency}</div>
+      ${splitBlock}
+    </div>
+    <div class="sec sec-pay">
+      <div class="sec-title">${L.footerHeader}</div>
+      <div class="mode"><span class="b">${L.checkType}:</span> ${escapeHtml(modeLabel)}</div>
+      <div class="b" style="margin-top:6px;font-size:10px">${L.payDist}</div>
+      <table class="pay">${payRows}</table>
+      ${notesBlock}
+    </div>
+    <div class="thanks">${L.thanks}</div>
+  </div>
 </body>
 </html>`;
 }
@@ -617,12 +763,15 @@ function aggregateFromSqlItems(items: SqlInvoicePayload["Items"]): CashierInvoic
   return aggregateFromParts(parts);
 }
 
-function groupLinesBySeat(lines: CashierInvoiceLine[]): Array<{ label: string; seatNo: number | null; lines: CashierInvoiceLine[]; total: number }> {
+function groupLinesBySeat(
+  lines: CashierInvoiceLine[],
+  lang: ReceiptLang = "ar",
+): Array<{ label: string; seatNo: number | null; lines: CashierInvoiceLine[]; total: number }> {
   const map = new Map<string, { label: string; seatNo: number | null; lines: CashierInvoiceLine[]; total: number }>();
   for (const ln of lines) {
     const seatNo = ln.seatNo != null && Number(ln.seatNo) >= 1 ? Number(ln.seatNo) : null;
     const key = seatNo != null ? `seat:${seatNo}` : "seat:none";
-    const bucket = map.get(key) || { label: seatLabel(seatNo), seatNo, lines: [], total: 0 };
+    const bucket = map.get(key) || { label: seatLabel(seatNo, lang), seatNo, lines: [], total: 0 };
     bucket.lines.push(ln);
     bucket.total += Number(ln.lineTotal || 0);
     map.set(key, bucket);
@@ -634,18 +783,21 @@ function groupLinesBySeat(lines: CashierInvoiceLine[]): Array<{ label: string; s
   });
 }
 
-function buildSeatSectionsHtml(lines: CashierInvoiceLine[]): string {
-  const sections = groupLinesBySeat(lines).filter((section) => section.lines.length > 0 && section.lines.some((ln) => ln.seatNo != null && Number(ln.seatNo) >= 1));
+function buildSeatSectionsHtml(lines: CashierInvoiceLine[], lang: ReceiptLang = "en"): string {
+  const sections = groupLinesBySeat(lines, lang).filter(
+    (section) => section.lines.length > 0 && section.lines.some((ln) => ln.seatNo != null && Number(ln.seatNo) >= 1),
+  );
   if (sections.length === 0) return "";
+  const cur = lang === "en" ? "EGP" : "ج.م";
   return sections
     .map((section) => {
       const rows = section.lines
         .map(
           (ln) =>
-            `<tr><td colspan="2">${escapeHtml(ln.name)}</td></tr><tr><td>${ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}×${ln.unitPrice.toFixed(2)}</td><td style="text-align:left">${ln.lineTotal.toFixed(2)}</td></tr>`,
+            `<tr><td colspan="2">${escapeHtml(ln.name)}</td></tr><tr><td>${ln.quantity % 1 === 0 ? String(ln.quantity) : ln.quantity.toFixed(2)}×${ln.unitPrice.toFixed(2)}</td><td class="num">${ln.lineTotal.toFixed(2)}</td></tr>`,
         )
         .join("");
-      return `<div class="seat-section"><div class="seat-section-head"><span>${escapeHtml(section.label)}</span><strong>${section.total.toFixed(2)} ج.م</strong></div><table class="items">${rows}</table></div>`;
+      return `<div class="seat-section"><div class="seat-section-head"><span>${escapeHtml(section.label)}</span><strong>${section.total.toFixed(2)} ${cur}</strong></div><table class="items">${rows}</table></div>`;
     })
     .join("");
 }
@@ -814,7 +966,7 @@ export function CashierPayInvoiceModal({
       setVisa("");
       setWallet("");
       setInstapay("");
-      setCloseSession(true);
+      setCloseSession(false);
       setSettlementMode("pay_now");
       setCreditLimitApprovalPending(false);
       setGuestApprovalPending(false);
@@ -1142,8 +1294,8 @@ export function CashierPayInvoiceModal({
     return `<table class="tot" style="margin-top:4px;font-size:9px">${rows}</table>`;
   }, [billingMode, splitPersonsN, lines]);
 
-  const seatSections = useMemo(() => groupLinesBySeat(lines), [lines]);
-  const seatSectionHtml = useMemo(() => buildSeatSectionsHtml(lines), [lines]);
+  const seatSections = useMemo(() => groupLinesBySeat(lines, "ar"), [lines]);
+  const seatSectionHtml = useMemo(() => buildSeatSectionsHtml(lines, receiptLang), [lines, receiptLang]);
 
   const foldLocked = splitShareLocked;
   const role = String(user?.role || "").trim().toLowerCase();
@@ -1288,12 +1440,18 @@ export function CashierPayInvoiceModal({
 
   const receiptHtml = useMemo(() => {
     if (!row?.invoiceId) return "";
+    const tableNo = formatReceiptTableNo(row);
+    const chairs = receiptSeatNosFrom(row, lines);
+    const guestName = receiptGuestName(row) || (agentName && agentName !== "—" ? agentName : "");
     return buildThermalReceiptHtml({
       billNo: billNumber != null ? String(billNumber) : "—",
       billDate: billDate || "—",
       agentName: agentName || "—",
       invoiceGuid: String(row.invoiceId),
-      tableLabel: row.tableLabel || null,
+      tableLabel: tableNo || null,
+      tableNo: tableNo || null,
+      chairNos: chairs,
+      guestName: guestName || null,
       customerReceipt: true,
       sessionId: row.sessionId,
       requestedAt: (row.requestedAt || "").replace("T", " ").slice(0, 19) || "—",
@@ -1648,7 +1806,14 @@ export function CashierPayInvoiceModal({
               </div>
               {row.tableLabel ? (
                 <div style={{ textAlign: "center", fontWeight: 800, fontSize: "0.95rem", marginBottom: "0.35rem" }}>
-                  الطاولة: {row.tableName || row.tableLabel}
+                  الطاولة:{" "}
+                  {row.tableNumber != null
+                    ? `T${row.tableNumber}`
+                    : looksLikeGuid(String(row.tableLabel || ""))
+                      ? row.tableName && !looksLikeGuid(String(row.tableName))
+                        ? row.tableName
+                        : "—"
+                      : row.tableName || row.tableLabel}
                   {typeof row.tableNumber === "number" ? <span style={{ fontWeight: 600, color: "var(--muted)" }}> ({row.tableNumber})</span> : null}
                 </div>
               ) : (
