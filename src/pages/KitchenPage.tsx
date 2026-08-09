@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 import { playKitchenWarnBeep } from "../lib/kdsBeep";
+import { kitchenLineKindLabel, parseKitchenTicketItem } from "../lib/kitchenTicketDisplay";
 import "../styles/operationalRoles.css";
 
 type OrderItem = {
@@ -21,6 +22,8 @@ type OrderItem = {
   cancelled?: boolean;
   notes?: string;
   kitchenNotes?: string;
+  modifiers?: Array<{ groupName?: string; itemName?: string; source?: string }>;
+  seatNo?: number | null;
 };
 type OrderRow = {
   id: string;
@@ -521,45 +524,43 @@ function KdsOrderCard({
               return (
                 <div
                   key={String(it.lineId || `${order.id}-${idx}`)}
-                  className="kds-card__item-row"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "auto 1fr auto",
-                    gap: 10,
-                    alignItems: "center",
-                    padding: "10px 12px",
-                    border: "1px solid rgba(15,23,42,0.12)",
-                    borderRadius: 12,
-                    background: delivered ? "rgba(148,163,184,0.12)" : "rgba(255,255,255,0.55)",
-                    opacity: delivered ? 0.55 : 1,
-                  }}
+                  className={`kds-item-frame kds-card__item-row${delivered ? " is-done" : ""}`}
                 >
-                  <div
-                    style={{
-                      minWidth: 44,
-                      height: 44,
-                      borderRadius: 12,
-                      display: "grid",
-                      placeItems: "center",
-                      fontWeight: 900,
-                      fontSize: "1.35rem",
-                      background: "#0f172a",
-                      color: "#f8fafc",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                    title="الكمية"
-                  >
+                  <div className="kds-item-frame__qty" title="الكمية">
                     {qty > 1 && preparedQty > 0 && preparedQty < qty ? `${preparedQty}/${qty}` : qty}
                   </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, fontSize: "1.12rem", lineHeight: 1.25, color: "#0f172a" }}>
-                      {it.name || "صنف"}
-                    </div>
-                    {String(it.notes || it.kitchenNotes || "").trim() ? (
-                      <div style={{ marginTop: 2, fontSize: "0.8rem", fontWeight: 700, color: "#b45309" }}>
-                        {String(it.notes || it.kitchenNotes || "").trim()}
-                      </div>
-                    ) : null}
+                  <div className="kds-item-frame__body">
+                    {(() => {
+                      const parsed = parseKitchenTicketItem({
+                        name: it.name,
+                        notes: it.notes,
+                        kitchenNotes: it.kitchenNotes,
+                        modifiers: it.modifiers,
+                      });
+                      const seatTxt =
+                        parsed.seatHint ||
+                        (it.seatNo != null && Number(it.seatNo) >= 1 ? `كرسي ${it.seatNo}` : null);
+                      return (
+                        <>
+                          {seatTxt ? (
+                            <div style={{ fontSize: "0.78rem", fontWeight: 800, color: "#0369a1" }}>{seatTxt}</div>
+                          ) : null}
+                          <ul className="kds-item-frame__lines">
+                            {parsed.lines.map((ln, li) => (
+                              <li key={`${it.lineId || idx}-ln-${li}`} className={`kds-item-line is-${ln.kind}`}>
+                                <span className="kds-item-line__kind">{kitchenLineKindLabel(ln.kind)}</span>
+                                <span className="kds-item-line__text">
+                                  {ln.kind !== "main" && ln.label ? (
+                                    <span className="kds-item-line__label">{ln.label}:</span>
+                                  ) : null}
+                                  {ln.value}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      );
+                    })()}
                   </div>
                   <span
                     style={{

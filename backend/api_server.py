@@ -3680,6 +3680,12 @@ def _normalize_pos_invoice_line(it: object) -> Optional[dict]:
                 out["seatNo"] = sn
         except (TypeError, ValueError):
             pass
+    kn = str(it.get("kitchenNotes") or it.get("notes") or "").strip()
+    if kn:
+        out["kitchenNotes"] = kn[:400]
+    mods = it.get("modifiers")
+    if isinstance(mods, list) and mods:
+        out["modifiers"] = mods
     for meta_key in ("_seatNum", "_orderId", "_lineId"):
         if meta_key in it:
             out[meta_key] = it.get(meta_key)
@@ -20403,13 +20409,20 @@ def _mat3am_now_iso() -> str:
 
 
 def _iso_to_local_dt(iso_s: str) -> Optional[datetime]:
+    """يحّول ISO إلى وقت محلي naive — يصلح خطأ استبعاد جلسات UTC (…Z) من تقرير اليوم."""
     try:
         s = str(iso_s or "").strip()
         if not s:
             return None
         if s.endswith("Z"):
-            s = s[:-1]
-        return datetime.fromisoformat(s)
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if getattr(dt, "tzinfo", None) is not None:
+            try:
+                dt = dt.astimezone().replace(tzinfo=None)
+            except Exception:
+                dt = dt.replace(tzinfo=None)
+        return dt
     except Exception:
         return None
 
@@ -20603,6 +20616,31 @@ def _mat3am_hall_resolve_table_id(raw: Optional[str], labels: dict[str, str]) ->
         if dig_a.isdigit() and dig_a == dig_b:
             return tid
     return want
+
+
+def _mat3am_hall_table_id_aliases(want_tid: str, labels: dict[str, str]) -> set[str]:
+    """كل المعرفات/الأسماء التي تطابق الطاولة المطلوبة (GUID ↔ T11)."""
+    want = str(want_tid or "").strip().upper()
+    if not want:
+        return set()
+    aliases = {want}
+    resolved = _mat3am_hall_resolve_table_id(want, labels)
+    if resolved:
+        aliases.add(str(resolved).strip().upper())
+    for tid, name in (labels or {}).items():
+        tid_u = str(tid or "").strip().upper()
+        nm = str(name or "").strip().upper()
+        if tid_u in aliases or nm in aliases:
+            aliases.add(tid_u)
+            if nm:
+                aliases.add(nm)
+            compact = nm.replace(" ", "")
+            dig = re.sub(r"^T0*", "", compact)
+            if dig.isdigit():
+                aliases.add(dig)
+                aliases.add(f"T{dig}")
+                aliases.add(f"T{dig.zfill(2)}")
+    return {a for a in aliases if a}
 
 
 def _mat3am_hall_policy_rates() -> dict:
@@ -20949,6 +20987,7 @@ def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) 
     start, service_end, next_open, business_day = _mat3am_business_day_window()
     labels = _mat3am_table_label_map()
     want_tid = _mat3am_hall_resolve_table_id(table_id, labels)
+    want_aliases = _mat3am_hall_table_id_aliases(want_tid, labels) if want_tid else set()
     policy = _mat3am_hall_policy_rates()
 
     def in_window(iso_val: Any) -> bool:
@@ -20962,6 +21001,18 @@ def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) 
 
     def tname(tid: str) -> str:
         return labels.get(tid, tid or "—")
+
+    def table_matches(tid: str) -> bool:
+        if not want_tid:
+            return True
+        t = tid_norm(tid)
+        if not t:
+            return False
+        if t in want_aliases or t == want_tid:
+            return True
+        # طابق عبر الاسم المعروض
+        nm = tname(t).strip().upper()
+        return bool(nm and (nm in want_aliases or nm == tname(want_tid).strip().upper()))
 
     sessions = _restaurant_load("table_sessions", [])
     if not isinstance(sessions, list):
@@ -21005,13 +21056,19 @@ def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) 
     def ensure_table(tid: str) -> Optional[dict]:
         if not tid:
             return None
-        if want_tid and tid != want_tid:
+        if not table_matches(tid):
             return None
-        row = table_rows.get(tid)
+        # وحّد المفتاح على المعرف المحلول إن أمكن
+        key = want_tid if (want_tid and table_matches(tid)) else tid_norm(tid)
+        if want_tid and table_matches(tid):
+            key = want_tid
+        else:
+            key = tid_norm(tid)
+        row = table_rows.get(key)
         if row is None:
             row = {
-                "tableId": tid,
-                "tableName": tname(tid),
+                "tableId": key,
+                "tableName": tname(key) if tname(key) != key else tname(tid_norm(tid)),
                 "sessions": 0,
                 "orders": 0,
                 "cancelledOrders": 0,
@@ -21025,7 +21082,7 @@ def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) 
                 "guests": 0,
                 "captains": set(),
             }
-            table_rows[tid] = row
+            table_rows[key] = row
         return row
 
     def ensure_captain(user_id: str, login: str, name: str) -> dict:
@@ -21045,11 +21102,32 @@ def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) 
             captain_rows[key] = row
         return row
 
+    # جلسات ذات نشاط في النافذة (طلبات/فواتير) حتى لو startTime خارج النافذة أو بتوقيت UTC خاطئ سابقاً
+    active_sids_in_window: set[str] = set()
+    for o in orders:
+        if not isinstance(o, dict):
+            continue
+        if in_window(o.get("createdAt")):
+            sid = str(o.get("sessionId") or "").strip()
+            if sid:
+                active_sids_in_window.add(sid)
+    for inv in invoices_raw:
+        if not isinstance(inv, dict):
+            continue
+        at = inv.get("paidAt") or inv.get("requestedAt") or inv.get("createdAt")
+        if in_window(at):
+            sid = str(inv.get("sessionId") or "").strip()
+            if sid:
+                active_sids_in_window.add(sid)
+
     day_sessions: list[dict] = []
     for s in sessions:
         if not isinstance(s, dict):
             continue
-        if not in_window(s.get("startTime")):
+        sid = str(s.get("id") or "").strip()
+        start_ok = in_window(s.get("startTime"))
+        activity_ok = bool(sid and sid in active_sids_in_window)
+        if not start_ok and not activity_ok:
             continue
         tid = tid_norm(s.get("tableId"))
         trow = ensure_table(tid)
@@ -21074,9 +21152,11 @@ def _build_hall_day_report(table_id: Optional[str] = None, store: bool = False) 
     for o in orders:
         if not isinstance(o, dict):
             continue
-        if not in_window(o.get("createdAt")):
-            continue
         sid = str(o.get("sessionId") or "").strip()
+        # اقبل الطلب إن كان زمنه في النافذة أو جلسته ضمن يوم التقرير
+        sess_in_day = sid and any(str(x.get("id") or "").strip() == sid for x in day_sessions)
+        if not in_window(o.get("createdAt")) and not sess_in_day:
+            continue
         sess = session_by_id.get(sid) if sid else None
         tid = tid_norm(o.get("tableId") or (sess.get("tableId") if sess else ""))
         trow = ensure_table(tid)
@@ -32768,7 +32848,26 @@ def _kds_normalize_item(it: dict) -> dict:
             line_status = "ready"
         else:
             line_status = "pending"
-    return {
+    notes = str(it.get("notes") or "").strip()[:400]
+    kitchen_notes = str(it.get("kitchenNotes") or it.get("kitchen_notes") or "").strip()[:400]
+    mods_raw = it.get("modifiers") if isinstance(it.get("modifiers"), list) else []
+    mods_out: list[dict] = []
+    for m in mods_raw[:40]:
+        if not isinstance(m, dict):
+            continue
+        item_name = str(m.get("itemName") or m.get("name") or "").strip()
+        if not item_name:
+            continue
+        mods_out.append(
+            {
+                "groupId": str(m.get("groupId") or "")[:80],
+                "groupName": str(m.get("groupName") or m.get("group") or "").strip()[:120],
+                "itemName": item_name[:160],
+                "priceDelta": float(m.get("priceDelta") or 0),
+                "source": str(m.get("source") or "")[:40],
+            }
+        )
+    out = {
         "lineId": str(it.get("lineId") or uuid.uuid4()),
         "name": str(it.get("name") or ""),
         "quantity": qty,
@@ -32786,6 +32885,13 @@ def _kds_normalize_item(it: dict) -> dict:
         "cancelled": cancelled,
         "cancelledAt": it.get("cancelledAt"),
     }
+    if notes:
+        out["notes"] = notes
+    if kitchen_notes:
+        out["kitchenNotes"] = kitchen_notes
+    if mods_out:
+        out["modifiers"] = mods_out
+    return out
 
 
 def _kds_refresh_order_status(order: dict) -> None:
@@ -36009,6 +36115,12 @@ def restaurant_create_invoice(body: dict):
                             row["seatNo"] = ni
                     except (TypeError, ValueError):
                         pass
+                kn = str(x.get("kitchenNotes") or x.get("notes") or "").strip()
+                if kn:
+                    row["kitchenNotes"] = kn[:400]
+                mods = x.get("modifiers")
+                if isinstance(mods, list) and mods:
+                    row["modifiers"] = mods
                 kds_items.append(row)
             ord_data = _restaurant_load("orders", [])
             actor_kds = _mat3am_actor_from_body(body)

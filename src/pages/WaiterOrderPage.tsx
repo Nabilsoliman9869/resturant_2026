@@ -94,6 +94,8 @@ type OrderTakerSessionRow = {
   billingRequestedAt?: string;
   billingProfile?: SessionBillingProfile;
   seatGuestLabels?: unknown;
+  ownerSeatNos?: number[];
+  seatBillingOverrides?: Record<string, { isOwner?: boolean; agentGuid?: string; label?: string }>;
   maxInvoiceLimit?: number;
   mergedIntoSessionId?: string;
   mergedSourceSessionIds?: string[];
@@ -599,6 +601,12 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [billSeatNos, setBillSeatNos] = useState<number[]>([]);
   /** نافذة اختيار الكرسي قبل مراجعة الحساب (ظاهرة من زر طلب الحساب) */
   const [billSeatPickerOpen, setBillSeatPickerOpen] = useState(false);
+  /** نمط التقسيم: شيك لكل كرسي | مالك منفصل + باقي مجمّع | المحدد مجمّعاً */
+  const [billSplitMode, setBillSplitMode] = useState<"per_seat" | "owner_plus_rest" | "combined_selected">("per_seat");
+  /** مقاعد المالك من سياسة الجلسة */
+  const [ownerSeatNos, setOwnerSeatNos] = useState<number[]>([]);
+  /** طابور طباعة شيكات الكابتن (أكثر من شيك) */
+  const [captainPrintQueue, setCaptainPrintQueue] = useState<CashierInvoiceRow[]>([]);
   const [mgrCtxMenu, setMgrCtxMenu] = useState<
     | { kind: "seat"; x: number; y: number; seatNo: number }
     | { kind: "line"; x: number; y: number; lineId: string; name: string }
@@ -912,6 +920,19 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     setCaptainGate(cid ? { id: cid, name: cname || "مسند الطلب" } : null);
     const bp = row?.billingProfile;
     setSessionBillingProfile(bp && typeof bp === "object" ? bp : null);
+    const fromList = Array.isArray(row?.ownerSeatNos)
+      ? row!.ownerSeatNos!.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n >= 1 && n <= 12)
+      : [];
+    const fromOverrides: number[] = [];
+    const ov = row?.seatBillingOverrides;
+    if (ov && typeof ov === "object") {
+      for (const [k, v] of Object.entries(ov)) {
+        const sn = Number(k);
+        if (!Number.isFinite(sn) || sn < 1 || sn > 12) continue;
+        if (v && (v.isOwner || String(v.agentGuid || "").trim())) fromOverrides.push(sn);
+      }
+    }
+    setOwnerSeatNos([...new Set([...fromList, ...fromOverrides])].sort((a, b) => a - b));
     setSessionGuestApprovalPending(Boolean(row?.guestApprovalPending));
     setSessionCustomerTypeLocked(Boolean(row?.customerTypeLocked));
     setSessionCustomerType(String(row?.customerType || (row?.guestSession ? "guest" : bp ? "vip_owner" : "cash")));
@@ -2786,8 +2807,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         const sn = seatNoFromLine(l);
         const tag = assignmentMode === "general" || sn == null ? null : seatGuestDisplay(sn);
         const kn = String(l.kitchenNotes || "").trim();
-        let nm = tag ? `${l.name} (${tag})` : l.name;
-        if (kn) nm += ` — ${kn.slice(0, 160)}`;
+        // اسم نظيف للمطبخ (بدون دمج الملاحظات في العنوان) — تُعرض سطراً بسطر في KDS
+        const nm = tag ? `${l.name} (${tag})` : l.name;
         return {
           productGuide: l.productGuide,
           menuItemId: l.productGuide,
@@ -2795,6 +2816,18 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           quantity: l.qty,
           unitPrice: l.unitPrice,
           ...(assignmentMode === "general" || sn == null ? {} : { seatNo: sn }),
+          ...(kn ? { kitchenNotes: kn.slice(0, 400) } : {}),
+          ...(l.modifiers && l.modifiers.length
+            ? {
+                modifiers: l.modifiers.map((m) => ({
+                  groupId: m.groupId,
+                  groupName: m.groupName,
+                  itemName: m.itemName,
+                  priceDelta: m.priceDelta,
+                  source: m.source,
+                })),
+              }
+            : {}),
         };
       });
 
@@ -3096,21 +3129,67 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           ? selectedBillSeats
           : visibleSeatNumbers.filter((n) => seatsWithItems.has(n));
       const splitGroups: Array<{ id: string; name: string; seats: number[] }> = [];
-      for (const seatNo of seatLoop) {
-        if (!seatsWithItems.has(seatNo) && selectedBillSeats.length > 0) {
-          // السماح بطلب كرسي محدد حتى لو التسمية فقط — الـ API يرفض إن لم توجد بنود
+      const mode = billSplitMode;
+      if (mode === "owner_plus_rest") {
+        const owners = (ownerSeatNos.length ? ownerSeatNos : selectedBillSeats).filter(
+          (n) => seatsWithItems.has(n) || selectedBillSeats.includes(n),
+        );
+        const ownerSet = new Set(owners.length ? owners : []);
+        // إن لم تُعرَّف مقاعد مالك: الكرسي المحدد الأول كمالك والباقي مجمّع
+        const effectiveOwners =
+          ownerSet.size > 0
+            ? [...ownerSet].sort((a, b) => a - b)
+            : seatLoop.length
+              ? [seatLoop[0]!]
+              : [];
+        const rest = seatLoop.filter((n) => !effectiveOwners.includes(n));
+        if (effectiveOwners.length) {
+          const ownerLabel =
+            effectiveOwners.length === 1
+              ? String(seatGuestLabels[effectiveOwners[0]!] ?? "").trim() || `مالك · كرسي ${effectiveOwners[0]}`
+              : `مالك / VIP (${effectiveOwners.join("، ")})`;
+          splitGroups.push({ id: "check-owner", name: ownerLabel, seats: effectiveOwners });
         }
-        const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
-        splitGroups.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
-      }
-      if (selectedBillSeats.length === 0) {
-        const orphanSeats = [...seatsWithItems]
-          .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
-          .sort((a, b) => a - b);
-        if (orphanSeats.length > 0) {
-          splitGroups.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
+        if (rest.length) {
+          splitGroups.push({
+            id: "check-rest",
+            name: rest.length === 1 ? String(seatGuestLabels[rest[0]!] ?? "").trim() || `كرسي ${rest[0]}` : "باقي الطاولة (مجمّع)",
+            seats: rest,
+          });
+        }
+        if (!splitGroups.length) {
+          for (const seatNo of seatLoop) {
+            const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
+            splitGroups.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
+          }
+        }
+      } else if (mode === "combined_selected") {
+        const seats = seatLoop.length ? seatLoop : selectedBillSeats;
+        if (seats.length) {
+          splitGroups.push({
+            id: "check-combined",
+            name: seats.length === 1 ? String(seatGuestLabels[seats[0]!] ?? "").trim() || `كرسي ${seats[0]}` : `فاتورة مجمّعة (${seats.join("، ")})`,
+            seats,
+          });
+        }
+      } else {
+        for (const seatNo of seatLoop) {
+          if (!seatsWithItems.has(seatNo) && selectedBillSeats.length > 0) {
+            // السماح بطلب كرسي محدد حتى لو التسمية فقط — الـ API يرفض إن لم توجد بنود
+          }
+          const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
+          splitGroups.push({ id: `check-${seatNo}`, name: label, seats: [seatNo] });
+        }
+        if (selectedBillSeats.length === 0) {
+          const orphanSeats = [...seatsWithItems]
+            .filter((i) => i !== SHARED_SEAT_NO && !visibleSeatNumbers.includes(i))
+            .sort((a, b) => a - b);
+          if (orphanSeats.length > 0) {
+            splitGroups.push({ id: "check-rest", name: "بدون تسمية مقعد / باقي الطاولة", seats: orphanSeats });
+          }
         }
       }
+      const billedSeatPayload = [...new Set(splitGroups.flatMap((g) => g.seats))].sort((a, b) => a - b);
       const r = await fetch(`${base}/api/restaurant/sessions/request-bill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3118,7 +3197,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           sessionId: activeSessionId,
           splitBySeat: true,
           seatGroups: splitGroups,
-          billSeatNos: selectedBillSeats.length > 0 ? selectedBillSeats : undefined,
+          billSeatNos: billedSeatPayload.length > 0 ? billedSeatPayload : undefined,
           partialBill: true,
           pendingCartCount: cart.filter((line) => Number(line.qty || 0) > 0).length,
           tipAmount: Math.max(0, tipAmount || 0),
@@ -3150,7 +3229,6 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }>(t) ?? {};
       if (!r.ok) throw new Error(t);
       const createdInvoices = Array.isArray(j.invoices) ? j.invoices : [];
-      const firstInvoice = createdInvoices[0];
       const stillOpen = Boolean(j.sessionStillOpen || j.partialBill);
       if (stillOpen && Array.isArray(j.billedSeats) && j.billedSeats.length) {
         setMsg(
@@ -3165,28 +3243,43 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       } else {
         setMsg(autoPrint ? "تم طلب الحساب وفتح طباعة الشيك مباشرة." : "تم طلب الحساب — الفاتورة جاهزة عند الكاشير للتسديد.");
       }
-      if (autoPrint && firstInvoice?.invoiceId) {
-        const invoiceId = String(firstInvoice.invoiceId || "").trim();
-        if (invoiceId) {
-          setCaptainInitialInvoiceRow({
-            sessionId: activeSessionId || undefined,
-            invoiceId,
-            total: Number(firstInvoice.total ?? total) || total,
-            requestedAt: new Date().toISOString(),
-            awaitingPayment: true,
-            splitName: String(firstInvoice.name || "").trim() || null,
-            billNumber: firstInvoice.billNumber != null ? Number(firstInvoice.billNumber) : j.billNumber,
-            subtotal: Number(firstInvoice.subtotal ?? billingTotals.netPortion) || billingTotals.netPortion,
-            tax: Number(firstInvoice.tax ?? vatValue) || vatValue,
-            serviceCharge: Number(firstInvoice.serviceCharge ?? serviceCharge) || serviceCharge,
-            discount: Number(firstInvoice.discount ?? discountValue) || discountValue,
-            lines: Array.isArray(firstInvoice.lines) ? (firstInvoice.lines as CashierInvoiceRow["lines"]) : [],
-            tableLabel: selectedTable?.name || selectedTableId,
-            tableName: selectedTable?.name || null,
-          });
-          setCaptainInvoiceId(invoiceId);
+      if (autoPrint && createdInvoices.length > 0) {
+        const printRows: CashierInvoiceRow[] = createdInvoices
+          .map((inv) => {
+            const invoiceId = String(inv.invoiceId || "").trim();
+            if (!invoiceId) return null;
+            return {
+              sessionId: activeSessionId || undefined,
+              invoiceId,
+              total: Number(inv.total ?? total) || total,
+              requestedAt: new Date().toISOString(),
+              awaitingPayment: true,
+              splitName: String(inv.name || "").trim() || null,
+              billNumber: inv.billNumber != null ? Number(inv.billNumber) : j.billNumber,
+              subtotal: Number(inv.subtotal ?? billingTotals.netPortion) || billingTotals.netPortion,
+              tax: Number(inv.tax ?? vatValue) || vatValue,
+              serviceCharge: Number(inv.serviceCharge ?? serviceCharge) || serviceCharge,
+              discount: Number(inv.discount ?? discountValue) || discountValue,
+              lines: Array.isArray(inv.lines) ? (inv.lines as CashierInvoiceRow["lines"]) : [],
+              tableLabel: selectedTable?.name || selectedTableId,
+              tableName: selectedTable?.name || null,
+            } as CashierInvoiceRow;
+          })
+          .filter((x): x is CashierInvoiceRow => Boolean(x));
+        if (printRows.length) {
+          const [first, ...rest] = printRows;
+          setCaptainInitialInvoiceRow(first!);
+          setCaptainInvoiceId(String(first!.invoiceId || ""));
           setCaptainInvoiceAutoPrint(true);
+          setCaptainPrintQueue(rest);
           setCaptainInvoiceOpen(true);
+          if (printRows.length > 1) {
+            setMsg(
+              (stillOpen
+                ? `تم إصدار ${printRows.length} شيكات — باقي الطاولة مفتوح. `
+                : `تم إصدار ${printRows.length} شيكات. `) + "تُطبع بالترتيب واحداً تلو الآخر.",
+            );
+          }
         }
       }
       setBillReviewOpen(false);
@@ -6529,6 +6622,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         printerHint={captainPrinterHint}
         autoPrintOnOpen={captainInvoiceAutoPrint}
         onClose={() => {
+          if (captainPrintQueue.length > 0) {
+            const [next, ...rest] = captainPrintQueue;
+            setCaptainPrintQueue(rest);
+            setCaptainInitialInvoiceRow(next!);
+            setCaptainInvoiceId(String(next!.invoiceId || ""));
+            setCaptainInvoiceAutoPrint(true);
+            setCaptainInvoiceOpen(true);
+            return;
+          }
           setCaptainInvoiceOpen(false);
           setCaptainInvoiceId(null);
           setCaptainInitialInvoiceRow(null);
@@ -6604,9 +6706,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           >
             <div className="waiter-pos__ops-modal__head">
               <div className="waiter-pos__ops-modal__head-copy">
-                <h3 className="waiter-pos__ops-modal__title">طلب الحساب — اختر الكرسي</h3>
+                <h3 className="waiter-pos__ops-modal__title">طلب الحساب — اختر النمط والكرسي</h3>
                 <div className="waiter-pos__ops-modal__note">
-                  كل كرسي غير مفوتر يظهر هنا. اختر الثاني أو الثالث دون انتظار سداد الأول — شيك مستقل لكل كرسي.
+                  مثال: أب + أولاد + مالك ← شيك المالك منفصل وفاتورة مجمّعة للباقي، أو شيك لكل كرسي.
                 </div>
               </div>
               <button type="button" className="waiter-pos__ops-modal__close" onClick={() => setBillSeatPickerOpen(false)} aria-label="إغلاق">
@@ -6614,10 +6716,46 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               </button>
             </div>
             <div className="waiter-pos__ops-modal__body" style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 900, color: "#0f172a", fontSize: "0.92rem" }}>نمط الفاتورة</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <button
+                    type="button"
+                    className={`waiter-pos__seat-pick-chip${billSplitMode === "per_seat" ? " is-on" : ""}`}
+                    onClick={() => setBillSplitMode("per_seat")}
+                  >
+                    شيك لكل كرسي
+                  </button>
+                  <button
+                    type="button"
+                    className={`waiter-pos__seat-pick-chip${billSplitMode === "owner_plus_rest" ? " is-on" : ""}`}
+                    onClick={() => {
+                      setBillSplitMode("owner_plus_rest");
+                      if (ownerSeatNos.length) {
+                        setBillSeatNos([...new Set([...ownerSeatNos, ...unbilledSeatNos])].filter((n) => unbilledSeatNos.includes(n)));
+                      } else {
+                        setBillSeatNos([...unbilledSeatNos]);
+                      }
+                    }}
+                    title={ownerSeatNos.length ? `مقاعد المالك: ${ownerSeatNos.join("، ")}` : "حدّد المقاعد — أول محدد يُعامل كمالك إن لم تُعرَّف مقاعد مالك"}
+                  >
+                    مالك منفصل + باقي مجمّع
+                    {ownerSeatNos.length ? ` (${ownerSeatNos.join("، ")})` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    className={`waiter-pos__seat-pick-chip${billSplitMode === "combined_selected" ? " is-on" : ""}`}
+                    onClick={() => setBillSplitMode("combined_selected")}
+                  >
+                    المحدد في فاتورة واحدة
+                  </button>
+                </div>
+              </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 {unbilledSeatNos.map((sn) => {
                   const on = billSeatNos.includes(sn);
                   const label = String(seatGuestLabels[sn] ?? "").trim();
+                  const isOwner = ownerSeatNos.includes(sn);
                   return (
                     <button
                       key={`picker-seat-${sn}`}
@@ -6630,6 +6768,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       }
                     >
                       كرسي {sn}
+                      {isOwner ? " ★مالك" : ""}
                       {label ? ` · ${label}` : ""}
                     </button>
                   );
@@ -6641,6 +6780,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setBillSeatNos([...unbilledSeatNos])}>
                   تحديد الكل غير المفوتر
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={ownerSeatNos.filter((n) => unbilledSeatNos.includes(n)).length === 0}
+                  onClick={() => setBillSeatNos(ownerSeatNos.filter((n) => unbilledSeatNos.includes(n)))}
+                >
+                  مقاعد المالك فقط
                 </button>
                 <button type="button" className="btn btn-ghost" onClick={() => setBillSeatNos([])}>
                   مسح التحديد

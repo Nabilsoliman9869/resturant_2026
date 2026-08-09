@@ -1075,3 +1075,9 @@ eserved + active.
 
 - **`api_server.py`:** منطق `_restaurant_should_close_session_after_settlement` — لا يُغلق بعد `mark-paid` / on-account / guest لمجرد انعدام فواتير معلّقة؛ يحترم `partialBillingAt` والبنود غير المفوترة. طلب حساب مقعد يضبط `partialBillingAt` حتى بلا بنود أخرى.
 - **`CashierPayInvoiceModal.tsx`:** توضيح خيار إغلاق الطاولة؛ افتراضي يبقى مفتوحاً لباقي الكراسي.
+
+### 152 — اختيارات طلب الحساب + مطبخ مهذّب + تقرير طاولة — UTC 2026-08-09T09:10:00Z — ID `bill-modes-kds-hall-c91e4a22`
+
+- **`WaiterOrderPage.tsx`:** أنماط طلب الحساب (شيك لكل كرسي / مالك منفصل+باقي مجمّع / المحدد مجمّعاً)؛ طباعة كل الشيكات بالترتيب؛ إرسال `kitchenNotes`/`modifiers` منفصلة للمطبخ؛ قراءة `ownerSeatNos`.
+- **`KitchenPage` + `kitchenTicketDisplay.ts` + CSS:** عرض بند المطبخ كإطار موحّد بأسطر (رئيسي / جانبي / طهي / ملاحظة).
+- **`api_server.py`:** إصلاح `_iso_to_local_dt` لـ UTC؛ مطابقة GUID↔T11 في تقرير الصالة؛ جلسات بنشاط داخل النافذة؛ الحفاظ على ملاحظات/إضافات في `_kds_normalize_item`.
