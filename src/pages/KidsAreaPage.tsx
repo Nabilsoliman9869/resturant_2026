@@ -50,6 +50,13 @@ type KPayment = {
 
 type KAlert = { id: string; text: string; at: string; by?: string };
 
+type KMenuHit = {
+  CardGuide: string;
+  ProductName: string;
+  Price?: number;
+  AgentPrice?: number;
+};
+
 type KOvertime = {
   applicable: boolean;
   exempt: boolean;
@@ -279,6 +286,19 @@ const STYLES = `
 .kids__modal-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 .kids__modal-h h3 { margin:0; font-family:var(--display); font-size:1.2rem; }
 .kids__modal-sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
+.kids__menu-search { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text); font-size:15px; margin-bottom:10px; }
+.kids__menu-hits { display:flex; flex-direction:column; gap:6px; max-height:340px; overflow:auto; margin-bottom:12px; }
+.kids__menu-hit { display:flex; justify-content:space-between; align-items:center; gap:10px;
+  padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface);
+  cursor:pointer; text-align:right; color:var(--text); width:100%; }
+.kids__menu-hit:hover, .kids__menu-hit.is-on { border-color:rgba(249,115,22,0.55); background:rgba(249,115,22,0.10); }
+.kids__menu-hit b { font-size:14px; }
+.kids__menu-hit span { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.kids__menu-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-top:8px; }
+.kids__menu-actions label { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+.kids__menu-actions input[type="number"] { width:72px; padding:6px 8px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text); }
 
 .kids__steps { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:18px; }
 .kids__step { text-align:center; padding:10px 8px; border-radius:10px;
@@ -369,6 +389,15 @@ export default function KidsAreaPage() {
   const [downPaymentInput, setDownPaymentInput] = useState<string>("");
 
   const [openTicketId, setOpenTicketId] = useState<string>("");
+
+  // منتقي منيو المطعم لطلب أصناف على تذكرة الطفل
+  const [menuTicket, setMenuTicket] = useState<KTicket | null>(null);
+  const [menuQ, setMenuQ] = useState("");
+  const [menuHits, setMenuHits] = useState<KMenuHit[]>([]);
+  const [menuPick, setMenuPick] = useState<KMenuHit | null>(null);
+  const [menuQty, setMenuQty] = useState("1");
+  const [menuFireNow, setMenuFireNow] = useState(true);
+  const [menuSearching, setMenuSearching] = useState(false);
 
   const showMsg = (type: "info" | "ok" | "err", text: string, ms = 4500) => {
     setMsg({ type, text });
@@ -626,23 +655,93 @@ export default function KidsAreaPage() {
     }
   };
 
-  const addCustomLine = async (t: KTicket) => {
-    if (!isCashier) return;
-    const productGuide = window.prompt("ProductGuide للصنف الإضافي:", "");
-    if (!productGuide || !productGuide.trim()) return;
-    const qtyStr = window.prompt("الكمية:", "1");
-    const qty = Number(qtyStr || 1);
+  const openMenuPicker = (t: KTicket) => {
+    setMenuTicket(t);
+    setMenuQ("");
+    setMenuHits([]);
+    setMenuPick(null);
+    setMenuQty("1");
+    setMenuFireNow(t.status === "active");
+  };
+
+  const closeMenuPicker = () => {
+    setMenuTicket(null);
+    setMenuHits([]);
+    setMenuPick(null);
+    setMenuQ("");
+  };
+
+  useEffect(() => {
+    if (!menuTicket) return;
+    const q = menuQ.trim();
+    if (q.length < 2) {
+      setMenuHits([]);
+      return;
+    }
+    let cancelled = false;
+    const tmr = window.setTimeout(() => {
+      void (async () => {
+        setMenuSearching(true);
+        try {
+          const r = await safeFetch(
+            `${base}/api/products/search?search_text=${encodeURIComponent(q)}&menuPicker=false`,
+          );
+          const j = (await r.json().catch(() => ({}))) as { products?: KMenuHit[]; detail?: string };
+          if (cancelled) return;
+          if (!r.ok) {
+            showMsg("err", j?.detail || `تعذّر البحث (${r.status})`);
+            setMenuHits([]);
+            return;
+          }
+          setMenuHits(Array.isArray(j.products) ? j.products.slice(0, 40) : []);
+        } finally {
+          if (!cancelled) setMenuSearching(false);
+        }
+      })();
+    }, 280);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(tmr);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuQ, menuTicket, base]);
+
+  const confirmMenuAdd = async () => {
+    if (!menuTicket || !menuPick) return;
+    const qty = Number(menuQty || 1);
     if (!Number.isFinite(qty) || qty <= 0) return showMsg("err", "كمية غير صالحة");
+    const guide = String(menuPick.CardGuide || "").trim();
+    if (!guide) return showMsg("err", "صنف غير صالح");
+    const canFire = menuTicket.status === "active" && menuFireNow;
     setBusy(true);
     try {
-      const r = await safeFetch(`${base}/api/kids/tickets/${t.id}/add-line`, {
+      const r = await safeFetch(`${base}/api/kids/tickets/${menuTicket.id}/add-line`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productGuide: productGuide.trim(), quantity: qty, mat3amActor: actor }),
+        body: JSON.stringify({
+          productGuide: guide,
+          quantity: qty,
+          sendToKitchen: true,
+          fireNow: canFire,
+          mat3amActor: actor,
+        }),
       });
-      const j = (await r.json().catch(() => ({}))) as { detail?: string };
+      const j = (await r.json().catch(() => ({}))) as {
+        detail?: string;
+        fired?: number;
+        fireWarning?: string;
+        isKitchen?: boolean;
+      };
       if (!r.ok) return showMsg("err", j?.detail || `تعذّرت الإضافة (${r.status})`);
-      showMsg("ok", "أُضيف الصنف للتذكرة");
+      const name = menuPick.ProductName || "الصنف";
+      if (j.fireWarning) {
+        showMsg("ok", `أُضيف «${name}» — لم يُرسل للمطبخ بعد: ${j.fireWarning}`);
+      } else if ((j.fired || 0) > 0) {
+        showMsg("ok", `أُضيف «${name}» وأُرسل للمطبخ`);
+      } else {
+        showMsg("ok", `أُضيف «${name}» لتذكرة ${menuTicket.childName}`);
+      }
+      closeMenuPicker();
       await loadTickets();
     } finally {
       setBusy(false);
@@ -670,7 +769,7 @@ export default function KidsAreaPage() {
       <header className="kids__hdr">
         <div>
           <h2>منطقة الأطفال — التذاكر</h2>
-          <p>{isCashier ? "كاشير: حجز/تسوية + إدارة كاملة." : "خدمة الكيدز: بدء الجلسة + إرسال الوجبات + ملاحظات."}</p>
+          <p>{isCashier ? "كاشير: حجز/تسوية + طلب من المنيو." : "خدمة الكيدز: بدء الجلسة + طلب من المنيو + إرسال الوجبات."}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button type="button" className="btn btn-ghost" onClick={() => void loadTickets()} disabled={busy}>تحديث</button>
@@ -1084,14 +1183,26 @@ export default function KidsAreaPage() {
               <button type="button" className="btn btn-ghost" onClick={() => void addNote(openTicket, "note")} disabled={busy}>+ ملاحظة</button>
               <button type="button" className="btn btn-ghost" onClick={() => void addNote(openTicket, "alert")} disabled={busy}>+ تنبيه</button>
               {openTicket.status === "active" ? (
-                <button
-                  type="button"
-                  className="btn btn-warning"
-                  onClick={() => void fireKitchen(openTicket)}
-                  disabled={busy || pendingKitchenCount(openTicket) === 0}
-                >
-                  🍽 اطلب الوجبة الآن ({pendingKitchenCount(openTicket)})
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-warning"
+                    onClick={() => void fireKitchen(openTicket)}
+                    disabled={busy || pendingKitchenCount(openTicket) === 0}
+                  >
+                    🍽 اطلب الوجبة الآن ({pendingKitchenCount(openTicket)})
+                  </button>
+                  {(isCashier || role === "kids_guard") ? (
+                    <button
+                      type="button"
+                      className="btn btn-violet"
+                      onClick={() => openMenuPicker(openTicket)}
+                      disabled={busy}
+                    >
+                      🍔 طلب من منيو المطعم
+                    </button>
+                  ) : null}
+                </>
               ) : null}
               {(role === "manager" || role === "developer") && openTicket.overtime?.applicable ? (
                 <button type="button" className="btn btn-ghost" onClick={() => void exemptOvertime(openTicket)} disabled={busy}>
@@ -1101,16 +1212,88 @@ export default function KidsAreaPage() {
               {isCashier ? (
                 <>
                   {openTicket.status === "active" ? (
-                    <>
-                      <button type="button" className="btn btn-ghost" onClick={() => void addCustomLine(openTicket)} disabled={busy}>+ بند إضافي</button>
-                      <button type="button" className="btn btn-ghost" onClick={() => void addInterimPayment(openTicket)} disabled={busy}>دفعة جزئية</button>
-                    </>
+                    <button type="button" className="btn btn-ghost" onClick={() => void addInterimPayment(openTicket)} disabled={busy}>دفعة جزئية</button>
                   ) : null}
                   <button type="button" className="btn btn-success" onClick={() => void settleTicket(openTicket)} disabled={busy}>
                     تسوية وإقفال
                   </button>
                 </>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {menuTicket ? (
+        <div className="kids__modal-bg" onClick={closeMenuPicker}>
+          <div className="kids__modal" onClick={(e) => e.stopPropagation()} style={{ width: "min(640px, 100%)" }}>
+            <div className="kids__modal-h">
+              <h3>طلب من منيو المطعم</h3>
+              <button type="button" className="btn btn-ghost" onClick={closeMenuPicker}>إغلاق</button>
+            </div>
+            <p className="kids__modal-sub">
+              للطفل <b>{menuTicket.childName}</b> — ابحث عن صنف (مثل برجر) ثم أضفه على التذكرة
+              {menuTicket.status === "active" ? " وأرسله للمطبخ." : " (يُرسل للمطبخ بعد بدء الجلسة)."}
+            </p>
+            <input
+              className="kids__menu-search"
+              value={menuQ}
+              onChange={(e) => setMenuQ(e.target.value)}
+              placeholder="ابحث باسم الصنف…"
+              autoFocus
+            />
+            <div className="kids__menu-hits">
+              {menuSearching ? <div style={{ color: "var(--muted)", padding: 8 }}>جاري البحث…</div> : null}
+              {!menuSearching && menuQ.trim().length >= 2 && menuHits.length === 0 ? (
+                <div style={{ color: "var(--muted)", padding: 8 }}>لا نتائج</div>
+              ) : null}
+              {menuHits.map((p) => {
+                const price = Number(p.Price ?? p.AgentPrice ?? 0);
+                const on = menuPick?.CardGuide === p.CardGuide;
+                return (
+                  <button
+                    key={p.CardGuide}
+                    type="button"
+                    className={`kids__menu-hit${on ? " is-on" : ""}`}
+                    onClick={() => setMenuPick(p)}
+                  >
+                    <b>{p.ProductName}</b>
+                    <span>{fmt(price)} ج.م</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="kids__menu-actions">
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <label>
+                  الكمية
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={menuQty}
+                    onChange={(e) => setMenuQty(e.target.value)}
+                  />
+                </label>
+                {menuTicket.status === "active" ? (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={menuFireNow}
+                      onChange={(e) => setMenuFireNow(e.target.checked)}
+                    />
+                    أرسل للمطبخ فوراً
+                  </label>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="btn btn-success"
+                disabled={busy || !menuPick}
+                onClick={() => void confirmMenuAdd()}
+              >
+                {menuPick ? `إضافة «${menuPick.ProductName}»` : "اختر صنفاً"}
+              </button>
             </div>
           </div>
         </div>

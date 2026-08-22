@@ -34758,13 +34758,23 @@ def kids_ticket_fire_kitchen(ticket_id: str, body: dict):
 
 @app.post("/api/kids/tickets/{ticket_id}/add-line")
 def kids_ticket_add_line(ticket_id: str, body: dict):
-    """يضيف بند إضافي للتذكرة (في MAT3AM_KIDS_TICKET_LINES — لا يلمس TBL023 الآن).
-    body: { productGuide, quantity?=1 }"""
+    """يضيف بند إضافي للتذكرة (منيو المطعم أو بند يدوي).
+    body: {
+      productGuide, quantity?=1,
+      sendToKitchen?=false  — فرض إرسال للمطبخ حتى لو الصنف ليس علامة كيدز 55555,
+      fireNow?=false        — بعد الإضافة أرسل كل بنود المطبخ المعلّقة فوراً (للتذكرة النشطة)
+    }"""
     body = body if isinstance(body, dict) else {}
     pg = str(body.get("productGuide") or "").strip().upper()
     qty = float(body.get("quantity") or 1)
     if not pg or qty <= 0:
         raise HTTPException(status_code=400, detail="productGuide وquantity مطلوبان")
+    force_kitchen = bool(
+        body.get("sendToKitchen")
+        or body.get("forceKitchen")
+        or body.get("isKitchen")
+    )
+    fire_now = bool(body.get("fireNow"))
 
     t = _kids_db_load_ticket(ticket_id.upper())
     if not t:
@@ -34792,7 +34802,7 @@ def kids_ticket_add_line(ticket_id: str, body: dict):
             raise HTTPException(status_code=404, detail="الصنف غير موجود")
         name = str(r[1] or "")
         price = float(r[2] or r[3] or 0)
-        is_kitchen = str(r[4] or "").strip() == KIDS_KITCHEN_MARKER
+        is_kitchen = force_kitchen or (str(r[4] or "").strip() == KIDS_KITCHEN_MARKER)
         minutes = int(r[5] or 0) if r[5] else 0
     finally:
         try: conn.close()
@@ -34808,8 +34818,56 @@ def kids_ticket_add_line(ticket_id: str, body: dict):
         "fromPackage": False,
         "addedBy": str((body.get("mat3amActor") or {}).get("name") or ""),
     })
+
+    fired = 0
+    kitchen_order_id = None
+    if fire_now and is_kitchen and str(t.get("status") or "").lower() == "active":
+        try:
+            fire_body = dict(body) if isinstance(body, dict) else {}
+            fire_body["lineIds"] = [line_id]
+            fire_out = kids_ticket_fire_kitchen(ticket_id, fire_body)
+            if isinstance(fire_out, dict):
+                fired = int(fire_out.get("fired") or 0)
+                kitchen_order_id = fire_out.get("kitchenOrderId")
+                if fire_out.get("ticket"):
+                    return {
+                        "success": True,
+                        "ticket": fire_out.get("ticket"),
+                        "lineId": line_id,
+                        "isKitchen": True,
+                        "fired": fired,
+                        "kitchenOrderId": kitchen_order_id,
+                    }
+        except HTTPException as he:
+            t2 = _kids_db_load_ticket(t["id"])
+            return {
+                "success": True,
+                "ticket": _kids_enrich_ticket(t2) if t2 else None,
+                "lineId": line_id,
+                "isKitchen": is_kitchen,
+                "fired": 0,
+                "fireWarning": str(getattr(he, "detail", None) or he),
+            }
+        except Exception as ex:
+            t2 = _kids_db_load_ticket(t["id"])
+            return {
+                "success": True,
+                "ticket": _kids_enrich_ticket(t2) if t2 else None,
+                "lineId": line_id,
+                "isKitchen": is_kitchen,
+                "fired": 0,
+                "fireWarning": str(ex),
+            }
+
     t2 = _kids_db_load_ticket(t["id"])
-    return {"success": True, "ticket": _kids_enrich_ticket(t2) if t2 else None, "lineId": line_id}
+    return {
+        "success": True,
+        "ticket": _kids_enrich_ticket(t2) if t2 else None,
+        "lineId": line_id,
+        "isKitchen": is_kitchen,
+        "fired": fired,
+        "kitchenOrderId": kitchen_order_id,
+    }
 
 
 @app.post("/api/kids/tickets/{ticket_id}/payment")

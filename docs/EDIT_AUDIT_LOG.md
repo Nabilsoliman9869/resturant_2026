@@ -1087,3 +1087,8 @@ eserved + active.
 - **`CashierPayInvoiceModal.tsx`:** قالب طباعة بإطار عام وأقسام مميزة؛ `Table No.` بدل GUID؛ `Chair No.` و`Name` عند التوفر؛ أقسام Items/Totals/Payment.
 - **`api_server.py`:** إثراء `tableLabel`/`tableNumber` دون إرجاع GUID كاسم طاولة.
 - **`WaiterOrderPage.tsx`:** تمرير رقم/اسم الطاولة عند طباعة شيك الكابتن.
+
+### 154 — طلب أصناف منيو المطعم من شاشة الكيدز — UTC 2026-08-22T10:50:00Z — ID `kids-menu-order-a8f31c`
+
+- **`KidsAreaPage.tsx`:** زر «طلب من منيو المطعم» + بحث أصناف وإضافتها لتذكرة الطفل (كاشير/حارس).
+- **`POST /api/kids/tickets/{id}/add-line`:** `sendToKitchen` لفرض بند مطبخ من منيو المطعم + `fireNow` لإرسال فوري للـ KDS باسم الطفل.
