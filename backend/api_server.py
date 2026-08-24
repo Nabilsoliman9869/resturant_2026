@@ -1961,6 +1961,184 @@ async def api_settings_test_connection(body: dict):
     """اختبار الاتصال بقاعدة البيانات بالمعاملات المرسلة (غير حاجب للحلقة الرئيسية)."""
     return await run_in_threadpool(_settings_test_connection_sync, body)
 
+
+def _parent_connection_cfg_from_settings() -> dict:
+    try:
+        if os.path.exists(_settings_path):
+            with open(_settings_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                return {
+                    "server": d.get("server") or "",
+                    "port": _normalize_sql_port(d.get("port")),
+                    "database": d.get("database") or "",
+                    "uid": d.get("uid") or "",
+                    "password": d.get("password") or "",
+                }
+    except Exception:
+        pass
+    return {"server": "", "port": None, "database": "", "uid": "", "password": ""}
+
+
+@app.get("/api/settings/tax-twin")
+def api_settings_tax_twin_get():
+    """إعدادات قاعدة التوأم الضريبية — الاسم الظاهر: مسار الحفظ اليومي."""
+    import tax_twin as _tax_twin
+
+    st = _tax_twin.status_snapshot(_settings_path)
+    parent = _parent_connection_cfg_from_settings()
+    cfg = st.get("cfg") or {}
+    # عرض وراثة الأم في الواجهة إن كانت حقول التوأم فارغة
+    view = dict(cfg)
+    if not str(view.get("server") or "").strip():
+        view["server"] = parent.get("server") or ""
+    if view.get("port") is None:
+        view["port"] = parent.get("port")
+    if not str(view.get("uid") or "").strip():
+        view["uid"] = parent.get("uid") or ""
+    if not str(view.get("database") or "").strip() and parent.get("database"):
+        view["database"] = f"{parent.get('database')}_TAX"
+    return {
+        "ok": True,
+        "alias": _tax_twin.ALIAS_LABEL,
+        "cfg": view,
+        "parent": {k: parent.get(k) for k in ("server", "port", "database", "uid")},
+        "lastPublisher": st.get("lastPublisher"),
+    }
+
+
+@app.put("/api/settings/tax-twin")
+async def api_settings_tax_twin_put(body: dict):
+    """حفظ مسار الحفظ اليومي؛ عند أول اتصال ناجح يُستعاد نسخة التوأم وتُفعَّل المزامنة."""
+    import tax_twin as _tax_twin
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+
+    def _work():
+        parent = _parent_connection_cfg_from_settings()
+        patch = {
+            "dailySavePath": body.get("dailySavePath", body.get("path", "")),
+            "server": body.get("server", ""),
+            "port": body.get("port"),
+            "database": body.get("database", ""),
+            "uid": body.get("uid", ""),
+            "password": body.get("password", ""),
+            "syncEnabled": body.get("syncEnabled", True),
+        }
+        if "password" not in body or body.get("password") is None:
+            # لا تمسح كلمة المرور إن لم تُرسل
+            cur = _tax_twin.load_tax_twin(_settings_path)
+            patch["password"] = cur.get("password") or parent.get("password") or ""
+
+        def _parent_conn():
+            conn = get_connection()
+            if conn is None:
+                raise RuntimeError("تعذر الاتصال بقاعدة الأم")
+            return conn
+
+        return _tax_twin.save_and_maybe_bootstrap(
+            settings_path=_settings_path,
+            patch=patch,
+            parent_cfg=parent,
+            get_parent_connection=_parent_conn,
+        )
+
+    result = await run_in_threadpool(_work)
+    try:
+        import tax_twin as _tax_twin
+
+        def _parent_conn_bg():
+            conn = get_connection()
+            if conn is None:
+                raise RuntimeError("تعذر الاتصال بقاعدة الأم")
+            return conn
+
+        _tax_twin.ensure_publisher_thread(
+            settings_path=_settings_path,
+            data_dir=str(DATA_DIR),
+            parent_cfg_loader=_parent_connection_cfg_from_settings,
+            get_parent_connection=_parent_conn_bg,
+        )
+    except Exception:
+        pass
+    if not result.get("ok") and result.get("bootstrapped") is False and result.get("detail"):
+        # الحفظ قد ينجح مع فشل التهيئة — نُرجع 200 مع ok=false للتوضيح في الواجهة
+        return result
+    return result
+
+
+@app.post("/api/settings/tax-twin/test")
+async def api_settings_tax_twin_test(body: dict = None):
+    import tax_twin as _tax_twin
+
+    body = body if isinstance(body, dict) else {}
+
+    def _work():
+        parent = _parent_connection_cfg_from_settings()
+        cfg = _tax_twin.load_tax_twin(_settings_path)
+        for k in ("dailySavePath", "server", "port", "database", "uid", "password"):
+            if k in body and body.get(k) is not None:
+                cfg[k] = body.get(k)
+        if not str(cfg.get("server") or "").strip():
+            cfg["server"] = parent.get("server") or ""
+        if cfg.get("port") is None:
+            cfg["port"] = parent.get("port")
+        if not str(cfg.get("uid") or "").strip():
+            cfg["uid"] = parent.get("uid") or ""
+        if not str(cfg.get("password") or "") and parent.get("password"):
+            cfg["password"] = parent.get("password") or ""
+        if not str(cfg.get("database") or "").strip() and parent.get("database"):
+            cfg["database"] = f"{parent.get('database')}_TAX"
+        return _tax_twin.test_server_reachable(cfg)
+
+    return await run_in_threadpool(_work)
+
+
+@app.post("/api/settings/tax-twin/bootstrap")
+async def api_settings_tax_twin_bootstrap():
+    """إعادة تهيئة التوأم يدوياً (نسخ من الأم ثم استعادة)."""
+    import tax_twin as _tax_twin
+
+    def _work():
+        parent = _parent_connection_cfg_from_settings()
+
+        def _parent_conn():
+            conn = get_connection()
+            if conn is None:
+                raise RuntimeError("تعذر الاتصال بقاعدة الأم")
+            return conn
+
+        return _tax_twin.bootstrap_twin(
+            settings_path=_settings_path,
+            parent_cfg=parent,
+            get_parent_connection=_parent_conn,
+        )
+
+    return await run_in_threadpool(_work)
+
+
+@app.post("/api/settings/tax-twin/run-publisher")
+async def api_settings_tax_twin_run_publisher():
+    import tax_twin as _tax_twin
+
+    def _work():
+        def _parent_conn():
+            conn = get_connection()
+            if conn is None:
+                raise RuntimeError("تعذر الاتصال بقاعدة الأم")
+            return conn
+
+        return _tax_twin.run_publisher_once(
+            settings_path=_settings_path,
+            data_dir=str(DATA_DIR),
+            parent_cfg=_parent_connection_cfg_from_settings(),
+            get_parent_connection=_parent_conn,
+        )
+
+    return await run_in_threadpool(_work)
+
+
 # CORS - للسماح للـ HTML بالاتصال
 app.add_middleware(
     CORSMiddleware,
@@ -14103,6 +14281,24 @@ def _mat3am_startup_bootstrap():
             print(f"[mat3am] ODBC WARNING: {e}", flush=True)
     except Exception as e:
         print(f"[mat3am] ODBC probe failed: {e}", flush=True)
+    try:
+        import tax_twin as _tax_twin
+
+        def _parent_conn_bg():
+            conn = get_connection()
+            if conn is None:
+                raise RuntimeError("تعذر الاتصال بقاعدة الأم")
+            return conn
+
+        _tax_twin.ensure_publisher_thread(
+            settings_path=_settings_path,
+            data_dir=str(DATA_DIR),
+            parent_cfg_loader=_parent_connection_cfg_from_settings,
+            get_parent_connection=_parent_conn_bg,
+        )
+        print("[mat3am] tax-twin publisher armed", flush=True)
+    except Exception as e:
+        print(f"[mat3am] tax-twin publisher skip: {e}", flush=True)
 
 
 def _run_background_startup_task(name: str, fn) -> None:

@@ -69,6 +69,7 @@ import DeliveryShippingZonesSettingsPage from "./pages/settings/DeliveryShipping
 import SharedTerminalSettingsPage from "./pages/settings/SharedTerminalSettingsPage";
 import TelegramOpsPulseSettingsPage from "./pages/settings/TelegramOpsPulseSettingsPage";
 import OpsDayResetPage from "./pages/settings/OpsDayResetPage";
+import TaxTwinDailySaveSettingsPage from "./pages/settings/TaxTwinDailySaveSettingsPage";
 import PosAdminPage from "./pages/PosAdminPage";
 import CallCenterPage from "./pages/CallCenterPage";
 import DeliveryManagementPage from "./pages/DeliveryManagementPage";
@@ -219,6 +220,7 @@ export default function App() {
           <Route path="ops-day-reset" element={<OpsDayResetPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
+          <Route path="daily-save-path" element={<TaxTwinDailySaveSettingsPage />} />
           <Route path="init-db" element={<DeveloperInitDb />} />
           <Route path="users" element={<DeveloperUsers />} />
         </Route>
@@ -448,6 +450,7 @@ export default function App() {
           <Route path="ops-day-reset" element={<OpsDayResetPage />} />
           <Route path="master-data" element={<MasterDataPage />} />
           <Route path="connection" element={<DeveloperConnection />} />
+          <Route path="daily-save-path" element={<TaxTwinDailySaveSettingsPage />} />
           <Route path="init-db" element={<DeveloperInitDb />} />
           <Route path="users" element={<DeveloperUsers />} />
         </Route>

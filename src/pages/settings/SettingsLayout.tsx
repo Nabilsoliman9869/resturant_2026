@@ -19,6 +19,7 @@ function buildSettingsSections(role: RoleId | null): SettingsNavSection[] {
         { to: "playbook", label: "📖 دليل تشغيل النظام", hint: "الدليل الشامل لفهم تأثير كل إعداد على سير العمل" },
         { to: "master-data", label: "التعريفات الأساسية", hint: "يؤثر على: الوحدات، العملات، ومجموعات البيانات المرجعية في كل الشاشات" },
         { to: "connection", label: "اتصال القاعدة", hint: "يؤثر على: حفظ وقراءة كل الإعدادات والبيانات من SQL Server" },
+        { to: "daily-save-path", label: "مسار الحفظ اليومي", hint: "قاعدة التوأم الضريبية: مجلد النسخ + تهيئة أولى ومزامنة الفواتير الضريبية" },
         { to: "init-db", label: "تهيئة SQL", hint: "يؤثر على: إنشاء الجداول الأولية قبل أي تشغيل فعلي" },
       ],
     },
