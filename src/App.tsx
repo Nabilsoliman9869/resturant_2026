@@ -10,6 +10,7 @@ import CashExpensePage from "./pages/CashExpensePage";
 import PurchasesPage from "./pages/PurchasesPage";
 import ReportsPage from "./pages/ReportsPage";
 import FlashReportPage from "./pages/FlashReportPage";
+import PeriodFinanceReportsPage from "./pages/PeriodFinanceReportsPage";
 import PosPlaceholder from "./pages/PosPlaceholder";
 import TablesLayoutPage from "./pages/TablesLayoutPage";
 import DeveloperConnection from "./pages/DeveloperConnection";
@@ -141,6 +142,7 @@ export default function App() {
         <Route path="pos" element={<PosPlaceholder />} />
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="period-finance" element={<PeriodFinanceReportsPage />} />
         <Route path="flash-report" element={<FlashReportPage />} />
         <Route path="costing" element={<CostingPage />} />
         <Route path="master-data" element={<MasterDataPage />} />
@@ -168,6 +170,7 @@ export default function App() {
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="period-finance" element={<PeriodFinanceReportsPage />} />
         <Route path="flash-report" element={<FlashReportPage />} />
         <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />
@@ -250,6 +253,7 @@ export default function App() {
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="period-finance" element={<PeriodFinanceReportsPage />} />
         <Route path="flash-report" element={<FlashReportPage />} />
         <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />
@@ -316,6 +320,7 @@ export default function App() {
         <Route path="tables" element={<WaiterTablesPage />} />
         <Route path="captain-tables" element={<WaiterTablesPage />} />
         <Route path="order-taker" element={<WaiterOrderPage />} />
+        <Route path="delivery-order" element={<DeliveryOrderPage />} />
         <Route path="guest-returns" element={<GuestReturnsManagerPage />} />
         <Route path="runner" element={<RunnerPage />} />
         <Route path="pos" element={<PosPlaceholder />} />
@@ -394,6 +399,7 @@ export default function App() {
         <Route path="purchases" element={<PurchasesPage />} />
         <Route path="cash-expense" element={<CashExpensePage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="period-finance" element={<PeriodFinanceReportsPage />} />
         <Route path="flash-report" element={<FlashReportPage />} />
         <Route path="table-sessions-report" element={<TableSessionsReportPage />} />
         <Route path="cashflow" element={<CashflowFrame />} />

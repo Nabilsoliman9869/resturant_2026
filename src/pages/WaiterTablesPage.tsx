@@ -1779,6 +1779,19 @@ export default function WaiterTablesPage() {
             </span>
           ) : null}
           <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)" }}>{businessDayLabel}</span>
+          <button
+            type="button"
+            className="btn btn-violet"
+            style={{ fontWeight: 800 }}
+            title="طلب دليفري بدون حجز طاولة صالة — جلسة افتراضية delivery:{فاتورة}"
+            onClick={() => {
+              const roleBase = orderTakerBase;
+              // شاشة طلب الدليفري (عميل دليفري) — لا تستهلك طاولة من المخطط
+              navigate(`${roleBase}/delivery-order`);
+            }}
+          >
+            🛵 طلب دليفري
+          </button>
           <div className="waiter-tables-toolbar__jump">
             <input
               type="search"

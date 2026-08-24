@@ -10573,6 +10573,7 @@ def get_reports_list():
     return {
         "reports": [
             {"id": "captains_flash", "name_ar": "فلاش ريبورت الكباتن", "name_en": "Captains Flash Report", "params": ["from_date"]},
+            {"id": "period_finance", "name_ar": "إيراد ومصروفات الفترة (± ضريبة)", "name_en": "Period Finance ± Tax", "params": ["from_date", "to_date"]},
             {"id": "trial_balance", "name_ar": "ميزان المراجعة", "name_en": "Trial Balance", "params": ["from_date", "to_date"]},
             {"id": "general_ledger", "name_ar": "دفتر الأستاذ العام", "name_en": "General Ledger", "params": ["account_guide", "from_date", "to_date"]},
             {"id": "customer_statement", "name_ar": "كشف حساب عميل", "name_en": "Customer Statement", "params": ["agent_guide", "from_date", "to_date", "currency_guide", "show_opening_balance", "posted_only"]},
@@ -11138,6 +11139,340 @@ def _build_flash_report(report_day_raw: Optional[str]) -> dict:
     }
 
 
+def _period_finance_parse_day(raw: Optional[str], *, fallback: Optional[date_cls] = None) -> date_cls:
+    txt = str(raw or "").strip()[:10]
+    if not txt:
+        return fallback or date_cls.today()
+    try:
+        return datetime.strptime(txt, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="صيغة التاريخ يجب أن تكون YYYY-MM-DD")
+
+
+def _invoice_channel_kind(inv: dict) -> str:
+    notes = str(inv.get("notes") or inv.get("Notes") or inv.get("billNotes") or "").strip().upper()
+    order_type = str(inv.get("orderType") or inv.get("channel") or "").strip().lower()
+    sid = str(inv.get("sessionId") or "").strip().lower()
+    if notes.startswith("KIDS|") or order_type in ("kids", "kids_area") or "kids:" in sid:
+        return "kids"
+    if sid.startswith("delivery:") or order_type in ("delivery", "takeaway_delivery"):
+        return "delivery"
+    return "dine_in"
+
+
+def _build_period_finance_report(
+    *,
+    from_date_raw: Optional[str],
+    to_date_raw: Optional[str],
+    table_id: Optional[str] = None,
+    captain: Optional[str] = None,
+    product_guide: Optional[str] = None,
+    channel: Optional[str] = None,
+) -> dict:
+    """تقرير فترة: إيراد بدون/مع ضريبة + فلاتر + كيدز + مصروفات/عمومية."""
+    day_from = _period_finance_parse_day(from_date_raw, fallback=date_cls.today().replace(day=1))
+    day_to = _period_finance_parse_day(to_date_raw, fallback=date_cls.today())
+    if day_to < day_from:
+        raise HTTPException(status_code=400, detail="to_date قبل from_date")
+
+    table_f = str(table_id or "").strip().lower()
+    captain_f = str(captain or "").strip().lower()
+    product_f = str(product_guide or "").strip().upper().replace("{", "").replace("}", "")
+    channel_f = str(channel or "all").strip().lower() or "all"
+    if channel_f not in ("all", "dine_in", "delivery", "kids"):
+        channel_f = "all"
+
+    invoices = _restaurant_load("invoices", [])
+    if not isinstance(invoices, list):
+        invoices = []
+    sessions = _restaurant_load("table_sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    sess_by_id = {
+        str(s.get("id") or "").strip(): s
+        for s in sessions
+        if isinstance(s, dict) and str(s.get("id") or "").strip()
+    }
+
+    matched: list[dict] = []
+    by_item: dict[str, dict] = {}
+    by_table: dict[str, dict] = {}
+    by_captain: dict[str, dict] = {}
+    kids_net = kids_tax = kids_service = kids_gross = 0.0
+    kids_count = 0
+    delivery_net = delivery_gross = 0.0
+    delivery_count = 0
+
+    for inv in invoices:
+        if not isinstance(inv, dict):
+            continue
+        # تاريخ الإيراد: التحصيل أولاً ثم طلب الحساب ثم الإنشاء
+        inv_dt = _parse_iso_dt_local(inv.get("paidAt") or inv.get("requestedAt") or inv.get("createdAt"))
+        if not inv_dt:
+            continue
+        inv_day = inv_dt.date()
+        if inv_day < day_from or inv_day > day_to:
+            continue
+
+        ch = _invoice_channel_kind(inv)
+        if channel_f != "all" and ch != channel_f:
+            continue
+
+        sid = str(inv.get("sessionId") or "").strip()
+        sess = sess_by_id.get(sid) if sid else None
+        tid = str(inv.get("tableId") or (sess or {}).get("tableId") or "").strip()
+        tlabel = str(
+            inv.get("tableLabel")
+            or inv.get("tableName")
+            or (sess or {}).get("tableLabel")
+            or tid
+            or ("دليفري" if ch == "delivery" else ("كيدز" if ch == "kids" else "—"))
+        ).strip()
+        cap_name = str(
+            inv.get("captainName")
+            or (sess or {}).get("captainName")
+            or (sess or {}).get("captainLogin")
+            or ""
+        ).strip()
+        cap_id = str(inv.get("captainUserId") or (sess or {}).get("captainUserId") or "").strip()
+
+        if table_f and table_f not in (tid.lower(), tlabel.lower()):
+            continue
+        if captain_f:
+            blob = f"{cap_name} {cap_id}".lower()
+            if captain_f not in blob:
+                continue
+
+        lines = [ln for ln in (inv.get("lines") or []) if isinstance(ln, dict)]
+        if product_f:
+            hit = False
+            for ln in lines:
+                pg = str(ln.get("productGuide") or ln.get("ProductGuide") or "").upper().replace("{", "").replace("}", "")
+                if pg == product_f:
+                    hit = True
+                    break
+            if not hit:
+                continue
+
+        subtotal = float(inv.get("subtotal") or 0)
+        discount = float(inv.get("discount") or 0)
+        tax = float(inv.get("tax") or 0)
+        service = float(inv.get("serviceCharge") or 0)
+        tip = float(inv.get("tipAmount") or 0)
+        total = float(inv.get("total") or 0)
+        if total <= 0:
+            total = max(0.0, subtotal + service + tax + tip)
+        net = max(0.0, subtotal)  # بعد خصم الفاتورة كما هو مخزّن
+        gross_with_tax = max(0.0, net + service + tax)
+
+        row = {
+            "invoiceId": str(inv.get("id") or ""),
+            "date": inv_day.isoformat(),
+            "channel": ch,
+            "tableId": tid,
+            "tableLabel": tlabel,
+            "captainName": cap_name or "—",
+            "captainUserId": cap_id,
+            "net": round(net, 2),
+            "discount": round(discount, 2),
+            "service": round(service, 2),
+            "tax": round(tax, 2),
+            "tip": round(tip, 2),
+            "grossWithTax": round(gross_with_tax, 2),
+            "total": round(total, 2),
+        }
+        matched.append(row)
+
+        if ch == "kids":
+            kids_count += 1
+            kids_net += net
+            kids_tax += tax
+            kids_service += service
+            kids_gross += gross_with_tax
+        if ch == "delivery":
+            delivery_count += 1
+            delivery_net += net
+            delivery_gross += gross_with_tax
+
+        tkey = tid or tlabel or "—"
+        tb = by_table.setdefault(tkey, {"tableId": tid, "tableLabel": tlabel, "invoices": 0, "net": 0.0, "tax": 0.0, "grossWithTax": 0.0})
+        tb["invoices"] += 1
+        tb["net"] = round(tb["net"] + net, 2)
+        tb["tax"] = round(tb["tax"] + tax, 2)
+        tb["grossWithTax"] = round(tb["grossWithTax"] + gross_with_tax, 2)
+
+        ckey = cap_id or cap_name or "—"
+        cb = by_captain.setdefault(
+            ckey,
+            {"captainUserId": cap_id, "captainName": cap_name or "—", "invoices": 0, "net": 0.0, "tax": 0.0, "grossWithTax": 0.0},
+        )
+        cb["invoices"] += 1
+        cb["net"] = round(cb["net"] + net, 2)
+        cb["tax"] = round(cb["tax"] + tax, 2)
+        cb["grossWithTax"] = round(cb["grossWithTax"] + gross_with_tax, 2)
+
+        for ln in lines:
+            if product_f:
+                pg = str(ln.get("productGuide") or ln.get("ProductGuide") or "").upper().replace("{", "").replace("}", "")
+                if pg != product_f:
+                    continue
+            name = str(ln.get("name") or ln.get("ProductName") or "صنف").strip() or "صنف"
+            pg2 = str(ln.get("productGuide") or ln.get("ProductGuide") or "").strip()
+            qty = float(ln.get("quantity") or 0)
+            unit = float(ln.get("unitPrice") or 0)
+            line_net = qty * unit - float(ln.get("discount") or 0)
+            ik = pg2 or name
+            ib = by_item.setdefault(ik, {"productGuide": pg2, "name": name, "qty": 0.0, "net": 0.0})
+            ib["qty"] = round(ib["qty"] + qty, 3)
+            ib["net"] = round(ib["net"] + max(0.0, line_net), 2)
+
+    # مصروفات الصندوق + العمومية (غير مباشرة)
+    cash_expenses = 0.0
+    cash_purchases = 0.0
+    cash_rows: list[dict] = []
+    overhead_total = 0.0
+    overhead_rows: list[dict] = []
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    SELECT Kind, ISNULL(Category,N''), ISNULL(Note,N''), ISNULL(Amount,0), CreatedAt, ISNULL(UserName,N'')
+                    FROM dbo.MAT3AM_CASHIER_OUTFLOW
+                    WHERE CONVERT(date, CreatedAt) >= CAST(? AS date)
+                      AND CONVERT(date, CreatedAt) <= CAST(? AS date)
+                    ORDER BY CreatedAt
+                    """,
+                    (day_from.isoformat(), day_to.isoformat()),
+                )
+                for r in cur.fetchall() or []:
+                    kind = str(r[0] or "").strip().lower()
+                    amt = float(r[3] or 0)
+                    if kind == "purchase":
+                        cash_purchases += amt
+                    else:
+                        cash_expenses += amt
+                    cash_rows.append(
+                        {
+                            "kind": kind or "expense",
+                            "category": str(r[1] or ""),
+                            "note": str(r[2] or ""),
+                            "amount": round(amt, 2),
+                            "at": str(r[4] or "")[:19],
+                            "by": str(r[5] or ""),
+                        }
+                    )
+            except Exception:
+                pass
+            try:
+                cur.execute(
+                    """
+                    SELECT DateKey, CostName, BasisType, ISNULL(DailyAmount,0), ISNULL(Note,N'')
+                    FROM dbo.MAT3AM_DAILY_OVERHEAD_LINE
+                    WHERE DateKey >= CAST(? AS date) AND DateKey <= CAST(? AS date)
+                    ORDER BY DateKey, CostName
+                    """,
+                    (day_from.isoformat(), day_to.isoformat()),
+                )
+                for r in cur.fetchall() or []:
+                    amt = float(r[3] or 0)
+                    overhead_total += amt
+                    overhead_rows.append(
+                        {
+                            "date": str(r[0] or "")[:10],
+                            "name": str(r[1] or ""),
+                            "basisType": str(r[2] or ""),
+                            "amount": round(amt, 2),
+                            "note": str(r[4] or ""),
+                        }
+                    )
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    net_sum = round(sum(float(x["net"]) for x in matched), 2)
+    tax_sum = round(sum(float(x["tax"]) for x in matched), 2)
+    service_sum = round(sum(float(x["service"]) for x in matched), 2)
+    gross_sum = round(sum(float(x["grossWithTax"]) for x in matched), 2)
+    tip_sum = round(sum(float(x["tip"]) for x in matched), 2)
+    expenses_total = round(cash_expenses + cash_purchases + overhead_total, 2)
+    profit_net = round(net_sum - expenses_total, 2)
+    profit_gross = round(gross_sum - expenses_total, 2)
+
+    return {
+        "reportId": "period_finance",
+        "fromDate": day_from.isoformat(),
+        "toDate": day_to.isoformat(),
+        "filters": {
+            "tableId": table_id or None,
+            "captain": captain or None,
+            "productGuide": product_guide or None,
+            "channel": channel_f,
+        },
+        "summary": {
+            "invoiceCount": len(matched),
+            "revenueNetNoTax": net_sum,
+            "serviceCharge": service_sum,
+            "taxVat": tax_sum,
+            "revenueWithTax": gross_sum,
+            "tips": tip_sum,
+            "kids": {
+                "invoiceCount": kids_count,
+                "revenueNetNoTax": round(kids_net, 2),
+                "serviceCharge": round(kids_service, 2),
+                "taxVat": round(kids_tax, 2),
+                "revenueWithTax": round(kids_gross, 2),
+            },
+            "delivery": {
+                "invoiceCount": delivery_count,
+                "revenueNetNoTax": round(delivery_net, 2),
+                "revenueWithTax": round(delivery_gross, 2),
+            },
+            "expenses": {
+                "cashierExpenses": round(cash_expenses, 2),
+                "cashierPurchases": round(cash_purchases, 2),
+                "overheadIndirect": round(overhead_total, 2),
+                "total": expenses_total,
+            },
+            "profitVsNetRevenue": profit_net,
+            "profitVsGrossRevenue": profit_gross,
+        },
+        "byItem": sorted(by_item.values(), key=lambda x: -float(x.get("net") or 0))[:200],
+        "byTable": sorted(by_table.values(), key=lambda x: -float(x.get("net") or 0))[:200],
+        "byCaptain": sorted(by_captain.values(), key=lambda x: -float(x.get("net") or 0))[:200],
+        "invoices": matched[:500],
+        "cashOutflows": cash_rows[:300],
+        "overheadLines": overhead_rows[:300],
+        "message": "إيراد من الفواتير المحلية المحصّلة/المطلوبة في الفترة؛ المصروفات من صرف الصندوق + مصاريف التشغيل العمومية.",
+    }
+
+
+@app.get("/api/reports/period-finance")
+def reports_period_finance(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    table_id: Optional[str] = None,
+    captain: Optional[str] = None,
+    product_guide: Optional[str] = None,
+    channel: Optional[str] = Query("all"),
+):
+    """تقرير إيراد (± ضريبة) ومصروفات وكيدز عن فترة مع فلاتر."""
+    return _build_period_finance_report(
+        from_date_raw=from_date,
+        to_date_raw=to_date,
+        table_id=table_id,
+        captain=captain,
+        product_guide=product_guide,
+        channel=channel,
+    )
+
+
 @app.get("/api/reports/{report_id}/run")
 def run_report(
     report_id: str,
@@ -11157,6 +11492,12 @@ def run_report(
         return _build_captains_flash_report(from_date or to_date)
     if report_id == "flash":
         return _build_flash_report(from_date or to_date)
+    if report_id == "period_finance":
+        return _build_period_finance_report(
+            from_date_raw=from_date,
+            to_date_raw=to_date,
+            product_guide=product_guide,
+        )
     conn = get_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="فشل الاتصال بقاعدة البيانات")

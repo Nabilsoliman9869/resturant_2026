@@ -272,6 +272,12 @@ export default function ReportsPage() {
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>تقارير الحسابات</h2>
+      <p style={{ color: "var(--muted)", marginTop: 0 }}>
+        للإيراد ± ضريبة والمصروفات والكيدز عن فترة:{" "}
+        <a href="period-finance" style={{ color: "var(--accent2)", fontWeight: 700 }}>
+          إيراد ومصروفات الفترة
+        </a>
+      </p>
 
       <div className="card" style={{ marginBottom: "1rem", display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
         <span style={{ color: "var(--muted)" }}>الخادم:</span>
