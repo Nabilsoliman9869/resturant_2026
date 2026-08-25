@@ -13,6 +13,16 @@ import {
 import { ManagerTableChecksModal } from "./ManagerTableChecksModal";
 import "../styles/hallLiveBoard.css";
 
+export type TableOverviewAwaitingInvoice = {
+  invoiceId: string;
+  splitName?: string | null;
+  seats?: number[];
+  total?: number;
+  billNumber?: number | null;
+  isOwnerCheck?: boolean;
+  agentName?: string | null;
+};
+
 export type TableOverviewSession = {
   sessionId: string;
   tableId?: string;
@@ -21,6 +31,8 @@ export type TableOverviewSession = {
   billingRequestedAt?: string | null;
   awaitingPayment?: boolean;
   awaitingInvoiceId?: string | null;
+  awaitingInvoices?: TableOverviewAwaitingInvoice[];
+  awaitingInvoiceCount?: number;
   billAgeMinutes?: number;
   orderCount?: number;
   kitchenInProgressCount?: number;
@@ -46,6 +58,25 @@ export type TableOverviewSession = {
 
 type FilterKey = "all" | "pay" | "bill" | "long" | "idle" | "returns" | "merge";
 type ViewMode = "table" | "cards";
+
+function awaitingChecks(s: TableOverviewSession): TableOverviewAwaitingInvoice[] {
+  if (Array.isArray(s.awaitingInvoices) && s.awaitingInvoices.length > 0) {
+    return s.awaitingInvoices.filter((x) => String(x?.invoiceId || "").trim());
+  }
+  if (s.awaitingPayment && s.awaitingInvoiceId) {
+    return [{ invoiceId: String(s.awaitingInvoiceId) }];
+  }
+  return [];
+}
+
+function checkChipLabel(c: TableOverviewAwaitingInvoice): string {
+  const seats = Array.isArray(c.seats) ? c.seats : [];
+  if (c.splitName) return String(c.splitName);
+  if (seats.length === 1) return `كرسي ${seats[0]}${c.isOwnerCheck ? " ★" : ""}`;
+  if (seats.length > 1) return `كراسي ${seats.join("+")}${c.isOwnerCheck ? " ★" : ""}`;
+  if (c.billNumber != null) return `#${c.billNumber}`;
+  return "شيك";
+}
 
 const POLL_MS = 28000;
 const LONG_MIN = 45;
@@ -142,13 +173,23 @@ export function CashierTableStripBoard() {
         },
       },
     ];
-    if (s.awaitingPayment && s.awaitingInvoiceId) {
+    const checks = awaitingChecks(s);
+    if (checks.length === 1) {
       items.push({
         id: "pay",
-        label: "تسديد الشيك",
+        label: `تسديد — ${checkChipLabel(checks[0]!)}`,
         hint: "فتح نافذة التسديد للكاشير/المدير",
-        onSelect: () => openPay(String(s.awaitingInvoiceId)),
+        onSelect: () => openPay(String(checks[0]!.invoiceId)),
       });
+    } else if (checks.length > 1) {
+      for (const c of checks) {
+        items.push({
+          id: `pay-${c.invoiceId}`,
+          label: `تسديد — ${checkChipLabel(c)}`,
+          hint: c.total != null ? `${Number(c.total).toFixed(2)} ج.م` : "شيك بانتظار الدفع",
+          onSelect: () => openPay(String(c.invoiceId)),
+        });
+      }
     }
     items.push({
       id: "table-checks",
@@ -459,15 +500,19 @@ export function CashierTableStripBoard() {
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {s.awaitingPayment && s.awaitingInvoiceId ? (
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }}
-                            onClick={() => openPay(String(s.awaitingInvoiceId))}
-                          >
-                            تسديد
-                          </button>
+                        {awaitingChecks(s).length > 0 ? (
+                          awaitingChecks(s).map((c) => (
+                            <button
+                              key={c.invoiceId}
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ fontSize: "0.74rem", padding: "0.2rem 0.55rem" }}
+                              title={c.total != null ? `${Number(c.total).toFixed(2)} ج.م` : undefined}
+                              onClick={() => openPay(String(c.invoiceId))}
+                            >
+                              {checkChipLabel(c)}
+                            </button>
+                          ))
                         ) : (
                           <button
                             type="button"
@@ -478,7 +523,7 @@ export function CashierTableStripBoard() {
                             تفاصيل
                           </button>
                         )}
-                        {!s.awaitingPayment ? (
+                        {awaitingChecks(s).length === 0 ? (
                           <NavLink
                             to="../delivery-hub?tab=convert"
                             className="btn btn-ghost"
@@ -650,11 +695,17 @@ function InspectDrawer({
         </div>
 
         <div className="hall-live-board__drawer-actions">
-          {s.awaitingPayment && s.awaitingInvoiceId ? (
-            <button type="button" className="btn btn-primary" onClick={() => onPay(String(s.awaitingInvoiceId))}>
-              تسديد الفاتورة الآن
+          {awaitingChecks(s).map((c) => (
+            <button
+              key={c.invoiceId}
+              type="button"
+              className="btn btn-primary"
+              onClick={() => onPay(String(c.invoiceId))}
+            >
+              تسديد — {checkChipLabel(c)}
+              {c.total != null ? ` (${Number(c.total).toFixed(2)})` : ""}
             </button>
-          ) : null}
+          ))}
           <NavLink to="../invoices-local" className="btn btn-ghost" style={{ textDecoration: "none", textAlign: "center" }}>
             فتح فواتير الطاولات
           </NavLink>
@@ -740,27 +791,21 @@ function TableStrip({
         {` · ${fmtMins(Number(s.sessionAgeMinutes || 0))}`}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: "0.75rem" }}>
-          {s.awaitingPayment && s.awaitingInvoiceId ? (
+          {awaitingChecks(s).map((c) => (
             <button
+              key={c.invoiceId}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenPay(String(s.awaitingInvoiceId));
+                onOpenPay(String(c.invoiceId));
               }}
-              style={{
-                padding: "2px 10px",
-                borderRadius: 999,
-                background: "rgba(234,179,8,0.28)",
-                fontWeight: 700,
-                border: "1px solid rgba(234,179,8,0.45)",
-                color: "inherit",
-                cursor: "pointer",
-                font: "inherit",
-              }}
+              className="btn btn-primary"
+              style={{ fontSize: "0.72rem", padding: "0.18rem 0.5rem" }}
+              title={c.total != null ? `${Number(c.total).toFixed(2)} ج.م` : undefined}
             >
-              تسديد
+              {checkChipLabel(c)}
             </button>
-          ) : null}
+          ))}
           {!pay ? (
             <NavLink
               to="../delivery-hub?tab=convert"

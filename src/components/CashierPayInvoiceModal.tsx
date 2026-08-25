@@ -1417,8 +1417,16 @@ export function CashierPayInvoiceModal({
 
   const nextPrintCopyNo = Math.max(1, Number(row?.printCount || 0) + 1);
   const showOnAccount = Boolean(
-    row?.agentGuid || (row?.customerType && row.customerType !== "cash")
+    row?.agentGuid ||
+      (row?.customerType && row.customerType !== "cash") ||
+      (row?.billingProfile && row.billingProfile.active !== false),
   );
+  const isOwnerCheck = Boolean(row?.billingProfile && row.billingProfile.active !== false);
+  const seatBadge =
+    Array.isArray(row?.seats) && row!.seats!.length
+      ? `كرسي ${row!.seats!.join("، ")}`
+      : String(row?.splitName || "").trim() || "";
+
 
   const suggestRemainder = useCallback(
     (field: "cash" | "visa" | "wallet" | "instapay") => {
@@ -1821,6 +1829,44 @@ export function CashierPayInvoiceModal({
                   الطاولة: غير مربوطة في المخطط لهذه الجلسة
                 </p>
               )}
+              {allowPayment ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    marginBottom: "0.45rem",
+                    display: "flex",
+                    gap: 8,
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {seatBadge ? (
+                    <span
+                      style={{
+                        fontSize: "0.82rem",
+                        fontWeight: 800,
+                        padding: "2px 10px",
+                        borderRadius: 999,
+                        background: "rgba(148,163,184,0.2)",
+                      }}
+                    >
+                      {seatBadge}
+                    </span>
+                  ) : null}
+                  <span
+                    style={{
+                      fontSize: "0.82rem",
+                      fontWeight: 900,
+                      padding: "2px 10px",
+                      borderRadius: 999,
+                      background: isOwnerCheck ? "rgba(245,158,11,0.22)" : "rgba(34,197,94,0.18)",
+                      color: isOwnerCheck ? "#92400e" : "#166534",
+                    }}
+                  >
+                    {isOwnerCheck ? "★ سياسة مالك / VIP" : "نقدي عادي"}
+                  </span>
+                </div>
+              ) : null}
               <details style={{ fontSize: "0.7rem", color: "var(--muted)", marginBottom: "0.35rem", textAlign: "center" }}>
                 <summary style={{ cursor: "pointer", listStyle: "none" }}>مرجع تقني (للدعم فقط)</summary>
                 <div style={{ wordBreak: "break-all", fontFamily: "monospace", marginTop: "0.35rem", lineHeight: 1.35 }}>
@@ -2173,7 +2219,10 @@ export function CashierPayInvoiceModal({
             >
               <div style={{ fontWeight: 800, fontSize: "0.92rem", marginBottom: "0.35rem" }}>طريقة التسوية</div>
               <p style={{ margin: "0 0 0.55rem", fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                اختر كيف تُغلق الفاتورة. الترحيل على حساب أو ضيف يعني إدخال المبلغ على الحساب — بدون طلب مبالغ نقدية.
+                {isOwnerCheck
+                  ? "هذا شيك مالك/VIP — تظهر خيارات الترحيل على الحساب حسب العميل المربوط."
+                  : "شيك نقدي عادي — السداد الفوري أو الضيافة حسب اعتماد المدير."}{" "}
+                اختر كيف تُغلق هذه الفاتورة فقط (كل كرسي مستقل).
               </p>
               <div style={{ display: "grid", gap: "0.45rem" }}>
                 {(

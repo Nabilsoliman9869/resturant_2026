@@ -48,6 +48,9 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
   const [amendPayMethod, setAmendPayMethod] = useState("");
   const [amendNote, setAmendNote] = useState("");
   const [amendBusy, setAmendBusy] = useState(false);
+  const [moveTargetId, setMoveTargetId] = useState("");
+  const [moveSelected, setMoveSelected] = useState<number[]>([]);
+  const [moveBusy, setMoveBusy] = useState(false);
 
   const dateRange = useMemo(() => {
     const to = new Date();
@@ -121,6 +124,52 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
     );
     setAmendPayMethod(String(inv.paymentMethod || ""));
     setAmendNote("");
+    setMoveTargetId("");
+    setMoveSelected([]);
+  }
+
+  const siblingAwaiting = useMemo(() => {
+    if (!amendInv) return [];
+    const sid = String(amendInv.sessionId || "").trim();
+    const self = String(amendInv.invoiceId || "");
+    return rows.filter(
+      (r) =>
+        String(r.sessionId || "") === sid &&
+        String(r.invoiceId || "") !== self &&
+        Boolean(r.awaitingPayment) &&
+        !String(r.paidAt || "").trim(),
+    );
+  }, [amendInv, rows]);
+
+  async function submitMoveLines() {
+    if (!amendInv?.invoiceId || !moveTargetId || moveSelected.length === 0) {
+      setMsg("اختر بنوداً وشيك هدف للنقل.");
+      return;
+    }
+    setMoveBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch(`${base}/api/restaurant/invoices-local/move-lines`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceInvoiceId: amendInv.invoiceId,
+          targetInvoiceId: moveTargetId,
+          lineIndexes: moveSelected,
+          mat3amActor: buildMat3amActor(user),
+        }),
+      });
+      const t = await r.text();
+      const j = tryParseJson<{ ok?: boolean; detail?: unknown; movedCount?: number }>(t) ?? {};
+      if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : t.slice(0, 200) || "فشل النقل");
+      setMsg(`تم نقل ${j.movedCount ?? moveSelected.length} بند/بنود إلى الشيك الآخر.`);
+      setAmendInv(null);
+      await load();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setMoveBusy(false);
+    }
   }
 
   async function submitAmend() {
@@ -221,6 +270,7 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
               <tr style={{ textAlign: "right", borderBottom: "1px solid rgba(15,23,42,0.12)" }}>
                 <th style={{ padding: "0.55rem", color: "#334155" }}>الوقت</th>
                 <th style={{ padding: "0.55rem", color: "#334155" }}>رقم</th>
+                <th style={{ padding: "0.55rem", color: "#334155" }}>الكرسي</th>
                 <th style={{ padding: "0.55rem", color: "#334155" }}>الحالة</th>
                 <th style={{ padding: "0.55rem", color: "#334155" }}>الدفع</th>
                 <th style={{ padding: "0.55rem", color: "#334155" }}>الإجمالي</th>
@@ -230,18 +280,32 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: "1rem", color: "#475569", fontWeight: 700 }}>
+                  <td colSpan={7} style={{ padding: "1rem", color: "#475569", fontWeight: 700 }}>
                     {loading ? "جاري التحميل…" : "لا شيكات لهذه الطاولة في المدى المحدد."}
                   </td>
                 </tr>
               ) : (
                 rows.map((inv) => {
                   const when = String(inv.paidAt || inv.requestedAt || "").replace("T", " ").slice(0, 16);
+                  const seats = Array.isArray(inv.seats) ? inv.seats : [];
+                  const bp = inv.billingProfile;
+                  const isOwner = !!(bp && bp.active !== false);
+                  const seatLabel =
+                    String(inv.splitName || "").trim() ||
+                    (seats.length ? `كرسي ${seats.join("، ")}` : "—");
                   return (
                     <tr key={String(inv.invoiceId)} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)" }}>
                       <td style={{ padding: "0.55rem" }}>{when || "—"}</td>
                       <td style={{ padding: "0.55rem", fontWeight: 900 }}>
                         {inv.billNumber != null ? `#${inv.billNumber}` : String(inv.invoiceId || "").slice(0, 8)}
+                      </td>
+                      <td style={{ padding: "0.55rem", fontWeight: 800 }}>
+                        {seatLabel}
+                        {isOwner ? (
+                          <span style={{ marginInlineStart: 6, color: "#b45309", fontSize: "0.78rem" }}>★ مالك</span>
+                        ) : (
+                          <span style={{ marginInlineStart: 6, color: "#64748b", fontSize: "0.78rem" }}>نقدي</span>
+                        )}
                       </td>
                       <td style={{ padding: "0.55rem" }}>{statusLabel(inv)}</td>
                       <td style={{ padding: "0.55rem" }}>{inv.paymentMethod || "—"}</td>
@@ -252,7 +316,7 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
                             فتح / طباعة
                           </button>
                           <button type="button" className="btn btn-ghost" style={{ fontSize: "0.78rem", padding: "0.28rem 0.65rem" }} onClick={() => startAmend(inv)}>
-                            تصحيح
+                            تصحيح / نقل
                           </button>
                         </div>
                       </td>
@@ -302,7 +366,17 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               {amendLines.map((ln, idx) => (
-                <div key={`al-${idx}`} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.6fr 0.7fr auto", gap: 6, alignItems: "center" }}>
+                <div key={`al-${idx}`} style={{ display: "grid", gridTemplateColumns: "auto 1.4fr 0.6fr 0.7fr auto", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={moveSelected.includes(idx)}
+                    onChange={(e) =>
+                      setMoveSelected((prev) =>
+                        e.target.checked ? [...prev, idx].sort((a, b) => a - b) : prev.filter((x) => x !== idx),
+                      )
+                    }
+                    title="تحديد للنقل إلى شيك آخر"
+                  />
                   <input
                     value={ln.name}
                     onChange={(e) => {
@@ -345,6 +419,48 @@ export function ManagerTableChecksModal({ open, tableId, tableLabel, onClose }: 
                 </div>
               ))}
             </div>
+            {siblingAwaiting.length > 0 ? (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "0.75rem",
+                  borderRadius: 10,
+                  border: "1px solid rgba(15,23,42,0.12)",
+                  background: "rgba(59,130,246,0.06)",
+                }}
+              >
+                <div style={{ fontWeight: 900, fontSize: "0.9rem", marginBottom: 6, color: "#0f172a" }}>
+                  نقل البنود المحددة إلى شيك كرسي آخر
+                </div>
+                <select
+                  value={moveTargetId}
+                  onChange={(e) => setMoveTargetId(e.target.value)}
+                  style={{ width: "100%", marginBottom: 8 }}
+                >
+                  <option value="">— اختر الشيك الهدف —</option>
+                  {siblingAwaiting.map((inv) => {
+                    const seats = Array.isArray(inv.seats) ? inv.seats : [];
+                    const label =
+                      String(inv.splitName || "").trim() ||
+                      (seats.length ? `كرسي ${seats.join("، ")}` : String(inv.invoiceId || "").slice(0, 8));
+                    return (
+                      <option key={String(inv.invoiceId)} value={String(inv.invoiceId)}>
+                        {label} · {money(Number(inv.total || 0))}
+                      </option>
+                    );
+                  })}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ fontSize: "0.82rem" }}
+                  disabled={moveBusy || !moveTargetId || moveSelected.length === 0}
+                  onClick={() => void submitMoveLines()}
+                >
+                  {moveBusy ? "…" : `نقل ${moveSelected.length || ""} بند محدد`}
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
               className="btn btn-ghost"

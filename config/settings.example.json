@@ -8,5 +8,17 @@
     "defaultCurrencyGuid": null,
     "currencyPreferredNames": ["جنيه مصري", "جنية مصرى"],
     "currencyNameContains": ["جنيه", "egp", "ج.م"]
+  },
+  "taxTwin": {
+    "alias": "مسار الحفظ اليومي",
+    "dailySavePath": "D:\\\\Mat3amTaxTwin",
+    "server": "",
+    "port": null,
+    "database": "YourDatabase_TAX",
+    "uid": "",
+    "password": "",
+    "syncEnabled": true,
+    "delayHours": 6,
+    "maxBatchSize": 100
   }
 }

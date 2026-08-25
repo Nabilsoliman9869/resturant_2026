@@ -24607,14 +24607,17 @@ def _resolve_batch_billing_profile(
     seats: list[int],
     seat_overrides: Optional[dict],
     session_profile: Optional[dict],
+    *,
+    prefer_seat_rules: bool = False,
 ) -> Optional[dict]:
     """
     لكل دفعة فاتورة (مقعد/مجموعة):
-    - إن وُجدت seatBillingOverrides: أول مقعد مالك في الدفعة يحدد السياسة؛ بلا مالك → نقدي.
-    - وإلا (وضع قديم): سياسة الجلسة كلها.
+    - إن وُجدت seatBillingOverrides أو prefer_seat_rules (تقسيم كراسي):
+      أول مقعد مالك في الدفعة يحدد السياسة؛ بلا مالك → نقدي عادي (لا تُعمَّم سياسة الجلسة).
+    - وإلا (فاتورة طاولة كاملة قديمة): سياسة الجلسة كلها.
     """
     ov = seat_overrides if isinstance(seat_overrides, dict) else {}
-    if ov:
+    if ov or prefer_seat_rules:
         for sn in seats:
             prof = _billing_profile_from_seat_override(ov.get(str(sn)) or ov.get(sn))
             if prof:
@@ -24641,8 +24644,8 @@ def _apply_owner_seats_to_session(session_row: dict, profile: Optional[dict], ow
         session_row["seatBillingOverrides"] = merged
         session_row["ownerSeatNos"] = list(owner_seats)
     else:
-        # توافق قديم: بدون تحديد مقاعد = الطاولة كلها كمالك
-        session_row.pop("seatBillingOverrides", None)
+        # بدون مقاعد مالك صريحة: لا تُعمَّم سياسة المالك على كل الكراسي
+        session_row["seatBillingOverrides"] = {}
         session_row["ownerSeatNos"] = []
 
 
@@ -26958,6 +26961,7 @@ def restaurant_cashier_table_overview():
     fm = _restaurant_file_tables_id_to_name()
 
     await_inv: dict = {}
+    await_inv_list: dict = {}
     for inv in invs:
         if not isinstance(inv, dict):
             continue
@@ -26966,8 +26970,27 @@ def restaurant_cashier_table_overview():
         if str(inv.get("paidAt") or "").strip():
             continue
         sid = str(inv.get("sessionId") or "").strip()
-        if sid:
-            await_inv[sid] = str(inv.get("invoiceId") or "")
+        if not sid:
+            continue
+        iid = str(inv.get("invoiceId") or "").strip()
+        if not iid:
+            continue
+        await_inv[sid] = iid  # توافق قديم: آخر شيك معلّق
+        seats_raw = inv.get("seats") if isinstance(inv.get("seats"), list) else []
+        seats_n = sorted({int(x) for x in seats_raw if str(x).isdigit() and int(x) > 0})
+        bp = inv.get("billingProfile") if isinstance(inv.get("billingProfile"), dict) else {}
+        is_owner = bool(bp) and bp.get("active") is not False
+        await_inv_list.setdefault(sid, []).append(
+            {
+                "invoiceId": iid,
+                "splitName": str(inv.get("splitName") or "").strip() or None,
+                "seats": seats_n,
+                "total": round(float(inv.get("total") or 0), 2),
+                "billNumber": inv.get("billNumber"),
+                "isOwnerCheck": is_owner,
+                "agentName": str(inv.get("agentName") or "").strip() or None,
+            }
+        )
 
     # مرتجعات معلّقة + خريطة الطاولات (منطقة/قسم) — إضافات اختيارية لا تكسر العملاء القدامى
     pending_returns_by_session: dict[str, int] = {}
@@ -27051,11 +27074,32 @@ def restaurant_cashier_table_overview():
 
         bill_req = str(s.get("billingRequestedAt") or "").strip() or None
         inv_id = await_inv.get(sid, "")
+        inv_checks = await_inv_list.get(sid) or []
+        # رتب الشيكات حسب رقم الكرسي ثم الإجمالي
+        inv_checks = sorted(
+            inv_checks,
+            key=lambda x: (
+                (x.get("seats") or [999])[0] if isinstance(x.get("seats"), list) and x.get("seats") else 999,
+                str(x.get("invoiceId") or ""),
+            ),
+        )
         bill_age = 0
         if bill_req:
             dt_bill = _iso_to_local_dt(bill_req)
             if dt_bill:
                 bill_age = max(0, int((datetime.now() - dt_bill).total_seconds() // 60))
+        # عمر أقدم شيك معلّق إن لم يُطلب حساب كامل للطاولة
+        if not bill_age and inv_checks:
+            for inv0 in invs:
+                if not isinstance(inv0, dict):
+                    continue
+                if str(inv0.get("invoiceId") or "") != str(inv_checks[0].get("invoiceId") or ""):
+                    continue
+                req0 = str(inv0.get("requestedAt") or "").strip()
+                dt0 = _iso_to_local_dt(req0) if req0 else None
+                if dt0:
+                    bill_age = max(0, int((datetime.now() - dt0).total_seconds() // 60))
+                break
         st_row = local_state.get(tid.strip().upper()) if tid else None
         guest_count = _normalize_session_guest_count(s.get("guestCount") or 1, 1)
         minimum_per_seat = _session_minimum_charge_per_seat(s, tid)
@@ -27089,8 +27133,10 @@ def restaurant_cashier_table_overview():
                 "guestCount": s.get("guestCount"),
                 "billingRequestedAt": bill_req,
                 "billAgeMinutes": bill_age,
-                "awaitingPayment": bool(inv_id),
-                "awaitingInvoiceId": inv_id or None,
+                "awaitingPayment": bool(inv_checks) or bool(inv_id),
+                "awaitingInvoiceId": (inv_checks[0].get("invoiceId") if inv_checks else inv_id) or None,
+                "awaitingInvoices": inv_checks,
+                "awaitingInvoiceCount": len(inv_checks),
                 "orderCount": len(sess_orders),
                 "kitchenInProgressCount": kitchen_pending,
                 "linesPreview": prev or "—",
@@ -29652,6 +29698,216 @@ def restaurant_invoices_local_manager_amend(body: dict):
         pass
     cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
     return {"ok": True, "invoice": _restaurant_enrich_invoice_with_table(found)}
+
+
+def _recalc_local_invoice_totals(inv: dict) -> None:
+    """إعادة حساب خدمة/ضريبة/إجمالي لشيك محلي من بنوده وسياسة الفوترة المخزّنة."""
+    lines = inv.get("lines") if isinstance(inv.get("lines"), list) else []
+    subtotal = round(sum(float(x.get("lineTotal") or 0) for x in lines if isinstance(x, dict)), 2)
+    disc = max(0.0, float(inv.get("discount") or 0))
+    tip = max(0.0, float(inv.get("tipAmount") or 0))
+    bp = inv.get("billingProfile") if isinstance(inv.get("billingProfile"), dict) else {}
+    bp_active = bool(bp) and bp.get("active") is not False
+    # خصم مالك إن وُجد على الملف ولم يُطبَّق مسبقاً على البنود — البنود تُفترض بالصافي التشغيلي
+    vip_pct = 0.0
+    if bp_active:
+        try:
+            vip_pct = max(0.0, min(100.0, float(bp.get("discountPct") or 0)))
+        except (TypeError, ValueError):
+            vip_pct = 0.0
+    net = max(0.0, subtotal - disc)
+    if vip_pct > 0:
+        net = round(net * (1.0 - vip_pct / 100.0), 2)
+    svc_pct = 12.5
+    vat_pct = 14.0
+    service_before_vat = True
+    try:
+        conn_p = get_connection()
+        if conn_p:
+            try:
+                cur_p = conn_p.cursor()
+                pol = _mat3am_pos_policy_row_from_cursor(cur_p)
+                if isinstance(pol, dict):
+                    svc_pct = float(pol.get("servicePercent") or svc_pct)
+                    vat_pct = float(pol.get("vatPercent") or vat_pct)
+                    service_before_vat = bool(pol.get("serviceBeforeVat", True))
+            finally:
+                conn_p.close()
+    except Exception:
+        pass
+    no_svc = bool(bp.get("noService")) if bp_active else bool(inv.get("noService"))
+    no_vat = bool(bp.get("noVat")) if bp_active else bool(inv.get("noVat"))
+    svc = 0.0 if no_svc else round(net * svc_pct / 100.0, 2)
+    if no_vat:
+        tax = 0.0
+    elif service_before_vat:
+        tax = round((net + svc) * vat_pct / 100.0, 2)
+    else:
+        tax = round(net * vat_pct / 100.0, 2)
+    inv["subtotal"] = net
+    inv["serviceCharge"] = svc
+    inv["tax"] = tax
+    inv["total"] = round(net + svc + tax + tip, 2)
+
+
+@app.post("/api/restaurant/invoices-local/move-lines")
+def restaurant_invoices_local_move_lines(body: dict):
+    """
+    نقل بنود من شيك كرسي إلى شيك كرسي آخر (نفس الجلسة) — للكاشير/المدير قبل التسديد.
+    يعيد حساب الإجماليين ويحدّث finalInvoiceId/seatNo على بنود الطلبات.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="جسم غير صالح")
+    _terminal_require_user(body.get("mat3amActor"))
+    actor = _mat3am_actor_from_body(body)
+    role = str(actor.get("role") or "").strip().lower()
+    if role not in ("cashier", "manager", "operation_manager", "developer", "accountant"):
+        raise HTTPException(status_code=403, detail="نقل البنود بين الشيكات متاح للكاشير/المدير/المحاسب")
+    src_id = str(body.get("sourceInvoiceId") or body.get("fromInvoiceId") or "").strip()
+    dst_id = str(body.get("targetInvoiceId") or body.get("toInvoiceId") or "").strip()
+    if not src_id or not dst_id:
+        raise HTTPException(status_code=400, detail="sourceInvoiceId و targetInvoiceId مطلوبان")
+    if src_id == dst_id:
+        raise HTTPException(status_code=400, detail="الشيك المصدر والهدف يجب أن يختلفا")
+
+    line_ids = body.get("lineIds")
+    line_indexes = body.get("lineIndexes")
+    want_ids: set[str] = set()
+    want_idx: set[int] = set()
+    if isinstance(line_ids, list):
+        want_ids = {str(x).strip() for x in line_ids if str(x).strip()}
+    if isinstance(line_indexes, list):
+        for x in line_indexes:
+            try:
+                want_idx.add(int(x))
+            except (TypeError, ValueError):
+                pass
+    if not want_ids and not want_idx:
+        raise HTTPException(status_code=400, detail="حدد البنود عبر lineIds أو lineIndexes")
+
+    raw = _restaurant_load("invoices", [])
+    if not isinstance(raw, list):
+        raw = []
+    src = dst = None
+    for inv in raw:
+        if not isinstance(inv, dict):
+            continue
+        iid = str(inv.get("invoiceId") or "")
+        if iid == src_id:
+            src = inv
+        elif iid == dst_id:
+            dst = inv
+    if not src or not dst:
+        raise HTTPException(status_code=404, detail="أحد الشيكين غير موجود")
+    if str(src.get("sessionId") or "").strip() != str(dst.get("sessionId") or "").strip():
+        raise HTTPException(status_code=400, detail="الشيكات يجب أن تكون لنفس الجلسة")
+    if str(src.get("paidAt") or "").strip() or str(dst.get("paidAt") or "").strip():
+        raise HTTPException(status_code=400, detail="لا يمكن النقل بعد تسديد أحد الشيكين")
+    if not src.get("awaitingPayment") or not dst.get("awaitingPayment"):
+        raise HTTPException(status_code=400, detail="النقل متاح فقط بين شيكات بانتظار الدفع")
+
+    src_lines = [dict(x) for x in (src.get("lines") or []) if isinstance(x, dict)]
+    dst_lines = [dict(x) for x in (dst.get("lines") or []) if isinstance(x, dict)]
+    dst_seats = dst.get("seats") if isinstance(dst.get("seats"), list) else []
+    target_seat = None
+    for s in dst_seats:
+        try:
+            n = int(s)
+            if n >= 1:
+                target_seat = n
+                break
+        except (TypeError, ValueError):
+            pass
+
+    moving: list[dict] = []
+    keep: list[dict] = []
+    for i, ln in enumerate(src_lines):
+        lid = str(ln.get("lineId") or "").strip()
+        take = (lid and lid in want_ids) or (i in want_idx)
+        if take:
+            moved = dict(ln)
+            if target_seat is not None:
+                moved["seatNo"] = target_seat
+            moving.append(moved)
+        else:
+            keep.append(ln)
+    if not moving:
+        raise HTTPException(status_code=400, detail="لم يُطابق أي بند للتحديد")
+    if not keep:
+        raise HTTPException(status_code=400, detail="لا يمكن إفراغ الشيك المصدر بالكامل — اترك بنداً واحداً على الأقل أو ادمج الشيكين من المدير")
+
+    dst_lines.extend(moving)
+    src["lines"] = keep
+    src["sourceLines"] = [dict(x) for x in keep]
+    dst["lines"] = dst_lines
+    dst["sourceLines"] = [dict(x) for x in dst_lines]
+    _recalc_local_invoice_totals(src)
+    _recalc_local_invoice_totals(dst)
+
+    now_iso = datetime.now().isoformat()
+    move_meta = {
+        "at": now_iso,
+        "from": src_id,
+        "to": dst_id,
+        "lineCount": len(moving),
+        "by": {"id": actor.get("id"), "name": actor.get("name") or actor.get("login"), "role": actor.get("role")},
+    }
+    for inv in (src, dst):
+        hist = inv.get("lineMoves")
+        if not isinstance(hist, list):
+            hist = []
+        hist.append(move_meta)
+        inv["lineMoves"] = hist[-40:]
+
+    # حدّث بنود الطلبات: finalInvoiceId + seatNo
+    moved_line_ids = {str(x.get("lineId") or "").strip() for x in moving if str(x.get("lineId") or "").strip()}
+    if moved_line_ids:
+        orders = _restaurant_load("orders", [])
+        if isinstance(orders, list):
+            sid = str(src.get("sessionId") or "").strip()
+            changed_orders = False
+            for o in orders:
+                if not isinstance(o, dict):
+                    continue
+                if sid and str(o.get("sessionId") or "").strip() != sid:
+                    continue
+                items = o.get("items")
+                if not isinstance(items, list):
+                    continue
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    lid = str(it.get("lineId") or it.get("id") or "").strip()
+                    if lid and lid in moved_line_ids:
+                        it["finalInvoiceId"] = dst_id
+                        if target_seat is not None:
+                            it["seatNo"] = target_seat
+                        changed_orders = True
+            if changed_orders:
+                _restaurant_save("orders", orders)
+
+    _restaurant_save("invoices", raw)
+    try:
+        _append_session_audit_entry(
+            {
+                "type": "cashier_move_invoice_lines",
+                "sourceInvoiceId": src_id,
+                "targetInvoiceId": dst_id,
+                "lineCount": len(moving),
+                "sessionId": str(src.get("sessionId") or ""),
+                "actor": move_meta.get("by"),
+                "at": now_iso,
+            }
+        )
+    except Exception:
+        pass
+    cache_delete_pattern("mat3am:restaurant:operational-snapshot:*")
+    return {
+        "ok": True,
+        "movedCount": len(moving),
+        "source": _restaurant_enrich_invoice_with_table(src),
+        "target": _restaurant_enrich_invoice_with_table(dst),
+    }
 
 
 @app.post("/api/restaurant/invoices-local/mark-paid")
@@ -37494,8 +37750,9 @@ def restaurant_sessions_request_bill(body: dict):
                 )
             part_profile = _resolve_batch_billing_profile(
                 part_seats,
-                seat_billing_overrides if seat_scoped_billing else None,
+                seat_billing_overrides,
                 session_billing_profile if billing_profile_active else None,
+                prefer_seat_rules=bool(split_enabled or partial_bill or seat_scoped_billing),
             )
             part_profile_active = bool(part_profile) and part_profile.get("active") is not False
 

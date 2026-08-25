@@ -605,6 +605,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [billSplitMode, setBillSplitMode] = useState<"per_seat" | "owner_plus_rest" | "combined_selected">("per_seat");
   /** مقاعد المالك من سياسة الجلسة */
   const [ownerSeatNos, setOwnerSeatNos] = useState<number[]>([]);
+  const [seatBillingOverrides, setSeatBillingOverrides] = useState<
+    Record<string, { isOwner?: boolean; agentGuid?: string; label?: string; discountPct?: number; noService?: boolean; noVat?: boolean }>
+  >({});
   /** طابور طباعة شيكات الكابتن (أكثر من شيك) */
   const [captainPrintQueue, setCaptainPrintQueue] = useState<CashierInvoiceRow[]>([]);
   const [mgrCtxMenu, setMgrCtxMenu] = useState<
@@ -933,6 +936,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
     }
     setOwnerSeatNos([...new Set([...fromList, ...fromOverrides])].sort((a, b) => a - b));
+    if (ov && typeof ov === "object") {
+      const nextOv: Record<string, { isOwner?: boolean; agentGuid?: string; label?: string; discountPct?: number; noService?: boolean; noVat?: boolean }> = {};
+      for (const [k, v] of Object.entries(ov)) {
+        if (v && typeof v === "object") nextOv[k] = { ...v };
+      }
+      setSeatBillingOverrides(nextOv);
+    } else {
+      setSeatBillingOverrides({});
+    }
     setSessionGuestApprovalPending(Boolean(row?.guestApprovalPending));
     setSessionCustomerTypeLocked(Boolean(row?.customerTypeLocked));
     setSessionCustomerType(String(row?.customerType || (row?.guestSession ? "guest" : bp ? "vip_owner" : "cash")));
@@ -2192,24 +2204,33 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         }
       }
       const sbp = sessionBillingProfile;
-      const billActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
-      const vipPct = billActive ? Math.max(0, Math.min(100, toNum(sbp?.discountPct, 0))) : 0;
+      const sessionVipActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
       const seats = visibleSeatNumbers.map((seatNo) => {
         const subtotal = Math.max(0, Number(seatMap.get(seatNo) || 0));
+        const ov = seatBillingOverrides[String(seatNo)];
+        const isOwnerSeat =
+          ownerSeatNos.includes(seatNo) ||
+          !!(ov && (ov.isOwner || String(ov.agentGuid || "").trim()));
+        // سياسة لكل كرسي: المالك فقط يحصل على خصم/إعفاء؛ الباقي نقدي عادي حتى لو الجلسة VIP
+        const billActive = isOwnerSeat && (sessionVipActive || !!(ov && (ov.isOwner || ov.agentGuid)));
+        const vipPct = billActive
+          ? Math.max(0, Math.min(100, toNum(ov?.discountPct ?? sbp?.discountPct, 0)))
+          : 0;
+        const noService = billActive ? Boolean(ov?.noService ?? sbp?.noService) : false;
+        const noVat = billActive ? Boolean(ov?.noVat ?? sbp?.noVat) : false;
         const netAfterOwner = billActive ? Math.max(0, subtotal * (1 - vipPct / 100)) : subtotal;
-        const serviceCharge = billActive && sbp?.noService ? 0 : (netAfterOwner * policy.servicePercent) / 100;
-        const vatValue =
-          billActive && sbp?.noVat
-            ? 0
-            : policy.serviceBeforeVat
-              ? ((netAfterOwner + serviceCharge) * policy.vatPercent) / 100
-              : (netAfterOwner * policy.vatPercent) / 100;
+        const serviceCharge = noService ? 0 : (netAfterOwner * policy.servicePercent) / 100;
+        const vatValue = noVat
+          ? 0
+          : policy.serviceBeforeVat
+            ? ((netAfterOwner + serviceCharge) * policy.vatPercent) / 100
+            : (netAfterOwner * policy.vatPercent) / 100;
         const grossBeforeMinimum = netAfterOwner + serviceCharge + vatValue;
         const minimumGap =
           !isDeliveryEmbedded && effectiveMinimumChargePerSeat > 0
             ? Math.max(0, effectiveMinimumChargePerSeat - grossBeforeMinimum)
             : 0;
-        return { seatNo, subtotal, serviceCharge, vatValue, grossBeforeMinimum, minimumGap };
+        return { seatNo, subtotal, serviceCharge, vatValue, grossBeforeMinimum, minimumGap, isOwnerSeat };
       });
       return {
         seats,
@@ -2223,6 +2244,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     [
       visibleSeatNumbers,
       sessionBillingProfile,
+      ownerSeatNos,
+      seatBillingOverrides,
       policy.servicePercent,
       policy.serviceBeforeVat,
       policy.vatPercent,
@@ -2263,19 +2286,24 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const reviewMinimumChargeDelta = reviewSeatMinimumSummary.minimumGap;
 
   const reviewBillingTotals = useMemo(() => {
-    const sbp = sessionBillingProfile;
-    const billActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
-    const ownerTpl = billActive && String(sbp?.source || "") === "vip_owner_template";
+    const scopedSeats = new Set(
+      scopedBillReviewLines
+        .map((l) => (l.seatNo != null ? Number(l.seatNo) : null))
+        .filter((n): n is number => n != null && Number.isFinite(n)),
+    );
+    const ownerInScope = [...scopedSeats].some((sn) => ownerSeatNos.includes(sn));
+    const cashInScope = [...scopedSeats].some((sn) => !ownerSeatNos.includes(sn));
+    let ownerLabel: string | undefined;
+    if (ownerInScope && cashInScope) ownerLabel = "مالك + نقدي (حسب الكرسي)";
+    else if (ownerInScope) ownerLabel = "Owner / VIP";
     return {
       netPortion: reviewSeatMinimumSummary.subtotal,
       serviceCharge: reviewSeatMinimumSummary.serviceCharge,
       vatValue: reviewSeatMinimumSummary.vatValue,
-      ownerTpl,
+      ownerTpl: ownerInScope,
+      ownerLabel,
     };
-  }, [
-    sessionBillingProfile,
-    reviewSeatMinimumSummary,
-  ]);
+  }, [scopedBillReviewLines, ownerSeatNos, reviewSeatMinimumSummary]);
 
   const reviewTotal = Math.max(
     0,
@@ -3046,7 +3074,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         return;
       }
       if (unbilledSeatNos.length >= 1) {
-        setBillSeatNos([]);
+        // افتراضي: كل الكراسي غير المفوترة — الكاشير/الكابتن يختار من يسدد لاحقاً دون ترتيب إلزامي
+        setBillSeatNos([...unbilledSeatNos]);
+        setBillSplitMode("per_seat");
         setBillSeatPickerOpen(true);
         return;
       }
@@ -3131,31 +3161,39 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       const splitGroups: Array<{ id: string; name: string; seats: number[] }> = [];
       const mode = billSplitMode;
       if (mode === "owner_plus_rest") {
-        const owners = (ownerSeatNos.length ? ownerSeatNos : selectedBillSeats).filter(
+        const owners = ownerSeatNos.filter(
           (n) => seatsWithItems.has(n) || selectedBillSeats.includes(n),
         );
-        const ownerSet = new Set(owners.length ? owners : []);
-        // إن لم تُعرَّف مقاعد مالك: الكرسي المحدد الأول كمالك والباقي مجمّع
-        const effectiveOwners =
-          ownerSet.size > 0
-            ? [...ownerSet].sort((a, b) => a - b)
-            : seatLoop.length
-              ? [seatLoop[0]!]
-              : [];
-        const rest = seatLoop.filter((n) => !effectiveOwners.includes(n));
-        if (effectiveOwners.length) {
-          const ownerLabel =
-            effectiveOwners.length === 1
-              ? String(seatGuestLabels[effectiveOwners[0]!] ?? "").trim() || `مالك · كرسي ${effectiveOwners[0]}`
-              : `مالك / VIP (${effectiveOwners.join("، ")})`;
-          splitGroups.push({ id: "check-owner", name: ownerLabel, seats: effectiveOwners });
-        }
-        if (rest.length) {
-          splitGroups.push({
-            id: "check-rest",
-            name: rest.length === 1 ? String(seatGuestLabels[rest[0]!] ?? "").trim() || `كرسي ${rest[0]}` : "باقي الطاولة (مجمّع)",
-            seats: rest,
-          });
+        // بدون مقاعد مالك معرّفة صراحةً → شيك لكل كرسي (لا تُعامل الكل كمالك)
+        if (!owners.length) {
+          for (const seatNo of seatLoop) {
+            const label = String(seatGuestLabels[seatNo] ?? "").trim() || String(seatNo);
+            splitGroups.push({
+              id: `check-${seatNo}`,
+              name: label,
+              seats: [seatNo],
+            });
+          }
+        } else {
+          const effectiveOwners = [...owners].sort((a, b) => a - b);
+          const rest = seatLoop.filter((n) => !effectiveOwners.includes(n));
+          if (effectiveOwners.length) {
+            const ownerLabel =
+              effectiveOwners.length === 1
+                ? String(seatGuestLabels[effectiveOwners[0]!] ?? "").trim() || `مالك · كرسي ${effectiveOwners[0]}`
+                : `مالك / VIP (${effectiveOwners.join("، ")})`;
+            splitGroups.push({ id: "check-owner", name: ownerLabel, seats: effectiveOwners });
+          }
+          if (rest.length) {
+            splitGroups.push({
+              id: "check-rest",
+              name:
+                rest.length === 1
+                  ? String(seatGuestLabels[rest[0]!] ?? "").trim() || `كرسي ${rest[0]}`
+                  : "باقي الطاولة (مجمّع)",
+              seats: rest,
+            });
+          }
         }
         if (!splitGroups.length) {
           for (const seatNo of seatLoop) {
@@ -6609,7 +6647,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           tipAmount: Math.max(0, tipAmount || 0),
           total: reviewTotal,
           minimumGap: reviewMinimumChargeDelta,
-          ownerLabel: reviewBillingTotals.ownerTpl ? "Owner / VIP" : undefined,
+          ownerLabel: reviewBillingTotals.ownerLabel,
         }}
         confirmBusy={requestBillBusy}
         onClose={() => setBillReviewOpen(false)}
@@ -6744,7 +6782,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         setBillSeatNos([...unbilledSeatNos]);
                       }
                     }}
-                    title={ownerSeatNos.length ? `مقاعد المالك: ${ownerSeatNos.join("، ")}` : "حدّد المقاعد — أول محدد يُعامل كمالك إن لم تُعرَّف مقاعد مالك"}
+                    title={ownerSeatNos.length ? `مقاعد المالك: ${ownerSeatNos.join("، ")}` : "عرّف مقاعد المالك من شريحة الطاولة أولاً — وإلا يُعامل كل كرسي حسب وضعه"}
                   >
                     مالك منفصل + باقي مجمّع
                     {ownerSeatNos.length ? ` (${ownerSeatNos.join("، ")})` : ""}

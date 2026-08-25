@@ -1338,7 +1338,11 @@ export default function WaiterTablesPage() {
       }
       if (mode) {
         const seats = (vipOwnerSeatsBySession[sessionId] || []).filter((n) => n >= 1 && n <= 12);
-        if (seats.length > 0) body.ownerSeatNos = seats;
+        if (seats.length === 0) {
+          setMsg("حدّد كرسي المالك أولاً (★ على الشريحة) قبل تطبيق Owner/VIP — حتى لا تُعامل كل الكراسي كمالك.");
+          return;
+        }
+        body.ownerSeatNos = seats;
       }
       const r = await safeFetch(`${base}/api/restaurant/table-sessions/${encodeURIComponent(sessionId)}/billing-profile`, {
         method: "PATCH",
