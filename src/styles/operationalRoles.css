@@ -1243,6 +1243,52 @@
   -webkit-text-fill-color: #0f172a;
 }
 
+/* عناصر النقل/الدمج داخل النافذة الفاتحة: لا تستخدم ألوان الثيم الداكن */
+.waiter-pos__ops-modal .waiter-pos__table-pick-hint,
+.waiter-pos__ops-modal .waiter-pos__table-pick-empty,
+.waiter-pos__ops-modal .waiter-pos__table-move-block__title {
+  color: #334155;
+}
+
+.waiter-pos__ops-modal .waiter-pos__table-move-block + .waiter-pos__table-move-block {
+  border-top-color: rgba(15, 23, 42, 0.12);
+}
+
+.waiter-pos__ops-modal .waiter-pos__table-pick-row {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.waiter-pos__ops-modal .waiter-pos__table-pick-row.is-selected {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.22);
+  color: #0c4a6e;
+}
+
+.waiter-pos__ops-modal .waiter-pos__table-pick-selected {
+  color: #0f172a;
+}
+
+.waiter-pos__ops-modal .waiter-pos__table-pick-clear {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.85);
+}
+
+.waiter-pos__ops-modal .waiter-pos__btn--primary {
+  color: #ffffff !important;
+  background: #0ea5e9 !important;
+  border-color: #0284c7 !important;
+}
+
+.waiter-pos__ops-modal .waiter-pos__btn--primary:disabled {
+  color: #64748b !important;
+  background: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+  opacity: 1;
+}
+
 .waiter-pos__ops-modal__grid-row {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) 140px 170px 96px;

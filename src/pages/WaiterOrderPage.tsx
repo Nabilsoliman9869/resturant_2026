@@ -5961,7 +5961,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
             <div className="waiter-pos__ops-modal__body">
               {navoptsActiveTab === "returns" && (
                 <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ color: "#94a3b8", fontSize: "0.9rem" }}>اختر طلبًا مرسلًا للمطبخ لطلب مرتجع من الجلسة الحالية فقط.</div>
+                  <div style={{ color: "#475569", fontSize: "0.9rem" }}>اختر طلبًا مرسلًا للمطبخ لطلب مرتجع من الجلسة الحالية فقط.</div>
                   <button
                     type="button"
                     className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action"
@@ -5989,7 +5989,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       <div className="waiter-pos__table-pick-empty">لا توجد نتائج.</div>
                     ) : (
                       <>
-                        <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 6 }}>اضغط على طاولة لاختيارها:</div>
+                        <div style={{ color: "#475569", fontSize: "0.85rem", marginBottom: 6 }}>اضغط على طاولة لاختيارها:</div>
                         <div className="waiter-pos__table-pick-list waiter-pos__table-pick-list--dialog" role="listbox" aria-label="طاولات للتحويل">
                           {transferSearchResults.map((t) => (
                             <button key={`tr-pick-${t.id}`} type="button" role="option" aria-selected={String(transferTargetTableId) === String(t.id)} className={`waiter-pos__table-pick-row${String(transferTargetTableId) === String(t.id) ? " is-selected" : ""}`} onClick={() => setTransferTargetTableId(String(t.id))} onDoubleClick={() => void transferTableTo(String(t.id))} title="انقر للتحديد أو دبل كليك لتنفيذ التحويل مباشرة">{tableDisplayName(t)} {sessionByTableRef[tableRefKey(t.id)]?.id ? "— مشغولة" : "— فارغة"}</button>
@@ -5998,7 +5998,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       </>
                     )}
                     {transferTargetTableId ? (
-                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#60a5fa" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => String(x.id) === String(transferTargetTableId))) || transferTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setTransferTargetTableId("")}>مسح</button></div>
+                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#1d4ed8" }}>المختار: <strong style={{ color: "#0f172a" }}>{tableDisplayName(tablesMoveCatalog.find((x) => String(x.id) === String(transferTargetTableId))) || transferTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#b91c1c" }} onClick={() => setTransferTargetTableId("")}>مسح</button></div>
                     ) : null}
                     <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: transferTargetTableId ? "#3b82f6" : undefined, opacity: transferTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !transferTargetTableId} onClick={() => void transferTableByTarget(transferTargetTableId)}>⮕ تنفيذ التحويل</button>
                   </div>
@@ -6008,8 +6008,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                 <div style={{ display: "grid", gap: 12 }}>
                   {mergedIntoSessionId || mergedSourceSessionIds.length > 0 ? (
                     <div className="waiter-pos__table-move-block" style={{ borderColor: "rgba(245,158,11,0.55)" }}>
-                      <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#fbbf24" }}>دمج نشط</div>
-                      <div style={{ color: "#cbd5e1", marginBottom: 10 }}>
+                      <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#b45309" }}>دمج نشط</div>
+                      <div style={{ color: "#334155", marginBottom: 10 }}>
                         {mergedIntoSessionId
                           ? "هذه هي الطاولة المصدر. يستمر الطلب منها، لكن طلب الحساب النهائي متاح من الطاولة الهدف فقط."
                           : `هذه هي الطاولة الهدف للحساب المشترك${mergedSourceSessionIds.length > 1 ? ` (${mergedSourceSessionIds.length} طاولات مصدر)` : ""}.`}
@@ -6024,13 +6024,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       </button>
                       {unmergePreviewLines.length > 0 ? (
                         <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-                          <div style={{ color: "#fbbf24", fontWeight: 800 }}>راجع كل الأصناف وأعد تحديد المقاعد قبل الفصل</div>
+                          <div style={{ color: "#b45309", fontWeight: 800 }}>راجع كل الأصناف وأعد تحديد المقاعد قبل الفصل</div>
                           {unmergePreviewLines.map((line) => {
                             const key = `${line.orderId}:${line.lineId}`;
                             return (
                               <div key={key} className="waiter-pos__ops-modal__grid-row">
                                 <div style={{ minWidth: 0 }}>
-                                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#fbbf24", fontSize: "0.78rem" }}>
+                                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#b45309", fontSize: "0.78rem" }}>
                                     <input
                                       type="checkbox"
                                       checked={unmergeSeatEnabled[key] !== false}
@@ -6038,10 +6038,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                     />
                                     تطبيق توزيع المقعد
                                   </label>
-                                  <div style={{ color: "#fff", fontWeight: 800 }}>{line.name} ×{line.quantity}</div>
-                                  <div style={{ color: "#94a3b8", fontSize: "0.78rem" }}>{line.origin === "source" ? "الطاولة المصدر" : "الطاولة الهدف"} · {line.tableId}</div>
+                                  <div style={{ color: "#0f172a", fontWeight: 800 }}>{line.name} ×{line.quantity}</div>
+                                  <div style={{ color: "#475569", fontSize: "0.78rem" }}>{line.origin === "source" ? "الطاولة المصدر" : "الطاولة الهدف"} · {line.tableId}</div>
                                 </div>
-                                <span style={{ color: "#cbd5e1" }}>المقعد</span>
+                                <span style={{ color: "#334155" }}>المقعد</span>
                                 <select disabled={unmergeSeatEnabled[key] === false} value={unmergeSeatTargets[key] || ""} onChange={(e) => setUnmergeSeatTargets((prev) => ({ ...prev, [key]: Number(e.target.value || 0) }))}>
                                   <option value="">بدون مقعد</option>
                                   {[...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1), SHARED_SEAT_NO].map((seat) => <option key={`${key}-${seat}`} value={seat}>{seatGuestDisplay(seat)}</option>)}
@@ -6073,7 +6073,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       </div>
                     )}
                     {mergeTargetTableId ? (
-                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#4ade80" }}>المختار: <strong style={{ color: "#fff" }}>{tableDisplayName(tablesMoveCatalog.find((x) => String(x.id) === String(mergeTargetTableId))) || mergeTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#f87171" }} onClick={() => setMergeTargetTableId("")}>مسح</button></div>
+                      <div className="waiter-pos__table-pick-selected waiter-pos__table-pick-selected--dialog" style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.4)", padding: "10px 12px", borderRadius: 10 }}><span style={{ color: "#15803d" }}>المختار: <strong style={{ color: "#0f172a" }}>{tableDisplayName(tablesMoveCatalog.find((x) => String(x.id) === String(mergeTargetTableId))) || mergeTargetTableId}</strong></span><button type="button" className="waiter-pos__table-pick-clear" style={{ color: "#b91c1c" }} onClick={() => setMergeTargetTableId("")}>مسح</button></div>
                     ) : null}
                     <button type="button" className="waiter-pos__btn waiter-pos__btn--primary waiter-pos__table-move-action" style={{ background: mergeTargetTableId ? "#22c55e" : undefined, opacity: mergeTargetTableId ? 1 : 0.4 }} disabled={!activeSessionId || sessionMoveBusy || !mergeTargetTableId || Boolean(mergedIntoSessionId) || mergedSourceSessionIds.length > 0} onClick={() => void mergeIntoTableTarget(mergeTargetTableId)}>⮕ تنفيذ الدمج</button>
                   </div>
@@ -6082,8 +6082,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               {navoptsActiveTab === "reorder" && (
                 <div style={{ display: "grid", gap: 12 }}>
                   <div className="waiter-pos__table-move-block">
-                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#8b5cf6" }}>نقل بين الضيوف</div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 8 }}>مراجعة بنود الطاولة وتغيير المقعد ضمن نافذة أوضح.</div>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#6d28d9" }}>نقل بين الضيوف</div>
+                    <div style={{ color: "#475569", fontSize: "0.85rem", marginBottom: 8 }}>مراجعة بنود الطاولة وتغيير المقعد ضمن نافذة أوضح.</div>
                     {billingLocked ? (
                       <div className="waiter-pos__table-pick-empty">تم طلب الحساب؛ الترتيب متوقف.</div>
                     ) : null}
@@ -6097,13 +6097,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                           return (
                             <div key={row.key} className="waiter-pos__ops-modal__grid-row">
                               <div style={{ minWidth: 0 }}>
-                                <div style={{ color: "#fff", fontWeight: 800, fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.name}</div>
+                                <div style={{ color: "#0f172a", fontWeight: 800, fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.name}</div>
                                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.8rem" }}>
-                                  <span style={{ color: row.statusTone === "cart" ? "#86efac" : "#93c5fd", fontWeight: 700 }}>{row.statusText}</span>
-                                  <span style={{ color: "#94a3b8" }}>×{row.qty}</span>
+                                  <span style={{ color: row.statusTone === "cart" ? "#15803d" : "#1d4ed8", fontWeight: 700 }}>{row.statusText}</span>
+                                  <span style={{ color: "#475569" }}>×{row.qty}</span>
                                 </div>
                               </div>
-                              <div style={{ color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 700 }}>{row.seatNo != null ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}</div>
+                              <div style={{ color: "#334155", fontSize: "0.82rem", fontWeight: 700 }}>{row.seatNo != null ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}</div>
                               <select value={targetValue} disabled={billingLocked || busy} onChange={(e) => { const n = Number(e.target.value || 0); setReorderSeatTargets((prev) => ({ ...prev, [row.key]: n })); }} style={{ width: "100%" }} aria-label={`اختر المقعد الجديد للبند ${row.name}`}>
                                 <option value="">اختر المقعد</option>
                                 {[...Array.from({ length: SEAT_SLOT_COUNT }, (_, idx) => idx + 1), SHARED_SEAT_NO].map((n) => (
@@ -6118,14 +6118,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     )}
                   </div>
                   <div className="waiter-pos__table-move-block" style={{ borderColor: "rgba(14,165,233,0.45)" }}>
-                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#38bdf8" }}>فصل ضيف أو بنود إلى طاولة أخرى</div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 10 }}>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#0369a1" }}>فصل ضيف أو بنود إلى طاولة أخرى</div>
+                    <div style={{ color: "#475569", fontSize: "0.85rem", marginBottom: 10 }}>
                       {roleHasManagerOpsAccess(user?.role)
                         ? "اختر البنود المرسلة، ثم الطاولة والمقعد الهدف. الطاولة الفارغة ستُشغّل تلقائيًا، والمشغولة ستطلب تأكيدًا قبل إضافة البنود إلى حسابها."
                         : "نقل الأصناف بين الطاولات اختصاص المدير فقط."}
                     </div>
                     {!roleHasManagerOpsAccess(user?.role) ? (
-                      <div style={{ color: "#fca5a5", fontWeight: 700, marginBottom: 10 }}>غير متاح لدور الكابتن/الجرسون — اطلب المدير.</div>
+                      <div style={{ color: "#b91c1c", fontWeight: 700, marginBottom: 10 }}>غير متاح لدور الكابتن/الجرسون — اطلب المدير.</div>
                     ) : null}
                     <select value={partialMoveTargetTableId} onChange={(e) => setPartialMoveTargetTableId(e.target.value)} disabled={!roleHasManagerOpsAccess(user?.role) || billingLocked || partialMoveBusy} style={{ width: "100%", marginBottom: 10 }}>
                       <option value="">اختر الطاولة الهدف</option>
@@ -6135,7 +6135,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         </option>
                       ))}
                     </select>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1", marginBottom: 10 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#334155", marginBottom: 10 }}>
                       <input
                         type="checkbox"
                         checked={partialMoveIncludesGuest}
@@ -6154,8 +6154,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                             onChange={(e) => setPartialMoveSelected((prev) => ({ ...prev, [row.key]: e.target.checked }))}
                           />
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ color: "#fff", fontWeight: 800 }}>{row.name} ×{row.qty}</div>
-                            <div style={{ color: "#94a3b8", fontSize: "0.78rem" }}>حاليًا: {row.seatNo ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}</div>
+                            <div style={{ color: "#0f172a", fontWeight: 800 }}>{row.name} ×{row.qty}</div>
+                            <div style={{ color: "#475569", fontSize: "0.78rem" }}>حاليًا: {row.seatNo ? seatGuestDisplay(row.seatNo) : "بدون مقعد"}</div>
                           </div>
                           <select
                             value={partialMoveSeatTargets[row.key] || row.seatNo || 1}
@@ -6192,8 +6192,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
               {navoptsActiveTab === "invoices" && (
                 <div style={{ display: "grid", gap: 12 }}>
                   <div className="waiter-pos__table-move-block">
-                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#ec4899" }}>شيكات الطاولة</div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 8 }}>معاينة وطباعة الشيكات من نافذة كبيرة.</div>
+                    <div className="waiter-pos__table-move-block__title waiter-pos__table-move-block__title--dialog" style={{ color: "#be185d" }}>شيكات الطاولة</div>
+                    <div style={{ color: "#475569", fontSize: "0.85rem", marginBottom: 8 }}>معاينة وطباعة الشيكات من نافذة كبيرة.</div>
                     {!billingLocked ? (
                       <div className="waiter-pos__table-pick-empty">بعد طلب الحساب ستظهر الشيكات هنا.</div>
                     ) : sessionInvoices.length === 0 ? (
@@ -6206,13 +6206,13 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                           return (
                             <div key={`session-invoice-${id || idx}`} className="waiter-pos__ops-modal__grid-row waiter-pos__ops-modal__grid-row--invoice">
                               <div style={{ minWidth: 0 }}>
-                                <div style={{ color: "#fff", fontWeight: 800, fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{String(inv.splitName || "").trim() || `شيك ${idx + 1}`}</div>
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.8rem", color: "#94a3b8" }}>
+                                <div style={{ color: "#0f172a", fontWeight: 800, fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{String(inv.splitName || "").trim() || `شيك ${idx + 1}`}</div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3, fontSize: "0.8rem", color: "#475569" }}>
                                   <span>فاتورة: {inv.billNumber != null ? String(inv.billNumber) : "—"}</span>
                                   <span>طباعة: {Number(inv.printCount || 0)}</span>
                                 </div>
                               </div>
-                              <div style={{ color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 700 }}>{inv.total != null ? `${Number(inv.total).toFixed(2)} ج.م` : "—"}</div>
+                              <div style={{ color: "#334155", fontSize: "0.82rem", fontWeight: 700 }}>{inv.total != null ? `${Number(inv.total).toFixed(2)} ج.م` : "—"}</div>
                               <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost waiter-pos__table-move-action" disabled={!id || isWaiterLocked} onClick={() => openCaptainInvoice(inv)} title={isWaiterLocked ? "تمت طباعة الشيك مرة." : "معاينة وطباعة"}>{isWaiterLocked ? "طبع الكابتن" : "معاينة / طباعة"}</button>
                             </div>
                           );
