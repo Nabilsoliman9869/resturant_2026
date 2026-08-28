@@ -6,19 +6,25 @@ import { buildMat3amActor } from "../lib/mat3amActor";
 import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 
-type Breakdown = { cash: number; visa: number; wallet: number; instapay: number };
+type Breakdown = { cash: number; visa: number; wallet: number; instapay: number; hospitality?: number };
 type InvRow = {
   invoiceId: string;
   billNumber?: number | string;
   tableLabel?: string;
   paidAt?: string;
   total: number;
+  paymentMethod?: string;
+  paymentStatus?: string;
   paymentBreakdown?: Breakdown;
   routeCash?: number;
   routeVisa?: number;
   routeWallet?: number;
   routeInstapay?: number;
+  routeHospitality?: number;
+  isHospitality?: boolean;
+  lines?: Array<{ name?: string; quantity?: number; unitPrice?: number; lineTotal?: number; cancelled?: boolean }>;
 };
+type HospItem = { name: string; quantity: number; amount: number; invoiceCount?: number };
 type Outflow = {
   outflowId: string;
   kind: string;
@@ -54,14 +60,18 @@ function todayISO() {
 }
 
 function invBreakdown(inv: InvRow): Breakdown {
-  return (
-    inv.paymentBreakdown || {
-      cash: Number(inv.routeCash) || 0,
-      visa: Number(inv.routeVisa) || 0,
-      wallet: Number(inv.routeWallet) || 0,
-      instapay: Number(inv.routeInstapay) || 0,
-    }
-  );
+  const base = inv.paymentBreakdown || {
+    cash: Number(inv.routeCash) || 0,
+    visa: Number(inv.routeVisa) || 0,
+    wallet: Number(inv.routeWallet) || 0,
+    instapay: Number(inv.routeInstapay) || 0,
+    hospitality: Number(inv.routeHospitality) || 0,
+  };
+  let hospitality = Number(base.hospitality) || Number(inv.routeHospitality) || 0;
+  if (hospitality <= 0.02 && inv.isHospitality) {
+    hospitality = Number(inv.total) || 0;
+  }
+  return { ...base, hospitality };
 }
 
 /**
@@ -97,6 +107,9 @@ export default function CashierShiftClosePage() {
   const [extraPurchase, setExtraPurchase] = useState("0");
   const [notes, setNotes] = useState("");
   const [history, setHistory] = useState<Hist[]>([]);
+  const [hospitalityItems, setHospitalityItems] = useState<HospItem[]>([]);
+  const [serverHospTotal, setServerHospTotal] = useState(0);
+  const [serverHospCount, setServerHospCount] = useState(0);
 
   const show = (type: "ok" | "err", text: string) => {
     setMsg({ type, text });
@@ -122,6 +135,8 @@ export default function CashierShiftClosePage() {
           invoices?: InvRow[];
           unassignedInvoices?: InvRow[];
           outflows?: Outflow[];
+          hospitalityItems?: HospItem[];
+          totals?: { hospitality?: number; hospitalityCount?: number };
           detail?: string;
         }>(await r.text()) ?? {};
       if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "تعذر التحميل");
@@ -131,6 +146,9 @@ export default function CashierShiftClosePage() {
       setInvoices(invs);
       setUnassigned(unas);
       setOutflows(outs);
+      setHospitalityItems(Array.isArray(j.hospitalityItems) ? j.hospitalityItems : []);
+      setServerHospTotal(Number(j.totals?.hospitality) || 0);
+      setServerHospCount(Number(j.totals?.hospitalityCount) || 0);
       const sel: Record<string, boolean> = {};
       for (const x of invs) sel[x.invoiceId] = true;
       setSelected(sel);
@@ -166,6 +184,8 @@ export default function CashierShiftClosePage() {
     let visa = 0;
     let wallet = 0;
     let instapay = 0;
+    let hospitality = 0;
+    let hospitalityCount = 0;
     let invoiceTotal = 0;
     for (const inv of pool) {
       const bd = invBreakdown(inv);
@@ -173,6 +193,11 @@ export default function CashierShiftClosePage() {
       visa += Number(bd.visa) || 0;
       wallet += Number(bd.wallet) || 0;
       instapay += Number(bd.instapay) || 0;
+      const hosp = Number(bd.hospitality) || 0;
+      if (hosp > 0.02 || inv.isHospitality) {
+        hospitality += hosp > 0.02 ? hosp : Number(inv.total) || 0;
+        hospitalityCount += 1;
+      }
       const collected = (Number(bd.cash) || 0) + (Number(bd.visa) || 0) + (Number(bd.wallet) || 0) + (Number(bd.instapay) || 0);
       invoiceTotal += collected > 0.0001 ? collected : Number(inv.total) || 0;
     }
@@ -194,6 +219,8 @@ export default function CashierShiftClosePage() {
       visa,
       wallet,
       instapay,
+      hospitality,
+      hospitalityCount,
       invoiceTotal,
       invoiceCount: pool.length,
       expenses,
@@ -205,6 +232,29 @@ export default function CashierShiftClosePage() {
       netHandover: declared,
     };
   }, [pool, outflows, selectedOut, extraExpense, extraPurchase, denoms]);
+
+  const hospitalityItemsView = useMemo(() => {
+    if (hospitalityItems.length) return hospitalityItems;
+    // احتياطي من الفواتير المحددة إن لم يُرجع الخادم التجميع
+    const map = new Map<string, HospItem>();
+    for (const inv of pool) {
+      const bd = invBreakdown(inv);
+      if (!((Number(bd.hospitality) || 0) > 0.02 || inv.isHospitality)) continue;
+      for (const ln of inv.lines || []) {
+        if (ln.cancelled) continue;
+        const qty = Number(ln.quantity) || 0;
+        if (qty <= 0) continue;
+        const name = String(ln.name || "صنف").trim() || "صنف";
+        const amount = Number(ln.lineTotal) || qty * (Number(ln.unitPrice) || 0);
+        const cur = map.get(name) || { name, quantity: 0, amount: 0, invoiceCount: 0 };
+        cur.quantity += qty;
+        cur.amount += amount;
+        cur.invoiceCount = (cur.invoiceCount || 0) + 1;
+        map.set(name, cur);
+      }
+    }
+    return [...map.values()].sort((a, b) => b.amount - a.amount);
+  }, [hospitalityItems, pool]);
 
   function toggleAll(on: boolean) {
     const next: Record<string, boolean> = {};
@@ -225,7 +275,7 @@ export default function CashierShiftClosePage() {
     const ok = window.confirm(
       `إرسال إقفال الشيفت لاعتماد المدير؟\n` +
         `الفترة: ${fromDate} → ${toDate}\n` +
-        `فواتير: ${totals.invoiceCount} · نقدي ${money(totals.cash)} · فيزا ${money(totals.visa)} · إنستا ${money(totals.instapay)}\n` +
+        `فواتير: ${totals.invoiceCount} · نقدي ${money(totals.cash)} · فيزا ${money(totals.visa)} · إنستا ${money(totals.instapay)} · ضيافة ${money(totals.hospitality)}\n` +
         `صافي تسليم (معدود): ${money(totals.netHandover)} ج.م`,
     );
     if (!ok) return;
@@ -330,9 +380,13 @@ export default function CashierShiftClosePage() {
             <span>محفظة</span>
             <strong>{money(totals.wallet)}</strong>
           </div>
+          <div className="kpi" style={{ borderColor: "rgba(180,83,9,0.45)", background: "rgba(255,251,235,0.95)" }}>
+            <span style={{ color: "#92400e" }}>ضيافة ({totals.hospitalityCount || serverHospCount} شيك)</span>
+            <strong style={{ color: "#78350f" }}>{money(totals.hospitality || serverHospTotal)}</strong>
+          </div>
           <div className="kpi kpi--total">
-            <span>مجمل المتحصل ({totals.invoiceCount} فاتورة)</span>
-            <strong>{money(totals.invoiceTotal)}</strong>
+            <span>مجمل المتحصل النقدي/الشبكة ({totals.invoiceCount} فاتورة)</span>
+            <strong>{money(totals.cash + totals.visa + totals.wallet + totals.instapay)}</strong>
           </div>
         </section>
 
@@ -363,6 +417,7 @@ export default function CashierShiftClosePage() {
                     <th>فيزا</th>
                     <th>إنستا</th>
                     <th>محفظة</th>
+                    <th>ضيافة</th>
                     <th>المتحصل</th>
                   </tr>
                 </thead>
@@ -374,6 +429,7 @@ export default function CashierShiftClosePage() {
                       (Number(bd.visa) || 0) +
                       (Number(bd.wallet) || 0) +
                       (Number(bd.instapay) || 0);
+                    const hosp = Number(bd.hospitality) || 0;
                     return (
                       <tr key={inv.invoiceId}>
                         <td>
@@ -390,6 +446,9 @@ export default function CashierShiftClosePage() {
                         <td>{money(Number(bd.visa) || 0)}</td>
                         <td>{money(Number(bd.instapay) || 0)}</td>
                         <td>{money(Number(bd.wallet) || 0)}</td>
+                        <td style={{ color: hosp > 0.02 ? "#92400e" : undefined, fontWeight: hosp > 0.02 ? 800 : undefined }}>
+                          {money(hosp)}
+                        </td>
                         <td>
                           <strong>{money(collected || Number(inv.total) || 0)}</strong>
                         </td>
@@ -436,6 +495,41 @@ export default function CashierShiftClosePage() {
               ) : null}
             </div>
           ) : null}
+        </section>
+
+        <section className="card shift-close__panel">
+          <div className="shift-close__panel-head">
+            <h3>أصناف الضيافة (رقابة / جرد)</h3>
+            <span className="muted" style={{ fontWeight: 700 }}>
+              {totals.hospitalityCount || serverHospCount} شيك · {money(totals.hospitality || serverHospTotal)} ج.م
+            </span>
+          </div>
+          {hospitalityItemsView.length === 0 ? (
+            <p className="muted">لا توجد شيكات ضيافة في الفترة المحددة (أو لم تُحدَّث الفواتير القديمة بعد إقفال الضيافة الجديد).</p>
+          ) : (
+            <div className="shift-close__table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الصنف</th>
+                    <th>الكمية</th>
+                    <th>القيمة</th>
+                    <th>مرات الظهور</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hospitalityItemsView.map((it) => (
+                    <tr key={it.name}>
+                      <td>{it.name}</td>
+                      <td>{Number(it.quantity) % 1 === 0 ? String(it.quantity) : Number(it.quantity).toFixed(2)}</td>
+                      <td>{money(it.amount)}</td>
+                      <td>{it.invoiceCount ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <div className="shift-close__grid2">

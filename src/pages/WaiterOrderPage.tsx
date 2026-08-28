@@ -239,8 +239,28 @@ type ServerOrder = {
   items?: ServerOrderItem[];
   generalOrder?: boolean;
   createdAt?: string;
+  sentAt?: string;
   updatedAt?: string;
 };
+
+/** ساعة:دقيقة لإرسال الطلب (لترتيب المتابعة). */
+function formatOrderClockTime(iso?: string | null): string {
+  const raw = String(iso || "").trim();
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
+  } catch {
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+}
+
+function orderSentClockLabel(o: ServerOrder): string {
+  return formatOrderClockTime(o.sentAt || o.createdAt || o.updatedAt);
+}
 
 type ReviewSeatMoveRow = {
   key: string;
@@ -512,6 +532,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   const [displayMode, setDisplayMode] = useState<"group" | "category">("group");
   const [sortMode, setSortMode] = useState<"default" | "name" | "price">("default");
   const [couponCode, setCouponCode] = useState("");
+  const [reviewMgrDiscountAmt, setReviewMgrDiscountAmt] = useState("");
+  const [reviewMgrDiscountPct, setReviewMgrDiscountPct] = useState("");
   const [tipAmount, setTipAmount] = useState(0);
   const [selectedAgentGuid, setSelectedAgentGuid] = useState("");
   const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1468,17 +1490,49 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
   );
 
   const seatCartStats = useMemo(() => {
-    const map = new Map<number, { qty: number; lines: number }>();
+    const map = new Map<number, { qty: number; lines: number; sentQty: number }>();
     for (const line of cart) {
       const seatNo = seatNoFromLine(line);
       if (seatNo == null) continue;
-      const prev = map.get(seatNo) ?? { qty: 0, lines: 0 };
+      const prev = map.get(seatNo) ?? { qty: 0, lines: 0, sentQty: 0 };
       prev.qty += Number(line.qty || 0);
       prev.lines += 1;
       map.set(seatNo, prev);
     }
+    for (const o of sessionOrders) {
+      if ((o.status || "").toLowerCase() === "cancelled") continue;
+      for (const it of activeOrderItems(o)) {
+        const seatNo = extractSeatFromOrderItem(it);
+        if (seatNo == null) continue;
+        const prev = map.get(seatNo) ?? { qty: 0, lines: 0, sentQty: 0 };
+        prev.sentQty += Number(it.quantity || 0) || 0;
+        map.set(seatNo, prev);
+      }
+    }
     return map;
-  }, [cart]);
+  }, [cart, sessionOrders]);
+
+  /** في وضع المقاعد: السلة والطلبات المرسلة تُفلتر حسب الضيف/الشيك المختار */
+  const seatScopedCart = useMemo(() => {
+    if (assignmentMode !== "per_seat") return cart;
+    return cart.filter((l) => seatNoFromLine(l) === selectedSeat);
+  }, [cart, assignmentMode, selectedSeat]);
+
+  const seatScopedSessionOrders = useMemo(() => {
+    if (assignmentMode !== "per_seat") {
+      return sessionOrders
+        .filter((o) => (o.status || "").toLowerCase() !== "cancelled")
+        .map((o) => ({ order: o, items: activeOrderItems(o) }));
+    }
+    const out: Array<{ order: ServerOrder; items: ServerOrderItem[] }> = [];
+    for (const o of sessionOrders) {
+      if ((o.status || "").toLowerCase() === "cancelled") continue;
+      const items = activeOrderItems(o).filter((it) => extractSeatFromOrderItem(it) === selectedSeat);
+      if (!items.length) continue;
+      out.push({ order: o, items });
+    }
+    return out;
+  }, [sessionOrders, assignmentMode, selectedSeat]);
 
   const captainDockSeats = useMemo(
     () => (assignmentMode === "per_seat" ? [...visibleSeatNumbers, SHARED_SEAT_NO] : []),
@@ -2312,6 +2366,37 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     Math.max(0, tipAmount || 0),
   );
 
+  const canReviewMgrDiscount = roleHasManagerOpsAccess(user?.role);
+  const reviewMgrDiscountParsed = useMemo(() => {
+    if (!canReviewMgrDiscount) return { amount: 0, percent: 0, cut: 0 };
+    const amount = Math.max(0, Number(String(reviewMgrDiscountAmt || "").replace(",", ".")) || 0);
+    const percent = Math.max(0, Math.min(100, Number(String(reviewMgrDiscountPct || "").replace(",", ".")) || 0));
+    const sub = Math.max(0, reviewSeatMinimumSummary.subtotal);
+    const cut = Math.min(sub, amount + (sub * percent) / 100);
+    return { amount, percent, cut };
+  }, [canReviewMgrDiscount, reviewMgrDiscountAmt, reviewMgrDiscountPct, reviewSeatMinimumSummary.subtotal]);
+
+  const reviewDiscountedTotals = useMemo(() => {
+    const sub = Math.max(0, reviewSeatMinimumSummary.subtotal);
+    const cut = reviewMgrDiscountParsed.cut;
+    const scale = sub > 0.0001 ? Math.max(0, sub - cut) / sub : 1;
+    const serviceCharge = Math.max(0, reviewSeatMinimumSummary.serviceCharge * scale);
+    const vatValue = Math.max(0, reviewSeatMinimumSummary.vatValue * scale);
+    const netPortion = Math.max(0, sub - cut);
+    const total = Math.max(
+      0,
+      netPortion + serviceCharge + vatValue + reviewMinimumChargeDelta + Math.max(0, tipAmount || 0),
+    );
+    return { netPortion, serviceCharge, vatValue, discount: cut, total };
+  }, [
+    reviewSeatMinimumSummary.subtotal,
+    reviewSeatMinimumSummary.serviceCharge,
+    reviewSeatMinimumSummary.vatValue,
+    reviewMgrDiscountParsed.cut,
+    reviewMinimumChargeDelta,
+    tipAmount,
+  ]);
+
   const billingTotals = useMemo(() => {
     const sbp = sessionBillingProfile;
     const billActive = !!(sbp && typeof sbp === "object" && sbp.active !== false);
@@ -2381,6 +2466,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       Math.max(0, tipAmount || 0),
   );
   const itemCount = cart.reduce((a, l) => a + l.qty, 0);
+  const scopedCartItemCount = seatScopedCart.reduce((a, l) => a + l.qty, 0);
+  const scopedCartGross = seatScopedCart.reduce((a, l) => a + l.qty * l.unitPrice, 0);
   const billingLocked = Boolean(billingRequestedAt);
 
   useEffect(() => {
@@ -2824,6 +2911,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       setMsg("الجلسة حالياً ضيف مؤقت. يمكنك تجهيز السلة فقط، لكن لا يمكن إرسال الطلب قبل اعتماد أو رفض المدير.");
       return;
     }
+    const cartToSend = assignmentMode === "per_seat" ? seatScopedCart : cart;
+    if (!cartToSend.length) {
+      setMsg(
+        assignmentMode === "per_seat"
+          ? `لا توجد أصناف في سلة ${seatGuestDisplay(selectedSeat)}. اختر ضيفاً آخر أو أضف أصنافاً.`
+          : "الطلب فارغ.",
+      );
+      return;
+    }
     const accumulatedTotal = reviewTotal + total;
     if (sessionMaxInvoiceLimit != null && sessionMaxInvoiceLimit > 0 && accumulatedTotal > sessionMaxInvoiceLimit) {
       setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
@@ -2831,7 +2927,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
     }
     setLoading(true);
     try {
-      const items = cart.map((l) => {
+      const items = cartToSend.map((l) => {
         const sn = seatNoFromLine(l);
         const tag = assignmentMode === "general" || sn == null ? null : seatGuestDisplay(sn);
         const kn = String(l.kitchenNotes || "").trim();
@@ -2896,9 +2992,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         if (r.status === 0) throw new Error(briefNetworkHint("failed to fetch"));
         throw new Error(detail || `HTTP ${r.status}`);
       }
-      setCart([]);
+      const sentIds = new Set(cartToSend.map((l) => l.id));
+      setCart((prev) => prev.filter((l) => !sentIds.has(l.id)));
       // نبقي كود الكوبون حتى طلب الحساب ليُخصم من إجمالي الفاتورة
-      setMsg("تم إرسال الطلب للمطبخ (الفاتورة تُنشأ عند «طلب الحساب» فقط).");
+      setMsg(
+        assignmentMode === "per_seat"
+          ? `تم إرسال طلب ${seatGuestDisplay(selectedSeat)} للمطبخ (الفاتورة تُنشأ عند «طلب الحساب» فقط).`
+          : "تم إرسال الطلب للمطبخ (الفاتورة تُنشأ عند «طلب الحساب» فقط).",
+      );
       // لا ننتظر إعادة جلب الطلبات — تخفيف ثقل «جاري الإرسال» بعد رد الخادم
       void loadSessionOrders();
       // Shared Terminal: إقفال تلقائي بعد كل إرسال للمطبخ (إن كان الإعداد مفعَّلاً)
@@ -3070,6 +3171,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           setMsg(`تجاوز الحد الأقصى للفاتورة (${sessionMaxInvoiceLimit.toFixed(2)}). يتطلب الأمر اعتماد مدير إضافي.`);
           return;
         }
+        setReviewMgrDiscountAmt("");
+        setReviewMgrDiscountPct("");
         setBillReviewOpen(true);
         return;
       }
@@ -3100,6 +3203,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       return;
     }
     setBillSeatPickerOpen(false);
+    setReviewMgrDiscountAmt("");
+    setReviewMgrDiscountPct("");
     setBillReviewOpen(true);
   }
 
@@ -3242,6 +3347,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
           agentGuid: selectedAgentGuid || undefined,
           billDate: billDate || undefined,
           couponCode: String(couponCode || "").trim() || undefined,
+          managerDiscountAmount:
+            canReviewMgrDiscount && reviewMgrDiscountParsed.amount > 0
+              ? reviewMgrDiscountParsed.amount
+              : undefined,
+          managerDiscountPercent:
+            canReviewMgrDiscount && reviewMgrDiscountParsed.percent > 0
+              ? reviewMgrDiscountParsed.percent
+              : undefined,
           mat3amActor: buildMat3amActor(user),
         }),
       });
@@ -3329,6 +3442,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
       }
       setBillReviewOpen(false);
       setBillSeatNos([]);
+      setReviewMgrDiscountAmt("");
+      setReviewMgrDiscountPct("");
       if (stillOpen) {
         setBillingRequestedAt(null);
       } else {
@@ -4625,9 +4740,16 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
           {/* Recent Orders */}
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 800, marginBottom: 8, fontSize: "0.9rem", color: "#0f172a" }}>الطلبات المرسلة</div>
-            {sessionOrders.filter((o) => String(o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
-              <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>لا توجد طلبات مرسلة بعد.</div>
+            <div style={{ fontWeight: 800, marginBottom: 8, fontSize: "0.9rem", color: "#0f172a" }}>
+              الطلبات المرسلة
+              {assignmentMode === "per_seat" ? ` · ${seatGuestDisplay(selectedSeat)}` : ""}
+            </div>
+            {seatScopedSessionOrders.length === 0 ? (
+              <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                {assignmentMode === "per_seat"
+                  ? `لا توجد طلبات مرسلة لـ ${seatGuestDisplay(selectedSeat)}.`
+                  : "لا توجد طلبات مرسلة بعد."}
+              </div>
             ) : (
               <div
                 style={{
@@ -4636,14 +4758,11 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   gap: 10,
                 }}
               >
-                {sessionOrders
-                  .filter((o) => String(o.status || "").toLowerCase() !== "cancelled")
-                  .slice()
-                  .reverse()
-                  .map((o) => {
+                {[...seatScopedSessionOrders].reverse().map(({ order: o, items }) => {
                     const st = String(o.status || "").toLowerCase();
-                    const lines = activeOrderItems(o).map(formatOrderItemLine);
+                    const lines = items.map(formatOrderItemLine);
                     const canCancel = st === "pending";
+                    const clock = orderSentClockLabel(o);
                     return (
                       <div
                         key={`sum-${o.id}`}
@@ -4655,7 +4774,10 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         }}
                       >
                         <div style={{ fontSize: "0.82rem", fontWeight: 800, marginBottom: 6, color: "#0f172a", display: "flex", justifyContent: "space-between", gap: 6 }}>
-                          <span>طلب #{o.id.slice(0, 8)} · {orderStatusLabelAr(st)} {o.generalOrder ? "· عام" : ""}</span>
+                          <span>
+                            طلب #{o.id.slice(0, 8)} · {orderStatusLabelAr(st)} {o.generalOrder ? "· عام" : ""}
+                            {clock ? ` · ${clock}` : ""}
+                          </span>
                           {canCancel ? (
                             <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.7rem", padding: "2px 6px" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button>
                           ) : null}
@@ -4709,10 +4831,16 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                                 setAssignmentMode("per_seat");
                                 setSelectedSeat(n);
                               }}
-                              title={seatGuestDisplay(n)}
+                              title={`${seatGuestDisplay(n)} — سلة ${stats?.qty ?? 0} · مرسل ${stats?.sentQty ?? 0}`}
                             >
                               <span className="waiter-pos__seat-pill__label">{truncateRailGuestLabel(seatGuestDisplay(n))}</span>
-                              {stats?.qty ? <span className="waiter-pos__seat-pill__meta">{stats.qty}</span> : null}
+                              {(stats?.qty || stats?.sentQty) ? (
+                                <span className="waiter-pos__seat-pill__meta">
+                                  {(stats?.qty || 0) > 0 ? stats!.qty : ""}
+                                  {(stats?.qty || 0) > 0 && (stats?.sentQty || 0) > 0 ? "/" : ""}
+                                  {(stats?.sentQty || 0) > 0 ? stats!.sentQty : ""}
+                                </span>
+                              ) : null}
                             </button>
                           );
                         })}
@@ -5036,7 +5164,9 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     <div>
                       <div className="waiter-pos__desk-card__title">السلة — قيد الإرسال</div>
                       <div className="waiter-pos__desk-card__sub">
-                        {itemCount} صنف · تقدير أولي {gross.toFixed(2)} ج.م
+                        {assignmentMode === "per_seat"
+                          ? `${scopedCartItemCount} صنف لـ ${seatGuestDisplay(selectedSeat)} · تقدير ${scopedCartGross.toFixed(2)} ج.م`
+                          : `${itemCount} صنف · تقدير أولي ${gross.toFixed(2)} ج.م`}
                       </div>
                       <div className="waiter-pos__cart-seat-indicator">
                         <span className="waiter-pos__cart-seat-indicator__label">التسجيل الآن:</span>
@@ -5054,7 +5184,7 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                       <button
                         type="button"
                         className="waiter-pos__btn waiter-pos__cart-submit"
-                        disabled={loading || billingLocked || sessionGuestApprovalPending || cart.length === 0}
+                        disabled={loading || billingLocked || sessionGuestApprovalPending || seatScopedCart.length === 0}
                         onClick={() => void submitSale()}
                       >
                         {loading ? "جاري الإرسال…" : sessionGuestApprovalPending ? "بانتظار قرار المدير" : "إرسال الطلب"}
@@ -5062,7 +5192,14 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     </div>
                   </div>
                   <div className="waiter-pos__order-box">
-                    {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
+                    {seatScopedCart.length === 0 ? (
+                      <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>
+                        {assignmentMode === "per_seat"
+                          ? `لا توجد عناصر لـ ${seatGuestDisplay(selectedSeat)}.`
+                          : "لا توجد عناصر"}
+                      </div>
+                    ) : (
+                      seatScopedCart.map((l) => (
                       <div
                         key={`desk-line-${l.id}`}
                         className="waiter-pos__order-line"
@@ -5106,7 +5243,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         ) : null}
                         <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
                       </div>
-                    ))}
+                    ))
+                    )}
                   </div>
                 </div>
 
@@ -5114,25 +5252,43 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   <div className="waiter-pos__desk-card__head">
                     <div>
                       <div className="waiter-pos__desk-card__title">مرسل / جاهز بالمطبخ</div>
-                      <div className="waiter-pos__desk-card__sub">متابعة الطلبات المرسلة من الجلسة الحالية.</div>
+                      <div className="waiter-pos__desk-card__sub">
+                        {assignmentMode === "per_seat"
+                          ? `طلبات ${seatGuestDisplay(selectedSeat)} فقط.`
+                          : "متابعة الطلبات المرسلة من الجلسة الحالية."}
+                      </div>
                     </div>
                   </div>
 
                   <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__sent--compact waiter-pos__ot-scroll-target">
                     {ordersBusy && !sessionOrders.length ? (
                       <div className="waiter-pos__summary-empty">جاري التحميل…</div>
-                    ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
-                      <div className="waiter-pos__summary-empty">لا توجد بعد.</div>
+                    ) : seatScopedSessionOrders.length === 0 ? (
+                      <div className="waiter-pos__summary-empty">
+                        {assignmentMode === "per_seat"
+                          ? `لا توجد طلبات مرسلة لـ ${seatGuestDisplay(selectedSeat)}.`
+                          : "لا توجد بعد."}
+                      </div>
                     ) : (
                       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                        {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
+                        {[...seatScopedSessionOrders].reverse().map(({ order: o, items }) => {
                           const st = (o.status || "").toLowerCase();
                           const canCancel = st === "pending";
-                          const lines = activeOrderItems(o).map(formatOrderItemLine);
+                          const lines = items.map(formatOrderItemLine);
+                          const clock = orderSentClockLabel(o);
                           return (
                             <li key={`sent-desk-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "8px 0", fontSize: "0.82rem", color: "#e2e8f0" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-                                <span><strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong> · {orderStatusLabelAr(st)}</span>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4, alignItems: "flex-start" }}>
+                                <span>
+                                  <strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong>
+                                  {" · "}
+                                  {orderStatusLabelAr(st)}
+                                  {clock ? (
+                                    <span style={{ color: "#7dd3fc", fontWeight: 800, marginInlineStart: 6 }} title="وقت إرسال الطلب للمطبخ">
+                                      · {clock}
+                                    </span>
+                                  ) : null}
+                                </span>
                                 {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
                               </div>
                               <ul style={{ margin: 0, paddingInlineStart: 16, color: "#cbd5e1", lineHeight: 1.45 }}>
@@ -5325,9 +5481,19 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                   style={{ order: 30 }}
                 >
                   <>
-                    <h3 style={{ marginTop: 0 }}>السلة — قيد الإرسال</h3>
+                    <h3 style={{ marginTop: 0 }}>
+                      السلة — قيد الإرسال
+                      {assignmentMode === "per_seat" ? ` · ${seatGuestDisplay(selectedSeat)}` : ""}
+                    </h3>
                     <div className="waiter-pos__order-box">
-                      {cart.length === 0 ? <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>لا توجد عناصر</div> : cart.map((l) => (
+                      {seatScopedCart.length === 0 ? (
+                        <div style={{ color: "var(--wp-muted)", fontSize: "0.9rem" }}>
+                          {assignmentMode === "per_seat"
+                            ? `لا توجد عناصر لـ ${seatGuestDisplay(selectedSeat)}.`
+                            : "لا توجد عناصر"}
+                        </div>
+                      ) : (
+                        seatScopedCart.map((l) => (
                         <div
                           key={`top-line-${l.id}`}
                           className="waiter-pos__order-line"
@@ -5372,7 +5538,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                           ) : null}
                           <button type="button" className="waiter-pos__line-remove" onClick={() => removeLine(l.id)} disabled={billingLocked}>×</button>
                         </div>
-                      ))}
+                      ))
+                      )}
                     </div>
                     <button
                       type="button"
@@ -5383,15 +5550,15 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                         fontSize: "1rem",
                         fontWeight: 900,
                         background:
-                          cart.length === 0
+                          seatScopedCart.length === 0
                             ? "linear-gradient(180deg, #64748b 0%, #475569 100%)"
                             : "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
                         color: "#fff",
-                        border: cart.length === 0 ? "1px solid #64748b" : "1px solid #15803d",
+                        border: seatScopedCart.length === 0 ? "1px solid #64748b" : "1px solid #15803d",
                         opacity: loading || billingLocked ? 0.65 : 1,
-                        cursor: loading || billingLocked || cart.length === 0 ? "not-allowed" : "pointer",
+                        cursor: loading || billingLocked || seatScopedCart.length === 0 ? "not-allowed" : "pointer",
                       }}
-                      disabled={loading || billingLocked || cart.length === 0}
+                      disabled={loading || billingLocked || seatScopedCart.length === 0}
                       onClick={() => void submitSale()}
                     >
                       {loading ? "جاري الإرسال…" : "إرسال الطلب"}
@@ -5452,21 +5619,38 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
 
                 <div className="waiter-pos__top-card" style={{ order: 50 }}>
                   <div id="waiter-ot-sec-sent" className="waiter-pos__sent waiter-pos__ot-scroll-target">
-                    <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>مرسل / جاهز بالمطبخ</h4>
+                    <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>
+                      مرسل / جاهز بالمطبخ
+                      {assignmentMode === "per_seat" ? ` · ${seatGuestDisplay(selectedSeat)}` : ""}
+                    </h4>
                     {ordersBusy && !sessionOrders.length ? (
                       <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>جاري التحميل…</div>
-                    ) : sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").length === 0 ? (
-                      <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>لا توجد بعد.</div>
+                    ) : seatScopedSessionOrders.length === 0 ? (
+                      <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem" }}>
+                        {assignmentMode === "per_seat"
+                          ? `لا توجد طلبات مرسلة لـ ${seatGuestDisplay(selectedSeat)}.`
+                          : "لا توجد بعد."}
+                      </div>
                     ) : (
                       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                        {sessionOrders.filter((o) => (o.status || "").toLowerCase() !== "cancelled").slice().reverse().map((o) => {
+                        {[...seatScopedSessionOrders].reverse().map(({ order: o, items }) => {
                           const st = (o.status || "").toLowerCase();
                           const canCancel = st === "pending";
-                          const lines = activeOrderItems(o).map(formatOrderItemLine);
+                          const lines = items.map(formatOrderItemLine);
+                          const clock = orderSentClockLabel(o);
                           return (
                             <li key={`sent-top-${o.id}`} style={{ borderBottom: "1px solid rgba(15,23,42,0.08)", padding: "8px 0", fontSize: "0.82rem", color: "#e2e8f0" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-                                <span><strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong> · {orderStatusLabelAr(st)}</span>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4, alignItems: "flex-start" }}>
+                                <span>
+                                  <strong style={{ color: "#fff" }}>طلب #{o.id.slice(0, 8)}</strong>
+                                  {" · "}
+                                  {orderStatusLabelAr(st)}
+                                  {clock ? (
+                                    <span style={{ color: "#7dd3fc", fontWeight: 800, marginInlineStart: 6 }} title="وقت إرسال الطلب للمطبخ">
+                                      · {clock}
+                                    </span>
+                                  ) : null}
+                                </span>
                                 {canCancel ? <button type="button" className="waiter-pos__btn waiter-pos__btn--ghost" style={{ fontSize: "0.72rem", padding: "3px 7px", color: "#f87171", borderColor: "#7f1d1d" }} onClick={() => void cancelServerOrder(o.id)}>إلغاء</button> : null}
                               </div>
                               <ul style={{ margin: 0, paddingInlineStart: 16, color: "#cbd5e1", lineHeight: 1.45 }}>
@@ -5732,8 +5916,8 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
                     </div>
                     <button
                       type="button"
-                      className={`waiter-pos__mb-sendbar__btn${cart.length === 0 ? " waiter-pos__mb-sendbar__btn--blocked" : ""}`}
-                      disabled={loading || billingLocked || sessionGuestApprovalPending || cart.length === 0}
+                      className={`waiter-pos__mb-sendbar__btn${seatScopedCart.length === 0 ? " waiter-pos__mb-sendbar__btn--blocked" : ""}`}
+                      disabled={loading || billingLocked || sessionGuestApprovalPending || seatScopedCart.length === 0}
                       onClick={() => void submitSale()}
                     >
                       {loading ? "جاري الإرسال…" : "إرسال الطلب"}
@@ -6641,14 +6825,20 @@ export default function WaiterOrderPage(props: WaiterOrderPageProps = {}) {
         lines={scopedBillReviewLines}
         returnedLines={returnedReviewLines}
         totals={{
-          subtotal: reviewBillingTotals.netPortion,
-          serviceCharge: reviewBillingTotals.serviceCharge,
-          vatValue: reviewBillingTotals.vatValue,
+          subtotal: reviewDiscountedTotals.netPortion + reviewDiscountedTotals.discount,
+          serviceCharge: reviewDiscountedTotals.serviceCharge,
+          vatValue: reviewDiscountedTotals.vatValue,
           tipAmount: Math.max(0, tipAmount || 0),
-          total: reviewTotal,
+          total: reviewDiscountedTotals.total,
           minimumGap: reviewMinimumChargeDelta,
           ownerLabel: reviewBillingTotals.ownerLabel,
+          discount: reviewDiscountedTotals.discount,
         }}
+        allowManagerDiscount={canReviewMgrDiscount}
+        managerDiscountAmount={reviewMgrDiscountAmt}
+        managerDiscountPercent={reviewMgrDiscountPct}
+        onManagerDiscountAmountChange={setReviewMgrDiscountAmt}
+        onManagerDiscountPercentChange={setReviewMgrDiscountPct}
         confirmBusy={requestBillBusy}
         onClose={() => setBillReviewOpen(false)}
         onPrinterHintChange={setCaptainPrinterHint}

@@ -28,7 +28,14 @@ type CaptainBillReviewModalProps = {
     total: number;
     minimumGap: number;
     ownerLabel?: string;
+    discount?: number;
   };
+  /** خصم مدير قبل/مع اعتماد طلب الحساب — يظهر لصلاحية المدير فقط */
+  allowManagerDiscount?: boolean;
+  managerDiscountAmount?: string;
+  managerDiscountPercent?: string;
+  onManagerDiscountAmountChange?: (value: string) => void;
+  onManagerDiscountPercentChange?: (value: string) => void;
   confirmBusy?: boolean;
   onClose: () => void;
   onPrinterHintChange: (value: string) => void;
@@ -55,6 +62,11 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
     lines,
     returnedLines,
     totals,
+    allowManagerDiscount,
+    managerDiscountAmount,
+    managerDiscountPercent,
+    onManagerDiscountAmountChange,
+    onManagerDiscountPercentChange,
     confirmBusy,
     onClose,
     onPrinterHintChange,
@@ -244,6 +256,12 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
                     <span style={{ color: "#475569", fontWeight: 700 }}>مجموع الأصناف</span>
                     <strong>{money(totals.subtotal)}</strong>
                   </div>
+                  {Number(totals.discount || 0) > 0.001 ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#b45309" }}>
+                      <span style={{ fontWeight: 800 }}>خصم المدير</span>
+                      <strong>− {money(Number(totals.discount || 0))}</strong>
+                    </div>
+                  ) : null}
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span style={{ color: "#475569", fontWeight: 700 }}>الخدمة</span>
                     <strong>{money(totals.serviceCharge)}</strong>
@@ -271,7 +289,7 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
                     style={{
                       marginTop: 6,
                       paddingTop: 8,
-                      borderTop: "1px dashed rgba(15,23,42,0.18)",
+                      borderTop: "1px dashed rgba(15, 23, 42, 0.18)",
                       display: "flex",
                       justifyContent: "space-between",
                     }}
@@ -281,6 +299,64 @@ export default function CaptainBillReviewModal(props: CaptainBillReviewModalProp
                   </div>
                 </div>
               </div>
+
+              {allowManagerDiscount ? (
+                <div
+                  style={{
+                    margin: 0,
+                    border: "1px solid rgba(180, 83, 9, 0.35)",
+                    borderRadius: 14,
+                    padding: 14,
+                    background: "rgba(255, 251, 235, 0.95)",
+                    color: "#0f172a",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 6, color: "#92400e" }}>خصم المدير</div>
+                  <div style={{ color: "#78350f", fontSize: "0.82rem", lineHeight: 1.45, fontWeight: 650, marginBottom: 10 }}>
+                    يمكن تطبيق خصم قيمة أو نسبة قبل اعتماد الشيك. بعد الطباعة يبقى الخصم متاحاً أيضاً من شاشة الشيك طالما لم يُسدَّد.
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span style={{ color: "#78350f", fontSize: "0.8rem", fontWeight: 700 }}>خصم قيمة (ج.م)</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={managerDiscountAmount || ""}
+                        onChange={(e) => onManagerDiscountAmountChange?.(e.target.value)}
+                        placeholder="0"
+                        disabled={confirmBusy}
+                        style={{
+                          padding: "0.55rem 0.7rem",
+                          borderRadius: 10,
+                          border: "1px solid rgba(180, 83, 9, 0.35)",
+                          background: "#fff",
+                          color: "#0f172a",
+                          fontWeight: 700,
+                        }}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span style={{ color: "#78350f", fontSize: "0.8rem", fontWeight: 700 }}>خصم نسبة (%)</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={managerDiscountPercent || ""}
+                        onChange={(e) => onManagerDiscountPercentChange?.(e.target.value)}
+                        placeholder="0"
+                        disabled={confirmBusy}
+                        style={{
+                          padding: "0.55rem 0.7rem",
+                          borderRadius: 10,
+                          border: "1px solid rgba(180, 83, 9, 0.35)",
+                          background: "#fff",
+                          color: "#0f172a",
+                          fontWeight: 700,
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
 
               <div
                 style={{

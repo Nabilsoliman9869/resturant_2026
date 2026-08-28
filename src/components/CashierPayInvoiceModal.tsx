@@ -1705,6 +1705,7 @@ export function CashierPayInvoiceModal({
         invoiceId: id,
         closeSession: Boolean(closeSession),
         checkID01: isTaxInvoice ? 1 : 0,
+        mat3amActor: buildMat3amActor(user),
       };
       const r = await fetch(`${base}/api/restaurant/invoices-local/mark-guest`, {
         method: "POST",
@@ -2098,8 +2099,15 @@ export function CashierPayInvoiceModal({
             </div>
 
             {!row?.paidAt ? (
-              <div className="card" style={{ marginTop: "0.75rem", padding: "0.65rem 0.75rem", fontSize: "0.86rem" }}>
-                <div style={{ fontWeight: 700, marginBottom: "0.45rem" }}>الخصم والكوبون</div>
+              <div className="card" style={{ marginTop: "0.75rem", padding: "0.65rem 0.75rem", fontSize: "0.86rem", border: isManagerDiscountRole ? "1px solid rgba(180,83,9,0.4)" : undefined, background: isManagerDiscountRole ? "rgba(255,251,235,0.9)" : undefined }}>
+                <div style={{ fontWeight: 800, marginBottom: "0.45rem", color: isManagerDiscountRole ? "#92400e" : undefined }}>
+                  {allowPayment ? "الخصم والكوبون" : isManagerDiscountRole ? "خصم المدير (متاح بعد طباعة الشيك)" : "الخصم والكوبون"}
+                </div>
+                {!allowPayment && isManagerDiscountRole ? (
+                  <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", color: "#78350f", lineHeight: 1.45, fontWeight: 650 }}>
+                    طبّق خصم قيمة أو نسبة هنا حتى بعد الطباعة، طالما الشيك لم يُسدَّد بعد.
+                  </p>
+                ) : null}
                 <label style={{ display: "grid", gap: 4, marginBottom: "0.5rem" }}>
                   <span style={{ color: "var(--muted)" }}>كود الكوبون</span>
                   <input

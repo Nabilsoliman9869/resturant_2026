@@ -30116,36 +30116,81 @@ _SHIFT_CLOSE_LOCKED = frozenset({"pending_manager", "approved", "closed"})
 
 def _shift_inv_breakdown(inv: dict) -> dict:
     parts = inv.get("paymentBreakdown") if isinstance(inv.get("paymentBreakdown"), dict) else None
-    out = {"cash": 0.0, "visa": 0.0, "wallet": 0.0, "instapay": 0.0}
+    out = {"cash": 0.0, "visa": 0.0, "wallet": 0.0, "instapay": 0.0, "hospitality": 0.0}
+    pm_raw = str(inv.get("paymentMethod") or inv.get("paymentStatus") or "").strip().lower()
+    hosp_methods = ("guest", "guest_on_account", "hospitality", "ضيافة", "partial_guest", "mixed_guest")
     if parts:
         for k in out:
             out[k] = _money2_round(parts.get(k))
+        if out["hospitality"] <= 0.0001 and pm_raw in hosp_methods:
+            # ضيافة كاملة أو متبقي ضيافة محفوظ بلا مفتاح hospitality
+            rem = 0.0
+            st = inv.get("settledTotals") if isinstance(inv.get("settledTotals"), dict) else {}
+            if st:
+                rem = _money2_round(st.get("remainder") or st.get("hospitality") or 0)
+            if rem <= 0.0001:
+                rem = _money2_round(inv.get("hospitalityAmount") or inv.get("total"))
+            # في السداد الجزئي + ضيافة: hospitality = المتبقي فقط
+            if pm_raw in ("partial_guest", "mixed_guest") and st:
+                rem = _money2_round(st.get("remainder") or rem)
+            out["hospitality"] = rem
         return out
     pm = _mat3am_normalize_payment_route_key(inv.get("paymentMethod") or "cash")
     amt = _money2_round(inv.get("settledTotals", {}).get("paidNow") if isinstance(inv.get("settledTotals"), dict) else None)
     if amt <= 0:
         amt = _money2_round(inv.get("total"))
-    if pm in out:
+    if pm_raw in hosp_methods or pm in hosp_methods:
+        st = inv.get("settledTotals") if isinstance(inv.get("settledTotals"), dict) else {}
+        if pm_raw in ("partial_guest", "mixed_guest") and st:
+            out["hospitality"] = _money2_round(st.get("remainder") or inv.get("hospitalityAmount") or 0)
+            # الجزء المحصّل يُوزَّع من breakdown فقط — هنا لا يوجد parts
+        else:
+            out["hospitality"] = _money2_round(inv.get("hospitalityAmount") or amt)
+        return out
+    if pm in ("cash", "visa", "wallet", "instapay"):
         out[pm] = amt
     elif pm in ("mixed", "mixed_account", "mixed_guest"):
         out["cash"] = amt
-    elif pm not in ("guest",):
+    elif pm not in ("guest", "guest_on_account", "hospitality"):
         out["cash"] = amt
     return out
+
+
+def _shift_invoice_settled_at(inv: dict) -> str:
+    """وقت التسوية الفعلي: paidAt أو onAccountAt (ضيافة/آجل بدون حركة نقد)."""
+    return str(inv.get("paidAt") or inv.get("onAccountAt") or "").strip()
+
+
+def _shift_invoice_is_hospitality(inv: dict) -> bool:
+    pm = str(inv.get("paymentMethod") or "").strip().lower()
+    ps = str(inv.get("paymentStatus") or "").strip().lower()
+    if pm in ("guest", "guest_on_account", "hospitality", "mixed_guest") or ps in (
+        "guest",
+        "guest_on_account",
+        "partial_guest",
+    ):
+        return True
+    bd = inv.get("paymentBreakdown") if isinstance(inv.get("paymentBreakdown"), dict) else None
+    if bd and _money2_round(bd.get("hospitality")) > 0.02:
+        return True
+    return False
 
 
 def _shift_invoice_open_for_user(inv: dict, user_id: str) -> bool:
     if not isinstance(inv, dict):
         return False
-    if not str(inv.get("paidAt") or "").strip():
+    settled_at = _shift_invoice_settled_at(inv)
+    if not settled_at:
         return False
     st = str(inv.get("shiftCloseStatus") or "").strip().lower()
     if st in _SHIFT_CLOSE_LOCKED:
         return False
+    bd = _shift_inv_breakdown(inv)
+    has_cash_routes = any(_money2_round(bd.get(k)) > 0 for k in ("cash", "visa", "wallet", "instapay"))
+    has_hosp = _money2_round(bd.get("hospitality")) > 0.02 or _shift_invoice_is_hospitality(inv)
+    # تصفير ضيف كامل بلا قيمة — لا يدخل شيفت الصندوق (إلا إن وُجدت ضيافة بمبلغ)
     if str(inv.get("paymentStatus") or "").strip().lower() == "guest" and _money2_round(inv.get("total")) <= 0.02:
-        # تصفير ضيف كامل بلا تحصيل — لا يدخل شيفت الصندوق
-        bd = inv.get("paymentBreakdown")
-        if not (isinstance(bd, dict) and any(_money2_round(bd.get(k)) > 0 for k in ("cash", "visa", "wallet", "instapay"))):
+        if not has_cash_routes and not has_hosp:
             return False
     paid_by = inv.get("paidBy") if isinstance(inv.get("paidBy"), dict) else {}
     pb_uid = str(paid_by.get("userId") or "").strip()
@@ -30159,7 +30204,7 @@ def _shift_invoice_open_for_user(inv: dict, user_id: str) -> bool:
 def _shift_invoice_unassigned(inv: dict) -> bool:
     if not isinstance(inv, dict):
         return False
-    if not str(inv.get("paidAt") or "").strip():
+    if not _shift_invoice_settled_at(inv):
         return False
     st = str(inv.get("shiftCloseStatus") or "").strip().lower()
     if st in _SHIFT_CLOSE_LOCKED:
@@ -30174,15 +30219,19 @@ def _shift_serialize_invoice(inv: dict) -> dict:
         "invoiceId": str(inv.get("invoiceId") or ""),
         "billNumber": inv.get("billNumber"),
         "tableLabel": str(inv.get("tableLabel") or inv.get("tableName") or ""),
-        "paidAt": str(inv.get("paidAt") or ""),
+        "paidAt": str(inv.get("paidAt") or inv.get("onAccountAt") or ""),
         "total": _money2_round(inv.get("total")),
         "paymentMethod": str(inv.get("paymentMethod") or ""),
+        "paymentStatus": str(inv.get("paymentStatus") or ""),
         "paymentBreakdown": bd,
         "paidBy": inv.get("paidBy") if isinstance(inv.get("paidBy"), dict) else None,
         "routeCash": bd["cash"],
         "routeVisa": bd["visa"],
         "routeWallet": bd["wallet"],
         "routeInstapay": bd["instapay"],
+        "routeHospitality": bd.get("hospitality", 0.0),
+        "isHospitality": _shift_invoice_is_hospitality(inv) or _money2_round(bd.get("hospitality")) > 0.02,
+        "lines": inv.get("lines") if isinstance(inv.get("lines"), list) else [],
     }
 
 
@@ -30400,7 +30449,8 @@ def restaurant_cashier_shift_close_open(
     unassigned = []
     if isinstance(raw, list):
         for inv in raw:
-            if not _shift_dt_in_date_range(inv.get("paidAt"), from_d, to_d):
+            settled_at = _shift_invoice_settled_at(inv) if isinstance(inv, dict) else ""
+            if not _shift_dt_in_date_range(settled_at, from_d, to_d):
                 continue
             if _shift_invoice_open_for_user(inv, uid):
                 mine.append(_shift_serialize_invoice(inv))
@@ -30414,9 +30464,12 @@ def restaurant_cashier_shift_close_open(
         "visa": 0.0,
         "wallet": 0.0,
         "instapay": 0.0,
+        "hospitality": 0.0,
         "invoiceTotal": 0.0,
         "collectedTotal": 0.0,
+        "hospitalityCount": 0,
     }
+    hospitality_items_map: dict = {}
     for row in mine:
         bd = row.get("paymentBreakdown") or {}
         line_collected = 0.0
@@ -30424,8 +30477,44 @@ def restaurant_cashier_shift_close_open(
             v = float(bd.get(k) or 0)
             totals[k] = _money2_round(totals[k] + v)
             line_collected += v
+        hosp = float(bd.get("hospitality") or row.get("routeHospitality") or 0)
+        if hosp > 0.02 or row.get("isHospitality"):
+            if hosp <= 0.02:
+                hosp = float(row.get("total") or 0)
+            totals["hospitality"] = _money2_round(totals["hospitality"] + hosp)
+            totals["hospitalityCount"] = int(totals["hospitalityCount"]) + 1
+            for ln in row.get("lines") or []:
+                if not isinstance(ln, dict):
+                    continue
+                if ln.get("cancelled"):
+                    continue
+                qty = float(ln.get("quantity") or 0)
+                if qty <= 0:
+                    continue
+                name = str(ln.get("name") or ln.get("productName") or "صنف").strip() or "صنف"
+                unit = float(ln.get("unitPrice") or 0)
+                amt = float(ln.get("lineTotal") or (qty * unit) or 0)
+                key = name
+                cur = hospitality_items_map.get(key) or {"name": name, "quantity": 0.0, "amount": 0.0, "invoiceCount": 0}
+                cur["quantity"] = float(cur["quantity"]) + qty
+                cur["amount"] = _money2_round(float(cur["amount"]) + amt)
+                cur["invoiceCount"] = int(cur["invoiceCount"]) + 1
+                hospitality_items_map[key] = cur
         totals["collectedTotal"] = _money2_round(totals["collectedTotal"] + line_collected)
         totals["invoiceTotal"] = _money2_round(totals["invoiceTotal"] + float(row.get("total") or 0))
+
+    hospitality_items = sorted(
+        (
+            {
+                "name": v["name"],
+                "quantity": _money2_round(v["quantity"]),
+                "amount": _money2_round(v["amount"]),
+                "invoiceCount": int(v["invoiceCount"]),
+            }
+            for v in hospitality_items_map.values()
+        ),
+        key=lambda x: (-float(x["amount"]), str(x["name"])),
+    )
 
     outflows = []
     conn = get_connection()
@@ -30453,6 +30542,7 @@ def restaurant_cashier_shift_close_open(
         "invoices": mine,
         "unassignedInvoices": unassigned,
         "outflows": outflows,
+        "hospitalityItems": hospitality_items,
         "totals": {
             **totals,
             "invoiceCount": len(mine),
@@ -30565,7 +30655,7 @@ def restaurant_cashier_shift_close_submit(body: dict):
             raise HTTPException(status_code=400, detail="فئات النقدية لا تقبل سالباً")
     declared_cash = _money2_round(d1 * 1 + d5 * 5 + d10 * 10 + d50 * 50 + d100 * 100 + d200 * 200)
 
-    cash = visa = wallet = insta = inv_total = 0.0
+    cash = visa = wallet = insta = hospitality = inv_total = 0.0
     lines_payload = []
     for inv in selected:
         bd = _shift_inv_breakdown(inv)
@@ -30573,6 +30663,10 @@ def restaurant_cashier_shift_close_submit(body: dict):
         visa += bd["visa"]
         wallet += bd["wallet"]
         insta += bd["instapay"]
+        hosp = _money2_round(bd.get("hospitality") or 0)
+        if hosp <= 0 and _shift_invoice_is_hospitality(inv):
+            hosp = _money2_round(inv.get("hospitalityAmount") or inv.get("total"))
+        hospitality += hosp
         inv_total += _money2_round(inv.get("total"))
         lines_payload.append(
             {
@@ -30580,15 +30674,17 @@ def restaurant_cashier_shift_close_submit(body: dict):
                 "refId": str(inv.get("invoiceId") or ""),
                 "refLabel": str(inv.get("tableLabel") or inv.get("billNumber") or ""),
                 "amount": _money2_round(inv.get("total")),
-                **{f"route{k.title()}": bd[k] for k in ()},
                 "routeCash": bd["cash"],
                 "routeVisa": bd["visa"],
                 "routeWallet": bd["wallet"],
                 "routeInstapay": bd["instapay"],
-                "paidAt": str(inv.get("paidAt") or "") or None,
+                "routeHospitality": hosp,
+                "paidAt": str(inv.get("paidAt") or inv.get("onAccountAt") or "") or None,
             }
         )
-    cash, visa, wallet, insta, inv_total = map(_money2_round, (cash, visa, wallet, insta, inv_total))
+    cash, visa, wallet, insta, hospitality, inv_total = map(
+        _money2_round, (cash, visa, wallet, insta, hospitality, inv_total)
+    )
 
     outflow_ids = [str(x).strip().upper() for x in (body.get("outflowIds") or []) if str(x).strip()]
     expenses_manual = _money2_round(body.get("expensesAmount"))
@@ -30658,6 +30754,7 @@ def restaurant_cashier_shift_close_submit(body: dict):
                 "visa": visa,
                 "wallet": wallet,
                 "instapay": insta,
+                "hospitality": hospitality,
                 "invoiceTotal": inv_total,
                 "invoiceCount": len(selected),
                 "expensesAmount": expenses,
@@ -31033,12 +31130,34 @@ def restaurant_invoices_local_mark_guest(body: dict):
         det = f"guest_on_account;checkID01={check_id01};posting={posting_result}"
         _audit_log(cur, "INV_GUEST_ACCOUNT", "TBL022", invoice_id, None, det[:990])
         conn.commit()
+        actor = _mat3am_actor_from_body(body)
+        hosp_amt = _money2_round(found.get("total"))
         found["awaitingPayment"] = False
         found["paymentStatus"] = "guest_on_account"
         found["paymentMethod"] = "guest_on_account"
         found["guestPaymentApproved"] = True
         found["onAccountAt"] = now_iso
-        found["paymentBreakdown"] = None
+        # يُحسب في إقفال الشيفت كضيافة (ليس نقداً) — paidAt مطلوب لدخول التقرير
+        found["paidAt"] = now_iso
+        found["paidBy"] = {
+            "userId": str(actor.get("id") or body.get("userId") or "").strip(),
+            "name": str(actor.get("name") or "").strip(),
+            "role": str(actor.get("role") or "").strip(),
+        }
+        found["hospitalityAmount"] = hosp_amt
+        found["paymentBreakdown"] = {
+            "cash": 0.0,
+            "visa": 0.0,
+            "wallet": 0.0,
+            "instapay": 0.0,
+            "hospitality": hosp_amt,
+        }
+        found["settledTotals"] = {
+            "grandTotal": hosp_amt,
+            "paidNow": 0.0,
+            "hospitality": hosp_amt,
+            "guestPayment": True,
+        }
         found["checkID01"] = check_id01
         _restaurant_save("invoices", raw)
     except HTTPException:
@@ -31074,6 +31193,7 @@ def restaurant_invoices_local_mark_guest(body: dict):
         "invoiceId": invoice_id,
         "paymentStatus": "guest_on_account",
         "onAccountAt": now_iso,
+        "paidAt": now_iso,
         "checkID01": check_id01,
         "posting": posting_result,
     }

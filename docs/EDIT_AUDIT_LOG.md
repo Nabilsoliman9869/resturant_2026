@@ -1117,3 +1117,19 @@ eserved + active.
 
 - **`WaiterOrderPage.tsx`:** ألوان نص داكنة داخل نافذة «نقل البنود / تحويل / دمج / شيكات» بدل `#fff`/`#94a3b8` على خلفية زجاجية فاتحة.
 - **`operationalRoles.css`:** تباين عناصر اختيار الطاولات والأزرار الأساسية داخل `.waiter-pos__ops-modal`.
+
+### 159 — وقت إرسال الطلب + خصم مدير في مراجعة الحساب — UTC 2026-08-28T08:25:00Z — ID `order-time-mgr-discount-a7c3e1`
+
+- **`WaiterOrderPage.tsx`:** عرض ساعة/دقيقة إرسال الطلب في «مرسل / جاهز بالمطبخ»؛ تمرير `managerDiscountAmount/Percent` مع طلب الحساب.
+- **`CaptainBillReviewModal.tsx`:** قسم خصم مدير (قيمة/%) مع تحديث ملخص الإجمالي.
+- **`CashierPayInvoiceModal.tsx`:** تمييز خصم المدير بعد طباعة شيك الكابتن.
+- **`KitchenPage.tsx`:** وقت الإرسال بجانب حالة الطلب على بطاقة المطبخ.
+- **ملاحظة:** تعديلات محلية فقط — لم تُرفع إلى GitHub بناءً على طلب المستخدم.
+
+### 160 — فلترة ضيف/شيك + ضيافة في إقفال الشيفت — UTC 2026-08-28T08:40:00Z — ID `seat-filter-hosp-shift-b91e4a`
+
+- **`WaiterOrderPage.tsx`:** النقر على مقعد/اسم ضيف يفلتر السلة والطلبات المرسلة؛ الإرسال يخص الضيف المختار فقط.
+- **`api_server.py`:** `mark-guest` يضبط `paidAt`/`paidBy`/`hospitality`؛ تقرير إقفال الشيفت يجمع الضيافة + أصنافها.
+- **`CashierShiftClosePage.tsx`:** KPI ضيافة + عمود + جدول أصناف الضيافة.
+- **`CashierPayInvoiceModal.tsx`:** تمرير `mat3amActor` مع ترحيل الضيافة.
+- **ملاحظة:** محلي فقط — بدون push.
