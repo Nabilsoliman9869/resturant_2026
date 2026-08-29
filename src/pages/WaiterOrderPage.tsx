@@ -28,6 +28,7 @@ import { CashierPayInvoiceModal, type CashierInvoiceRow } from "../components/Ca
 import CaptainBillReviewModal, { type CaptainBillReviewLine } from "../components/CaptainBillReviewModal";
 import { useAuth } from "../auth/AuthContext";
 import { roleHasManagerOpsAccess } from "../auth/roles";
+import { formatMat3amClock } from "../lib/mat3amTime";
 import { repairArabicDisplayText, sessionDisplayName } from "../auth/displayUser";
 import { buildMat3amActor } from "../lib/mat3amActor";
 import { useTerminalLock } from "../context/TerminalLockContext";
@@ -243,19 +244,9 @@ type ServerOrder = {
   updatedAt?: string;
 };
 
-/** ساعة:دقيقة لإرسال الطلب (لترتيب المتابعة). */
+/** ساعة:دقيقة لإرسال الطلب بتوقيت القاهرة (وليس ساعة سيرفر Railway). */
 function formatOrderClockTime(iso?: string | null): string {
-  const raw = String(iso || "").trim();
-  if (!raw) return "";
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return "";
-  try {
-    return d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
-  } catch {
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mm = String(d.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
-  }
+  return formatMat3amClock(iso);
 }
 
 function orderSentClockLabel(o: ServerOrder): string {

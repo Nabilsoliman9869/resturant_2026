@@ -5,6 +5,7 @@ import { getApiBase } from "../lib/apiBase";
 import { tryParseJson } from "../lib/tryParseJson";
 import { playKitchenWarnBeep } from "../lib/kdsBeep";
 import { kitchenLineKindLabel, parseKitchenTicketItem } from "../lib/kitchenTicketDisplay";
+import { formatMat3amClock } from "../lib/mat3amTime";
 import "../styles/operationalRoles.css";
 
 type OrderItem = {
@@ -448,14 +449,8 @@ function KdsOrderCard({
           <div style={{ color: "var(--wp-muted)", fontSize: "0.8rem", marginTop: 4 }}>
             {orderStatusLabelAr(order.status)}
             {order.createdAt ? (
-              <span style={{ marginInlineStart: 8, color: "#0369a1", fontWeight: 800 }} title="وقت إرسال الطلب للمطبخ">
-                · إرسال {(() => {
-                  try {
-                    return new Date(order.createdAt).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true });
-                  } catch {
-                    return "";
-                  }
-                })()}
+              <span style={{ marginInlineStart: 8, color: "#0369a1", fontWeight: 800 }} title="وقت إرسال الطلب للمطبخ (توقيت القاهرة)">
+                · إرسال {formatMat3amClock(order.createdAt)}
               </span>
             ) : null}
             {leadLabel !== "—" ? (

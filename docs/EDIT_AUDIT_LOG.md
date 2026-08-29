@@ -1133,3 +1133,9 @@ eserved + active.
 - **`CashierShiftClosePage.tsx`:** KPI ضيافة + عمود + جدول أصناف الضيافة.
 - **`CashierPayInvoiceModal.tsx`:** تمرير `mat3amActor` مع ترحيل الضيافة.
 - **ملاحظة:** محلي فقط — بدون push.
+
+### 161 — توقيت الطلبات بتوقيت القاهرة وليس سيرفر Railway — UTC 2026-08-29T07:15:00Z — ID `cairo-order-clock-f3a91c`
+
+- **`api_server.py`:** `_mat3am_now_iso()` يعيد ISO بـ `Africa/Cairo` (+03:00)؛ إنشاء/دمج طلبات KDS يستخدمه بدل `datetime.now()` السيرفر.
+- **`mat3amTime.ts` + واجهات الكابتن/المطبخ:** عرض الساعة بمنطقة `Africa/Cairo`؛ الطوابع بدون منطقة تُفسَّر كـ UTC (سلوك Railway السابق).
+- **`requirements.txt`:** إضافة `tzdata` لضمان ZoneInfo على الحاويات.

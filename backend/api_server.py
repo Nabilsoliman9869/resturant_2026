@@ -20933,20 +20933,22 @@ def _mat3am_tz():
 
         return ZoneInfo(name)
     except Exception:
-        return timezone(timedelta(hours=2))
+        # شتاء مصر UTC+2 / صيف UTC+3 — نفضّل +3 كتقريب عند غياب tzdata
+        return timezone(timedelta(hours=3))
 
 
 def _mat3am_now() -> datetime:
-    """وقت تشغيل المطعم (naive) — يُستخدم في اليوم التشغيلي وطوابع الجلسات."""
+    """وقت تشغيل المطعم (naive القاهرة) — يُستخدم في اليوم التشغيلي وطوابع الجلسات."""
     return datetime.now(_mat3am_tz()).replace(tzinfo=None)
 
 
 def _mat3am_now_iso() -> str:
-    return _mat3am_now().isoformat()
+    """طابع ISO بمنطقة القاهرة الصريحة (مثال: …+03:00) — لا يُخلط مع UTC السيرفر."""
+    return datetime.now(_mat3am_tz()).isoformat(timespec="seconds")
 
 
 def _iso_to_local_dt(iso_s: str) -> Optional[datetime]:
-    """يحّول ISO إلى وقت محلي naive — يصلح خطأ استبعاد جلسات UTC (…Z) من تقرير اليوم."""
+    """يحّول ISO إلى وقت القاهرة naive — يصلح خطأ استبعاد جلسات UTC (…Z) من تقرير اليوم."""
     try:
         s = str(iso_s or "").strip()
         if not s:
@@ -20956,7 +20958,7 @@ def _iso_to_local_dt(iso_s: str) -> Optional[datetime]:
         dt = datetime.fromisoformat(s)
         if getattr(dt, "tzinfo", None) is not None:
             try:
-                dt = dt.astimezone().replace(tzinfo=None)
+                dt = dt.astimezone(_mat3am_tz()).replace(tzinfo=None)
             except Exception:
                 dt = dt.replace(tzinfo=None)
         return dt
@@ -33866,7 +33868,7 @@ def _kds_refresh_order_status(order: dict) -> None:
             order["status"] = "ready"
             order["completedAt"] = None
         else:
-            now_iso = datetime.now().isoformat()
+            now_iso = _mat3am_now_iso()
             for x in items:
                 if bool(x.get("cancelled")):
                     continue
@@ -34137,7 +34139,7 @@ def _kds_upsert_table_order(ord_data: list, payload: dict) -> dict:
             ex["kitchenTotals"] = payload.get("kitchenTotals")
         # آخر مرسل للمطبخ يظهر على الشريحة
         _kds_apply_captain_fields(ex, captain_fields)
-        ex["updatedAt"] = datetime.now().isoformat()
+        ex["updatedAt"] = _mat3am_now_iso()
         _kds_refresh_order_status(ex)
         return ex
 
@@ -34154,7 +34156,7 @@ def _kds_upsert_table_order(ord_data: list, payload: dict) -> dict:
         "kitchenTotals": payload.get("kitchenTotals"),
         "status": "pending",
         "generalOrder": bool(payload.get("generalOrder")),
-        "createdAt": datetime.now().isoformat(),
+        "createdAt": _mat3am_now_iso(),
         "prepTargetMinutes": payload_target,
         "ticketNo": _restaurant_next_kds_ticket_no(ord_data),
     }
@@ -36340,7 +36342,7 @@ def restaurant_create_order(body: dict):
             ex,
             _kds_resolve_captain_fields(body=body, session_id=session_id or str(ex.get("sessionId") or "")),
         )
-        ex["updatedAt"] = datetime.now().isoformat()
+        ex["updatedAt"] = _mat3am_now_iso()
         _kds_refresh_order_status(ex)
         # تأكد من وجود prepTargetMinutes بعد الدمج — استخدم KDS defaults كـ fallback
         if not ex.get("prepTargetMinutes"):
@@ -36447,7 +36449,7 @@ def restaurant_update_order_status(order_id: str, body: dict):
             elif status in ("served", "paid"):
                 # تثبيت "تم التسليم": نعلّم كل البنود sent حتى لا يعيد
                 # _kds_refresh_order_status الطلب إلى ready في القراءات اللاحقة.
-                now_iso = datetime.now().isoformat()
+                now_iso = _mat3am_now_iso()
                 items = [_kds_normalize_item(x) for x in (o.get("items") or []) if isinstance(x, dict)]
                 for it in items:
                     it["prepared"] = True
@@ -36591,14 +36593,14 @@ def restaurant_update_order_line(order_id: str, line_id: str, body: dict):
             found["prepared"] = prepared
             found["preparedQty"] = float(found.get("quantity") or 0) if prepared else 0.0
             found["lineStatus"] = "ready" if prepared else "pending"
-            found["preparedAt"] = datetime.now().isoformat() if prepared else None
+            found["preparedAt"] = _mat3am_now_iso() if prepared else None
             if prepared and not str(o.get("prepStartTime") or "").strip():
-                o["prepStartTime"] = datetime.now().isoformat()
+                o["prepStartTime"] = _mat3am_now_iso()
         if "sent" in (body or {}):
             sent = bool(body.get("sent"))
             found["sent"] = sent
             found["lineStatus"] = "sent" if sent else ("ready" if found.get("prepared") else "pending")
-            found["sentAt"] = datetime.now().isoformat() if sent else None
+            found["sentAt"] = _mat3am_now_iso() if sent else None
         o["items"] = items
         _kds_refresh_order_status(o)
         _restaurant_save("orders", data)
@@ -36634,7 +36636,7 @@ def restaurant_send_order_line(order_id: str, line_id: str):
             raise HTTPException(status_code=404, detail="سطر الطلب غير موجود")
         if not bool(found.get("prepared")):
             raise HTTPException(status_code=409, detail="لا يمكن الإرسال قبل تأكيد التحضير")
-        now_iso = datetime.now().isoformat()
+        now_iso = _mat3am_now_iso()
         needs_runner = _workflow_kitchen_needs_runner()
         if needs_runner:
             # مسار استلام: جاهز لطابور المناولة/الدور المحدد — ليس بعد على الطاولة
